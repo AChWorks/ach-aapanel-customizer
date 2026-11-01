@@ -1,0 +1,87 @@
+# aaPanel native integration - evidence and provisional boundaries
+
+This is **technical integration guidance**, not a second product specification.
+The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the active research/acceptance owner is [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1).
+
+## Primary source evidence
+
+1. Official [aaPanel third-party plugin documentation v1.1](https://www.aapanel.com/pkg/aaPanel_Linux_Panel_Plug-in_development_documentation_v1.1.pdf), pages 1-2: `plugin/<name>/<name>_main.py`, `index.html`, `info.json`, `icon.png`, `install.sh`; class matches `<name>_main`; conventional POST invocation uses `/plugin?action=a&name=<name>&s=<method>`.
+2. The official [demo.zip](https://www.aapanel.com/pkg/demo.zip) was inspected **as data, not executed**. Its parent folder is `demo/`; its `index.html` opens inside aaPanel and requests methods through the legacy `/plugin` route. Sample SHA-256 at inspection: `52f2d7f212212a1496b91c0f96070ce83c8ea66ee63c1b755eb6d16863cfadff`. The supplied sample is not a security template.
+3. Official [App Store docs](https://www.aapanel.com/docs/Function/AppStore.html) describe Third-party Plug-ins -> Import Plug-ins, but do **not** prove lifecycle/update compatibility on any specific installation.
+4. Public aaPanel source [panelPlugin.py](https://github.com/aaPanel/aaPanel/blob/38bf35903b37b50d9654f47c4ad904ca3369715f/class/panelPlugin.py) recognizes `plugin/<name>/info.json` and constructs local-plugin inventory. The inspected implementation invokes uninstall scripts and removes plugin code. This is source evidence for that Git revision, **not** a cross-version contract.
+5. The same official PDF documents read-only `public.M('sites')` selectors for site IDs, names, paths and status. Actual panel schemas and revision-specific API behavior still require tests.
+
+## Important security boundary
+
+The aaPanel PDF explicitly warns: **dynamic plugin routes do not inherit aaPanel session authorization** and require an appropriate `_check` implementation. Its sample declares `_check` returning `True`, allowing unauthenticated requests. **Never copy this sample access pattern.**
+
+This first candidate intentionally **does not define `_check`** and only uses the conventional in-panel `/plugin?action=a` route. In the isolated aaPanel **8.0.7** test, unauthenticated requests returned HTTP 404, authenticated requests without aaPanel's `x-http-token` header returned `INIT_CSRF_ERR`, and the same read-only methods succeeded through the panel's own UI. This verifies the observed version/route, **not** a general security guarantee for other versions or future privileged methods. No Apply/write endpoint is exposed in this candidate.
+
+## First non-production implementation slice
+
+`plugin/ach_customizer/` is a prototype native plugin package with an English-only in-panel read-only UI, following aaPanel conventions, and two narrowly bounded read operations:
+
+- `get_sites`: paginated source records from the panel's `sites` table. IDs are returned as discovered; no WordPress-specific assumption or hard-coded list. Application and resource relationships remain **Needs Review** until verified.
+- `preview_php_fpm`: compares *operator-supplied* concurrency values to explicit `[www]` pool settings in a single, conventional, versioned PHP-FPM configuration file. Rejects missing/ambiguous/duplicate/unreadable configuration. The result's scope is **shared service**. It does not infer sites sharing a pool, include-expanded config, effective runtime, or what aaPanel would write. It NEVER writes, reloads, restarts or schedules anything.
+
+This is **not a supported package or initial release**. `install.sh` owns no resident service or host settings. Its uninstall helper opens the complete aaPanel path hierarchy through pinned directory file descriptors with no symlink traversal; it requires root-owned, non-group/world-writable ancestor directories and byte-identical singly-linked regular icon files. Only the fixed product icon name is unlinked relative to the verified destination directory descriptor. Unsafe or unexpected ownership/layout preserves the copied icon. The lab observed **browser UI uninstall on the previous candidate** and **isolated native V2 backend uninstall/reinstall on the corrected candidate**; broader update, operator-state preservation, enable/disable, authorization for future writes, and rollback are still pending. Do not equate a source or ZIP build with release/production acceptance.
+
+## Historical aaPanel browser and lifecycle evidence (2026-11-01; previous candidate)
+
+Environment: a dedicated, disposable **Debian 12 (Bookworm)** VM running aaPanel **8.0.7**, verified with the installed panel's `public.get_panel_version()`. The panel's HTTPS/SSH management access was forwarded only to `127.0.0.1` on the development host. This guest had **no Nginx, Apache, managed site, or PHP-FPM runtime installed**; no production data or credentials were used. The aaPanel installer was downloaded from the official vendor and SHA-256 verified before guest execution.
+
+**Evidence identity:** All observations below in this historical section belong to the **previous**, monitor-only source candidate `2ccbe3a2acd8a22d2153cff45991e967b01b9c32` (plugin version `0.1.0`), whose development ZIP SHA-256 was `bc790aaf9ba66835cf7f8d7e211d0e7bab286298a89c55a009c943ae3409c915`. In particular, the browser UI uninstall was performed on **that previous candidate**, not the corrected cleanup candidate. This historical digest is **not** the digest to use for the current package. The corrected ZIP's SHA-256 is `1a3379e5f2c251cc87c5cfd6ecb74e88db487eeb91424a51084925a9bd94b129`, with its separate, limited native V2 backend evidence documented below. Neither digest denotes a supported release.
+
+- **Native package and UI:** The installed panel's own `panelPlugin.update_zip()` and `panelPlugin.input_zip()` successfully accepted the ZIP, ran `install.sh`, registered `info.json`/icon, and exposed the local plugin in the App Store's **Third-party Plug-ins** inventory. The **Setting** and **Uninstall** controls appeared in its inventory row; selecting the same plugin from **Recently used** opened the English management UI inside aaPanel. The **file-picker upload interaction itself was not exercised**; backend import methods were used on this isolated guest.
+- **Authenticated read-only paths:** The in-panel UI's `Overview`, `Websites`, and `PHP-FPM Preview` tabs loaded without observed browser JavaScript errors. `get_overview` returned `mode=Monitor`; `get_sites` returned an empty but valid page on the initially empty host; and a PHP `85` preview returned `Needs Review`/`shared_service` because that PHP-FPM directory did not exist. These outcomes did not assert that any PHP service had been configured, activated, or verified.
+- **Auth and CSRF:** A request without an authenticated panel session returned HTTP 404, a valid-session request without the native `x-http-token` returned `INIT_CSRF_ERR`, and in-panel requests with the native token succeeded. These checks are evidence for the observed routes on aaPanel 8.0.7 only, not a substitute for per-operation authorization when Apply is added.
+- **Historical native UI uninstall/reinstall (previous candidate only):** The first native UI uninstall removed plugin code but left aaPanel's copied icon in its shared static icon directory. An initial hook on the **previous** candidate checked only final path components and byte equality. A subsequent **UI uninstall on that previous candidate** removed both plugin directory and matched icon, leaving panel and task processes running; backend reinstall succeeded. Later independent review found that the first hook **did not check symlinked ancestor directories**. These historical observations neither validate the corrected helper nor constitute a fresh UI uninstall test on the corrected candidate; its separately isolated backend test is described below.
+- **Dynamic discovery integration:** Two *temporary metadata rows* were committed to the isolated panel's actual SQLite `sites` table, and native `public.M('sites')` calls through the project's monitor detected both, then a rename and deletion. All fixture rows were removed and the database returned to **zero** sites. **This is not evidence of a website created, renamed or regenerated through aaPanel's actual site-management workflow.**
+- **Previous-candidate source tests:** 21 unit/package tests passed locally, including entrypoint, site pagination/change fixtures, strict PHP-FPM file-parsing and owned-icon cleanup guards. POSIX script syntax and deterministic ZIP output were verified. See [the prior candidate's exact source CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/41315098998) for those 21 tests.
+
+## Corrected candidate: REQUIRED-01 remediation and isolated V2 backend retest (2026-11-01)
+
+The independent review of PR #3 candidate `2ccbe3a2acd8a22d2153cff45991e967b01b9c32` identified a **required** ownership flaw: `-L` on the terminal icon file did not reject a symlink at an ancestor directory. The corrected candidate uses `ach_customizer_cleanup.py` with descriptor-relative `os.open(..., O_NOFOLLOW | O_DIRECTORY)` for *each* ancestor from the filesystem root, checks directory identity (owner UID 0, no group/world write, no unexpected filesystem boundary under the panel root), checks exact file ownership, regular type, single link, bounded size and byte identity, rechecks the destination inode, then calls `os.unlink` for only `ico-ach_customizer.png` relative to the verified destination directory descriptor. The uninstall shell refuses to invoke the helper through a symlinked source parent. Missing/ambiguous paths fail closed without deleting the copied icon. This deliberately does **not** add any host-configuration write capability.
+
+- **Local tests:** 32 unit/package tests passed, including new tests for symlinked source/destination parents (including a shared panel parent), tampered/nonregular icons, final-component symlinks, hardlinks, unsafe directory permissions and idempotent normal cleanup. The development ZIP builder includes the new helper.
+- **Master-executed isolated runtime recheck (not rerun by the independent reviewer):** In the same Debian 12 / aaPanel 8.0.7 QEMU guest, native `panelPlugin.update_zip()` / `input_zip()` accepted the new ZIP (SHA-256 `1a3379e5f2c251cc87c5cfd6ecb74e88db487eeb91424a51084925a9bd94b129`). Guest-side regression checks on **temporary directories only** passed for both symlinked parent cases, mismatched content, unsafe directory permissions, normal deletion and repeat cleanup. The *installed aaPanel V2* `panelPlugin.uninstall_plugin()` path then ran the actual product uninstall hook, and confirmed removal of both the product plugin directory and its copied icon. Finally the same ZIP was natively reinstalled; both original icon and helper were verified, aaPanel HTTPS remained listening and no lab site fixture rows remained.
+- **Exact test isolation:** For this corrected-candidate V2 backend invocation, the external vendor `downloadFile` branch was suppressed and the normal cloud/plugin lookup was replaced with local plugin metadata from the **verified manifest**. This avoided executing an unrelated pre-existing vendor temp script. The actual product uninstall hook ran, but this **does not prove a fresh browser UI uninstall** on the corrected candidate or an unrestricted upstream vendor-download workflow. Earlier UI uninstall/in-panel tests remain historical observations of the previous candidate, documented separately above.
+- **Retained sanitized machine evidence:** [aaPanel 8.0.7 REQUIRED-01 lab result](evidence/aaPanel-8.0.7-2026-11-01-required01.json) contains allowlisted assertions and explicit limits, **without credentials, panel URLs or session identifiers**. GitHub source CI remains separate from this physical runtime evidence.
+
+The PR remains Draft pending independent delta re-review on the exact corrected commit. No merge, release or production installation is implied.
+
+## Compatibility and outstanding acceptance
+
+| Required proof | Observed status |
+| --- | --- |
+| Official plugin layout, request syntax and ZIP extraction | Source-verified and isolated runtime accepted on aaPanel 8.0.7 |
+| Real in-panel management and read-only API | **Previously observed** on Debian 12 + aaPanel 8.0.7 for the older candidate (including session/CSRF). These browser checks were **not freshly rerun** on the corrected candidate |
+| Native ZIP import/backend, uninstall and reinstall | **Corrected candidate:** native backend import, isolated V2 backend uninstall and reinstall passed; **previous candidate only:** browser UI uninstall. New browser UI uninstall and ZIP file-picker upload remain untested |
+| Dynamic website source inventory | **Passed with actual aaPanel SQLite fixture rows**; real aaPanel site creation/rename untested |
+| PHP-FPM file-only preview and runtime truth | Missing PHP 85 yields `Needs Review`; no actual pool/runtime/impact test yet |
+| Nginx virtual-host extension durability and panel regeneration | **Unverified**; Nginx not installed in the guest |
+| Overall/per-module enable-disable, persistent policy/state migration | **Not implemented or verified** |
+| Manual Apply/Auto-enforce, syntax validation, recovery/rollback | **Not implemented or verified**; monitor-only prototype |
+| More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Unverified** |
+| Production authorization, deployment, release | **Not authorized**; no production changes |
+
+The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, provision an isolated web stack with at least one real new/renamed site, verify generated configuration behavior and service relationships, and prove an ownership-aware Apply/validation/rollback boundary. Do not install this development package on production.
+
+## Local source verification (safe to run without aaPanel)
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+sh -n plugin/ach_customizer/install.sh
+python3 -B scripts/build_plugin.py --output /tmp/ach-customizer-dev.zip
+```
+
+This ZIP is a **development artifact only**. It must not be marked compatible, released, or deployed until actual panel and lifecycle acceptance is documented.
+
+## Architectural guardrails
+
+- No core patching, public admin listener, background daemon or scheduler in the first slice.
+- Never assume a site ID belongs to one PHP-FPM pool or that site-specific policies may write shared pool settings.
+- Dynamic routing cannot be used as a privileged shortcut; server-side operator authorization at execution time is mandatory.
+- Persistent future policy/recovery state must be outside the replaceable plugin directory; uninstall/purge semantics must preserve non-owned state.
+- A source-defined `server` include is not proof that arbitrary Nginx `location` changes can be overridden there.
+- Monitor must never perform host changes. Runtime validation, per-policy approval, preflight, locks, recovery and uncertain-effect reconciliation are prerequisites for any Apply mode.

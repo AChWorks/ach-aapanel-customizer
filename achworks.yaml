@@ -8,7 +8,7 @@ metadata:
 
 spec:
   type: aapanel-plugin
-  lifecycle: planned
+  lifecycle: development
   system: aapanel-customization
   ownership: AChWorks
 

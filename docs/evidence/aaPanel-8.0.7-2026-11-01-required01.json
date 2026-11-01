@@ -1,0 +1,71 @@
+{
+  "boundaries": [
+    "Browser ZIP picker not exercised.",
+    "Native V2 backend uninstall path was invoked with vendor fetch and cloud metadata lookup isolated.",
+    "These checks do not certify other aaPanel versions, real websites, PHP-FPM, Nginx or Apply.",
+    "No production targets or real customer records used."
+  ],
+  "candidate_version": "0.1.0 (development only)",
+  "candidate_zip_sha256": "1a3379e5f2c251cc87c5cfd6ecb74e88db487eeb91424a51084925a9bd94b129",
+  "environment": {
+    "aaPanel": "8.0.7",
+    "guest": "isolated disposable QEMU VM",
+    "os": "Debian 12",
+    "production_access": false
+  },
+  "evidence_type": "isolated_aaPanel_native_uninstall_symlink_ancestry_retest",
+  "observed": {
+    "final_state": {
+      "aaPanel_https_service_listening_on_guest_loopback": true,
+      "lab_site_fixture_rows_remaining": 0,
+      "native_cleanup_file_matches_zip": true,
+      "plugin_reinstalled": true,
+      "product_icon_byte_identical": true
+    },
+    "native_backend_import": {
+      "api_methods": [
+        "panelPlugin.update_zip",
+        "panelPlugin.input_zip"
+      ],
+      "installed_cleanup_file_matches_zip": true,
+      "post_uninstall_reinstall": "pass",
+      "pre_uninstall_import": "pass"
+    },
+    "native_v2_uninstall": {
+      "actual_uninstall_hook_executed": true,
+      "external_vendor_download": "disabled in this lab invocation",
+      "matched_icon_removed": true,
+      "method": "panel_plugin_v2.panelPlugin.uninstall_plugin",
+      "plugin_directory_removed": true,
+      "plugin_lookup": "verified local manifest injected to avoid vendor/cloud lookup",
+      "preexisting_vendor_temp_script": "not executed and left untouched",
+      "result_status": 0
+    },
+    "sandbox_cleanup_regressions": [
+      {
+        "check": "normal",
+        "status": "pass"
+      },
+      {
+        "check": "idempotent",
+        "status": "pass"
+      },
+      {
+        "check": "dest_symlink_parent",
+        "status": "pass"
+      },
+      {
+        "check": "src_symlink_parent",
+        "status": "pass"
+      },
+      {
+        "check": "tampered",
+        "status": "pass"
+      },
+      {
+        "check": "directory_world_writable",
+        "status": "pass"
+      }
+    ]
+  }
+}

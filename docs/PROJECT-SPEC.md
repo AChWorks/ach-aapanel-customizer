@@ -43,7 +43,7 @@ The plugin must behave as an ordinary **aaPanel-installed plugin**:
 - Support versioned updates, uninstall, and reinstall with explicit treatment of persistent user configuration, already-applied host changes, and recovery records.
 - Not require a second public administrative interface, separate login, or extra network listener.
 
-The primary workflows must be understandable without editing Nginx, PHP, or WordPress files directly. Advanced diagnostics remain available, with actionable failure stage, cause, impacted targets, and operation/correlation ID. Support localization and correct layout for Persian/RTL as well as English/LTR; do not hard-code a single language.
+The primary workflows must be understandable without editing Nginx, PHP, or WordPress files directly. Advanced diagnostics remain available, with actionable failure stage, cause, impacted targets, and operation/correlation ID. Use aaPanel's established native visual, navigation, and interaction conventions. English-only UI is acceptable and sufficient for the initial supported release; Persian translation and RTL are optional future enhancements, not acceptance gates. Keep application-specific content and target identifiers Unicode-safe without introducing a speculative localization framework.
 
 ### Typical operator journey
 

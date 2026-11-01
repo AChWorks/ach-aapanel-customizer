@@ -1,0 +1,31 @@
+name: Source checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile plugin Python sources
+        run: python3 -B -m compileall -q plugin/ach_customizer scripts tests
+      - name: Unit and package tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Parse embedded UI JavaScript
+        run: |
+          python3 - <<'PYJS'
+          import re
+          from pathlib import Path
+          html = Path('plugin/ach_customizer/index.html').read_text(encoding='utf-8')
+          inline = re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>', html, flags=re.DOTALL | re.IGNORECASE)
+          assert len(inline) == 1, 'Expected one embedded script'
+          Path('/tmp/ach-customizer-embedded.js').write_text(inline[0], encoding='utf-8')
+          PYJS
+          node --check /tmp/ach-customizer-embedded.js
+      - name: Check the shell script
+        run: sh -n plugin/ach_customizer/install.sh
+      - name: Build local ZIP candidate
+        run: python3 -B scripts/build_plugin.py --output "$RUNNER_TEMP/ach-customizer.zip"

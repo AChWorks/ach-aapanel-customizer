@@ -1,0 +1,140 @@
+<style>
+  #ach-customizer { font-size: 13px; line-height: 1.55; }
+  #ach-customizer .ach-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  #ach-customizer .ach-tabs button[aria-selected="true"] { font-weight:700; border-bottom:2px solid currentColor; }
+  #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
+  #ach-customizer .ach-note { padding:10px 12px; border:1px solid #d4d9e0; border-radius:5px; margin-bottom:12px; }
+  #ach-customizer .ach-note:focus { outline:2px solid #555; }
+  #ach-customizer .ach-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:12px 0; }
+  #ach-customizer .ach-fields label { display:block; font-weight:600; }
+  #ach-customizer .ach-fields input { width:100%; max-width:210px; margin-top:3px; }
+  #ach-customizer table { width:100%; border-collapse:collapse; }
+  #ach-customizer td, #ach-customizer th { padding:7px 9px; text-align:start; border-bottom:1px solid #e1e5ec; overflow-wrap:anywhere; }
+  #ach-customizer .ach-scroll { overflow-x:auto; }
+  #ach-customizer .ach-controls { display:flex; align-items:center; gap:8px; margin-top:12px; }
+  #ach-customizer button:focus-visible, #ach-customizer input:focus-visible { outline:2px solid #2486d1; outline-offset:2px; }
+  #ach-customizer .ach-error { color:#ad2525; }
+  @media(max-width:600px) { #ach-customizer .ach-fields { grid-template-columns:1fr; } }
+</style>
+<div class="bt-form" id="ach-customizer" dir="ltr" lang="en">
+  <div class="bt-w-con pd15">
+    <h3>ACh aaPanel Customizer</h3>
+    <p class="ach-note">Development candidate: Monitor only. This plugin cannot apply, reload, or modify host configuration.</p>
+    <div class="ach-tabs" role="tablist" aria-label="Plugin sections">
+      <button type="button" data-tab="overview" role="tab" aria-selected="true">Overview</button>
+      <button type="button" data-tab="websites" role="tab" aria-selected="false">Websites</button>
+      <button type="button" data-tab="php" role="tab" aria-selected="false">PHP-FPM Preview</button>
+    </div>
+    <p id="ach-message" role="status" aria-live="polite"></p>
+    <section class="ach-view" data-view="overview" role="tabpanel">
+      <p id="ach-overview-status">Loading...</p>
+      <p>Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.</p>
+    </section>
+    <section class="ach-view" data-view="websites" role="tabpanel" hidden>
+      <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
+      <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
+    </section>
+    <section class="ach-view" data-view="php" role="tabpanel" hidden>
+      <p class="ach-note">File-only preview. Runtime values and websites sharing this pool are not yet verified. This is not an Apply action.</p>
+      <form id="ach-php-form">
+        <div class="ach-fields">
+          <div><label for="ach-php-version">PHP version (e.g. 85)</label><input id="ach-php-version" name="php_version" autocomplete="off" inputmode="numeric" pattern="[0-9]{2,3}" placeholder="85" required /></div>
+          <div><label for="ach-max-children">pm.max_children</label><input id="ach-max-children" name="max_children" type="number" min="1" required /></div>
+          <div><label for="ach-start-servers">pm.start_servers</label><input id="ach-start-servers" name="start_servers" type="number" min="1" required /></div>
+          <div><label for="ach-min-spare">pm.min_spare_servers</label><input id="ach-min-spare" name="min_spare_servers" type="number" min="1" required /></div>
+          <div><label for="ach-max-spare">pm.max_spare_servers</label><input id="ach-max-spare" name="max_spare_servers" type="number" min="1" required /></div>
+          <div><label for="ach-max-requests">pm.max_requests</label><input id="ach-max-requests" name="max_requests" type="number" min="0" required /></div>
+        </div>
+        <button type="submit" class="btn btn-success">Preview drift (read-only)</button>
+      </form>
+      <p id="ach-fpm-result" role="status" aria-live="polite"></p>
+      <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Actual file</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
+    </section>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var root = $('#ach-customizer');
+  if (!root.length) return;
+  // English-only for the initial release, following the native aaPanel plugin UI.
+  var t = {
+    loading: 'Loading...',
+    error: 'Request failed',
+    noSites: 'No sites in this page',
+    noDrift: 'No differences in the inspected file',
+    id: 'Operation ID'
+  };
+  var page = 1, hasMore = false, siteBusy = false;
+  function msg(value, failed) { root.find('#ach-message').text(value || '').toggleClass('ach-error', Boolean(failed)); }
+  function request(method, data, done) {
+    msg(t.loading, false);
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:20000, dataType:'json' })
+      .done(function (response) {
+        if (!response || response.status !== true) {
+          msg((response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '')) || t.error, true);
+          done(null);
+        } else { msg('', false); done(response); }
+      })
+      .fail(function (_xhr, status) { msg(t.error + ': ' + status, true); done(null); });
+  }
+  function overview() {
+    request('get_overview', {}, function (r) {
+      root.find('#ach-overview-status').text(r ? r.mode + ' — ' + r.notice : t.error);
+    });
+  }
+  function sites() {
+    if (siteBusy) return;
+    siteBusy = true;
+    request('get_sites', {page:page, page_size:25}, function (r) {
+      siteBusy = false;
+      var body = root.find('#ach-sites-rows').empty();
+      if (!r) return;
+      (r.sites || []).forEach(function (site) {
+        var tr = $('<tr>');
+        $('<td>').text(site.id).appendTo(tr);
+        $('<td>').text(site.name).appendTo(tr);
+        $('<td>').text(site.document_root).appendTo(tr);
+        $('<td>').text(site.classification).appendTo(tr);
+        body.append(tr);
+      });
+      if (!r.sites.length) body.append($('<tr>').append($('<td colspan="4">').text(t.noSites)));
+      hasMore = Boolean(r.has_more);
+      root.find('#ach-page').text(page);
+      root.find('#ach-prev').prop('disabled', page <= 1);
+      root.find('#ach-next').prop('disabled', !hasMore);
+    });
+  }
+  root.find('[data-tab]').on('click', function () {
+    var tab = $(this).attr('data-tab');
+    root.find('[data-tab]').attr('aria-selected', 'false');
+    $(this).attr('aria-selected', 'true');
+    root.find('[data-view]').prop('hidden', true);
+    root.find('[data-view="' + tab + '"]').prop('hidden', false);
+    msg('', false);
+    if (tab === 'overview') overview();
+    if (tab === 'websites') sites();
+  });
+  root.find('#ach-prev').on('click', function () { if (page > 1 && !siteBusy) { page -= 1; sites(); } });
+  root.find('#ach-next').on('click', function () { if (hasMore && !siteBusy) { page += 1; sites(); } });
+  root.find('#ach-php-form').on('submit', function (event) {
+    event.preventDefault();
+    var data = {};
+    $(this).serializeArray().forEach(function (field) { data[field.name] = field.value; });
+    request('preview_php_fpm', data, function (r) {
+      var tbody = root.find('#ach-diff-rows').empty();
+      root.find('#ach-fpm-result').text(r ? r.state + ': ' + (r.reason || r.note || r.source || '') : t.error);
+      if (!r) return;
+      (r.changes || []).forEach(function (diff) {
+        var tr = $('<tr>');
+        $('<td>').text(diff.setting).appendTo(tr);
+        $('<td>').text(diff.desired).appendTo(tr);
+        $('<td>').text(diff.actual).appendTo(tr);
+        tbody.append(tr);
+      });
+      if (r.state === 'File Match') root.find('#ach-fpm-result').text(r.state + ': ' + t.noDrift + '. ' + r.note);
+    });
+  });
+  overview();
+})();
+</script>
