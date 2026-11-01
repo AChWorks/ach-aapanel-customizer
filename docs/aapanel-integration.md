@@ -48,7 +48,33 @@ The independent review of PR #3 candidate `2ccbe3a2acd8a22d2153cff45991e967b01b9
 - **Exact test isolation:** For this corrected-candidate V2 backend invocation, the external vendor `downloadFile` branch was suppressed and the normal cloud/plugin lookup was replaced with local plugin metadata from the **verified manifest**. This avoided executing an unrelated pre-existing vendor temp script. The actual product uninstall hook ran, but this **does not prove a fresh browser UI uninstall** on the corrected candidate or an unrestricted upstream vendor-download workflow. Earlier UI uninstall/in-panel tests remain historical observations of the previous candidate, documented separately above.
 - **Retained sanitized machine evidence:** [aaPanel 8.0.7 REQUIRED-01 lab result](evidence/aaPanel-8.0.7-2026-11-01-required01.json) contains allowlisted assertions and explicit limits, **without credentials, panel URLs or session identifiers**. GitHub source CI remains separate from this physical runtime evidence.
 
-The PR remains Draft pending independent delta re-review on the exact corrected commit. No merge, release or production installation is implied.
+PR #3 was independently approved and merged into `main` at `1e19cec8fd2a4cadfb0d4021b2e7f6baf1842565`. This confirms source integration only: no supported release or production installation is implied.
+
+## aaPanel 8.0.7 V2 Nginx site sources (non-production inspection, 2026-11-02)
+
+The installed `class_v2/panel_site_v2.py` in the retained Debian 12 guest provides additional **version-specific source evidence**, not cross-version compatibility:
+
+- `panelSite.AddSite()` calls `nginxAdd()`, which rewrites `/www/server/panel/vhost/nginx/<site>.conf` using an aaPanel-owned template. The template directly includes `enable-php-<version>.conf`, the per-site rewrite file and (when selected/enabled) aaPanel's built-in global-rule block. It does **not itself** add an unconditional `nginx/extension/<site>/*.conf` include. Effective expanded configuration and any extension injected by other installed components still require runtime verification.
+- `_get_global_rule_include()` gates aaPanel's `global_rule/global.conf` to PHP sites using panel-maintained global metadata. `_apply_global_rule()` iterates through site configurations and writes a shared rule and relevant VHosts. This is a **panel-owned, potentially multi-site** feature; it is not a plugin-owned per-site fragment API, nor permission for our plugin to replace operator global rules.
+- `DeleteSite()` can remove the site's `nginx/extension/<site>` directory. Extension paths cannot be treated as durable user-state storage or assumed to survive deletion/renaming.
+
+Do not infer extension-file effectiveness, persistence after regeneration, or safe Apply from source inspection alone. Record actual behavior in a real managed-site test before selecting an adapter.
+
+## Actual native website and Nginx lifecycle (isolated guest, 2026-11-02)
+
+**Tested combination:** Debian 12, aaPanel **8.0.7**, Nginx **1.28.3**, QEMU TCG overlay on the retained non-production lab. The official aaPanel installer completed with exit code 0. Nginx passed its syntax test. No Production host was accessed.
+
+1. **Real creation/discovery/HTTP:** `panel_site_v2.panelSite.AddSite()` created the static (`PHP 00`) site `site-a.ach-customizer.invalid` as real aaPanel site ID **3**, with Nginx VHost, document root and index. Without any SQLite fixture insertion, the installed `ach_customizer` endpoint discovered the new site with `Needs Review`. The actual server returned **HTTP 200** using its `Host` header, and `nginx -t` passed. This does not establish PHP-FPM functionality.
+
+2. **Regeneration/extension:** The V2 `nginxAdd()` template has no unconditional per-site extension include. A test-only fragment in `vhost/nginx/extension/<site>/` initially had no effect. Adding an explicit include inside this test VHost made an HTTP header appear; native regeneration then **removed the include** (while retaining the fragment file), and the header disappeared. **Later**, the aaPanel/vendor `site_total` service created its own `site_total.conf` and asynchronously reinserted the extension include, making the lab header appear again. Therefore both temporary loss and later repair are observed; the recovery timing and behavior must **not** be treated as a durable plugin-owned extension contract. Our fragment was deleted while the `site_total`-owned file was preserved. Nginx syntax and HTTP 200 still passed.
+
+3. **Native SQLite contention/partial provisioning:** A second `AddSite()` initially returned outer `status: 0`, with `siteId` equal to **`error: database is locked`**. The VHost and root were created but the actual database/monitor had no second site. Process and `/proc/locks` inspection showed `BT-Task` holding a reserved SQLite write lock while awaiting the auxiliary flock held by the `make_suer_ssl_task` child. Only this verified exact child was terminated **inside the disposable guest**; locks cleared and `PRAGMA quick_check` was `ok`. Retrying the native site-add then succeeded with site ID **4** and visible dynamic inventory. The observation illustrates an uncertain-outcome native API, but is not proof of every possible lock cause; a future Apply must reconcile actual DB/files/service state, not trust just outer success status.
+
+4. **Backend deletion:** Direct standalone V2 `DeleteSite(path=1)` removed the second test VHost and extension directory but failed importing `BTPanel` from `files_v2`, because the bare probe lacked the actual panel request module context. Its database record remained at that point. Guarded `DeleteSite(path=0)` completed and removed site **4** from the actual database and monitor, retaining site **3** and HTTP 200. The deliberately retained test-only document root was then removed using exact-path, ownership/content checks. This **does not** establish that aaPanel browser UI deletion with root removal fails or succeeds.
+
+**Unverified gates:** true site rename; corrected-candidate browser file-picker and uninstall; actual PHP-FPM pools; extension durability across aaPanel upgrades or without `site_total`; supported scope ownership, Apply, reload/rollback and state migration. No release/merge/Production approval follows from these tests.
+
+Sanitized machine evidence: [aaPanel 8.0.7 native site/Nginx lifecycle](evidence/aaPanel-8.0.7-2026-11-02-site-nginx-lifecycle.json). Reproducible non-production test scripts/overlay remain in the existing AI Server Agent lab; never publish guest credentials or raw log files.
 
 ## Compatibility and outstanding acceptance
 
@@ -57,15 +83,15 @@ The PR remains Draft pending independent delta re-review on the exact corrected 
 | Official plugin layout, request syntax and ZIP extraction | Source-verified and isolated runtime accepted on aaPanel 8.0.7 |
 | Real in-panel management and read-only API | **Previously observed** on Debian 12 + aaPanel 8.0.7 for the older candidate (including session/CSRF). These browser checks were **not freshly rerun** on the corrected candidate |
 | Native ZIP import/backend, uninstall and reinstall | **Corrected candidate:** native backend import, isolated V2 backend uninstall and reinstall passed; **previous candidate only:** browser UI uninstall. New browser UI uninstall and ZIP file-picker upload remain untested |
-| Dynamic website source inventory | **Passed with actual aaPanel SQLite fixture rows**; real aaPanel site creation/rename untested |
+| Dynamic website source inventory | **Native real site creation ID 3 and backend deletion ID 4 confirmed** on aaPanel 8.0.7; browser lifecycle and site rename remain untested |
 | PHP-FPM file-only preview and runtime truth | Missing PHP 85 yields `Needs Review`; no actual pool/runtime/impact test yet |
-| Nginx virtual-host extension durability and panel regeneration | **Unverified**; Nginx not installed in the guest |
+| Nginx virtual-host extension durability and panel regeneration | **Nginx 1.28.3 tested:** native generator removes custom include; separate asynchronous `site_total` later reinserts it. No stable plugin-owned extension contract established |
 | Overall/per-module enable-disable, persistent policy/state migration | **Not implemented or verified** |
 | Manual Apply/Auto-enforce, syntax validation, recovery/rollback | **Not implemented or verified**; monitor-only prototype |
 | More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Unverified** |
 | Production authorization, deployment, release | **Not authorized**; no production changes |
 
-The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, provision an isolated web stack with at least one real new/renamed site, verify generated configuration behavior and service relationships, and prove an ownership-aware Apply/validation/rollback boundary. Do not install this development package on production.
+The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, test actual site rename, real PHP-FPM pools, independence from `site_total`, and ownership-aware Apply/validation/rollback. The real site/regen evidence above narrows but does not close these gates. Do not install this development package on production.
 
 ## Local source verification (safe to run without aaPanel)
 
