@@ -1,4 +1,5 @@
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -46,6 +47,61 @@ class PackageContractTests(unittest.TestCase):
         self.assertIn('bt-form', html)
         self.assertNotIn('data-i18n', html)
         self.assertNotIn('navigator.language', html)
+
+    def test_uninstall_only_removes_byte_identical_product_icon(self):
+        script = (PACKAGE / 'install.sh').read_text(encoding='utf-8')
+        self.assertIn('plugin_icon=/www/server/panel/plugin/ach_customizer/icon.png', script)
+        self.assertIn('copied_icon=/www/server/panel/BTPanel/static/img/soft_ico/ico-ach_customizer.png', script)
+        self.assertIn('[ ! -L "$plugin_icon" ]', script)
+        self.assertIn('[ ! -L "$copied_icon" ]', script)
+        self.assertIn('cmp -s "$plugin_icon" "$copied_icon"', script)
+        self.assertIn('rm -f -- "$copied_icon"', script)
+        self.assertNotIn('rm -rf', script)
+        self.assertNotIn('rm -f -- "$plugin_icon"', script)
+
+    def test_icon_cleanup_shell_behavior_with_isolated_files(self):
+        script = (PACKAGE / 'install.sh').read_text(encoding='utf-8')
+        begin = script.index('cleanup_owned_icon() {')
+        end = script.index('\n}\n', begin) + 2
+        function = script[begin:end]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'plugin-icon.png'
+            copied = root / 'copied-icon.png'
+            source_bytes = (PACKAGE / 'icon.png').read_bytes()
+            source.write_bytes(source_bytes)
+
+            def invoke():
+                command = (
+                    'plugin_icon=' + shlex.quote(str(source)) + '\n' +
+                    'copied_icon=' + shlex.quote(str(copied)) + '\n' +
+                    function + '\ncleanup_owned_icon\n'
+                )
+                return subprocess.run(['/bin/sh', '-eu', '-c', command],
+                                      check=True, capture_output=True, text=True)
+
+            copied.write_bytes(b'owned by another component')
+            self.assertIn('preserved', invoke().stdout)
+            self.assertEqual(copied.read_bytes(), b'owned by another component')
+            copied.write_bytes(source_bytes)
+            self.assertIn('removed verified', invoke().stdout)
+            self.assertFalse(copied.exists())
+            self.assertIn('preserved', invoke().stdout)
+            self.assertFalse(copied.exists())
+
+            target = root / 'other-component-file.png'
+            target.write_bytes(source_bytes)
+            copied.symlink_to(target)
+            self.assertIn('preserved', invoke().stdout)
+            self.assertTrue(copied.is_symlink())
+            self.assertEqual(target.read_bytes(), source_bytes)
+            copied.unlink()
+            copied.write_bytes(source_bytes)
+            original = root / 'real-icon.png'
+            source.rename(original)
+            source.symlink_to(original)
+            self.assertIn('preserved', invoke().stdout)
+            self.assertTrue(copied.exists())
 
     def test_installer_does_not_purge_settings_or_services(self):
         script = (PACKAGE / 'install.sh').read_text()

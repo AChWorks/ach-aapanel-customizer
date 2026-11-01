@@ -15,7 +15,7 @@ The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the
 
 The aaPanel PDF explicitly warns: **dynamic plugin routes do not inherit aaPanel session authorization** and require an appropriate `_check` implementation. Its sample declares `_check` returning `True`, allowing unauthenticated requests. **Never copy this sample access pattern.**
 
-This first candidate intentionally **does not define `_check`** and only uses the conventional in-panel `/plugin?action=a` route. The exact current session/permission/CSRF enforcement still requires an isolated, version-specific runtime test before privileged operations are added. No Apply/write endpoint is exposed in this candidate.
+This first candidate intentionally **does not define `_check`** and only uses the conventional in-panel `/plugin?action=a` route. In the isolated aaPanel **8.0.7** test, unauthenticated requests returned HTTP 404, authenticated requests without aaPanel's `x-http-token` header returned `INIT_CSRF_ERR`, and the same read-only methods succeeded through the panel's own UI. This verifies the observed version/route, **not** a general security guarantee for other versions or future privileged methods. No Apply/write endpoint is exposed in this candidate.
 
 ## First non-production implementation slice
 
@@ -24,22 +24,37 @@ This first candidate intentionally **does not define `_check`** and only uses th
 - `get_sites`: paginated source records from the panel's `sites` table. IDs are returned as discovered; no WordPress-specific assumption or hard-coded list. Application and resource relationships remain **Needs Review** until verified.
 - `preview_php_fpm`: compares *operator-supplied* concurrency values to explicit `[www]` pool settings in a single, conventional, versioned PHP-FPM configuration file. Rejects missing/ambiguous/duplicate/unreadable configuration. The result's scope is **shared service**. It does not infer sites sharing a pool, include-expanded config, effective runtime, or what aaPanel would write. It NEVER writes, reloads, restarts or schedules anything.
 
-This is **not a supported package or initial release**. `install.sh` owns no resident service or host settings; ordinary uninstall is expected to be handled by aaPanel and must be demonstrated. Overall/per-module enable/disable, persistent policies, authorization checks for future writes, update/uninstall/reinstall semantics, and recovery are still pending. Do not equate a source or ZIP build with those outcomes.
+This is **not a supported package or initial release**. `install.sh` owns no resident service or host settings, and its uninstall hook removes aaPanel's copied icon **only** when both paths are regular non-symlink files whose contents match exactly. The isolated lab demonstrated native uninstall and reinstall; broader update, operator-state preservation, enable/disable, authorization for future writes, and rollback are still pending. Do not equate a source or ZIP build with release/production acceptance.
 
-## Compatibility and acceptance status
+## Isolated aaPanel runtime evidence (2026-11-01)
 
-| Required proof | Status |
+Environment: a dedicated, disposable **Debian 12 (Bookworm)** VM running aaPanel **8.0.7**, verified with the installed panel's `public.get_panel_version()`. The panel's HTTPS/SSH management access was forwarded only to `127.0.0.1` on the development host. This guest had **no Nginx, Apache, managed site, or PHP-FPM runtime installed**; no production data or credentials were used. The aaPanel installer was downloaded from the official vendor and SHA-256 verified before guest execution.
+
+The tested candidate is **monitor-only** `0.1.0`; the corrected development ZIP SHA-256 is `bc790aaf9ba66835cf7f8d7e211d0e7bab286298a89c55a009c943ae3409c915`. This is a reproducibility locator for this lab candidate, not a stable-release trust declaration. The PR and its exact CI run own the source candidate and evidence identity.
+
+- **Native package and UI:** The installed panel's own `panelPlugin.update_zip()` and `panelPlugin.input_zip()` successfully accepted the ZIP, ran `install.sh`, registered `info.json`/icon, and exposed the local plugin in the App Store's **Third-party Plug-ins** inventory. The **Setting** and **Uninstall** controls appeared in its inventory row; selecting the same plugin from **Recently used** opened the English management UI inside aaPanel. The **file-picker upload interaction itself was not exercised**; backend import methods were used on this isolated guest.
+- **Authenticated read-only paths:** The in-panel UI's `Overview`, `Websites`, and `PHP-FPM Preview` tabs loaded without observed browser JavaScript errors. `get_overview` returned `mode=Monitor`; `get_sites` returned an empty but valid page on the initially empty host; and a PHP `85` preview returned `Needs Review`/`shared_service` because that PHP-FPM directory did not exist. These outcomes did not assert that any PHP service had been configured, activated, or verified.
+- **Auth and CSRF:** A request without an authenticated panel session returned HTTP 404, a valid-session request without the native `x-http-token` returned `INIT_CSRF_ERR`, and in-panel requests with the native token succeeded. These checks are evidence for the observed routes on aaPanel 8.0.7 only, not a substitute for per-operation authorization when Apply is added.
+- **Native uninstall/reinstall and defect repair:** The first native UI uninstall removed plugin code but left aaPanel's copied icon in its shared static icon directory. This was reproduced, then corrected with an uninstall hook guarded by an exact path, regular-file/no-symlink checks and byte equality. The next UI uninstall removed both plugin directory **and matched icon**, leaving the panel and task processes running. Reinstallation using the same native methods succeeded. Direct guest hook tests verified an unrelated/tampered icon is preserved, a matched icon is removed, a second cleanup is idempotent, and the final installed icon was restored.
+- **Dynamic discovery integration:** Two *temporary metadata rows* were committed to the isolated panel's actual SQLite `sites` table, and native `public.M('sites')` calls through the project's monitor detected both, then a rename and deletion. All fixture rows were removed and the database returned to **zero** sites. **This is not evidence of a website created, renamed or regenerated through aaPanel's actual site-management workflow.**
+- **Offline/source tests:** 21 unit/package tests passed locally, including entrypoint, site pagination/change fixtures, strict PHP-FPM file-parsing and owned-icon cleanup guards. POSIX script syntax and deterministic ZIP output were verified. See the PR's exact CI run for source-level checks.
+
+## Compatibility and outstanding acceptance
+
+| Required proof | Observed status |
 | --- | --- |
-| Official plugin layout, request syntax, sample ZIP | Source-verified; current version compatibility unverified |
-| Real aaPanel version, OS and module matrix | Not selected |
-| Real native import, in-panel load and auth/CSRF behavior | Unverified |
-| Dynamic discovery and a new/renamed non-WordPress site | Pure unit fixtures only |
-| Shared PHP-FPM config file preview and source syntax | Pure fixture tests only; runtime/impact unverified |
-| Panel site generation and regeneration effects | Unverified |
-| Enable/disable, update, uninstall, reinstall and persistence | Not implemented/verified |
-| Nginx include durability and syntax/application/rollback | Unverified |
+| Official plugin layout, request syntax and ZIP extraction | Source-verified and isolated runtime accepted on aaPanel 8.0.7 |
+| Real in-panel management and read-only API | **Passed on Debian 12 + aaPanel 8.0.7**, with observed session/CSRF checks |
+| Native ZIP import/backend, uninstall and reinstall | **Passed in isolated VM**; UI file-picker upload not yet tested |
+| Dynamic website source inventory | **Passed with actual aaPanel SQLite fixture rows**; real aaPanel site creation/rename untested |
+| PHP-FPM file-only preview and runtime truth | Missing PHP 85 yields `Needs Review`; no actual pool/runtime/impact test yet |
+| Nginx virtual-host extension durability and panel regeneration | **Unverified**; Nginx not installed in the guest |
+| Overall/per-module enable-disable, persistent policy/state migration | **Not implemented or verified** |
+| Manual Apply/Auto-enforce, syntax validation, recovery/rollback | **Not implemented or verified**; monitor-only prototype |
+| More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Unverified** |
+| Production authorization, deployment, release | **Not authorized**; no production changes |
 
-A non-production aaPanel test is essential before accepting Issue #1. Do **not** install on production. When an isolated environment is available, record exact panel version/build, OS, webserver, PHP module and plugin import UI, capture a new site and PHP-FPM drift, verify auth and session boundaries, then exercise lifecycle operations **without reusing production data**.
+The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, provision an isolated web stack with at least one real new/renamed site, verify generated configuration behavior and service relationships, and prove an ownership-aware Apply/validation/rollback boundary. Do not install this development package on production.
 
 ## Local source verification (safe to run without aaPanel)
 
