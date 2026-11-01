@@ -16,39 +16,39 @@
   #ach-customizer .ach-error { color:#ad2525; }
   @media(max-width:600px) { #ach-customizer .ach-fields { grid-template-columns:1fr; } }
 </style>
-<div class="bt-form" id="ach-customizer" dir="auto">
+<div class="bt-form" id="ach-customizer" dir="ltr" lang="en">
   <div class="bt-w-con pd15">
     <h3>ACh aaPanel Customizer</h3>
-    <p class="ach-note" data-i18n="readOnly">Development candidate: Monitor only. This plugin cannot apply, reload, or modify host configuration.</p>
+    <p class="ach-note">Development candidate: Monitor only. This plugin cannot apply, reload, or modify host configuration.</p>
     <div class="ach-tabs" role="tablist" aria-label="Plugin sections">
-      <button type="button" data-tab="overview" role="tab" aria-selected="true" data-i18n="overview">Overview</button>
-      <button type="button" data-tab="websites" role="tab" aria-selected="false" data-i18n="websites">Websites</button>
-      <button type="button" data-tab="php" role="tab" aria-selected="false" data-i18n="php">PHP-FPM Preview</button>
+      <button type="button" data-tab="overview" role="tab" aria-selected="true">Overview</button>
+      <button type="button" data-tab="websites" role="tab" aria-selected="false">Websites</button>
+      <button type="button" data-tab="php" role="tab" aria-selected="false">PHP-FPM Preview</button>
     </div>
     <p id="ach-message" role="status" aria-live="polite"></p>
     <section class="ach-view" data-view="overview" role="tabpanel">
       <p id="ach-overview-status">Loading...</p>
-      <p data-i18n="scope">Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.</p>
+      <p>Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.</p>
     </section>
     <section class="ach-view" data-view="websites" role="tabpanel" hidden>
-      <div class="ach-scroll"><table><thead><tr><th>ID</th><th data-i18n="site">Site</th><th data-i18n="root">Document root</th><th data-i18n="classification">Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
-      <div class="ach-controls"><button type="button" id="ach-prev" data-i18n="previous">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next" data-i18n="next">Next</button></div>
+      <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
+      <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
     </section>
     <section class="ach-view" data-view="php" role="tabpanel" hidden>
-      <p class="ach-note" data-i18n="phpWarning">File-only preview. Runtime values and websites sharing this pool are not yet verified. This is not an Apply action.</p>
+      <p class="ach-note">File-only preview. Runtime values and websites sharing this pool are not yet verified. This is not an Apply action.</p>
       <form id="ach-php-form">
         <div class="ach-fields">
-          <div><label for="ach-php-version" data-i18n="phpVersion">PHP version (e.g. 85)</label><input id="ach-php-version" name="php_version" autocomplete="off" inputmode="numeric" pattern="[0-9]{2,3}" placeholder="85" required /></div>
+          <div><label for="ach-php-version">PHP version (e.g. 85)</label><input id="ach-php-version" name="php_version" autocomplete="off" inputmode="numeric" pattern="[0-9]{2,3}" placeholder="85" required /></div>
           <div><label for="ach-max-children">pm.max_children</label><input id="ach-max-children" name="max_children" type="number" min="1" required /></div>
           <div><label for="ach-start-servers">pm.start_servers</label><input id="ach-start-servers" name="start_servers" type="number" min="1" required /></div>
           <div><label for="ach-min-spare">pm.min_spare_servers</label><input id="ach-min-spare" name="min_spare_servers" type="number" min="1" required /></div>
           <div><label for="ach-max-spare">pm.max_spare_servers</label><input id="ach-max-spare" name="max_spare_servers" type="number" min="1" required /></div>
           <div><label for="ach-max-requests">pm.max_requests</label><input id="ach-max-requests" name="max_requests" type="number" min="0" required /></div>
         </div>
-        <button type="submit" class="btn btn-success" data-i18n="preview">Preview drift (read-only)</button>
+        <button type="submit" class="btn btn-success">Preview drift (read-only)</button>
       </form>
       <p id="ach-fpm-result" role="status" aria-live="polite"></p>
-      <div class="ach-scroll"><table><thead><tr><th data-i18n="setting">Setting</th><th data-i18n="desired">Desired</th><th data-i18n="actual">Actual file</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
+      <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Actual file</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
     </section>
   </div>
 </div>
@@ -57,14 +57,14 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var isFa = /^fa(?:-|$)/i.test(document.documentElement.lang || navigator.language || 'en');
-  root.attr('dir', isFa ? 'rtl' : 'ltr');
-  var messages = {
-    en: { readOnly:'Development candidate: Monitor only. This plugin cannot apply, reload, or modify host configuration.', overview:'Overview', websites:'Websites', php:'PHP-FPM Preview', scope:'Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.', site:'Site', root:'Document root', classification:'Classification', previous:'Previous', next:'Next', phpWarning:'File-only preview. Runtime values and websites sharing this pool are not yet verified. This is not an Apply action.', phpVersion:'PHP version (e.g. 85)', preview:'Preview drift (read-only)', setting:'Setting', desired:'Desired', actual:'Actual file', loading:'Loading...', error:'Request failed', noSites:'No sites in this page', noDrift:'No differences in the inspected file', id:'Operation ID' },
-    fa: { readOnly:'نسخه توسعه‌ای: فقط پایش. هیچ تغییر تنظیمات، اعمال یا راه‌اندازی مجدد خدمات انجام نمی‌شود.', overview:'نمای کلی', websites:'وب‌سایت‌ها', php:'پیش‌نمایش PHP-FPM', scope:'فهرست وب‌سایت‌ها فقط خواندنی است. تنظیمات PHP-FPM مشترک‌اند و به یک وب‌سایت تعلق ندارند.', site:'سایت', root:'مسیر ریشه', classification:'وضعیت شناسایی', previous:'قبلی', next:'بعدی', phpWarning:'فقط مقایسه فایل انجام می‌شود. مقدار Runtime و سایت‌های متصل به این Pool هنوز تأیید نشده‌اند. گزینه Apply وجود ندارد.', phpVersion:'نسخه PHP (مثلاً 85)', preview:'نمایش اختلاف (فقط خواندنی)', setting:'تنظیم', desired:'مطلوب', actual:'موجود در فایل', loading:'در حال بارگذاری...', error:'درخواست ناموفق بود', noSites:'در این صفحه سایتی یافت نشد', noDrift:'در فایل بررسی‌شده اختلافی مشاهده نشد', id:'شناسه عملیات' }
+  // English-only for the initial release, following the native aaPanel plugin UI.
+  var t = {
+    loading: 'Loading...',
+    error: 'Request failed',
+    noSites: 'No sites in this page',
+    noDrift: 'No differences in the inspected file',
+    id: 'Operation ID'
   };
-  var t = messages[isFa ? 'fa' : 'en'];
-  root.find('[data-i18n]').each(function () { $(this).text(t[$(this).attr('data-i18n')]); });
   var page = 1, hasMore = false, siteBusy = false;
   function msg(value, failed) { root.find('#ach-message').text(value || '').toggleClass('ach-error', Boolean(failed)); }
   function request(method, data, done) {

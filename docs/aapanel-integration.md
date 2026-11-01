@@ -19,7 +19,7 @@ This first candidate intentionally **does not define `_check`** and only uses th
 
 ## First non-production implementation slice
 
-`plugin/ach_customizer/` is a prototype native plugin package with an in-panel read-only UI and two narrowly bounded read operations:
+`plugin/ach_customizer/` is a prototype native plugin package with an English-only in-panel read-only UI, following aaPanel conventions, and two narrowly bounded read operations:
 
 - `get_sites`: paginated source records from the panel's `sites` table. IDs are returned as discovered; no WordPress-specific assumption or hard-coded list. Application and resource relationships remain **Needs Review** until verified.
 - `preview_php_fpm`: compares *operator-supplied* concurrency values to explicit `[www]` pool settings in a single, conventional, versioned PHP-FPM configuration file. Rejects missing/ambiguous/duplicate/unreadable configuration. The result's scope is **shared service**. It does not infer sites sharing a pool, include-expanded config, effective runtime, or what aaPanel would write. It NEVER writes, reloads, restarts or schedules anything.

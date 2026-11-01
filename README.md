@@ -24,7 +24,7 @@ It is **not WordPress-only** and does not imply every aaPanel subsystem will be 
 
 A provisional native plugin source lives at `plugin/ach_customizer/`. Run `python3 -B -m unittest discover -s tests -p "test_*.py" -v` for source-only tests and `python3 -B scripts/build_plugin.py` to construct a **local, unverified development ZIP**. This is not an authorized production installation path. Actual aaPanel import, native UI/session authorization and lifecycle remain unverified until tested on a **non-production** installation. Do not deploy this repository to production as a plugin.
 
-The first prototype uses Python for aaPanel compatibility. Specific adapter contracts, support matrix and host-writing operations are still evidence-gated.
+The first prototype uses Python for aaPanel compatibility and an English-only UI consistent with aaPanel’s standard plugin patterns. Specific adapter contracts, support matrix and host-writing operations are still evidence-gated.
 
 ## Security and scope
 

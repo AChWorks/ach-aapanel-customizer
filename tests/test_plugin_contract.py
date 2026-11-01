@@ -39,6 +39,14 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/icon.png', names)
                 self.assertTrue(archive.read('ach_customizer/icon.png').startswith(b'\x89PNG'))
 
+    def test_native_ui_is_english_only_without_translation_dependency(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('lang="en"', html)
+        self.assertIn('dir="ltr"', html)
+        self.assertIn('bt-form', html)
+        self.assertNotIn('data-i18n', html)
+        self.assertNotIn('navigator.language', html)
+
     def test_installer_does_not_purge_settings_or_services(self):
         script = (PACKAGE / 'install.sh').read_text()
         for forbidden in ('rm -rf', 'systemctl', 'service nginx', 'service php', 'crontab', 'reload'):
