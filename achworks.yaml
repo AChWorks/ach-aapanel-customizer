@@ -1,0 +1,20 @@
+schemaVersion: achworks.dev/v1alpha1
+kind: Component
+
+metadata:
+  name: ach-aapanel-customizer
+  title: ACh aaPanel Customizer
+  description: Native modular aaPanel plugin for durable, inspectable, and recoverable customization of aaPanel and its managed modules, websites, and services.
+
+spec:
+  type: aapanel-plugin
+  lifecycle: planned
+  system: aapanel-customization
+  ownership: AChWorks
+
+  documentation:
+    path: docs/PROJECT-SPEC.md
+
+  source:
+    repository: AChWorks/ach-aapanel-customizer
+    url: https://github.com/AChWorks/ach-aapanel-customizer
