@@ -194,6 +194,13 @@ def preview_php_fpm(config_root, version, expected):
     if len(found) != 1:
         return {"state": "Needs Review", "reason": "Exactly one explicit [www] pool is required; found " + str(len(found)), "scope": "shared_service", "version": version}
     source, actual = found[0]
+    # PHP-FPM documents pm.max_requests=0 when the directive is omitted.
+    # aaPanel's native php-fpm.conf template omits it entirely. Do not
+    # fabricate defaults for the other, mandatory dynamic-pool settings.
+    implicit_defaults = []
+    if "pm.max_requests" not in actual:
+        actual["pm.max_requests"] = 0
+        implicit_defaults.append({"setting": "pm.max_requests", "value": 0, "origin": "PHP-FPM default"})
     missing = [key for key in POOL_KEYS if key not in actual]
     if missing:
         return {"state": "Needs Review", "reason": "Missing explicit settings: " + ", ".join(missing), "scope": "shared_service", "version": version, "source": source}
@@ -206,5 +213,8 @@ def preview_php_fpm(config_root, version, expected):
         "pool": "www",
         "source": source,
         "changes": diff,
-        "note": "File-only observation; effective runtime and site-to-pool impact are not verified. No Apply is available.",
+        "implicit_defaults": implicit_defaults,
+        "note": ("pm.max_requests=0 is the documented PHP-FPM default, not an explicit file value. "
+                 if implicit_defaults else "")
+                + "File/default comparison only; running pool state and site-to-pool impact are not verified. No Apply is available.",
     }

@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "environment": "isolated Debian 12 QEMU TCG aaPanel 8.0.7 guest; non-production",
+  "observed_date": "2026-11-02",
+  "basis_commit": "1805fbed054765bcde003ee7f904c469e3065417",
+  "installer": "native aaPanel install_soft.sh 4 install php 8.5",
+  "installer_exit_code": 0,
+  "runtime_binary_version": "PHP 8.5.12 (fpm-fcgi)",
+  "pool_config": "/www/server/php/85/etc/php-fpm.conf",
+  "pool_config_sha256": "232d0c85d59e187ed0da59514f31d5f02462fd98d6964de11216542bd7074bbb",
+  "pool_mode": "dynamic",
+  "pool": "www",
+  "explicit_pool_values": {
+    "pm.max_children": 50,
+    "pm.start_servers": 5,
+    "pm.min_spare_servers": 5,
+    "pm.max_spare_servers": 20
+  },
+  "omitted_directive": "pm.max_requests",
+  "runtime_effective_default_from_php_fpm_tt": {
+    "pm.max_requests": 0
+  },
+  "old_monitor": {
+    "state": "Needs Review",
+    "reason": "Missing explicit settings: pm.max_requests"
+  },
+  "fixed_candidate": {
+    "match": {
+      "state": "File Match",
+      "implicit_defaults": [
+        {
+          "setting": "pm.max_requests",
+          "value": 0,
+          "origin": "PHP-FPM default"
+        }
+      ]
+    },
+    "drift": {
+      "state": "File Drift",
+      "changes": [
+        {
+          "setting": "pm.max_requests",
+          "desired": 300,
+          "actual": 0
+        }
+      ]
+    },
+    "pool_file_hash_unchanged_after_preview": true
+  },
+  "website_mapping": {
+    "primary_site": {
+      "id": 3,
+      "name": "site-a.ach-customizer.invalid",
+      "php_version": "85"
+    },
+    "second_site": {
+      "id": 5,
+      "name": "site-php85-b.ach-customizer.invalid",
+      "php_version": "85"
+    },
+    "both_site_nginx_vhosts_include": "enable-php-85.conf",
+    "shared_php_fpm_socket": "/tmp/php-cgi-85.sock",
+    "both_real_http_fastcgi_responses": "PHP-8.5 / HTTP 200",
+    "pool_config_hash_unchanged_after_site_operations": true
+  },
+  "cleanup": {
+    "second_site_removed_via_native_backend": true,
+    "second_site_root_cleaned_with_exact_path_guards": true,
+    "primary_site_preserved": true,
+    "nginx_syntax_valid": true,
+    "primary_site_http_200": true
+  },
+  "assurance_limits": [
+    "FPM binary/runtime config inspection and HTTP routing were observed in one versioned lab combination; not a cross-version compatibility guarantee.",
+    "Preview remains file/default based. It does not query the live FPM master process on each request or claim that the daemon has reloaded its latest file.",
+    "Both test sites targeted one installed versioned [www] pool; no per-site FPM pool was configured.",
+    "No WP Toolkit automation or cross-tool pool reset was reproduced. A normal second native website creation left the FPM config hash unchanged.",
+    "Site deletion used the native backend path=0 plus guarded test root cleanup, not an authenticated browser UI test.",
+    "Lab-only changes: no production deployment, plugin Apply, PHP-FPM reload, version migration, or policy enforcement."
+  ]
+}

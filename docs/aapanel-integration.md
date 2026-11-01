@@ -76,6 +76,18 @@ Do not infer extension-file effectiveness, persistence after regeneration, or sa
 
 Sanitized machine evidence: [aaPanel 8.0.7 native site/Nginx lifecycle](evidence/aaPanel-8.0.7-2026-11-02-site-nginx-lifecycle.json). Reproducible non-production test scripts/overlay remain in the existing AI Server Agent lab; never publish guest credentials or raw log files.
 
+## Actual PHP 8.5 native-pool verification and bounded monitor correction (isolated guest, 2026-11-02)
+
+The same isolated aaPanel 8.0.7 / Nginx 1.28.3 guest was reused with its prior qcow2 overlay. The **native aaPanel PHP 8.5 installer** exited successfully; the installed `php-fpm` binary reports **PHP 8.5.12**. The `www` pool was running in `dynamic` mode, `php-fpm -t` passed and the real FastCGI socket `/tmp/php-cgi-85.sock` existed. This is **one observed environment**, not a declared PHP version compatibility matrix.
+
+The generated `/www/server/php/85/etc/php-fpm.conf` explicitly sets `pm.max_children=50`, `pm.start_servers=5`, `pm.min_spare_servers=5`, `pm.max_spare_servers=20`, but **omits `pm.max_requests`**. The installed PHP-FPM's `-tt` config dump reports **`pm.max_requests=0`**, consistent with the [official PHP-FPM configuration reference](https://www.php.net/manual/en/install.fpm.configuration.php) documenting an omitted `pm.max_requests` default of 0. Before the correction, the plugin returned `Needs Review` with `Missing explicit settings: pm.max_requests` for this valid native layout.
+
+The **candidate monitor correction** infers *only* the documented optional `pm.max_requests=0` when absent from the single accepted `[www]` pool. The response exposes this as `implicit_defaults`, distinguishes file/default comparisons from effective live runtime, and continues to fail closed for omitted mandatory dynamic-pool values, unsupported modes/includes, duplicates and symlinked configuration. **No config writes, FPM reload, Apply or auto-enforcement** were added. The preview UI labels its source as `Configured / PHP default` rather than implying an explicit file value.
+
+Against the actual guest pool, the corrected candidate returned `File Match` for the desired `pm.max_requests=0`, and `File Drift` (desired 300, actual/default 0) for the alternative. The pool file SHA-256 was unchanged by previews. Native `SetPHPVersion` linked real site ID **3** to `enable-php-85.conf` and a real PHP HTTP request returned `PHP-8.5 / HTTP 200`. A second native website, ID **5**, used the **same include and FPM socket** and also served real PHP 8.5 via HTTP 200. Native site creation did not alter the shared pool file hash in this experiment. The second test site was removed through aaPanel's backend plus guarded disposable-root cleanup; site ID 3, Nginx syntax and HTTP 200 remained healthy.
+
+**Remaining limits:** this does not reproduce the historical aaPanel/WP Toolkit settings reset, demonstrate a different per-site PHP pool, prove the live daemon always matches a subsequently edited file, establish browser authorization, implement reload/rollback or authorize production mutation. It supports a *read-only* shared-pool preview and evidence-based adapter selection only. Sanitized facts: [Native aaPanel 8.0.7 PHP 8.5 FPM evidence](evidence/aaPanel-8.0.7-2026-11-02-php85-native-pool.json).
+
 ## Compatibility and outstanding acceptance
 
 | Required proof | Observed status |
@@ -84,14 +96,14 @@ Sanitized machine evidence: [aaPanel 8.0.7 native site/Nginx lifecycle](evidence
 | Real in-panel management and read-only API | **Previously observed** on Debian 12 + aaPanel 8.0.7 for the older candidate (including session/CSRF). These browser checks were **not freshly rerun** on the corrected candidate |
 | Native ZIP import/backend, uninstall and reinstall | **Corrected candidate:** native backend import, isolated V2 backend uninstall and reinstall passed; **previous candidate only:** browser UI uninstall. New browser UI uninstall and ZIP file-picker upload remain untested |
 | Dynamic website source inventory | **Native real site creation ID 3 and backend deletion ID 4 confirmed** on aaPanel 8.0.7; browser lifecycle and site rename remain untested |
-| PHP-FPM file-only preview and runtime truth | Missing PHP 85 yields `Needs Review`; no actual pool/runtime/impact test yet |
+| PHP-FPM file-only preview and runtime truth | **Native PHP 8.5.12 pool tested:** single shared `www` dynamic pool, real HTTP mapping for two sites, omitted `pm.max_requests` default 0 confirmed. Preview is still file/default-only; no live configuration-change/rollback proof |
 | Nginx virtual-host extension durability and panel regeneration | **Nginx 1.28.3 tested:** native generator removes custom include; separate asynchronous `site_total` later reinserts it. No stable plugin-owned extension contract established |
 | Overall/per-module enable-disable, persistent policy/state migration | **Not implemented or verified** |
 | Manual Apply/Auto-enforce, syntax validation, recovery/rollback | **Not implemented or verified**; monitor-only prototype |
 | More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Unverified** |
 | Production authorization, deployment, release | **Not authorized**; no production changes |
 
-The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, test actual site rename, real PHP-FPM pools, independence from `site_total`, and ownership-aware Apply/validation/rollback. The real site/regen evidence above narrows but does not close these gates. Do not install this development package on production.
+The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, test actual site rename, PHP-FPM configuration resets/reloads and conflict behavior, independence from `site_total`, and ownership-aware Apply/validation/rollback. The real site/regen evidence above narrows but does not close these gates. Do not install this development package on production.
 
 ## Local source verification (safe to run without aaPanel)
 

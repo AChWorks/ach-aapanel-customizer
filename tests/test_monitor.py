@@ -98,6 +98,7 @@ class PHPMonitorTests(unittest.TestCase):
         self.assertEqual(result['state'], 'File Match')
         self.assertEqual(result['scope'], 'shared_service')
         self.assertEqual(result['changes'], [])
+        self.assertEqual(result['implicit_defaults'], [])
         self.assertEqual(self.pool.read_bytes(), before)
 
     def test_detect_shared_pool_drift_and_preserve_bytes(self):
@@ -107,6 +108,31 @@ class PHPMonitorTests(unittest.TestCase):
         self.assertEqual(result['state'], 'File Drift')
         self.assertEqual(result['changes'], [{'setting': 'pm.max_children', 'desired': 20, 'actual': 80}])
         self.assertEqual(self.pool.read_bytes(), before)
+
+    def test_native_aapanel_omitted_max_requests_uses_php_default_zero(self):
+        # aaPanel's real native PHP 8.5 php-fpm.conf puts the www pool in the
+        # root file and omits pm.max_requests; PHP-FPM -tt reports default 0.
+        self.pool.unlink()
+        root_conf = self.root / '85' / 'etc' / 'php-fpm.conf'
+        native_values = dict(EXPECTED, **{'pm.max_requests': '0'})
+        root_conf.write_text('[global]\n[www]\npm = dynamic\n'
+                             + ''.join(f'{k} = {v}\n' for k, v in native_values.items()
+                                       if k != 'pm.max_requests'), encoding='utf-8')
+        before = root_conf.read_bytes()
+        result = self.preview(native_values)
+        self.assertEqual(result['state'], 'File Match')
+        self.assertEqual(result['changes'], [])
+        self.assertEqual(result['implicit_defaults'],
+                         [{'setting': 'pm.max_requests', 'value': 0, 'origin': 'PHP-FPM default'}])
+        self.assertEqual(root_conf.read_bytes(), before)
+        drift = self.preview(EXPECTED)
+        self.assertEqual(drift['state'], 'File Drift')
+        self.assertEqual(drift['changes'],
+                         [{'setting': 'pm.max_requests', 'desired': 300, 'actual': 0}])
+        # Do not infer defaults for mandatory pool capacity limits.
+        root_conf.write_text(root_conf.read_text().replace('pm.max_children = 20\n', ''),
+                             encoding='utf-8')
+        self.assertEqual(self.preview(native_values)['state'], 'Needs Review')
 
     def test_unknown_or_ambiguous_configuration_needs_review(self):
         self.pool.write_text('[www]\npm = dynamic\npm.max_children = 20\n', encoding='utf-8')
