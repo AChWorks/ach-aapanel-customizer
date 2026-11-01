@@ -117,7 +117,9 @@ class PHPMonitorTests(unittest.TestCase):
         native_values = dict(EXPECTED, **{'pm.max_requests': '0'})
         root_conf.write_text('[global]\n[www]\npm = dynamic\n'
                              + ''.join(f'{k} = {v}\n' for k, v in native_values.items()
-                                       if k != 'pm.max_requests'), encoding='utf-8')
+                                       if k != 'pm.max_requests')
+                             + 'listen = /tmp/php-cgi-85.sock\n'
+                             + 'pm.status_path = /phpfpm_85_status\n', encoding='utf-8')
         before = root_conf.read_bytes()
         result = self.preview(native_values)
         self.assertEqual(result['state'], 'File Match')
@@ -133,6 +135,61 @@ class PHPMonitorTests(unittest.TestCase):
         root_conf.write_text(root_conf.read_text().replace('pm.max_children = 20\n', ''),
                              encoding='utf-8')
         self.assertEqual(self.preview(native_values)['state'], 'Needs Review')
+
+    def test_malformed_directives_never_activate_implicit_default(self):
+        # A missing '=' must not be mistaken for an omitted optional setting.
+        # Syntactically malformed names and unknown pm.* keys are also unsafe.
+        self.pool.unlink()
+        root_conf = self.root / '85' / 'etc' / 'php-fpm.conf'
+        desired_zero = dict(EXPECTED, **{'pm.max_requests': '0'})
+        valid = ('[global]\n[www]\npm = dynamic\n'
+                 + ''.join(f'{k} = {v}\n' for k, v in desired_zero.items()
+                           if k != 'pm.max_requests'))
+        cases = (
+            'pm.max_requests',
+            'pm.max_requests: 300',
+            'pm.max_requests: 300 = 0',
+            'pm.max_requests 300 = 0',
+            'pm.max_requests =',
+            'pm.max_requests = nonsense',
+            'pm.max_requets = 0',
+            'bad bare directive',
+            '[www',
+        )
+        for line in cases:
+            with self.subTest(line=line):
+                root_conf.write_text(valid + line + '\n', encoding='utf-8')
+                before = root_conf.read_bytes()
+                for desired in (desired_zero, EXPECTED):
+                    result = self.preview(desired)
+                    self.assertEqual(result['state'], 'Needs Review', result)
+                    self.assertEqual(root_conf.read_bytes(), before)
+
+    def test_explicit_optional_directive_retains_no_implicit_default(self):
+        self.pool.unlink()
+        root_conf = self.root / '85' / 'etc' / 'php-fpm.conf'
+        desired_zero = dict(EXPECTED, **{'pm.max_requests': '0'})
+        native = ('[global]\n[www]\npm = dynamic\n'
+                  + ''.join(f'{k} = {v}\n' for k, v in desired_zero.items()
+                            if k != 'pm.max_requests')
+                  + 'listen = /tmp/php-cgi-85.sock\n'
+                  + 'pm.status_path = /phpfpm_85_status\n'
+                  + 'php_admin_value[error_log] = /tmp/php-fpm.log\n')
+        for explicit in (0, 300):
+            with self.subTest(explicit=explicit):
+                root_conf.write_text(native + f'pm.max_requests = {explicit}\n', encoding='utf-8')
+                before = root_conf.read_bytes()
+                for desired in (desired_zero, EXPECTED):
+                    result = self.preview(desired)
+                    self.assertEqual(result['implicit_defaults'], [])
+                    self.assertEqual(result['state'],
+                                     'File Match' if explicit == int(desired['pm.max_requests'])
+                                     else 'File Drift')
+                    self.assertEqual(root_conf.read_bytes(), before)
+        root_conf.write_text(native + 'pm.max_requests = 0\npm.max_requests = 0\n', encoding='utf-8')
+        before = root_conf.read_bytes()
+        self.assertEqual(self.preview(desired_zero)['state'], 'Needs Review')
+        self.assertEqual(root_conf.read_bytes(), before)
 
     def test_unknown_or_ambiguous_configuration_needs_review(self):
         self.pool.write_text('[www]\npm = dynamic\npm.max_children = 20\n', encoding='utf-8')

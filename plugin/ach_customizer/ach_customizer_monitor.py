@@ -12,6 +12,17 @@ POOL_KEYS = (
     "pm.max_spare_servers",
     "pm.max_requests",
 )
+# These are native FPM process-manager directives, not policy fields.
+# Unknown pm.* keys must not be silently mistaken for an omitted policy key.
+PM_PASSTHROUGH_KEYS = frozenset((
+    "pm.status_path",
+    "pm.status_listen",
+    "pm.process_idle_timeout",
+    "pm.max_spawn_rate",
+))
+# Conservative INI key syntax: regular FPM directives and php/env array keys.
+FPM_INI_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*(?:\[[A-Za-z0-9_./:-]+\])?")
+
 CONFIG_FILES_LIMIT = 32
 MAX_CONFIG_BYTES = 256 * 1024
 
@@ -99,7 +110,7 @@ def _parse_pool_file(file_path, allowed_include=None):
     seen_sections = set()
     pool = {}
     pool_mode = None
-    for line in text.splitlines():
+    for line_number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line or line.startswith((";", "#")):
             continue
@@ -109,9 +120,13 @@ def _parse_pool_file(file_path, allowed_include=None):
                 raise MonitorInputError("Duplicate [www] pool section")
             seen_sections.add(section)
             continue
+        # Without '=', a malformed directive (not a genuine omission) could
+        # otherwise activate the implicit pm.max_requests=0 default.
         if "=" not in line:
-            continue
+            raise MonitorInputError("Malformed PHP-FPM directive on line " + str(line_number))
         key, value = (part.strip() for part in line.split("=", 1))
+        if not FPM_INI_KEY.fullmatch(key):
+            raise MonitorInputError("Unsupported PHP-FPM directive key on line " + str(line_number))
         if key == "include":
             # Include expansion is not implemented. Trust only the explicit root
             # include already preflighted above; nested includes need review.
@@ -127,6 +142,8 @@ def _parse_pool_file(file_path, allowed_include=None):
             pool_mode = value.split(";", 1)[0].split("#", 1)[0].strip()
             continue
         if key not in POOL_KEYS:
+            if key.startswith("pm.") and key not in PM_PASSTHROUGH_KEYS:
+                raise MonitorInputError("Unsupported PHP-FPM process-manager setting: " + key)
             continue
         if key in pool:
             raise MonitorInputError("Duplicate setting inside [www]: " + key)

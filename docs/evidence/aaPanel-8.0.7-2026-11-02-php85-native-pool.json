@@ -77,5 +77,8 @@
     "No WP Toolkit automation or cross-tool pool reset was reproduced. A normal second native website creation left the FPM config hash unchanged.",
     "Site deletion used the native backend path=0 plus guarded test root cleanup, not an authenticated browser UI test.",
     "Lab-only changes: no production deployment, plugin Apply, PHP-FPM reload, version migration, or policy enforcement."
-  ]
+  ],
+  "runtime_probe_helper_source_commit": "5821cd8b88e1819b05f85163a2dbcb97ed2d4738",
+  "runtime_probe_helper_sha256": "a4761f06c0e77755dfc8f7a07ac9a4b4c7939f0ab640fdc0c5abeda4e26790e2",
+  "runtime_probe_scope": "Only the read-only helper source from the stated commit was copied to the isolated guest. The later malformed-line parser fix was checked by source tests, not rerun in the guest."
 }
