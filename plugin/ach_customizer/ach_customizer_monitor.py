@@ -89,7 +89,7 @@ def expected_pool_values(values):
     return result
 
 
-def _parse_pool_file(file_path):
+def _parse_pool_file(file_path, allowed_include=None):
     if file_path.is_symlink() or not file_path.is_file():
         raise MonitorInputError("Non-regular or linked FPM configuration: " + str(file_path))
     if file_path.stat().st_size > MAX_CONFIG_BYTES:
@@ -112,6 +112,13 @@ def _parse_pool_file(file_path):
         if "=" not in line:
             continue
         key, value = (part.strip() for part in line.split("=", 1))
+        if key == "include":
+            # Include expansion is not implemented. Trust only the explicit root
+            # include already preflighted above; nested includes need review.
+            candidate = value.split(";", 1)[0].split("#", 1)[0].strip()
+            if allowed_include is None or candidate != allowed_include:
+                raise MonitorInputError("Unexpanded or unsupported PHP-FPM include")
+            continue
         if section != "www":
             continue
         if key == "pm":
@@ -177,7 +184,9 @@ def preview_php_fpm(config_root, version, expected):
         for path in paths:
             if not path.exists() and not path.is_symlink():
                 continue
-            has_pool, actual = _parse_pool_file(path)
+            has_pool, actual = _parse_pool_file(
+                path, allowed_include=include_values[0] if path == main_conf and include_values else None
+            )
             if has_pool:
                 found.append((str(path), actual))
     except (MonitorInputError, OSError, UnicodeError) as exc:

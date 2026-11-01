@@ -135,6 +135,12 @@ class PHPMonitorTests(unittest.TestCase):
         main.write_text('[global]\n', encoding='utf-8')
         self.assertEqual(self.preview()['state'], 'Needs Review')
 
+    def test_nested_include_in_pool_is_not_silently_accepted(self):
+        self.pool.write_text(self.pool.read_text() + 'include=other/*.conf\n', encoding='utf-8')
+        result = self.preview()
+        self.assertEqual(result['state'], 'Needs Review')
+        self.assertIn('include', result['reason'])
+
     def test_invalid_policy_fails_without_file_access(self):
         for version in ('../85', 'abc', '85/x', '', '0085'):
             with self.subTest(version=version), self.assertRaises(monitor.MonitorInputError):
