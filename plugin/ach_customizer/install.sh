@@ -1,24 +1,21 @@
 #!/bin/sh
 set -eu
-# aaPanel owns distribution/removal of this plugin's code. This candidate
-# creates no jobs, services, or host configuration. Persistent operator data
-# (if added in a later version) is never purged by ordinary uninstall.
+# aaPanel owns the removable plugin source. This candidate creates no jobs,
+# services or host configuration. Persistent operator data is never purged.
 
-plugin_icon=/www/server/panel/plugin/ach_customizer/icon.png
-copied_icon=/www/server/panel/BTPanel/static/img/soft_ico/ico-ach_customizer.png
+cleanup=/www/server/panel/plugin/ach_customizer/ach_customizer_cleanup.py
+panel_python=/www/server/panel/pyenv/bin/python3
 
-cleanup_owned_icon() {
-    # aaPanel copies the icon outside the replaceable plugin directory, but
-    # its native uninstall may leave that copy behind. Remove only the exact
-    # product-named, regular, byte-identical copy; preserve other ownership.
-    if [ -f "$plugin_icon" ] && [ ! -L "$plugin_icon" ] && \
-       [ -f "$copied_icon" ] && [ ! -L "$copied_icon" ] && \
-       cmp -s "$plugin_icon" "$copied_icon"; then
-        rm -f -- "$copied_icon"
-        echo 'ACh aaPanel Customizer: removed verified product-owned icon copy'
-    else
-        echo 'ACh aaPanel Customizer: unknown or absent icon copy preserved'
-    fi
+trusted_helper_path() {
+    # Do not execute a helper through a redirected plugin source directory.
+    # The Python helper then validates owner, mode and descriptor identity for
+    # *both* complete paths before it considers removing the copied icon.
+    for directory in /www /www/server /www/server/panel \
+        /www/server/panel/plugin /www/server/panel/plugin/ach_customizer
+    do
+        [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+    done
+    [ -f "$cleanup" ] && [ ! -L "$cleanup" ]
 }
 
 case "${1:-}" in
@@ -26,7 +23,14 @@ case "${1:-}" in
         echo 'ACh aaPanel Customizer source registered (monitor-only)'
         ;;
     uninstall)
-        cleanup_owned_icon
+        # The cleanup helper performs descriptor-anchored, no-symlink and
+        # ownership validation before removing only our copied icon.
+        # If the executable or helper is unavailable, fail safely.
+        if [ -x "$panel_python" ] && trusted_helper_path; then
+            "$panel_python" "$cleanup" || echo 'ACh aaPanel Customizer: icon copy preserved (helper failed)'
+        else
+            echo 'ACh aaPanel Customizer: icon copy preserved (cleanup unavailable)'
+        fi
         echo 'ACh aaPanel Customizer: no services, jobs or host configurations to revert'
         ;;
     *)
