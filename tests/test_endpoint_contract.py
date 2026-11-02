@@ -119,6 +119,65 @@ class EntrypointTests(unittest.TestCase):
             )
 
 
+    def test_temporary_and_nonprimary_sessions_cannot_mutate_or_create_state(self):
+        """Every rejected case must fail before entering the persistent writer."""
+        import ach_customizer_state as state
+
+        flask_stub = types.ModuleType("flask")
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        file = Path(self.state_dir.name) / state.STATE_FILE
+        primary = {"login": True, "uid": 1}
+        cases = (
+            ("temporary_token_uid1", {**primary, "tmp_login": True}, "POST", True),
+            ("temporary_truthy_marker", {**primary, "tmp_login": "yes"}, "POST", True),
+            ("temporary_identity_id_empty", {**primary, "tmp_login_id": ""}, "POST", True),
+            ("temporary_identity_id_zero", {**primary, "tmp_login_id": 0}, "POST", True),
+            ("temporary_expiration_marker", {**primary, "tmp_login_expire": 0}, "POST", True),
+            ("temporary_all_markers", {
+                **primary, "tmp_login": True,
+                "tmp_login_id": "18", "tmp_login_expire": 999999
+            }, "POST", True),
+            ("secondary_user", {"login": True, "uid": 2}, "POST", True),
+            ("string_primary_id", {"login": True, "uid": "1"}, "POST", True),
+            ("boolean_primary_id", {"login": True, "uid": True}, "POST", True),
+            ("not_authenticated", {"login": False, "uid": 1}, "POST", True),
+            ("get_instead_of_post", primary.copy(), "GET", True),
+            ("no_flask_request_context", primary.copy(), "POST", False),
+        )
+
+        with patch.dict(sys.modules, {"flask": flask_stub}):
+            for persisted in (False, True):
+                if persisted:
+                    state.set_enabled("overall", False,
+                                      directory=self.state_dir.name,
+                                      expected_revision=0)
+                revision = 1 if persisted else 0
+                original = file.read_bytes() if persisted else None
+                for label, session, method, has_context in cases:
+                    with self.subTest(persisted=persisted, case=label):
+                        flask_stub.session = dict(session)
+                        flask_stub.request.method = method
+                        flask_stub.has_request_context = lambda: has_context
+                        with patch.object(
+                            MODULE, "set_enabled",
+                            side_effect=AssertionError("Unauthorized state writer called"),
+                        ) as writer:
+                            response = self.plugin.set_control({
+                                "control": "overall", "enabled": "true",
+                                "expected_revision": str(revision),
+                            })
+                            writer.assert_not_called()
+                        self.assertIs(response["status"], False)
+                        self.assertEqual(response["stage"], "monitor_authorization")
+                        self.assertTrue(response["operation_id"])
+                        self.assertEqual(file.exists(), persisted)
+                        if persisted:
+                            self.assertEqual(file.read_bytes(), original)
+                            self.assertEqual(state.read_state(self.state_dir.name)["revision"], revision)
+                        else:
+                            self.assertEqual(list(Path(self.state_dir.name).iterdir()), [])
+
     def test_optimistic_revision_rejection_through_authenticated_endpoint(self):
         flask_stub = types.ModuleType("flask")
         flask_stub.session = {"uid": 1, "login": True}

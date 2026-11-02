@@ -137,7 +137,8 @@
     "No Apply, automatic enforcement, rollback or production installation was executed",
     "Browser observations are summarized evidence, not an independently replayed complete browser trace",
     "Validated external state persistence applies to the monitored switches only, not future host-managed policies",
-    "Earlier 0.1.1 candidate SHA values in this report are historical; exact post-remediation SHA values and browser rejection evidence are recorded separately in optimistic_revision_final_candidate."
+    "Earlier 0.1.1 candidate SHA values in this report are historical; exact post-remediation SHA values and browser rejection evidence are recorded separately in optimistic_revision_final_candidate.",
+    "The post-review temporary-login authorization correction has targeted Python source tests and upstream-current-source context; actual aaPanel 8.0.7 token-session browser replay has not been performed."
   ],
   "optimistic_revision_final_candidate": {
     "note": "Final candidate was retested after correcting pre-existing same-version 0.1.1 implementation; earlier SHA values above belong to its pre-correction ancestor, not this test.",
@@ -186,5 +187,26 @@
     "test_website_http_status": 200,
     "temporary_test_only_guest_firewall_rules_absent": true,
     "production_effects": "none"
+  },
+  "review_remediation_after_runtime_evidence": {
+    "finding": "PR #8 independent high-assurance review REQUIRED-01",
+    "affected_boundary": "Primary-admin-only Monitor state mutation",
+    "finding_cause": "aaPanel temporary token sessions may satisfy login=True and uid=1; previous gate checked only these flags plus POST",
+    "upstream_source": "https://github.com/aaPanel/aaPanel/blob/master/class/userlogin.py",
+    "upstream_observed_keys": [
+      "tmp_login",
+      "tmp_login_id",
+      "tmp_login_expire"
+    ],
+    "correction": "Deny a truthy tmp_login or presence of either temporary identity marker, before calling persistent state writer; preserve native aaPanel authentication/CSRF, primary uid and POST checks",
+    "corrected_main_source_sha256": "95ef83527d83355d33e15379085e580d68b7514ac0feed2513117252e9a4342e",
+    "focused_endpoint_test_source_sha256": "d5b715e31dec42376963329b1eb58fbc7c65470c4b4067b3bd222d51e500cb69",
+    "verification": "Endpoint tests using 12 forbidden session/request scenarios against both absent and already-persisted state, asserting monitor_authorization, no state-writer invocation, and no file/revision mutation; ordinary primary-admin POST success retained",
+    "guest_runtime_replay": false,
+    "aaPanel_8_0_7_temporary_token_internals_independently_verified": false,
+    "attribution": "The earlier browser observations in this file apply only to their separately recorded SHA-256 identities, not to the post-review corrected authentication guard",
+    "production_changes": false,
+    "corrected_development_zip_sha256": "58f74f08ca9f372436b1c29eb86a308f5969cde8f5998d9eeda81b061e9d33dc",
+    "local_source_test_results": "64 Python tests and 43 real-inline-JavaScript tests passed; syntax checks pass"
   }
 }

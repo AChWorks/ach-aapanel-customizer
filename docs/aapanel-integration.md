@@ -189,9 +189,25 @@ authenticated aaPanel browser session, a revision-3 update advanced to
 revision 4; a subsequent stale revision-3 request was rejected visibly with
 stage monitor_state_write and the saved revision remained 4.
 
+**Temporary-login authorization (focused review remediation; source-only):**
+aaPanel's [upstream `userlogin.py`](https://github.com/aaPanel/aaPanel/blob/master/class/userlogin.py)
+shows a temporary-token route that can set `login=True`, `uid=1` and
+`tmp_login=True`, as well as a separate temporary identity carrying
+`tmp_login_id` and `tmp_login_expire`. The plugin's original UID-1-only
+check would not distinguish such sessions from a full administrator session.
+The state-mutation gate now **also denies** truthy `tmp_login` and any
+present `tmp_login_id` or `tmp_login_expire`, before it calls the writer.
+Native aaPanel authentication and CSRF remain unchanged. Focused unit tests
+verify ordinary UID-1 POST success and rejection of both temporary forms,
+non-primary users, GET and missing context, against absent and existing
+persistent state. Rejected requests do not enter the state writer, create
+settings files or advance the revision. These **new tests are not a browser
+replay** of aaPanel 8.0.7's actual temporary-token issuance; the cited
+upstream source is the current version, not an immutable 8.0.7 snapshot.
+
 Atomic replacement, strict state schema, finite read bounds, ownership/mode
 checks, no-follow file opens, conflict reporting and fail-closed error
-handling are exercised in source tests. Browser and guest checks confirm
+handling are exercised in source tests. Earlier browser and guest checks confirm
 no inspected VHost or PHP-FPM configuration changes, successful nginx -t,
 and HTTP 200 from the retained site. A missing/invalid frontend state schema
 leaves all controls disabled rather than inferring preferences.

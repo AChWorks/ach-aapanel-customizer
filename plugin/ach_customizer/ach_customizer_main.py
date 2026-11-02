@@ -73,11 +73,18 @@ class ach_customizer_main:
         try:
             from flask import has_request_context, request, session
 
+            # aaPanel can mark a temporary-token login as login=True and
+            # uid=1. These sessions must never persist operator preferences.
+            # Check the independent temporary identity markers even when a
+            # token/session passes aaPanel's native authentication and CSRF.
             if (not has_request_context() or request.method != "POST"
                     or session.get("login") is not True
                     or type(session.get("uid")) is not int
-                    or session["uid"] != 1):
-                raise PermissionError("Primary aaPanel administrator session and POST are required")
+                    or session["uid"] != 1
+                    or bool(session.get("tmp_login"))
+                    or "tmp_login_id" in session
+                    or "tmp_login_expire" in session):
+                raise PermissionError("Full primary aaPanel administrator session and POST are required")
             control = self._argument(args, "control")
             enabled = self._argument(args, "enabled")
             state, changed = set_enabled(
