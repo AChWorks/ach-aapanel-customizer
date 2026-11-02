@@ -48,7 +48,7 @@
         <button type="submit" class="btn btn-success">Preview drift (read-only)</button>
       </form>
       <p id="ach-fpm-result" role="status" aria-live="polite"></p>
-      <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Actual file</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
+      <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Configured / PHP default</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
     </section>
   </div>
 </div>
@@ -62,7 +62,7 @@
     loading: 'Loading...',
     error: 'Request failed',
     noSites: 'No sites in this page',
-    noDrift: 'No differences in the inspected file',
+    noDrift: 'No differences in the inspected configuration/defaults',
     id: 'Operation ID'
   };
   var page = 1, hasMore = false, siteBusy = false;

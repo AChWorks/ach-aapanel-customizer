@@ -12,6 +12,17 @@ POOL_KEYS = (
     "pm.max_spare_servers",
     "pm.max_requests",
 )
+# These are native FPM process-manager directives, not policy fields.
+# Unknown pm.* keys must not be silently mistaken for an omitted policy key.
+PM_PASSTHROUGH_KEYS = frozenset((
+    "pm.status_path",
+    "pm.status_listen",
+    "pm.process_idle_timeout",
+    "pm.max_spawn_rate",
+))
+# Conservative INI key syntax: regular FPM directives and php/env array keys.
+FPM_INI_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*(?:\[[A-Za-z0-9_./:-]+\])?")
+
 CONFIG_FILES_LIMIT = 32
 MAX_CONFIG_BYTES = 256 * 1024
 
@@ -99,41 +110,68 @@ def _parse_pool_file(file_path, allowed_include=None):
     seen_sections = set()
     pool = {}
     pool_mode = None
-    for line in text.splitlines():
+    for line_number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line or line.startswith((";", "#")):
             continue
         if line.startswith("[") and line.endswith("]"):
             section = line[1:-1].strip()
+            # The monitor only supports one canonical [www] pool. Reject case
+            # variants rather than accidentally treating them as other pools.
+            if section.lower() == "www" and section != "www":
+                raise MonitorInputError("Noncanonical [www] pool section")
             if section in seen_sections and section == "www":
                 raise MonitorInputError("Duplicate [www] pool section")
             seen_sections.add(section)
             continue
+        # Without '=', a malformed directive (not a genuine omission) could
+        # otherwise activate the implicit pm.max_requests=0 default.
         if "=" not in line:
-            continue
+            raise MonitorInputError("Malformed PHP-FPM directive on line " + str(line_number))
         key, value = (part.strip() for part in line.split("=", 1))
-        if key == "include":
-            # Include expansion is not implemented. Trust only the explicit root
-            # include already preflighted above; nested includes need review.
+        if not FPM_INI_KEY.fullmatch(key):
+            raise MonitorInputError("Unsupported PHP-FPM directive key on line " + str(line_number))
+        # Ordinary PHP-FPM directive names are case-insensitive. Normalize
+        # comparisons, but preserve the original key and array-key suffix.
+        canonical_key = key.lower()
+        if canonical_key == "include":
+            # PHP-FPM special-cases lowercase "include" with a case-sensitive
+            # comparison, unlike ordinary pool directives. Never expand an
+            # unrecognized mixed-case variant as a valid include.
+            if key != "include":
+                raise MonitorInputError("Noncanonical PHP-FPM include directive")
+            # Includes inside a pool inherit parser context. The independent
+            # file parser cannot safely infer defaults across that boundary.
+            if section == "www":
+                raise MonitorInputError("include inside [www] pool needs review")
+            # Trust only the explicit root include preflighted above; nested
+            # or separately scoped includes require context-aware expansion.
             candidate = value.split(";", 1)[0].split("#", 1)[0].strip()
             if allowed_include is None or candidate != allowed_include:
                 raise MonitorInputError("Unexpanded or unsupported PHP-FPM include")
             continue
         if section != "www":
+            # Headerless include fragments may inherit an active pool from the
+            # parent. Never skip process-manager values outside our explicit
+            # [www] context and then infer pm.max_requests=0.
+            if canonical_key == "pm" or canonical_key.startswith("pm."):
+                raise MonitorInputError("Unscoped or unsupported PHP-FPM pool setting: " + key)
             continue
-        if key == "pm":
+        if canonical_key == "pm":
             if pool_mode is not None:
                 raise MonitorInputError("Duplicate PHP-FPM pool mode")
             pool_mode = value.split(";", 1)[0].split("#", 1)[0].strip()
             continue
-        if key not in POOL_KEYS:
+        if canonical_key not in POOL_KEYS:
+            if canonical_key.startswith("pm.") and canonical_key not in PM_PASSTHROUGH_KEYS:
+                raise MonitorInputError("Unsupported PHP-FPM process-manager setting: " + key)
             continue
-        if key in pool:
-            raise MonitorInputError("Duplicate setting inside [www]: " + key)
+        if canonical_key in pool:
+            raise MonitorInputError("Duplicate setting inside [www]: " + canonical_key)
         value = value.split(";", 1)[0].split("#", 1)[0].strip()
         if not re.fullmatch(r"[0-9]{1,10}", value):
-            raise MonitorInputError("Unsupported value inside [www]: " + key)
-        pool[key] = int(value)
+            raise MonitorInputError("Unsupported value inside [www]: " + canonical_key)
+        pool[canonical_key] = int(value)
     if "www" in seen_sections and pool_mode != "dynamic":
         raise MonitorInputError("Only an explicit dynamic [www] pool is supported")
     return "www" in seen_sections, pool
@@ -159,7 +197,11 @@ def preview_php_fpm(config_root, version, expected):
             line = line.split(";", 1)[0].split("#", 1)[0].strip()
             if "=" in line:
                 key, value = (x.strip() for x in line.split("=", 1))
-                if key == "include":
+                if key.lower() == "include":
+                    # Reject variants before selecting files to inspect: they
+                    # are not recognized as includes by PHP-FPM itself.
+                    if key != "include":
+                        raise MonitorInputError("Noncanonical PHP-FPM include directive")
                     include_values.append(value)
         if len(include_values) > 1:
             raise MonitorInputError("Multiple PHP-FPM include directives need review")
@@ -194,6 +236,13 @@ def preview_php_fpm(config_root, version, expected):
     if len(found) != 1:
         return {"state": "Needs Review", "reason": "Exactly one explicit [www] pool is required; found " + str(len(found)), "scope": "shared_service", "version": version}
     source, actual = found[0]
+    # PHP-FPM documents pm.max_requests=0 when the directive is omitted.
+    # aaPanel's native php-fpm.conf template omits it entirely. Do not
+    # fabricate defaults for the other, mandatory dynamic-pool settings.
+    implicit_defaults = []
+    if "pm.max_requests" not in actual:
+        actual["pm.max_requests"] = 0
+        implicit_defaults.append({"setting": "pm.max_requests", "value": 0, "origin": "PHP-FPM default"})
     missing = [key for key in POOL_KEYS if key not in actual]
     if missing:
         return {"state": "Needs Review", "reason": "Missing explicit settings: " + ", ".join(missing), "scope": "shared_service", "version": version, "source": source}
@@ -206,5 +255,8 @@ def preview_php_fpm(config_root, version, expected):
         "pool": "www",
         "source": source,
         "changes": diff,
-        "note": "File-only observation; effective runtime and site-to-pool impact are not verified. No Apply is available.",
+        "implicit_defaults": implicit_defaults,
+        "note": ("pm.max_requests=0 is the documented PHP-FPM default, not an explicit file value. "
+                 if implicit_defaults else "")
+                + "File/default comparison only; running pool state and site-to-pool impact are not verified. No Apply is available.",
     }
