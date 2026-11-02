@@ -25,6 +25,8 @@ jobs:
           Path('/tmp/ach-customizer-embedded.js').write_text(inline[0], encoding='utf-8')
           PYJS
           node --check /tmp/ach-customizer-embedded.js
+      - name: Exercise inventory frontend against malformed and valid payloads
+        run: node --test tests/test_inventory_ui.cjs
       - name: Check the shell script
         run: sh -n plugin/ach_customizer/install.sh
       - name: Build local ZIP candidate

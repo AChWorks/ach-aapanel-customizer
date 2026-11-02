@@ -132,6 +132,25 @@ supported. These limits are *domain-name payload* bounds, not a global
 response-size cap. Truncated or invalid inventories fail visibly rather
 than claiming successful discovery.
 
+The inventory UI additionally validates the **entire rendered response shape**
+before rendering any row: the requested page/page size and boolean pagination
+flag, bounded site records and unique positive IDs, required display strings,
+binding-object names and integer ports, and a canonical-binding flag consistent
+with the returned domains. An invalid response clears prior rows, disables
+pagination and displays **Invalid inventory response**; a missing or incorrect
+schema still displays the distinct stale-backend warning. The DOM renderer
+continues to use jQuery `.text()` for untrusted site/domain strings. An
+executable, dependency-free Node regression harness runs the **shipped inline
+script** against both valid and malformed API responses in CI
+(`node --test tests/test_inventory_ui.cjs`), rather than asserting merely
+that a validation snippet is present in source.
+
+**Evidence boundary:** The aaPanel guest/browser observations linked below
+were made against the earlier inventory-schema candidate and remain valid only
+for the functionality and source hashes stated in that record. The expanded
+malformed-schema response handling has executable JavaScript regression
+evidence, not a new aaPanel browser replay or cross-version guarantee.
+
 **Actual candidate native integration and browser evidence:** Debian 12,
 aaPanel **8.0.7**, Nginx **1.28.3**, PHP-FPM **8.5.12** in a disposable
 non-production QEMU guest. Exact candidate SHA-256 values, A/B browser
@@ -163,6 +182,7 @@ The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ac
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+node --test tests/test_inventory_ui.cjs
 sh -n plugin/ach_customizer/install.sh
 python3 -B scripts/build_plugin.py --output /tmp/ach-customizer-dev.zip
 ```
