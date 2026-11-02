@@ -562,5 +562,182 @@ class PHPMonitorTests(unittest.TestCase):
         self.assertEqual(self.preview()['state'], 'Needs Review')
 
 
+class SharedPHPFileImpactTests(unittest.TestCase):
+    """Conventional native Nginx site file links, not effective runtime."""
+
+    class SitesQuery:
+        def __init__(self, rows):
+            self.rows = rows
+            self.calls = []
+
+        def order(self, key):
+            assert key == 'id asc'
+            return self
+
+        def limit(self, limit):
+            assert limit == '0,101'
+            return self
+
+        def field(self, fields):
+            assert fields == 'id,name'
+            return self
+
+        def select(self):
+            return self.rows[:101]
+
+    class Panel:
+        def __init__(self, rows):
+            self.query = SharedPHPFileImpactTests.SitesQuery(rows)
+
+        def M(self, table):
+            assert table == 'sites'
+            return self.query
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="ach-fpm-impact-")
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        self.nginx = self.base / 'nginx-conf'
+        self.vhosts = self.base / 'vhosts'
+        self.nginx.mkdir()
+        self.vhosts.mkdir()
+        self.pool = self.base / 'php-fpm.conf'
+        self.pool.write_text(
+            '[global]\n[www]\npm = dynamic\n'
+            'pm.max_children = 50\npm.start_servers = 5\n'
+            'pm.min_spare_servers = 5\npm.max_spare_servers = 20\n'
+            'listen = /tmp/php-cgi-85.sock\n', encoding='utf-8'
+        )
+        (self.nginx / 'enable-php-85.conf').write_text(
+            'location ~ \\.php$ {\n'
+            'fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n',
+            encoding='utf-8'
+        )
+        self.rows = [
+            {'id': 3, 'name': 'site-a.example.test'},
+            {'id': 6, 'name': 'site-b.example.test'},
+            {'id': 7, 'name': 'static.example.test'},
+        ]
+        for site in self.rows:
+            self.vhost(site['name']).write_text(
+                'server {\n  server_name ' + site['name'] + ';\n'
+                '  include enable-php-' +
+                ('00' if site['id'] == 7 else '85') + '.conf;\n}\n',
+                encoding='utf-8'
+            )
+
+    def vhost(self, name):
+        return self.vhosts / (name + '.conf')
+
+    def inspect(self, rows=None):
+        return monitor.inspect_php_fpm_site_impact(
+            self.Panel(self.rows if rows is None else rows),
+            '85', self.pool,
+            vhost_root=self.vhosts, nginx_conf_root=self.nginx
+        )
+
+    def test_all_native_website_ids_are_scoped_by_shared_file_and_socket(self):
+        files = [self.pool, self.nginx / 'enable-php-85.conf'] + [
+            self.vhost(row['name']) for row in self.rows
+        ]
+        before = {str(p): p.read_bytes() for p in files}
+        got = self.inspect()
+        self.assertEqual(got['schema'], 1)
+        self.assertEqual(got['state'], 'File Mapping')
+        self.assertEqual(got['site_count'], 3)
+        self.assertEqual(got['other_php_sites_count'], 1)
+        self.assertEqual(got['matched_sites'], [
+            {'id': 3, 'site_key': 'site-a.example.test'},
+            {'id': 6, 'site_key': 'site-b.example.test'},
+        ])
+        self.assertEqual(got['unresolved_sites'], [])
+        self.assertIn('not proof of effective routing', got['note'])
+        self.assertEqual({str(p): p.read_bytes() for p in files}, before)
+
+    def test_missing_or_indirect_site_link_is_review_not_per_site_false_ownership(self):
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include /tmp/operator-php.conf;\n}\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['matched_sites'], [{'id': 3, 'site_key': 'site-a.example.test'}])
+        self.assertEqual(got['unresolved_sites'][0]['id'], 6)
+        self.assertEqual(got['site_count'], 3)
+
+    def test_wp_fastcgi_variant_and_direct_fastcgi_override_are_ambiguous(self):
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include enable-php-85-wpfastcgi.conf;\n}\n')
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include enable-php-85.conf;\n'
+            ' fastcgi_pass unix:/tmp/other.sock;\n}\n')
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+
+    def test_unknown_filename_is_review_without_escaping_vhost_root(self):
+        self.rows.append({'id': 8, 'name': '../other'})
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['unresolved_sites'], [
+            {'id': 8, 'site_key': '../other', 'reason': 'Unsupported VHost filename'}
+        ])
+
+    def test_symlinked_and_oversized_site_vhosts_are_reviewed_not_followed(self):
+        site = self.vhost('site-b.example.test')
+        site.unlink()
+        site.symlink_to(self.pool)
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+        site.unlink()
+        site.write_text('x' * (monitor.MAX_NGINX_SITE_BYTES + 1))
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+
+    def test_socket_mismatch_invalidates_global_mapping_before_site_scan(self):
+        include = self.nginx / 'enable-php-85.conf'
+        include.write_text('fastcgi_pass unix:/tmp/unrelated.sock;\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertIn('not mapped', got['reason'])
+        self.assertEqual(got['matched_sites'], [])
+        self.assertEqual(got['site_count'], 0)
+
+    def test_missing_ambiguous_pool_socket_is_not_fabricated(self):
+        self.pool.write_text(self.pool.read_text() + 'listen = /tmp/second.sock\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertIn('single literal Unix socket', got['reason'])
+        self.assertEqual(got['matched_sites'], [])
+
+    def test_too_many_sites_fail_closed_instead_of_partial_shared_pool_claim(self):
+        rows = [{'id': i, 'name': 's{}.example.test'.format(i)} for i in range(1, 102)]
+        got = self.inspect(rows)
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['site_count'], 0)
+        self.assertEqual(got['matched_sites'], [])
+        self.assertIn('exceeds bounded', got['reason'])
+
+    def test_duplicate_identity_never_returns_partial_success(self):
+        duplicate = [self.rows[0], dict(self.rows[0])]
+        got = self.inspect(duplicate)
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['matched_sites'], [])
+        self.assertEqual(got['site_count'], 0)
+        self.assertIn('Duplicate', got['reason'])
+
+    def test_missing_site_does_not_claim_complete_mapping(self):
+        self.vhost('site-b.example.test').unlink()
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual([s['id'] for s in got['unresolved_sites']], [6])
+
+    def test_alt_php_version_or_noncanonical_socket_does_not_overclaim(self):
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include enable-php-84.conf;\n}\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'File Mapping')
+        self.assertEqual([s['id'] for s in got['matched_sites']], [3])
+        self.assertEqual(got['other_php_sites_count'], 2)
+        self.pool.write_text(self.pool.read_text().replace(
+            '/tmp/php-cgi-85.sock', '127.0.0.1:10851'))
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+
 if __name__ == '__main__':
     unittest.main()

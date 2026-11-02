@@ -86,6 +86,32 @@ class TestManualFpmWorkflow(unittest.TestCase):
         self.assertEqual(recovered["state"],"Rolled Back")
         self.assertEqual(self.config.read_bytes(),SOURCE)
 
+    def test_controller_uses_original_effective_values_to_verify_auto_restore(self):
+        expectations=[]
+        def hooks(_version, desired):
+            expectations.append(dict(desired))
+            def validate(): pass
+            def activate(): pass
+            def verify():
+                from ach_customizer_monitor import preview_php_fpm
+                observed=preview_php_fpm(self.config_root,"85",desired)
+                if observed["state"]!="File Match":
+                    raise RuntimeError("Runtime verification expected a different FPM policy")
+                if desired["pm.max_children"]==20:
+                    raise RuntimeError("Injected downstream failure after candidate reload")
+            return validate,activate,verify
+        self.controller.hooks_factory=hooks
+        with self.assertRaises(core.FpmApplyError) as caught:
+            self.controller.apply(self.payload())
+        self.assertEqual(caught.exception.stage,"apply")
+        self.assertEqual(expectations[0]["pm.max_children"],20)
+        self.assertEqual(expectations[1]["pm.max_children"],50)
+        self.assertEqual(expectations[1]["pm.max_spare_servers"],20)
+        self.assertEqual(expectations[1]["pm.max_requests"],0)
+        self.assertEqual(self.config.read_bytes(),SOURCE)
+        self.assertFalse((self.state_dir/core.JOURNAL).exists())
+        self.assertFalse((self.state_dir/core.SNAPSHOT).exists())
+
     def test_primary_session_and_temporary_markers_are_denied_before_any_planning(self):
         normal=dict(self.flask.session)
         checks=(
@@ -128,6 +154,23 @@ class TestManualFpmWorkflow(unittest.TestCase):
         with self.assertRaises(core.FpmApplyError) as caught:
             self.controller.apply(payload)
         self.assertEqual(caught.exception.stage,"fpm_conflict")
+
+    def test_last_moment_site_mapping_change_blocks_apply_before_backup(self):
+        payload=self.payload()
+        count=0
+        def changing_impact(_panel,_version,_source):
+            nonlocal count
+            count+=1
+            if count==2:
+                self.impact["matched_sites"][1]["site_key"]="site-b-renamed.test"
+            return self.impact
+        self.controller.impact_lookup=changing_impact
+        with self.assertRaises(core.FpmApplyError) as caught:
+            self.controller.apply(payload)
+        self.assertEqual(caught.exception.stage,"fpm_conflict")
+        self.assertEqual(self.config.read_bytes(),SOURCE)
+        self.assertFalse((self.state_dir/core.JOURNAL).exists())
+        self.assertFalse((self.state_dir/core.SNAPSHOT).exists())
 
     def test_last_moment_monitor_change_blocks_apply_under_state_lock(self):
         payload=self.payload()

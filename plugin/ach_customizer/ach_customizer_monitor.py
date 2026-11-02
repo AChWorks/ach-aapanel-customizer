@@ -29,6 +29,9 @@ MAX_DOMAIN_ROWS_PER_PAGE = 1000
 MAX_DOMAIN_NAME_BYTES = 1024
 MAX_DOMAIN_TEXT_BYTES_PER_PAGE = 256 * 1024
 INVENTORY_SCHEMA_VERSION = 2
+PHP_IMPACT_SCHEMA_VERSION = 1
+PHP_IMPACT_SITE_LIMIT = 100
+MAX_NGINX_SITE_BYTES = 64 * 1024
 
 
 class MonitorInputError(ValueError):
@@ -334,5 +337,160 @@ def preview_php_fpm(config_root, version, expected):
         "implicit_defaults": implicit_defaults,
         "note": ("pm.max_requests=0 is the documented PHP-FPM default, not an explicit file value. "
                  if implicit_defaults else "")
-                + "File/default comparison only; running pool state and site-to-pool impact are not verified. No Apply is available.",
+                + "File/default comparison only; running pool state is not verified. Shared-site file attribution is separately classified and is not an Apply authorization.",
     }
+
+
+def _bounded_file_text(path, byte_limit):
+    """Read one regular config without following its final symlink."""
+    import os
+    import stat
+
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        meta = os.fstat(fd)
+        if not stat.S_ISREG(meta.st_mode) or meta.st_size > byte_limit:
+            raise MonitorInputError("Unsupported or oversized configuration file")
+        content = bytearray()
+        while len(content) <= byte_limit:
+            chunk = os.read(fd, byte_limit + 1 - len(content))
+            if not chunk:
+                break
+            content.extend(chunk)
+        if len(content) > byte_limit:
+            raise MonitorInputError("Configuration file exceeds the read limit")
+        return content.decode("utf-8")
+    finally:
+        os.close(fd)
+
+
+def _single_www_listen(pool_source):
+    """Extract only a literal, unique Unix listen of the already parsed pool."""
+    text = _bounded_file_text(pool_source, MAX_CONFIG_BYTES)
+    section = None
+    addresses = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            continue
+        if section != "www" or "=" not in line:
+            continue
+        key, value = (x.strip() for x in line.split("=", 1))
+        if key.lower() == "listen":
+            addresses.append(value.split(";", 1)[0].split("#", 1)[0].strip())
+    if len(addresses) != 1 or not re.fullmatch(r"/[A-Za-z0-9_./-]+\.sock", addresses[0]):
+        raise MonitorInputError("A single literal Unix socket in [www] is required")
+    return addresses[0]
+
+
+def _native_nginx_php_version(vhost_text):
+    """Identify only the conventional direct aaPanel PHP include, not full routing."""
+    includes = re.findall(
+        r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*(?:\#[^\n]*)?$",
+        vhost_text,
+    )
+    php_includes = [value for value in includes if "enable-php-" in value]
+    if len(php_includes) != 1 or re.search(r"(?m)^[ \t]*fastcgi_pass\b", vhost_text):
+        raise MonitorInputError("No unique conventional PHP include in the site VHost")
+    match = re.fullmatch(r"enable-php-([0-9]{2,3})\.conf", php_includes[0])
+    if not match:
+        raise MonitorInputError("The PHP include requires review")
+    return match.group(1)
+
+
+def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
+                                vhost_root="/www/server/panel/vhost/nginx",
+                                nginx_conf_root="/www/server/nginx/conf"):
+    """Bounded, read-only **file attribution**, never an effective-runtime claim.
+
+    One shared PHP-FPM service can serve multiple native sites. Nginx
+    extension overlays, indirect includes, alternative FastCGI layouts,
+    concurrent regeneration and mixed web engines cannot be inferred from
+    a VHost's direct include alone; refuse such ownership claims.
+    """
+    result = {
+        "schema": PHP_IMPACT_SCHEMA_VERSION,
+        "state": "Needs Review",
+        "scope": "shared_service",
+        "version": version,
+        "matched_sites": [],
+        "unresolved_sites": [],
+        "site_count": 0,
+        "other_php_sites_count": 0,
+        "reason": "",
+        "note": ("Conventional Nginx VHost/PHP include and [www] Unix-socket FILE attribution only; "
+                 "not proof of effective routing, PHP worker state, or a complete impact boundary for Apply."),
+    }
+    try:
+        if not isinstance(version, str) or not re.fullmatch(r"[0-9]{2,3}", version):
+            raise MonitorInputError("Invalid PHP version for shared impact")
+        vhost_dir = Path(vhost_root)
+        nginx_dir = Path(nginx_conf_root)
+        if vhost_dir.is_symlink() or nginx_dir.is_symlink():
+            raise MonitorInputError("Linked Nginx configuration directory")
+        socket = _single_www_listen(pool_source)
+        php_include = _bounded_file_text(
+            nginx_dir / ("enable-php-" + version + ".conf"), MAX_NGINX_SITE_BYTES
+        )
+        fastcgi = re.findall(
+            r"(?m)^[ \t]*fastcgi_pass[ \t]+unix:([^;\s]+)[ \t]*;",
+            php_include,
+        )
+        if len(fastcgi) != 1 or fastcgi[0] != socket:
+            raise MonitorInputError("Nginx PHP include is not mapped to the inspected [www] socket")
+        # Native DB is the authority for website IDs. Refuse partial sets:
+        # missing later pages would create an unsafe shared-resource claim.
+        rows = (
+            panel_public.M("sites")
+            .order("id asc")
+            .limit("0," + str(PHP_IMPACT_SITE_LIMIT + 1))
+            .field("id,name")
+            .select()
+        )
+        if not isinstance(rows, list):
+            raise MonitorInputError("aaPanel website inventory is unavailable")
+        if len(rows) > PHP_IMPACT_SITE_LIMIT:
+            raise MonitorInputError("Website count exceeds bounded shared-pool attribution")
+        seen = set()
+        for site in rows:
+            if not isinstance(site, dict) or not re.fullmatch(r"[0-9]+", str(site.get("id", ""))):
+                raise MonitorInputError("Unexpected website identity")
+            site_id = int(site["id"])
+            if site_id <= 0 or site_id in seen:
+                raise MonitorInputError("Duplicate or invalid website ID")
+            seen.add(site_id)
+            name = site.get("name")
+            if not isinstance(name, str) or not name.strip() or len(name) > 255:
+                raise MonitorInputError("Invalid native website key")
+            result["site_count"] += 1
+            site_key = {"id": site_id, "site_key": name}
+            # Website identity comes from SQLite, never from an arbitrary path
+            # supplied by an HTTP client. Unknown naming is Needs Review.
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+                result["unresolved_sites"].append({**site_key, "reason": "Unsupported VHost filename"})
+                continue
+            try:
+                vhost = _bounded_file_text(
+                    vhost_dir / (name + ".conf"), MAX_NGINX_SITE_BYTES
+                )
+                assigned = _native_nginx_php_version(vhost)
+            except (OSError, UnicodeError, MonitorInputError):
+                result["unresolved_sites"].append({**site_key, "reason": "VHost PHP assignment needs review"})
+                continue
+            if assigned == version:
+                result["matched_sites"].append(site_key)
+            else:
+                result["other_php_sites_count"] += 1
+        if result["unresolved_sites"]:
+            result["reason"] = "Some website assignments are ambiguous; shared impact is incomplete"
+        else:
+            result["state"] = "File Mapping"
+    except (OSError, UnicodeError, MonitorInputError, ValueError) as exc:
+        # A global DB/schema/socket error invalidates *all* partial matches.
+        # Only per-site unsupported VHosts keep already proven file links.
+        result.update(matched_sites=[], unresolved_sites=[], site_count=0,
+                      other_php_sites_count=0, reason=str(exc)[:250])
+    return result

@@ -299,9 +299,11 @@ def _check_callbacks(validate, activate, verify):
 
 
 def apply(config_root, state_dir, version, desired, *, expected_before, expected_after,
-          validate, activate, verify):
+          validate, activate, verify, verify_restored):
     """Manual Apply after externally verified admin, CSRF, POST and approval gates."""
     _check_callbacks(validate, activate, verify)
+    if not callable(verify_restored):
+        raise FpmApplyError("validation", "Independent baseline runtime verification is required")
     fd_state, lock_fd = _lock(state_dir)
     try:
         existing = _read_journal(fd_state)
@@ -346,14 +348,14 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
                              prefix="ach_customizer_recover")
                     validate()
                     activate()
-                    verify()
+                    verify_restored()
                 elif current == before:
                     if mutation_attempted:
                         # Even if a failed rename left the old bytes, activation
                         # state may be uncertain: revalidate and reload baseline.
                         validate()
                         activate()
-                        verify()
+                        verify_restored()
                     elif (st.st_dev != original_stat.st_dev or st.st_ino != original_stat.st_ino):
                         raise FpmApplyError("conflict", "PHP-FPM ownership changed before Apply")
                 else:

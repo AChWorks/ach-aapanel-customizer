@@ -61,7 +61,7 @@ class TestFpmManualApply(unittest.TestCase):
             self.events.append("verify")
         return validate, activate, verify
 
-    def apply(self, desired=None, hooks=None, plan=None):
+    def apply(self, desired=None, hooks=None, plan=None, verify_restored=None):
         desired = DESIRED if desired is None else desired
         plan = self.plan() if plan is None else plan
         validate, activate, verify = hooks or self.hooks()
@@ -70,6 +70,7 @@ class TestFpmManualApply(unittest.TestCase):
             expected_before=plan["before_sha256"],
             expected_after=plan["after_sha256"],
             validate=validate, activate=activate, verify=verify,
+            verify_restored=verify_restored or self.hooks()[2],
         )
 
     def test_preview_is_read_only_and_version_scoped(self):
@@ -167,6 +168,36 @@ class TestFpmManualApply(unittest.TestCase):
         self.assertFalse((self.data / manual.SNAPSHOT).exists())
         self.assertEqual(count, 3)
         self.assertEqual(self.events, ["reload", "verify"])
+
+    def test_forward_runtime_mismatch_requires_distinct_baseline_verification(self):
+        expected=self.plan()["after_sha256"]
+        calls=[]
+        def forward_verify():
+            calls.append("forward")
+            self.assertEqual(manual._sha(self.config.read_bytes()), expected)
+            raise ValueError("Simulated post-reload PHP failure")
+        def baseline_verify():
+            calls.append("restored")
+            self.assertEqual(self.config.read_bytes(), BASELINE)
+        with self.assertRaises(manual.FpmApplyError) as caught:
+            self.apply(hooks=(lambda: None, lambda: None, forward_verify),
+                       verify_restored=baseline_verify)
+        self.assertEqual(caught.exception.stage,"apply")
+        self.assertEqual(calls,["forward","restored"])
+        self.assertEqual(self.config.read_bytes(),BASELINE)
+        self.assertFalse((self.data/manual.JOURNAL).exists())
+        self.assertFalse((self.data/manual.SNAPSHOT).exists())
+
+    def test_apply_rejects_missing_baseline_verifier_before_any_recovery_files(self):
+        plan=self.plan()
+        with self.assertRaises(manual.FpmApplyError) as caught:
+            manual.apply(self.root/"php",self.data,"85",DESIRED,
+                expected_before=plan["before_sha256"],
+                expected_after=plan["after_sha256"],
+                validate=lambda:None,activate=lambda:None,verify=lambda:None,
+                verify_restored=None)
+        self.assertEqual(caught.exception.stage,"validation")
+        self.assertEqual(list(self.data.iterdir()),[])
 
     def test_crash_or_failed_recovery_is_not_silently_claimed(self):
         def fail_reload():

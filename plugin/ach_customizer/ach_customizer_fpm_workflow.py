@@ -207,6 +207,13 @@ class ManualFpmWorkflow:
                 or _arg(args, "expected_impact") != current["impact_sha256"]):
             raise recovery.FpmApplyError("fpm_conflict", "Manual Apply preview is stale")
         validate, activate, verify = self.hooks_factory(recovery.VERSION, plan["desired"])
+        # Recovery verifies the ORIGINAL pool values, never the candidate's
+        # values. A failed forward verification must not make a successful
+        # baseline restoration look uncertain merely because it reverted.
+        restored_values = dict(plan["desired"])
+        for change in plan["changes"]:
+            restored_values[change["setting"]] = change["actual"]
+        _, _, verify_restored = self.hooks_factory(recovery.VERSION, restored_values)
         # Serialize against persistent Monitor toggle writes: approval must
         # still match a current enabled revision while the host operation runs.
         state_fd = _open_state_dir(self.data_dir)
@@ -216,10 +223,19 @@ class ManualFpmWorkflow:
                 latest = self._state()
                 if latest["revision"] != current["monitor_revision"]:
                     raise recovery.FpmApplyError("fpm_conflict", "Monitor state changed before Apply")
+                # The initial site-file mapping is only an observation. Verify
+                # it once more immediately before the guarded file mutation.
+                # External aaPanel updates do not honor our plugin lock, so
+                # this remains a bounded best-effort precondition, not a
+                # transactional site inventory or full traffic guarantee.
+                _, impact_now = self._impact(self._environment(recovery.VERSION), plan)
+                if impact_now != current["impact_sha256"]:
+                    raise recovery.FpmApplyError("fpm_conflict", "Shared PHP-FPM site mapping changed before Apply")
                 result = recovery.apply(
                     self.config_root, self.data_dir, recovery.VERSION, plan["desired"],
                     expected_before=plan["before_sha256"], expected_after=plan["after_sha256"],
-                    validate=validate, activate=activate, verify=verify)
+                    validate=validate, activate=activate, verify=verify,
+                    verify_restored=verify_restored)
             finally:
                 os.close(state_lock)
         finally:

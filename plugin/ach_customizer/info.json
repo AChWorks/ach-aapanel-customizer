@@ -1,8 +1,8 @@
 {
   "title": "ACh aaPanel Customizer",
   "name": "ach_customizer",
-  "ps": "Monitor-only development candidate; persisted enable/disable controls",
-  "versions": "0.1.1",
+  "ps": "Monitor with operator-confirmed PHP 8.5 shared FPM Apply and rollback (development only)",
+  "versions": "0.1.3",
   "checks": "/www/server/panel/plugin/ach_customizer",
   "author": "AChWorks",
   "home": "https://github.com/AChWorks/ach-aapanel-customizer"

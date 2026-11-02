@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "sanitized isolated native WordPress PHP-FPM writer reset and read-only shared-site file mapping",
+  "observation_date_utc": "2026-11-02",
+  "production_host_touched": false,
+  "guest": {
+    "os": "Debian 12 QEMU user-network non-production guest",
+    "aaPanel_version": "8.0.7",
+    "nginx_version": "1.28.3",
+    "php_fpm_version": "8.5.12",
+    "disk_mode": "disposable task-owned overlay over retained lab images",
+    "source_files_not_modified_by_monitor": true
+  },
+  "native_writer": {
+    "trigger": "one_key_wp.optimize_php.optimize_php (called by one_key_wp.deploy_wp after WordPress package unpack)",
+    "writer": "config.config.setFpmConfig",
+    "writes_versioned_shared_file": "/www/server/php/85/etc/php-fpm.conf",
+    "reload_method": "public.phpReload(version)",
+    "site_fixture": [
+      {
+        "site_id": 3,
+        "site_key": "site-a.ach-customizer.invalid"
+      },
+      {
+        "site_id": 6,
+        "site_key": "site-b.ach-customizer.invalid"
+      }
+    ],
+    "shared_fastcgi_socket": "/tmp/php-cgi-85.sock",
+    "baseline": {
+      "pm_max_children": 50,
+      "pm_start_servers": 5,
+      "pm_min_spare_servers": 5,
+      "pm_max_spare_servers": 20,
+      "file_sha256": "232d0c85d59e187ed0da59514f31d5f02462fd98d6964de11216542bd7074bbb",
+      "php_fpm_syntax": true,
+      "nginx_syntax": true,
+      "http_php_for_both_sites": true
+    },
+    "reproduction": [
+      {
+        "scenario": "native guest memory, unmodified memory measurement",
+        "resulting_settings": {
+          "pm_max_children": 50,
+          "pm_start_servers": 5,
+          "pm_min_spare_servers": 5,
+          "pm_max_spare_servers": 30
+        },
+        "after_sha256": "9b61c3d7532790c3501242c44dee9a7cf493e338b9ed2efb0fe4d3c8ccd087c6",
+        "native_result_success": true,
+        "config_syntax_pass": true,
+        "php_fpm_tt_matches_written_values": true,
+        "http_php_for_both_sites": true
+      },
+      {
+        "scenario": "injected 3072 MB measurement for 2-4GB branch only",
+        "injection": "test-scoped monkeypatch of one_key_wp.get_mem; native writer, file mutation and PHP-FPM reload remained real",
+        "resulting_settings": {
+          "pm_max_children": 80,
+          "pm_start_servers": 10,
+          "pm_min_spare_servers": 10,
+          "pm_max_spare_servers": 30
+        },
+        "after_sha256": "ecf629cbf77581bc62df1648bd0e85470cf7c940c74cfc1a7b2c76b8b1fcdfe7",
+        "native_result_success": true,
+        "config_syntax_pass": true,
+        "php_fpm_tt_matches_written_values": true,
+        "http_php_for_both_sites": true,
+        "monitor_reported": "File Drift with four setting differences"
+      }
+    ],
+    "rollback": {
+      "file_sha256_matches_baseline": true,
+      "versioned_php_fpm_reload_called": true,
+      "php_fpm_t_pass": true,
+      "php_fpm_tt_matches_baseline": true,
+      "nginx_t_pass": true,
+      "http_php_for_both_sites": true,
+      "test_backups_removed_after_verification": true
+    }
+  },
+  "candidate_file_attribution": {
+    "candidate_version": "0.1.2 (unreleased development only)",
+    "monitor_source_sha256": "203093acac1577fef56f265922be68202a652044d6d2e227f3ed5473a14b07d0",
+    "endpoint_source_sha256": "890aaa13b5b487902878f3258f7129466b70ee8ba49dbfe513440080c8b2d41d",
+    "observed_php_preview": "File Match after native writer rollback",
+    "observed_shared_impact_state": "File Mapping",
+    "observed_site_ids": [
+      3,
+      6
+    ],
+    "unresolved_site_count": 0,
+    "file_sha256_unchanged_by_candidate_read": true,
+    "authorization": "read-only code invoked directly with guest panel Python; not a browser permission replay",
+    "native_zip_update": {
+      "result": "PASS",
+      "development_archive_sha256": "95ffefe8d7386896e01d4f3f7fd417097f2985951f5ad4ed3083d2462d7bf6e2",
+      "from_installed_version": "0.1.1",
+      "to_installed_version": "0.1.2",
+      "installed_main_and_monitor_source_identical_to_candidate": true,
+      "guest_only_panel_restart_after_update": "PASS",
+      "installed_readonly_endpoint": "File Match with File Mapping / site IDs 3 and 6",
+      "inspected_host_config_hashes_unchanged": true
+    }
+  },
+  "verification_limits": [
+    "The historical 3GiB profile branch was exercised by a controlled synthetic memory measurement, not by resizing the guest's physical RAM.",
+    "The direct native optimize_php invocation is not a full WordPress deploy, installation, download or web UI flow; source-level call chain from deploy_wp was separately inspected.",
+    "This is one aaPanel 8.0.7 / Debian 12 / Nginx 1.28.3 / PHP-FPM 8.5.12 environment, not a cross-version guarantee.",
+    "A successful php-fpm -tt reads the configuration from disk; the separate PHP HTTP checks demonstrated service availability, not exhaustive request/process performance or every effective pool value under load.",
+    "File attribution reports only conventional direct aaPanel VHost -> PHP include -> [www] socket relationships; possible extension overrides and worker/runtime routing are not proved.",
+    "The 0.1.2 development ZIP was imported through native aaPanel plugin APIs, guest panel restarted, and the installed read-only endpoint executed with guest panel Python. The 0.1.2 browser UI and real temporary/restricted authentication were not replayed.",
+    "Real temporary-token and restricted-role browser authorization remain unverified; no Apply or Auto-enforce exists.",
+    "No production host, aaPanel vendor source, or public release was changed."
+  ]
+}
