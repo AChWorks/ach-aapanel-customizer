@@ -220,6 +220,113 @@ class TestManualFpmWorkflow(unittest.TestCase):
         include.write_text(conventional)
         self.assertRegex(self.controller.prepare(VALUES)["impact_sha256"], r"^[0-9a-f]{64}$")
 
+    def test_unsupported_native_dependencies_block_prepare_apply_and_rollback(self):
+        from ach_customizer_monitor import inspect_php_fpm_site_impact
+
+        nginx = self.base / "native-nginx"
+        vhosts = self.base / "native-vhosts"
+        rewrites = self.base / "native-rewrites"
+        for folder in (nginx, vhosts, rewrites):
+            folder.mkdir()
+        php = nginx / "enable-php-85.conf"
+        php.write_text(
+            "location ~ \\.php$ {\n"
+            " include fastcgi.conf;\n include pathinfo.conf;\n"
+            " fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n"
+        )
+        fastcgi = nginx / "fastcgi.conf"
+        fastcgi.write_text(
+            "fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n"
+        )
+        pathinfo = nginx / "pathinfo.conf"
+        pathinfo.write_text("fastcgi_param PATH_INFO $path_info;\n")
+        rewrite = rewrites / "example-a.test.conf"
+        rewrite.write_text("location / {\n rewrite ^(.*)$ /index.php?s=$1 last;\n}\n")
+        vhost = vhosts / "example-a.test.conf"
+        vhost.write_text(
+            "server {\n include enable-php-85.conf;\n include " + str(rewrite) + ";\n}\n"
+        )
+
+        class Query:
+            def order(self, _): return self
+            def limit(self, _): return self
+            def field(self, _): return self
+            def select(self): return [{"id": 3, "name": "example-a.test"}]
+
+        self.panel.M = lambda table: Query()
+        self.controller.impact_lookup = lambda panel, version, source: (
+            inspect_php_fpm_site_impact(
+                panel, version, source,
+                vhost_root=vhosts, nginx_conf_root=nginx, rewrite_root=rewrites,
+            )
+        )
+        safe_files = {p: p.read_text() for p in (fastcgi, pathinfo, rewrite, vhost)}
+        cases = (
+            (fastcgi, "grpc_pass grpc://backend;"),
+            (fastcgi, "memcached_pass backend;"),
+            (pathinfo, "grpc_pass grpc://backend;"),
+            (pathinfo, "memcached_pass backend;"),
+            (rewrite, "grpc_pass grpc://backend;"),
+            (rewrite, "memcached_pass backend;"),
+            (vhost, "proxy_pass http://backend;"),
+            (vhost, "grpc_pass grpc://backend;"),
+            (vhost, "memcached_pass backend;"),
+        )
+
+        def unsafe_file_text(path, directive):
+            base = safe_files[path]
+            if path == vhost:
+                return base.replace(
+                    "\n}\n",
+                    "\n location /unsupported {\n  " + directive + "\n }\n}\n",
+                    1,
+                )
+            if path == rewrite:
+                return base + "\nlocation /unsupported {\n " + directive + "\n}\n"
+            return base + "\n" + directive + "\n"
+
+        approved_before = self.payload()
+        for path, directive in cases:
+            with self.subTest(phase="before Apply", file=path.name, directive=directive):
+                path.write_text(unsafe_file_text(path, directive))
+                for action, args in (
+                    (self.controller.prepare, VALUES),
+                    (self.controller.apply, approved_before),
+                ):
+                    with self.assertRaises(core.FpmApplyError) as caught:
+                        action(args)
+                    self.assertEqual(caught.exception.stage, "fpm_impact")
+                self.assertEqual(self.config.read_bytes(), SOURCE)
+                self.assertFalse((self.state_dir / core.JOURNAL).exists())
+                self.assertFalse((self.state_dir / core.SNAPSHOT).exists())
+                path.write_text(safe_files[path])
+
+        # Re-prepare because checked dependency identities include file metadata.
+        applied = self.controller.apply(self.payload())
+        current = self.config.read_bytes()
+        old_approval = self.rollback_payload(applied["operation_id"])
+        for path, directive in cases:
+            with self.subTest(phase="after Apply", file=path.name, directive=directive):
+                path.write_text(unsafe_file_text(path, directive))
+                unavailable = self.controller.recovery({"php_version": "85"})
+                self.assertFalse(unavailable["safe_rollback_file_match"])
+                self.assertIn("manual_recovery", unavailable)
+                with self.assertRaises(core.FpmApplyError) as caught:
+                    self.controller.rollback(old_approval)
+                self.assertEqual(caught.exception.stage, "fpm_conflict")
+                self.assertEqual(self.config.read_bytes(), current)
+                self.assertTrue((self.state_dir / core.JOURNAL).exists())
+                self.assertTrue((self.state_dir / core.SNAPSHOT).exists())
+                path.write_text(safe_files[path])
+
+        # The recovered current-site approval must be newly inspected.
+        fresh = self.rollback_payload(applied["operation_id"])
+        self.assertNotEqual(fresh["expected_impact"], old_approval["expected_impact"])
+        self.assertEqual(self.controller.rollback(fresh)["state"], "Rolled Back")
+        self.assertEqual(self.config.read_bytes(), SOURCE)
+        self.assertFalse((self.state_dir / core.JOURNAL).exists())
+        self.assertFalse((self.state_dir / core.SNAPSHOT).exists())
+
     def test_last_moment_site_mapping_change_blocks_apply_before_backup(self):
         payload=self.payload()
         count=0

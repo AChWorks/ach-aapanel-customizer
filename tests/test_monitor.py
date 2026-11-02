@@ -771,6 +771,98 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         rewrite.symlink_to(self.pool)
         self.assertEqual(self.inspect()['state'], 'Needs Review')
 
+    def test_consistent_upstream_policy_for_native_parameter_dependencies(self):
+        include = self.nginx / 'enable-php-85.conf'
+        include.write_text(
+            'location ~ \\.php$ {\n include fastcgi.conf;\n'
+            ' include pathinfo.conf;\n'
+            ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n'
+        )
+        params = {
+            name: self.nginx / name
+            for name in ('fastcgi.conf', 'pathinfo.conf')
+        }
+        defaults = {
+            'fastcgi.conf': 'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n',
+            'pathinfo.conf': 'fastcgi_param PATH_INFO $path_info;\n',
+        }
+        for name, path in params.items():
+            path.write_text(defaults[name])
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+        routes = (
+            'fastcgi_pass unix:/tmp/other.sock;',
+            'proxy_pass http://backend;',
+            'uwsgi_pass backend;',
+            'scgi_pass backend;',
+            'grpc_pass grpc://backend;',
+            'memcached_pass backend;',
+        )
+        for name, path in params.items():
+            for route in routes:
+                with self.subTest(dependency=name, route=route):
+                    invalid = defaults[name] + route + '\n'
+                    path.write_text(invalid)
+                    rejected = self.inspect()
+                    self.assertEqual(rejected['state'], 'Needs Review')
+                    self.assertEqual(rejected['site_count'], 0)
+                    self.assertEqual(rejected['matched_sites'], [])
+                    self.assertNotIn('dependency_sha256', rejected)
+                    self.assertEqual(path.read_text(), invalid)
+            path.write_text(defaults[name] + '# grpc_pass grpc://ignored;\n')
+            accepted = self.inspect()
+            self.assertEqual(accepted['state'], 'File Mapping')
+            self.assertNotEqual(accepted['dependency_sha256'], good['dependency_sha256'])
+            path.write_text(defaults[name])
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_consistent_upstream_policy_for_vhost_and_native_rewrite(self):
+        vhost = self.vhost('site-a.example.test')
+        original = vhost.read_text()
+        rewrite = self.rewrites / 'site-a.example.test.conf'
+        valid_rewrite = 'location / {\n rewrite ^(.*)$ /index.php?s=$1 last;\n}\n'
+        rewrite.write_text(valid_rewrite)
+        routed_vhost = original.replace(
+            'include enable-php-85.conf;',
+            'include enable-php-85.conf;\n include ' + str(rewrite) + ';'
+        )
+        vhost.write_text(routed_vhost)
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+        routes = (
+            'fastcgi_pass unix:/tmp/other.sock;',
+            'proxy_pass http://backend;',
+            'uwsgi_pass backend;',
+            'scgi_pass backend;',
+            'grpc_pass grpc://backend;',
+            'memcached_pass backend;',
+        )
+        for route in routes:
+            for surface, file, base in (
+                ('vhost', vhost, routed_vhost),
+                ('rewrite', rewrite, valid_rewrite),
+            ):
+                with self.subTest(surface=surface, route=route):
+                    if surface == 'vhost':
+                        invalid = base.replace(
+                            '\n}\n', '\n location /unsupported {\n  ' + route + '\n }\n}\n', 1
+                        )
+                    else:
+                        invalid = base + '\nlocation /unsupported {\n ' + route + '\n}\n'
+                    file.write_text(invalid)
+                    rejected = self.inspect()
+                    self.assertEqual(rejected['state'], 'Needs Review')
+                    self.assertEqual([s['id'] for s in rejected['unresolved_sites']], [3])
+                    self.assertNotIn('dependency_sha256', rejected)
+                    self.assertEqual(file.read_text(), invalid)
+                    file.write_text(base)
+        rewrite.write_text(valid_rewrite + '# memcached_pass disabled;\n')
+        accepted = self.inspect()
+        self.assertEqual(accepted['state'], 'File Mapping')
+        self.assertNotEqual(accepted['dependency_sha256'], good['dependency_sha256'])
+        rewrite.write_text(valid_rewrite)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
     def test_changed_nest_dir_or_hardlinked_vhost_is_not_trusted(self):
         ordinary = self.vhost('site-a.example.test')
         hardlink = self.vhosts / 'duplicate.conf'

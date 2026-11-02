@@ -35,9 +35,29 @@ PHP_IMPACT_SCHEMA_VERSION = 1
 PHP_IMPACT_SITE_LIMIT = 100
 MAX_NGINX_SITE_BYTES = 64 * 1024
 
+# One policy for every accepted Nginx file, not one predicate per include type.
+# The main PHP snippet is the sole exception: it must have exactly one
+# separately validated literal Unix fastcgi_pass to the inspected [www] socket.
+NGINX_UPSTREAM_DIRECTIVES = re.compile(
+    r"\b(?:fastcgi_pass|proxy_pass|uwsgi_pass|scgi_pass|grpc_pass|memcached_pass)\b"
+)
+
 
 class MonitorInputError(ValueError):
     pass
+
+
+def _active_nginx_text(source):
+    """Conservative shared comment removal for bounded source inspection."""
+    return "\n".join(line.split("#", 1)[0] for line in source.splitlines())
+
+
+def _unsupported_nginx_upstream(active_text, *, allow_fastcgi=False):
+    """Reject unsupported upstream directives consistently in every dependency."""
+    return any(
+        name != "fastcgi_pass" or not allow_fastcgi
+        for name in NGINX_UPSTREAM_DIRECTIVES.findall(active_text)
+    )
 
 
 def parse_page(value, *, maximum=100000):
@@ -429,13 +449,13 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None):
     # A second include may define a hidden FastCGI route. aaPanel's exact
     # generated per-site rewrite include is accepted only when its bytes and
     # identity are independently inspected and bound to the approval digest.
-    active = "\n".join(line.split("#", 1)[0] for line in vhost_text.splitlines())
+    active = _active_nginx_text(vhost_text)
     includes = re.findall(
         r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$",
         active,
     )
     if (len(includes) != len(re.findall(r"\binclude\b", active))
-            or re.search(r"\b(?:fastcgi_pass|uwsgi_pass|scgi_pass)\b", active)):
+            or _unsupported_nginx_upstream(active)):
         raise MonitorInputError("Unverified Nginx include or upstream routing needs review")
     php = [re.fullmatch(r"enable-php-([0-9]{2,3})\.conf", name) for name in includes]
     php = [match for match in php if match]
@@ -488,9 +508,7 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         # aaPanel's native PHP snippet can include fastcgi.conf and pathinfo.conf.
         # Inspect only these bounded parameter dependencies; never expand
         # arbitrary routing, wildcard paths, or further nested includes.
-        php_active = "\n".join(
-            line.split("#", 1)[0] for line in php_include.splitlines()
-        )
+        php_active = _active_nginx_text(php_include)
         php_nested = re.findall(
             r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$",
             php_active,
@@ -505,21 +523,16 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 nginx_dir / name, MAX_NGINX_SITE_BYTES,
                 with_fingerprint=True,
             )
-            params_active = "\n".join(
-                line.split("#", 1)[0] for line in params.splitlines()
-            )
-            if re.search(r"\b(?:include|location|fastcgi_pass|proxy_pass|uwsgi_pass|scgi_pass)\b",
-                         params_active):
+            params_active = _active_nginx_text(params)
+            if (re.search(r"\b(?:include|location)\b", params_active)
+                    or _unsupported_nginx_upstream(params_active)):
                 raise MonitorInputError("Unsafe Nginx FastCGI parameter include needs review")
             dependencies.append({"kind": name, "signature": params_signature})
         # Count *all* active FastCGI directives independently of the one
         # supported Unix-socket shape. A named upstream, variable, malformed
         # directive or additional location must never escape this comparison.
         # Ignore Nginx comments, but fail closed on unrecognized syntax.
-        if re.search(
-            r"\b(?:proxy_pass|uwsgi_pass|scgi_pass|grpc_pass|memcached_pass)\b",
-            php_active,
-        ):
+        if _unsupported_nginx_upstream(php_active, allow_fastcgi=True):
             raise MonitorInputError("Unsupported Nginx PHP upstream routing needs review")
         all_fastcgi = re.findall(r"\bfastcgi_pass\b", php_active)
         unix_fastcgi = re.findall(
@@ -574,13 +587,9 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     rewrite_text, rewrite_signature = _bounded_file_text(
                         rewrite, MAX_NGINX_SITE_BYTES, with_fingerprint=True
                     )
-                    rewrite_active = "\n".join(
-                        line.split("#", 1)[0] for line in rewrite_text.splitlines()
-                    )
-                    if re.search(
-                        r"\b(?:include|fastcgi_pass|proxy_pass|uwsgi_pass|scgi_pass)\b",
-                        rewrite_active,
-                    ):
+                    rewrite_active = _active_nginx_text(rewrite_text)
+                    if (re.search(r"\binclude\b", rewrite_active)
+                            or _unsupported_nginx_upstream(rewrite_active)):
                         raise MonitorInputError("Unverified Nginx rewrite routing needs review")
                     dependencies.append({"kind": "native_rewrite", "id": site_id,
                                          "signature": rewrite_signature})
