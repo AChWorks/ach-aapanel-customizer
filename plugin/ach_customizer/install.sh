@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
-# aaPanel owns the removable plugin source. This candidate creates no jobs,
-# services or host configuration. Persistent operator data is never purged.
+# aaPanel owns removable plugin source. Uninstall does not revert earlier
+# manually applied host configuration. Persistent recovery records are retained.
 
 cleanup=/www/server/panel/plugin/ach_customizer/ach_customizer_cleanup.py
 panel_python=/www/server/panel/pyenv/bin/python3
@@ -20,7 +20,7 @@ trusted_helper_path() {
 
 case "${1:-}" in
     install)
-        echo 'ACh aaPanel Customizer source registered (monitor-only)'
+        echo 'ACh aaPanel Customizer source registered (Monitor default; Manual Apply requires approval)'
         ;;
     uninstall)
         # The cleanup helper performs descriptor-anchored, no-symlink and
@@ -31,7 +31,10 @@ case "${1:-}" in
         else
             echo 'ACh aaPanel Customizer: icon copy preserved (cleanup unavailable)'
         fi
-        echo 'ACh aaPanel Customizer: no services, jobs or host configurations to revert'
+        echo 'ACh aaPanel Customizer: aaPanel removes plugin files; only verified plugin-owned icon cleanup was attempted'
+        echo 'ACh aaPanel Customizer: existing PHP-FPM settings may include previously applied changes; uninstall does not revert them'
+        echo 'ACh aaPanel Customizer: persistent operator state and recovery records are preserved'
+        echo 'ACh aaPanel Customizer: reinstall the plugin or follow documented supervised recovery to restore earlier PHP-FPM settings'
         ;;
     *)
         echo 'Usage: install.sh install|uninstall' >&2

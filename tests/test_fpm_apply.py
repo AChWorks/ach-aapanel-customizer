@@ -98,7 +98,8 @@ class TestFpmManualApply(unittest.TestCase):
         self.assertEqual((self.data / manual.SNAPSHOT).read_bytes(), BASELINE)
         recovered = manual.rollback(
             self.root / "php", self.data, "85", result["operation_id"],
-            validate=self.hooks()[0], activate=self.hooks()[1], verify=self.hooks()[2])
+            validate=self.hooks()[0], activate=self.hooks()[1], verify=self.hooks()[2],
+            prewrite_check=lambda: None)
         self.assertEqual(recovered["state"], "Rolled Back")
         self.assertEqual(self.config.read_bytes(), BASELINE)
         self.assertFalse((self.data / manual.SNAPSHOT).exists())
@@ -216,9 +217,23 @@ class TestFpmManualApply(unittest.TestCase):
         # The journal remains recoverable; a verified operator rollback clears it.
         done = manual.rollback(
             self.root / "php", self.data, "85", record["operation_id"],
-            validate=lambda: None, activate=lambda: None, verify=lambda: None)
+            validate=lambda: None, activate=lambda: None, verify=lambda: None,
+            prewrite_check=lambda: None)
         self.assertEqual(done["state"], "Rolled Back")
         self.assertFalse((self.data / manual.JOURNAL).exists())
+
+    def test_rollback_prewrite_check_is_mandatory_and_refusal_preserves_journal(self):
+        result = self.apply()
+        applied = self.config.read_bytes()
+        for check in (None, lambda: (_ for _ in ()).throw(
+                manual.FpmApplyError("fpm_conflict", "site reassigned"))):
+            with self.assertRaises(manual.FpmApplyError):
+                manual.rollback(self.root / "php", self.data, "85", result["operation_id"],
+                                validate=lambda: None, activate=lambda: None,
+                                verify=lambda: None, prewrite_check=check)
+            self.assertEqual(self.config.read_bytes(), applied)
+            self.assertTrue((self.data / manual.JOURNAL).exists())
+            self.assertTrue((self.data / manual.SNAPSHOT).exists())
 
     def test_recovery_status_reports_file_ownership_and_conflict(self):
         self.assertEqual(manual.recovery_status(self.root / "php", self.data, "85")["state"], "No Recovery")
@@ -247,7 +262,8 @@ class TestFpmManualApply(unittest.TestCase):
         self.config.write_bytes(contents + b"; external change\n")
         with self.assertRaises(manual.FpmApplyError) as caught:
             manual.rollback(self.root / "php", self.data, "85", result["operation_id"],
-                            validate=lambda: None, activate=lambda: None, verify=lambda: None)
+                            validate=lambda: None, activate=lambda: None, verify=lambda: None,
+                            prewrite_check=lambda: None)
         self.assertEqual(caught.exception.stage, "conflict")
         self.assertTrue((self.data / manual.SNAPSHOT).is_file())
         self.assertEqual(self.config.read_bytes(), contents + b"; external change\n")
@@ -318,7 +334,8 @@ class TestFpmManualApply(unittest.TestCase):
         result = self.apply()
         with self.assertRaises(manual.FpmApplyError):
             manual.rollback(self.root / "php", self.data, "85", "deadbeef" * 4,
-                            validate=lambda: None, activate=lambda: None, verify=lambda: None)
+                            validate=lambda: None, activate=lambda: None, verify=lambda: None,
+                            prewrite_check=lambda: None)
         self.assertNotEqual(self.config.read_bytes(), BASELINE)
         self.assertTrue((self.data / manual.SNAPSHOT).is_file())
 

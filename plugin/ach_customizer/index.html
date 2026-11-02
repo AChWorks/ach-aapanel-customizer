@@ -78,8 +78,10 @@
         <hr />
         <button id="ach-fpm-check-recovery" type="button">Inspect saved PHP 8.5 recovery</button>
         <p id="ach-fpm-recovery-status" role="status" aria-live="polite">Recovery status not loaded.</p>
+        <p id="ach-fpm-recovery-impact" role="status" aria-live="polite">Current affected sites not inspected.</p>
+        <div class="ach-scroll"><table><thead><tr><th>PHP-FPM setting</th><th>Current</th><th>Restore baseline</th></tr></thead><tbody id="ach-fpm-restore-rows"></tbody></table></div>
         <div id="ach-fpm-rollback-controls" hidden>
-          <label><input id="ach-fpm-rollback-approval" type="checkbox" /> I approve restoring this exact saved PHP 8.5 configuration and reloading PHP-FPM.</label>
+          <label><input id="ach-fpm-rollback-approval" type="checkbox" /> I reviewed the current shared-site impact and configuration values above, and approve restoring this exact saved PHP 8.5 baseline and reloading the shared service.</label>
           <div class="ach-controls"><button id="ach-fpm-rollback" type="button" class="btn btn-warning" disabled>Restore saved configuration</button></div>
         </div>
       </div>
@@ -270,6 +272,8 @@
     if (!impact.unresolved_sites.every(function (s) { return validSite(s, true); })) return false;
     return impact.state !== 'File Mapping' ||
       (impact.unresolved_sites.length === 0 &&
+       typeof impact.dependency_sha256 === 'string' &&
+       /^[0-9a-f]{64}$/.test(impact.dependency_sha256) &&
        impact.matched_sites.length + impact.other_php_sites_count === impact.site_count);
   }
   function phpFields() {
@@ -289,6 +293,8 @@
     root.find('#ach-fpm-rollback-controls').prop('hidden', true);
     root.find('#ach-fpm-rollback-approval').prop('checked', false);
     root.find('#ach-fpm-rollback').prop('disabled', true);
+    root.find('#ach-fpm-restore-rows').empty();
+    root.find('#ach-fpm-recovery-impact').text('Current affected sites not inspected.');
   }
   function fpmLock(value) {
     fpmBusy = value;
@@ -380,14 +386,47 @@
         root.find('#ach-fpm-recovery-status').text('Recovery unavailable; investigate the error before any further Apply.');
         return;
       }
+      var policyKeys = ['pm.max_children', 'pm.start_servers', 'pm.min_spare_servers',
+        'pm.max_spare_servers', 'pm.max_requests'];
+      var validValues = r.baseline_values && r.observed_values && policyKeys.every(function (key) {
+        return Number.isSafeInteger(r.baseline_values[key]) && r.baseline_values[key] >= 0 &&
+          Number.isSafeInteger(r.observed_values[key]) && r.observed_values[key] >= 0;
+      });
       var safe = typeof r.operation_id === 'string' && /^[0-9a-f]{32}$/.test(r.operation_id) &&
-        r.safe_rollback_file_match === true &&
-        (r.state === 'Applied' || r.state === 'Already Baseline');
+        r.version === '85' && r.safe_rollback_file_match === true &&
+        (r.state === 'Applied' || r.state === 'Already Baseline') &&
+        validValues && validImpact(r.shared_impact, '85') &&
+        r.shared_impact.state === 'File Mapping' && r.shared_impact.matched_sites.length > 0 &&
+        typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256) &&
+        typeof r.recovery_decision_sha256 === 'string' &&
+        /^[0-9a-f]{64}$/.test(r.recovery_decision_sha256) &&
+        typeof r.warning === 'string';
       root.find('#ach-fpm-recovery-status').text('Recovery state: ' + r.state +
         (r.operation_id ? '; operation: ' + r.operation_id : '') +
         (r.phase ? '; phase: ' + r.phase : '') +
-        (safe ? '; explicit restoration available.' : '; no automatic restoration allowed.'));
+        (safe ? '; fresh impact approval required.' : '; automatic restoration unavailable.'));
+      if (r.shared_impact && validImpact(r.shared_impact, '85')) {
+        root.find('#ach-fpm-recovery-impact').text(
+          'Current PHP 85 shared-site file mapping: ' +
+          r.shared_impact.matched_sites.map(function (site) { return site.id + ': ' + site.site_key; }).join(', ') +
+          '; other-PHP sites: ' + r.shared_impact.other_php_sites_count +
+          '; unresolved sites: ' + r.shared_impact.unresolved_sites.length +
+          '. ' + (r.impact_reason || r.warning || r.shared_impact.reason || '') +
+          (r.manual_recovery ? ' ' + r.manual_recovery : '')
+        );
+      } else {
+        root.find('#ach-fpm-recovery-impact').text(
+          r.impact_reason || r.manual_recovery || 'Current site mapping not verified.'
+        );
+      }
       if (safe) {
+        policyKeys.forEach(function (key) {
+          var tr = $('<tr>');
+          $('<td>').text(key).appendTo(tr);
+          $('<td>').text(r.observed_values[key]).appendTo(tr);
+          $('<td>').text(r.baseline_values[key]).appendTo(tr);
+          root.find('#ach-fpm-restore-rows').append(tr);
+        });
         fpmRecovery = r;
         root.find('#ach-fpm-rollback-controls').prop('hidden', false);
       }
@@ -397,9 +436,11 @@
   root.find('#ach-fpm-rollback-approval').on('change', function () { fpmLock(fpmBusy); });
   root.find('#ach-fpm-rollback').on('click', function () {
     if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
-    var op = fpmRecovery.operation_id;
+    var op = fpmRecovery.operation_id, current = fpmRecovery;
     resetRecovery(); fpmLock(true);
-    request('fpm_rollback', {php_version:'85', approved_scope:'PHP85-www-shared-service', operation_id:op}, function (r) {
+    request('fpm_rollback', {php_version:'85', approved_scope:'PHP85-www-shared-service',
+      operation_id:op, expected_impact:current.impact_sha256,
+      expected_recovery:current.recovery_decision_sha256}, function (r) {
       fpmLock(false);
       root.find('#ach-fpm-recovery-status').text(r ?
         'Recovery result: ' + r.state + '; original SHA-256: ' + r.restored_sha256 +

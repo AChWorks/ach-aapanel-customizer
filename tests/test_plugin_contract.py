@@ -82,6 +82,11 @@ class PackageContractTests(unittest.TestCase):
         for action in ('install', 'uninstall'):
             result = subprocess.run(['/bin/sh', str(PACKAGE / 'install.sh'), action], check=True, capture_output=True, text=True)
             self.assertIn('ACh aaPanel Customizer', result.stdout)
+            if action == 'uninstall':
+                self.assertIn('PHP-FPM settings may include previously applied changes', result.stdout)
+                self.assertIn('recovery records are preserved', result.stdout)
+                self.assertIn('reinstall the plugin', result.stdout)
+                self.assertNotIn('no services, jobs or host configurations to revert', result.stdout)
 
 
 if __name__ == '__main__':

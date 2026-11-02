@@ -18,7 +18,9 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from ach_customizer_monitor import POOL_KEYS, expected_pool_values, preview_php_fpm
+from ach_customizer_monitor import (
+    POOL_KEYS, MonitorInputError, _parse_pool_text, expected_pool_values, preview_php_fpm,
+)
 
 MAX_BYTES = 256 * 1024
 VERSION = "85"  # First verified native PHP 8.5 [www] adapter; refuse other versions.
@@ -395,6 +397,22 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
         os.close(fd_state)
 
 
+def _recovery_pool_values(payload):
+    """Read only five known numeric fields; never expose raw backup config."""
+    try:
+        text = payload.decode("utf-8")
+        has_pool, values = _parse_pool_text(text)
+    except (UnicodeError, MonitorInputError) as exc:
+        raise FpmApplyError("recovery", "Unsupported saved PHP-FPM pool layout") from exc
+    if not has_pool:
+        raise FpmApplyError("recovery", "No supported [www] pool in recovery configuration")
+    values = dict(values)
+    values.setdefault("pm.max_requests", 0)
+    if any(key not in values for key in POOL_KEYS):
+        raise FpmApplyError("recovery", "Recovery configuration is missing required pool settings")
+    return {key: values[key] for key in POOL_KEYS}
+
+
 def recovery_status(config_root, state_dir, version):
     """Read-only visibility into the one durable PHP 8.5 rollback boundary."""
     if version != VERSION:
@@ -424,19 +442,35 @@ def recovery_status(config_root, state_dir, version):
         state = ("Applied" if digest == record["after_sha256"] else
                  "Already Baseline" if digest == record["before_sha256"] else
                  "Needs Review")
+        baseline_values = observed_values = None
+        restoration_changes = []
+        if state in ("Applied", "Already Baseline"):
+            baseline_values = _recovery_pool_values(snapshot)
+            observed_values = _recovery_pool_values(current)
+            restoration_changes = [
+                {"setting": key, "current": observed_values[key],
+                 "baseline": baseline_values[key]}
+                for key in POOL_KEYS if observed_values[key] != baseline_values[key]
+            ]
         return {"state": state, "version": version,
                 "phase": record["phase"], "operation_id": record["operation_id"],
                 "baseline_sha256": record["before_sha256"],
                 "applied_sha256": record["after_sha256"],
                 "observed_sha256": digest,
+                "baseline_values": baseline_values,
+                "observed_values": observed_values,
+                "restoration_changes": restoration_changes,
                 "safe_rollback_file_match": state in ("Applied", "Already Baseline")}
     finally:
         os.close(fd_state)
 
 
-def rollback(config_root, state_dir, version, operation_id, *, validate, activate, verify):
-    """Restore only a matching last manual Apply; refuse intervening aaPanel edits."""
+def rollback(config_root, state_dir, version, operation_id, *,
+             validate, activate, verify, prewrite_check):
+    """Restore after the trusted caller's fresh shared-impact authorization."""
     _check_callbacks(validate, activate, verify)
+    if not callable(prewrite_check):
+        raise FpmApplyError("validation", "Fresh pre-write Rollback impact verification is required")
     fd_state, lock_fd = _lock(state_dir)
     try:
         record = _read_journal(fd_state)
@@ -450,6 +484,14 @@ def rollback(config_root, state_dir, version, operation_id, *, validate, activat
             current, st = _read(fd_config, "php-fpm.conf")
             if _sha(current) != record["after_sha256"] and current != before:
                 raise FpmApplyError("conflict", "PHP-FPM was modified since Apply; refusing overwrite")
+            # Run the current-site/approved-decision check while holding the
+            # recovery lock, as near as possible to the configuration replace.
+            # Site writers outside this plugin still do not share its lock.
+            prewrite_check()
+            newest, latest_stat = _read(fd_config, "php-fpm.conf")
+            if (newest != current or latest_stat.st_dev != st.st_dev
+                    or latest_stat.st_ino != st.st_ino):
+                raise FpmApplyError("conflict", "PHP-FPM changed during the Rollback impact recheck")
             if current != before:
                 _replace(fd_config, "php-fpm.conf", before, _Expected(st, current), prefix="ach_customizer_rollback")
             try:

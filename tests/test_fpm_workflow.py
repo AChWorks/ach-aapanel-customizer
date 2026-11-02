@@ -43,6 +43,7 @@ class TestManualFpmWorkflow(unittest.TestCase):
             "schema":1,"state":"File Mapping","scope":"shared_service","version":"85",
             "matched_sites":[{"id":3,"site_key":"example-a.test"},{"id":6,"site_key":"example-b.test"}],
             "unresolved_sites":[],"site_count":2,"other_php_sites_count":0,
+            "dependency_sha256":"a"*64,
             "note":"FILE mapping, not effective runtime",
         }
         self.calls=[]
@@ -72,6 +73,14 @@ class TestManualFpmWorkflow(unittest.TestCase):
                 "expected_after":prepared["plan"]["after_sha256"],
                 "expected_impact":prepared["impact_sha256"]}
 
+    def rollback_payload(self, operation_id):
+        detail = self.controller.recovery({"php_version": "85"})
+        self.assertTrue(detail["safe_rollback_file_match"])
+        return {"php_version": "85", "operation_id": operation_id,
+                "approved_scope": workflow.APPROVAL_SCOPE,
+                "expected_impact": detail["impact_sha256"],
+                "expected_recovery": detail["recovery_decision_sha256"]}
+
     def test_valid_full_admin_prepare_and_apply_then_recover(self):
         payload=self.payload()
         self.assertEqual(payload["expected_revision"],"0")
@@ -81,8 +90,7 @@ class TestManualFpmWorkflow(unittest.TestCase):
         self.assertEqual(self.calls,["validate","validate","activate","verify"])
         status=self.controller.recovery({"php_version":"85"})
         self.assertEqual(status["state"],"Applied")
-        recovered=self.controller.rollback({"php_version":"85","operation_id":applied["operation_id"],
-                                            "approved_scope":workflow.APPROVAL_SCOPE})
+        recovered=self.controller.rollback(self.rollback_payload(applied["operation_id"]))
         self.assertEqual(recovered["state"],"Rolled Back")
         self.assertEqual(self.config.read_bytes(),SOURCE)
 
@@ -226,9 +234,8 @@ class TestManualFpmWorkflow(unittest.TestCase):
         with self.assertRaises(core.FpmApplyError):
             self.controller.prepare(VALUES)
         self.assertEqual(self.controller.recovery({})["state"],"Applied")
-        self.assertEqual(self.controller.rollback({
-            "operation_id":result["operation_id"],
-            "approved_scope":workflow.APPROVAL_SCOPE})["state"],"Rolled Back")
+        self.assertEqual(self.controller.rollback(
+            self.rollback_payload(result["operation_id"]))["state"],"Rolled Back")
         self.assertEqual(self.config.read_bytes(),SOURCE)
 
     def test_wrong_rollback_id_and_missing_approval_do_not_touch_file(self):
@@ -241,6 +248,91 @@ class TestManualFpmWorkflow(unittest.TestCase):
             with self.assertRaises(core.FpmApplyError):
                 self.controller.rollback(args)
             self.assertEqual(self.config.read_bytes(),after)
+
+    def test_rollback_requires_new_site_removed_site_and_reassignment_approval(self):
+        for change in ("added", "removed", "reassigned"):
+            with self.subTest(change=change):
+                self.impact = {
+                    **self.impact,
+                    "matched_sites": [
+                        {"id": 3, "site_key": "example-a.test"},
+                        {"id": 6, "site_key": "example-b.test"}
+                    ],
+                    "site_count": 2,
+                    "other_php_sites_count": 0,
+                    "dependency_sha256": "a" * 64,
+                }
+                applied = self.controller.apply(self.payload())
+                stale = self.rollback_payload(applied["operation_id"])
+                applied_bytes = self.config.read_bytes()
+                if change == "added":
+                    self.impact["matched_sites"].append({"id": 9, "site_key": "new-php85.test"})
+                    self.impact["site_count"] = 3
+                elif change == "removed":
+                    self.impact["matched_sites"].pop()
+                    self.impact["site_count"] = 1
+                else:
+                    self.impact["matched_sites"].pop()
+                    self.impact["other_php_sites_count"] = 1
+                with self.assertRaises(core.FpmApplyError) as caught:
+                    self.controller.rollback(stale)
+                self.assertEqual(caught.exception.stage, "fpm_conflict")
+                self.assertEqual(self.config.read_bytes(), applied_bytes)
+                self.assertTrue((self.state_dir / core.JOURNAL).exists())
+                fresh = self.rollback_payload(applied["operation_id"])
+                self.assertNotEqual(fresh["expected_impact"], stale["expected_impact"])
+                status = self.controller.recovery({})
+                self.assertEqual(status["restoration_changes"], [
+                    {"setting": "pm.max_children", "current": 20, "baseline": 50},
+                    {"setting": "pm.max_spare_servers", "current": 10, "baseline": 20},
+                    {"setting": "pm.max_requests", "current": 300, "baseline": 0},
+                ])
+                self.assertEqual(self.controller.rollback(fresh)["state"], "Rolled Back")
+                self.assertEqual(self.config.read_bytes(), SOURCE)
+
+    def test_stale_dependency_or_unknown_routing_retains_recovery(self):
+        applied = self.controller.apply(self.payload())
+        old = self.rollback_payload(applied["operation_id"])
+        self.impact["dependency_sha256"] = "b" * 64
+        with self.assertRaises(core.FpmApplyError):
+            self.controller.rollback(old)
+        updated = self.rollback_payload(applied["operation_id"])
+        self.assertNotEqual(old["expected_recovery"], updated["expected_recovery"])
+
+        self.impact["state"] = "Needs Review"
+        status = self.controller.recovery({})
+        self.assertFalse(status["safe_rollback_file_match"])
+        self.assertIn("manual_recovery", status)
+        self.assertEqual(status["shared_impact"]["state"], "Needs Review")
+        with self.assertRaises(core.FpmApplyError):
+            self.controller.rollback(updated)
+        self.assertTrue((self.state_dir / core.JOURNAL).exists())
+        self.impact["state"] = "File Mapping"
+        self.assertEqual(self.controller.rollback(
+            self.rollback_payload(applied["operation_id"]))["state"], "Rolled Back")
+
+    def test_last_moment_site_change_blocks_rollback_inside_core_lock(self):
+        applied = self.controller.apply(self.payload())
+        after = self.config.read_bytes()
+        count = 0
+
+        def changing_impact(_panel, _version, _source):
+            nonlocal count
+            count += 1
+            if count == 3:
+                self.impact["dependency_sha256"] = "c" * 64
+            return self.impact
+
+        self.controller.impact_lookup = changing_impact
+        old = self.rollback_payload(applied["operation_id"])
+        with self.assertRaises(core.FpmApplyError) as caught:
+            self.controller.rollback(old)
+        self.assertEqual(caught.exception.stage, "fpm_conflict")
+        self.assertEqual(self.config.read_bytes(), after)
+        self.assertTrue((self.state_dir / core.JOURNAL).exists())
+        self.assertEqual(self.controller.rollback(
+            self.rollback_payload(applied["operation_id"]))["state"], "Rolled Back")
+
 
 if __name__=="__main__":
     unittest.main()

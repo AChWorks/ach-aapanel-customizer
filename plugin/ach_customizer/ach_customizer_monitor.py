@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -184,7 +186,11 @@ def _parse_pool_file(file_path, allowed_include=None):
         raise MonitorInputError("Non-regular or linked FPM configuration: " + str(file_path))
     if file_path.stat().st_size > MAX_CONFIG_BYTES:
         raise MonitorInputError("FPM configuration exceeds the read limit: " + str(file_path))
-    text = file_path.read_text(encoding="utf-8")
+    return _parse_pool_text(file_path.read_text(encoding="utf-8"), allowed_include)
+
+
+def _parse_pool_text(text, allowed_include=None):
+    """Apply the same conservative pool parser to trusted recovery bytes."""
     section = None
     seen_sections = set()
     pool = {}
@@ -341,16 +347,35 @@ def preview_php_fpm(config_root, version, expected):
     }
 
 
-def _bounded_file_text(path, byte_limit):
+def _bounded_file_text(path, byte_limit, *, with_fingerprint=False):
     """Read one regular config without following its final symlink."""
     import os
     import stat
 
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    # Anchor every path component with O_NOFOLLOW, not just the leaf file.
+    # Otherwise a symlinked ancestor can redirect an apparently trusted
+    # Nginx include to a different tree between discovery and inspection.
+    path = Path(path)
+    if not path.is_absolute() or ".." in path.parts:
+        raise MonitorInputError("Noncanonical Nginx configuration path")
+    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    directory = os.open("/", dir_flags)
+    try:
+        for component in path.parts[1:-1]:
+            following = os.open(component, dir_flags, dir_fd=directory)
+            os.close(directory)
+            directory = following
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC |
+                     os.O_NONBLOCK, dir_fd=directory)
+    finally:
+        os.close(directory)
     try:
         meta = os.fstat(fd)
-        if not stat.S_ISREG(meta.st_mode) or meta.st_size > byte_limit:
-            raise MonitorInputError("Unsupported or oversized configuration file")
+        if (not stat.S_ISREG(meta.st_mode) or not 0 <= meta.st_size <= byte_limit
+                or meta.st_nlink != 1 or meta.st_uid != os.geteuid()
+                or meta.st_mode & 0o022):
+            raise MonitorInputError("Unsafe or oversized Nginx configuration file")
+        before = meta
         content = bytearray()
         while len(content) <= byte_limit:
             chunk = os.read(fd, byte_limit + 1 - len(content))
@@ -359,7 +384,20 @@ def _bounded_file_text(path, byte_limit):
             content.extend(chunk)
         if len(content) > byte_limit:
             raise MonitorInputError("Configuration file exceeds the read limit")
-        return content.decode("utf-8")
+        after = os.fstat(fd)
+        tracked = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns",
+                   "st_uid", "st_gid", "st_mode", "st_nlink")
+        if any(getattr(before, key) != getattr(after, key) for key in tracked):
+            raise MonitorInputError("Nginx configuration changed during inspection")
+        decoded = content.decode("utf-8")
+        if not with_fingerprint:
+            return decoded
+        identity = {key: getattr(after, key) for key in tracked}
+        identity["sha256"] = hashlib.sha256(content).hexdigest()
+        fingerprint = hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return decoded, fingerprint
     finally:
         os.close(fd)
 
@@ -386,24 +424,34 @@ def _single_www_listen(pool_source):
     return addresses[0]
 
 
-def _native_nginx_php_version(vhost_text):
-    """Identify only the conventional direct aaPanel PHP include, not full routing."""
+def _native_nginx_php_version(vhost_text, *, native_rewrite=None):
+    """Identify a direct PHP include and only an explicitly known native rewrite."""
+    # A second include may define a hidden FastCGI route. aaPanel's exact
+    # generated per-site rewrite include is accepted only when its bytes and
+    # identity are independently inspected and bound to the approval digest.
+    active = "\n".join(line.split("#", 1)[0] for line in vhost_text.splitlines())
     includes = re.findall(
-        r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*(?:\#[^\n]*)?$",
-        vhost_text,
+        r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$",
+        active,
     )
-    php_includes = [value for value in includes if "enable-php-" in value]
-    if len(php_includes) != 1 or re.search(r"(?m)^[ \t]*fastcgi_pass\b", vhost_text):
-        raise MonitorInputError("No unique conventional PHP include in the site VHost")
-    match = re.fullmatch(r"enable-php-([0-9]{2,3})\.conf", php_includes[0])
-    if not match:
-        raise MonitorInputError("The PHP include requires review")
-    return match.group(1)
+    if (len(includes) != len(re.findall(r"\binclude\b", active))
+            or re.search(r"\b(?:fastcgi_pass|uwsgi_pass|scgi_pass)\b", active)):
+        raise MonitorInputError("Unverified Nginx include or upstream routing needs review")
+    php = [re.fullmatch(r"enable-php-([0-9]{2,3})\.conf", name) for name in includes]
+    php = [match for match in php if match]
+    if len(php) != 1:
+        raise MonitorInputError("No unique conventional Nginx PHP include")
+    extras = [name for name in includes if not re.fullmatch(r"enable-php-[0-9]{2,3}\.conf", name)]
+    if extras and (len(extras) != 1 or native_rewrite is None
+                   or extras[0] != native_rewrite):
+        raise MonitorInputError("Additional or unverified Nginx include/routing needs review")
+    return php[0].group(1), bool(extras)
 
 
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                                 vhost_root="/www/server/panel/vhost/nginx",
-                                nginx_conf_root="/www/server/nginx/conf"):
+                                nginx_conf_root="/www/server/nginx/conf",
+                                rewrite_root="/www/server/panel/vhost/rewrite"):
     """Bounded, read-only **file attribution**, never an effective-runtime claim.
 
     One shared PHP-FPM service can serve multiple native sites. Nginx
@@ -429,12 +477,41 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
             raise MonitorInputError("Invalid PHP version for shared impact")
         vhost_dir = Path(vhost_root)
         nginx_dir = Path(nginx_conf_root)
-        if vhost_dir.is_symlink() or nginx_dir.is_symlink():
+        rewrite_dir = Path(rewrite_root)
+        if vhost_dir.is_symlink() or nginx_dir.is_symlink() or rewrite_dir.is_symlink():
             raise MonitorInputError("Linked Nginx configuration directory")
         socket = _single_www_listen(pool_source)
-        php_include = _bounded_file_text(
-            nginx_dir / ("enable-php-" + version + ".conf"), MAX_NGINX_SITE_BYTES
+        php_include, php_signature = _bounded_file_text(
+            nginx_dir / ("enable-php-" + version + ".conf"), MAX_NGINX_SITE_BYTES,
+            with_fingerprint=True,
         )
+        # aaPanel's native PHP snippet can include fastcgi.conf and pathinfo.conf.
+        # Inspect only these bounded parameter dependencies; never expand
+        # arbitrary routing, wildcard paths, or further nested includes.
+        php_active = "\n".join(
+            line.split("#", 1)[0] for line in php_include.splitlines()
+        )
+        php_nested = re.findall(
+            r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$",
+            php_active,
+        )
+        if (len(php_nested) != len(re.findall(r"\binclude\b", php_active))
+                or len(set(php_nested)) != len(php_nested)
+                or any(name not in ("fastcgi.conf", "pathinfo.conf") for name in php_nested)):
+            raise MonitorInputError("Unverified Nginx PHP nested include needs review")
+        dependencies = [{"kind": "php_include", "signature": php_signature}]
+        for name in php_nested:
+            params, params_signature = _bounded_file_text(
+                nginx_dir / name, MAX_NGINX_SITE_BYTES,
+                with_fingerprint=True,
+            )
+            params_active = "\n".join(
+                line.split("#", 1)[0] for line in params.splitlines()
+            )
+            if re.search(r"\b(?:include|location|fastcgi_pass|proxy_pass|uwsgi_pass|scgi_pass)\b",
+                         params_active):
+                raise MonitorInputError("Unsafe Nginx FastCGI parameter include needs review")
+            dependencies.append({"kind": name, "signature": params_signature})
         fastcgi = re.findall(
             r"(?m)^[ \t]*fastcgi_pass[ \t]+unix:([^;\s]+)[ \t]*;",
             php_include,
@@ -473,10 +550,30 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 result["unresolved_sites"].append({**site_key, "reason": "Unsupported VHost filename"})
                 continue
             try:
-                vhost = _bounded_file_text(
-                    vhost_dir / (name + ".conf"), MAX_NGINX_SITE_BYTES
+                vhost, vhost_signature = _bounded_file_text(
+                    vhost_dir / (name + ".conf"), MAX_NGINX_SITE_BYTES,
+                    with_fingerprint=True,
                 )
-                assigned = _native_nginx_php_version(vhost)
+                rewrite = rewrite_dir / (name + ".conf")
+                assigned, has_rewrite = _native_nginx_php_version(
+                    vhost, native_rewrite=str(rewrite)
+                )
+                if has_rewrite:
+                    rewrite_text, rewrite_signature = _bounded_file_text(
+                        rewrite, MAX_NGINX_SITE_BYTES, with_fingerprint=True
+                    )
+                    rewrite_active = "\n".join(
+                        line.split("#", 1)[0] for line in rewrite_text.splitlines()
+                    )
+                    if re.search(
+                        r"\b(?:include|fastcgi_pass|proxy_pass|uwsgi_pass|scgi_pass)\b",
+                        rewrite_active,
+                    ):
+                        raise MonitorInputError("Unverified Nginx rewrite routing needs review")
+                    dependencies.append({"kind": "native_rewrite", "id": site_id,
+                                         "signature": rewrite_signature})
+                dependencies.append({"kind": "vhost", "id": site_id,
+                                     "signature": vhost_signature})
             except (OSError, UnicodeError, MonitorInputError):
                 result["unresolved_sites"].append({**site_key, "reason": "VHost PHP assignment needs review"})
                 continue
@@ -487,6 +584,11 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         if result["unresolved_sites"]:
             result["reason"] = "Some website assignments are ambiguous; shared impact is incomplete"
         else:
+            # Bind every accepted site VHost and the shared PHP include's
+            # bytes+identity to the Apply/Rollback impact precondition.
+            result["dependency_sha256"] = hashlib.sha256(json.dumps(
+                dependencies, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")).hexdigest()
             result["state"] = "File Mapping"
     except (OSError, UnicodeError, MonitorInputError, ValueError) as exc:
         # A global DB/schema/socket error invalidates *all* partial matches.

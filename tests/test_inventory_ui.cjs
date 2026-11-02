@@ -39,6 +39,7 @@ function loadUi() {
     '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
+    '#ach-fpm-recovery-impact', '#ach-fpm-restore-rows',
     '#ach-fpm-rollback-controls', '#ach-fpm-rollback-approval', '#ach-fpm-rollback'
   ]) elements.set(name, fakeNode('div'));
   const controls = [
@@ -193,6 +194,9 @@ function loadUi() {
       fpmPrepareDisabled: elements.get('#ach-fpm-prepare').props.disabled,
       fpmCommitDisabled: elements.get('#ach-fpm-commit').props.disabled,
       fpmRecovery: elements.get('#ach-fpm-recovery-status').textContent,
+      fpmRecoveryImpact: elements.get('#ach-fpm-recovery-impact').textContent,
+      fpmRestoreRows: elements.get('#ach-fpm-restore-rows').children.map(tr =>
+        tr.children.map(td => td.textContent)),
       fpmRollbackHidden: elements.get('#ach-fpm-rollback-controls').props.hidden,
       fpmRollbackDisabled: elements.get('#ach-fpm-rollback').props.disabled,
       impactRows: elements.get('#ach-impact-rows').children.map(tr =>
@@ -553,6 +557,7 @@ const phpImpact = (overrides = {}) => ({
     {id: 6, site_key: '<img src=x onerror=alert(1)>'}
   ],
   unresolved_sites: [], site_count: 3, other_php_sites_count: 1,
+  dependency_sha256: 'e'.repeat(64),
   reason: '', note: 'File-only attribution, not effective runtime.',
   ...overrides
 });
@@ -634,6 +639,25 @@ const guardedPlan = (overrides = {}) => ({
   shared_impact: phpImpact(), ...overrides
 });
 
+const recoveryPreview = (overrides = {}) => ({
+  status: true, version: '85', state: 'Applied', phase: 'applied',
+  operation_id: 'd'.repeat(32), safe_rollback_file_match: true,
+  baseline_sha256: 'a'.repeat(64), applied_sha256: 'b'.repeat(64),
+  observed_sha256: 'b'.repeat(64), impact_sha256: 'c'.repeat(64),
+  recovery_decision_sha256: 'f'.repeat(64),
+  shared_impact: phpImpact(), warning: 'Shared service reload affects current sites.',
+  baseline_values: {'pm.max_children': 50, 'pm.start_servers': 5,
+    'pm.min_spare_servers': 5, 'pm.max_spare_servers': 20, 'pm.max_requests': 0},
+  observed_values: {'pm.max_children': 20, 'pm.start_servers': 5,
+    'pm.min_spare_servers': 5, 'pm.max_spare_servers': 10, 'pm.max_requests': 300},
+  restoration_changes: [
+    {setting:'pm.max_children', current:20, baseline:50},
+    {setting:'pm.max_spare_servers', current:10, baseline:20},
+    {setting:'pm.max_requests', current:300, baseline:0}
+  ],
+  ...overrides
+});
+
 test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit approval', () => {
   const ui = loadUi();
   assert.notEqual(ui.state().fpmPrepareDisabled, false);
@@ -662,8 +686,17 @@ test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit
   assert.notEqual(ui.state().fpmReviewHidden, false);
   const recovery = ui.inspectFpmRecovery();
   assert.match(recovery.options.url, /s=fpm_recovery$/);
-  recovery.respond({status:true, state:'Applied', phase:'applied', operation_id:'d'.repeat(32), safe_rollback_file_match:true});
+  recovery.respond(recoveryPreview());
   assert.equal(ui.state().fpmRollbackHidden, false);
+  assert.match(ui.state().fpmRecoveryImpact, /3: site-a.test/);
+  assert.match(ui.state().fpmRecoveryImpact, /6: <img src=x/);
+  assert.deepEqual(ui.state().fpmRestoreRows, [
+    ['pm.max_children', '20', '50'],
+    ['pm.start_servers', '5', '5'],
+    ['pm.min_spare_servers', '5', '5'],
+    ['pm.max_spare_servers', '10', '20'],
+    ['pm.max_requests', '300', '0']
+  ]);
   assert.equal(ui.state().fpmRollbackDisabled, true);
   ui.approveFpmRollback(true);
   assert.equal(ui.state().fpmRollbackDisabled, false);
@@ -671,6 +704,8 @@ test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit
   assert.match(rollback.options.url, /s=fpm_rollback$/);
   assert.equal(rollback.options.timeout, 120000);
   assert.equal(rollback.options.data.operation_id, 'd'.repeat(32));
+  assert.equal(rollback.options.data.expected_impact, 'c'.repeat(64));
+  assert.equal(rollback.options.data.expected_recovery, 'f'.repeat(64));
   rollback.respond({status:true, state:'Rolled Back', restored_sha256:'a'.repeat(64), audit_logged:true});
   assert.match(ui.state().fpmRecovery, /Rolled Back/);
   assert.equal(ui.state().fpmRollbackDisabled, true);
@@ -714,6 +749,41 @@ test('Malformed manual PHP-FPM preparation fails closed without write', () => {
     assert.equal(ui.state().fpmPrepareDisabled, true);
     assert.match(ui.state().error, /API mismatch/);
   }
+});
+
+test('Unknown or stale recovery data cannot enable shared-service rollback', () => {
+  for (const invalid of [
+    recoveryPreview({shared_impact:phpImpact({state:'Needs Review',
+      unresolved_sites:[{id:9,site_key:'uncertain',reason:'Indirect routing'}], site_count:4})}),
+    recoveryPreview({recovery_decision_sha256:'bad'}),
+    recoveryPreview({impact_sha256:'bad'}),
+    recoveryPreview({baseline_values:null}),
+    recoveryPreview({safe_rollback_file_match:false,
+      manual_recovery:'Preserved; supervised manual restoration required.'})
+  ]) {
+    const ui = loadUi();
+    ui.inspectFpmRecovery().respond(invalid);
+    assert.equal(ui.state().fpmRollbackHidden, true);
+    assert.equal(ui.state().fpmRollbackDisabled, true);
+    assert.deepEqual(ui.state().fpmRestoreRows, []);
+    const count = ui.requests.length;
+    ui.approveFpmRollback(true);
+    ui.rollbackFpm();
+    assert.equal(ui.requests.length, count, 'No unapproved Rollback request');
+  }
+});
+
+test('Changed recovery inspection revokes previous approval and clears stale values', () => {
+  const ui = loadUi();
+  ui.inspectFpmRecovery().respond(recoveryPreview());
+  ui.approveFpmRollback(true);
+  assert.equal(ui.state().fpmRollbackDisabled, false);
+  ui.inspectFpmRecovery().respond(recoveryPreview({state:'Needs Review',
+    safe_rollback_file_match:false, impact_reason:'site changed',
+    manual_recovery:'Evidence preserved', shared_impact:phpImpact({state:'Needs Review'})}));
+  assert.equal(ui.state().fpmRollbackHidden, true);
+  assert.deepEqual(ui.state().fpmRestoreRows, []);
+  assert.match(ui.state().fpmRecoveryImpact, /site changed/);
 });
 
 test('Failed Apply is not retried and user can inspect recovery status', () => {

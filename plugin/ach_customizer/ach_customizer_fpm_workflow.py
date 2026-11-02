@@ -1,8 +1,7 @@
 """Native-aaPanel-only manual shared PHP-FPM flow; never auto-enforce.
 
-This module is not yet exposed through the plugin entrypoint. When integrated,
-aaPanel's ordinary authenticated plugin route must provide the native CSRF
-check. Every privileged method independently enforces a full admin POST.
+aaPanel's ordinary authenticated plugin route provides native CSRF checks;
+each privileged method independently enforces a full primary-admin POST.
 """
 from __future__ import annotations
 
@@ -137,7 +136,7 @@ class ManualFpmWorkflow:
             "pm.max_requests":_arg(args,"max_requests"),
         }
 
-    def _impact(self, panel, plan):
+    def _lookup_impact(self, panel, plan):
         lookup = self.impact_lookup
         if lookup is None:
             try:
@@ -147,7 +146,10 @@ class ManualFpmWorkflow:
                     "fpm_compatibility", "Site-to-pool attribution adapter is not installed"
                 ) from exc
             lookup = inspect_php_fpm_site_impact
-        impact = lookup(panel, recovery.VERSION, plan["source"])
+        return lookup(panel, recovery.VERSION, plan["source"])
+
+    def _impact(self, panel, plan, *, observed=None):
+        impact = observed if observed is not None else self._lookup_impact(panel, plan)
         if (not isinstance(impact, dict) or impact.get("state") != "File Mapping"
                 or impact.get("schema") != 1 or impact.get("version") != recovery.VERSION
                 or impact.get("scope") != "shared_service"
@@ -160,7 +162,9 @@ class ManualFpmWorkflow:
                 or type(impact.get("other_php_sites_count")) is not int
                 or impact["other_php_sites_count"] < 0
                 or impact["site_count"] != (
-                    len(impact["matched_sites"]) + impact["other_php_sites_count"])):
+                    len(impact["matched_sites"]) + impact["other_php_sites_count"])
+                or not isinstance(impact.get("dependency_sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", impact["dependency_sha256"])):
             raise recovery.FpmApplyError("fpm_impact", "Native shared-pool site attribution needs review")
         ids = set()
         for item in impact["matched_sites"]:
@@ -175,6 +179,7 @@ class ManualFpmWorkflow:
             "version":recovery.VERSION, "site_count":impact["site_count"],
             "matched_sites":impact["matched_sites"],
             "other_php_sites_count":impact.get("other_php_sites_count"),
+            "dependency_sha256":impact["dependency_sha256"],
         }
         digest = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
                                             separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -243,25 +248,89 @@ class ManualFpmWorkflow:
         return {**result, "shared_impact":current["shared_impact"],
                 "note":"Native FPM syntax/reload and service health checked; not proof of all client traffic."}
 
+    def _recovery_details(self, panel, version):
+        """One read-only current recovery decision, independent of Monitor mode."""
+        status = recovery.recovery_status(self.config_root, self.data_dir, version)
+        if not status.get("operation_id"):
+            return status
+        manual = ("Automatic restoration is unavailable. Recovery records remain intact. "
+                  "Reinstall the plugin or use an authorized supervised recovery "
+                  "procedure after inspecting current sites, FPM bytes and service health.")
+        plan = {"source": str(Path(self.config_root) / version / "etc/php-fpm.conf")}
+        try:
+            observed = self._lookup_impact(panel, plan)
+        except Exception:
+            return {**status, "safe_rollback_file_match": False,
+                    "impact_reason": "Current site routing cannot be inspected",
+                    "shared_impact": None, "manual_recovery": manual}
+        try:
+            impact, digest = self._impact(panel, plan, observed=observed)
+        except recovery.FpmApplyError as exc:
+            return {**status, "safe_rollback_file_match": False,
+                    "impact_reason": str(exc), "shared_impact": observed,
+                    "manual_recovery": manual}
+        result = {**status, "shared_impact": impact, "impact_sha256": digest}
+        if not status["safe_rollback_file_match"]:
+            return {**result, "manual_recovery": manual}
+        decision = {
+            "operation_id": status["operation_id"],
+            "baseline_sha256": status["baseline_sha256"],
+            "applied_sha256": status["applied_sha256"],
+            "observed_sha256": status["observed_sha256"],
+            "restoration_changes": status["restoration_changes"],
+            "impact_sha256": digest,
+        }
+        result["recovery_decision_sha256"] = hashlib.sha256(
+            json.dumps(decision, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        result["warning"] = (
+            "Restoring PHP 85 [www] reloads one shared service for the currently "
+            "listed sites and possibly undiscovered consumers. File mapping does "
+            "not establish full effective routing or universal site health."
+        )
+        return result
+
     def recovery(self, args):
         _full_primary_admin_post()
         version = _arg(args, "php_version", recovery.VERSION)
-        self._environment(version)
-        return recovery.recovery_status(self.config_root, self.data_dir, version)
+        panel = self._environment(version)
+        return self._recovery_details(panel, version)
 
     def rollback(self, args):
         _full_primary_admin_post()
         if _arg(args, "approved_scope") != APPROVAL_SCOPE:
             raise recovery.FpmApplyError("fpm_approval", "Explicit shared-service recovery approval is required")
         version = _arg(args, "php_version", recovery.VERSION)
-        self._environment(version)
+        panel = self._environment(version)
         operation_id = _arg(args, "operation_id")
         if not isinstance(operation_id, str) or not re.fullmatch("[0-9a-f]{32}", operation_id):
             raise recovery.FpmApplyError("fpm_recovery", "A valid saved operation ID is required")
-        current = recovery.recovery_status(self.config_root, self.data_dir, version)
-        if current["operation_id"] != operation_id or not current["safe_rollback_file_match"]:
-            raise recovery.FpmApplyError("fpm_conflict", "Recovery changed or is not safe to restore automatically")
+        current = self._recovery_details(panel, version)
+        expected_decision = _arg(args, "expected_recovery")
+        expected_impact = _arg(args, "expected_impact")
+        if (current.get("operation_id") != operation_id
+                or current.get("safe_rollback_file_match") is not True
+                or not isinstance(expected_decision, str)
+                or not re.fullmatch("[0-9a-f]{64}", expected_decision)
+                or expected_decision != current.get("recovery_decision_sha256")
+                or expected_impact != current.get("impact_sha256")):
+            raise recovery.FpmApplyError(
+                "fpm_conflict", "Recovery decision or affected websites changed; inspect and approve again"
+            )
         validate, activate, verify = self.hooks_factory(version, None)
-        return recovery.rollback(
+
+        def prewrite_check():
+            latest = self._recovery_details(self._environment(version), version)
+            if (latest.get("safe_rollback_file_match") is not True
+                    or latest.get("recovery_decision_sha256") != expected_decision
+                    or latest.get("impact_sha256") != expected_impact):
+                raise recovery.FpmApplyError(
+                    "fpm_conflict", "Shared-site impact or recovery file changed before Rollback"
+                )
+
+        restored = recovery.rollback(
             self.config_root, self.data_dir, version, operation_id,
-            validate=validate, activate=activate, verify=verify)
+            validate=validate, activate=activate, verify=verify,
+            prewrite_check=prewrite_check)
+        return {**restored, "shared_impact": current["shared_impact"],
+                "note": "Baseline bytes restored and FPM syntax/reload checks completed."}
