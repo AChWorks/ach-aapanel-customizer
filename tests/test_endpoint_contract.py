@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 import types
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -64,6 +65,11 @@ class MemoryDomainQuery:
 class EntrypointTests(unittest.TestCase):
     def setUp(self):
         self.plugin = MODULE.ach_customizer_main()
+        self.state_dir = tempfile.TemporaryDirectory(prefix="ach-endpoint-state-")
+        self.addCleanup(self.state_dir.cleanup)
+        state_path = patch.object(MODULE, "_STATE_DIR", self.state_dir.name)
+        state_path.start()
+        self.addCleanup(state_path.stop)
 
     def test_no_auth_bypassing_dynamic_check_or_mutation_entrypoint(self):
         self.assertNotIn('_check', vars(MODULE.ach_customizer_main))
@@ -73,6 +79,166 @@ class EntrypointTests(unittest.TestCase):
         self.assertTrue(response['status'])
         self.assertEqual(response['mode'], 'Monitor')
         self.assertIs(response['enforcement'], False)
+
+    def test_primary_administrator_only_post_can_change_monitor_flags(self):
+        flask_stub = types.ModuleType("flask")
+        flask_stub.session = {"uid": 1, "login": True}
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        with patch.dict(sys.modules, {"flask": flask_stub}):
+            response = self.plugin.set_control({"control": "overall", "enabled": "false", "expected_revision": "0"})
+            self.assertTrue(response["status"], response)
+            self.assertFalse(response["overall_enabled"])
+            self.assertEqual(response["mode"], "Disabled")
+            self.assertFalse(response["enforcement"])
+            self.assertEqual(response["state_revision"], 1)
+            self.assertTrue(response["changed"])
+            self.assertEqual(self.plugin.get_overview({})["state_revision"], 1)
+            duplicate = self.plugin.set_control({"control": "overall", "enabled": "false", "expected_revision": "1"})
+            self.assertTrue(duplicate["status"])
+            self.assertFalse(duplicate["changed"])
+            self.assertEqual(duplicate["state_revision"], 1)
+            flask_stub.session["uid"] = 2
+            refused = self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})
+            self.assertFalse(refused["status"])
+            self.assertEqual(refused["stage"], "monitor_authorization")
+            flask_stub.session["uid"] = 1
+            flask_stub.request.method = "GET"
+            refused = self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})
+            self.assertEqual(refused["stage"], "monitor_authorization")
+            flask_stub.request.method = "POST"
+            flask_stub.session["login"] = False
+            refused = self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})
+            self.assertEqual(refused["stage"], "monitor_authorization")
+            self.assertEqual(self.plugin.get_overview({})["state_revision"], 1)
+            flask_stub.session["login"] = True
+            flask_stub.has_request_context = lambda: False
+            self.assertEqual(
+                self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})["stage"],
+                "monitor_authorization",
+            )
+
+
+    def test_temporary_and_nonprimary_sessions_cannot_mutate_or_create_state(self):
+        """Every rejected case must fail before entering the persistent writer."""
+        import ach_customizer_state as state
+
+        flask_stub = types.ModuleType("flask")
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        file = Path(self.state_dir.name) / state.STATE_FILE
+        primary = {"login": True, "uid": 1}
+        cases = (
+            ("temporary_token_uid1", {**primary, "tmp_login": True}, "POST", True),
+            ("temporary_truthy_marker", {**primary, "tmp_login": "yes"}, "POST", True),
+            ("temporary_identity_id_empty", {**primary, "tmp_login_id": ""}, "POST", True),
+            ("temporary_identity_id_zero", {**primary, "tmp_login_id": 0}, "POST", True),
+            ("temporary_expiration_marker", {**primary, "tmp_login_expire": 0}, "POST", True),
+            ("temporary_all_markers", {
+                **primary, "tmp_login": True,
+                "tmp_login_id": "18", "tmp_login_expire": 999999
+            }, "POST", True),
+            ("secondary_user", {"login": True, "uid": 2}, "POST", True),
+            ("string_primary_id", {"login": True, "uid": "1"}, "POST", True),
+            ("boolean_primary_id", {"login": True, "uid": True}, "POST", True),
+            ("not_authenticated", {"login": False, "uid": 1}, "POST", True),
+            ("get_instead_of_post", primary.copy(), "GET", True),
+            ("no_flask_request_context", primary.copy(), "POST", False),
+        )
+
+        with patch.dict(sys.modules, {"flask": flask_stub}):
+            for persisted in (False, True):
+                if persisted:
+                    state.set_enabled("overall", False,
+                                      directory=self.state_dir.name,
+                                      expected_revision=0)
+                revision = 1 if persisted else 0
+                original = file.read_bytes() if persisted else None
+                for label, session, method, has_context in cases:
+                    with self.subTest(persisted=persisted, case=label):
+                        flask_stub.session = dict(session)
+                        flask_stub.request.method = method
+                        flask_stub.has_request_context = lambda: has_context
+                        with patch.object(
+                            MODULE, "set_enabled",
+                            side_effect=AssertionError("Unauthorized state writer called"),
+                        ) as writer:
+                            response = self.plugin.set_control({
+                                "control": "overall", "enabled": "true",
+                                "expected_revision": str(revision),
+                            })
+                            writer.assert_not_called()
+                        self.assertIs(response["status"], False)
+                        self.assertEqual(response["stage"], "monitor_authorization")
+                        self.assertTrue(response["operation_id"])
+                        self.assertEqual(file.exists(), persisted)
+                        if persisted:
+                            self.assertEqual(file.read_bytes(), original)
+                            self.assertEqual(state.read_state(self.state_dir.name)["revision"], revision)
+                        else:
+                            self.assertEqual(list(Path(self.state_dir.name).iterdir()), [])
+
+    def test_optimistic_revision_rejection_through_authenticated_endpoint(self):
+        flask_stub = types.ModuleType("flask")
+        flask_stub.session = {"uid": 1, "login": True}
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        with patch.dict(sys.modules, {"flask": flask_stub}):
+            first = self.plugin.set_control({
+                "control": "overall", "enabled": "false", "expected_revision": "0"
+            })
+            self.assertTrue(first["status"], first)
+            conflict = self.plugin.set_control({
+                "control": "overall", "enabled": "true", "expected_revision": "0"
+            })
+            self.assertFalse(conflict["status"])
+            self.assertEqual(conflict["stage"], "monitor_state_write")
+            self.assertIn("revision changed", conflict["msg"])
+            self.assertEqual(self.plugin.get_overview({})["state_revision"], 1)
+            missing = self.plugin.set_control({
+                "control": "overall", "enabled": "true"
+            })
+            self.assertFalse(missing["status"])
+            self.assertIn("revision", missing["msg"])
+            valid = self.plugin.set_control({
+                "control": "overall", "enabled": "true", "expected_revision": "1"
+            })
+            self.assertTrue(valid["status"])
+            self.assertEqual(valid["state_revision"], 2)
+
+    def test_disabled_monitors_do_not_inspect_websites_or_shared_fpm(self):
+        import ach_customizer_state as state
+
+        state.set_enabled("site_inventory", False, directory=self.state_dir.name, expected_revision=0)
+        with patch.object(MODULE, "get_site_page", side_effect=AssertionError("must not scan")) as sites_call:
+            blocked = self.plugin.get_sites({})
+            self.assertFalse(blocked["status"])
+            self.assertIn("disabled", blocked["msg"])
+            sites_call.assert_not_called()
+
+        state.set_enabled("overall", False, directory=self.state_dir.name, expected_revision=1)
+        with patch.object(MODULE, "preview_php_fpm", side_effect=AssertionError("must not inspect")) as fpm_call:
+            blocked = self.plugin.preview_php_fpm({})
+            self.assertFalse(blocked["status"])
+            self.assertIn("disabled", blocked["msg"])
+            fpm_call.assert_not_called()
+        overview = self.plugin.get_overview({})
+        self.assertFalse(overview["enforcement"])
+        self.assertEqual(overview["modules"]["site_inventory"], "Disabled")
+        self.assertEqual(overview["modules"]["php_fpm_file_preview"], "Disabled")
+
+    def test_corrupted_monitor_state_is_visible_not_silently_reset(self):
+        from pathlib import Path
+        from ach_customizer_state import STATE_FILE
+        file = Path(self.state_dir.name) / STATE_FILE
+        file.write_text("{invalid")
+        file.chmod(0o600)
+        error = self.plugin.get_overview({})
+        self.assertFalse(error["status"])
+        self.assertEqual(error["stage"], "monitor_state_read")
+        self.assertTrue(error["operation_id"])
+        self.assertFalse(self.plugin.get_sites({})["status"])
+        self.assertEqual(file.read_text(), "{invalid")
 
     def test_actual_entrypoint_can_query_sites_and_handles_error(self):
         query = MemorySiteQuery([

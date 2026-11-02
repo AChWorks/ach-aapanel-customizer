@@ -1,0 +1,212 @@
+{
+  "evidence_type": "native_aaPanel_browser_zip_lifecycle_and_persistent_monitor_controls",
+  "date_utc": "2026-11-02",
+  "authority": "disposable_nonproduction_qemu_guest_only",
+  "project": "AChWorks/ach-aapanel-customizer",
+  "integration_base": "36088ebb6ad5229c7e471dd2af34dc232a4e296b",
+  "environment": {
+    "guest_os": "Debian 12",
+    "aaPanel": "8.0.7",
+    "nginx": "1.28.3",
+    "php_fpm": "8.5.12",
+    "storage": "task_owned_disposable_overlay_over_retained_site_lifecycle_qcow2",
+    "authenticated_browser": "real_aaPanel_primary_administrator_session",
+    "browser_tool": "Playwright_against_native_aaPanel_UI"
+  },
+  "merged_0_1_0_browser_lifecycle": {
+    "zip_sha256": "3ad4df34f2bc5503ef6f82b5ff7e103c7f9340848166837092abbfd64864a803",
+    "native_ui_file_picker_upload": "pass",
+    "native_ui_install": "pass",
+    "installed_source_hashes": "matched_the_merged_main_package",
+    "native_plugin_setting_dialog": "pass",
+    "live_site_domain_binding_display": "pass",
+    "native_ui_uninstall_confirmation": "pass",
+    "native_uninstall_result": "Uninstallaton succeeded",
+    "plugin_directory_and_owned_icon_removed": true,
+    "native_ui_reinstall_after_uninstall": "pass",
+    "site_and_host_configuration_preserved": true
+  },
+  "monitor_0_1_1_candidate": {
+    "version": "0.1.1",
+    "development_zip_sha256": "2632011252f2f46fd4686f4ea5c67f607691857339c0ed4c22832c57d894be95",
+    "source_sha256": {
+      "ach_customizer_main.py": "22a6ea0d191efc96b6ee329ef88584e00c514f823ab7346f0070fd03b7df3de6",
+      "ach_customizer_state.py": "94f688a40a2dcc9b5b1a348557269df96c3a916d5aa4322c12c4782f2d223047",
+      "index.html": "621abbeed553c2a3ccb4ddb1e6b6d374a3d154316be3267a0364e92529aabfe7"
+    },
+    "browser_native_upgrade_from": "0.1.0",
+    "browser_native_upgrade_result": "Installation succeeded!",
+    "installed_source_hashes": "matched_candidate",
+    "controlled_guest_only_panel_restart_to_load_new_python": "pass",
+    "fresh_default_monitor": {
+      "overall": true,
+      "site_inventory": true,
+      "php_fpm_file_preview": true,
+      "revision": 0,
+      "state_file_created_on_read": false
+    },
+    "browser_post_global_disable": {
+      "result": "pass",
+      "changed": true,
+      "overall_enabled": false,
+      "state_revision": 1,
+      "enforcement": false,
+      "website_inventory_request_after_disable": {
+        "status": false,
+        "stage": "website_discovery",
+        "message": "Monitor is disabled by its operator",
+        "ui_rows": 0
+      }
+    },
+    "persistent_storage_after_disable": {
+      "state_path": "/www/server/panel/data/ach_customizer.state.json",
+      "lock_path": "/www/server/panel/data/ach_customizer.state.lock",
+      "owner": "root",
+      "mode": "0600",
+      "enabled": false,
+      "revision": 1
+    },
+    "browser_native_uninstall": {
+      "result": "Uninstallaton succeeded",
+      "plugin_directory_and_owned_icon_absent": true,
+      "state_and_lock_preserved": true,
+      "exact_state_revision_after_uninstall": 1,
+      "exact_overall_enabled_after_uninstall": false
+    },
+    "browser_native_reinstall": {
+      "previous_version_reported": "0",
+      "version": "0.1.1",
+      "result": "Installation succeeded!",
+      "overview_after_reinstall": "Disabled",
+      "restored_global_flag": false,
+      "restored_state_revision": 1,
+      "restored_module_flags": {
+        "site_inventory": true,
+        "php_fpm_file_preview": true
+      }
+    },
+    "browser_global_reenable": {
+      "result": "pass",
+      "overall_enabled": true,
+      "revision": 2,
+      "enforcement": false,
+      "site_inventory_request_result": "pass",
+      "discovered_real_site_id": 3,
+      "domain_binding": "site-a.ach-customizer.invalid"
+    },
+    "browser_module_disable": {
+      "result": "pass",
+      "control": "php_fpm_file_preview",
+      "revision": 3,
+      "overall_enabled": true,
+      "site_inventory_enabled": true,
+      "php_fpm_file_preview_enabled": false,
+      "preview_request_rejected": true,
+      "rejection_message": "Monitor module is disabled: php_fpm_file_preview",
+      "enforcement": false
+    },
+    "authenticated_get_mutation_attempt": {
+      "method": "GET",
+      "result": "aaPanel INIT_CSRF_ERR",
+      "state_mutation": "none_observed"
+    }
+  },
+  "host_integrity_before_and_after": {
+    "nginx_vhost_sha256": "c8d5232ec6f8aeba40a5de0366709f524603f4eab26a86c0d9ac26fa19bce2fb",
+    "shared_php_fpm_conf_sha256": "232d0c85d59e187ed0da59514f31d5f02462fd98d6964de11216542bd7074bbb",
+    "nginx_syntax": "pass",
+    "test_site_http": 200,
+    "test_firewall_rules_removed": true,
+    "remote_vendor_uninstall_script_created": false,
+    "production_changes": false
+  },
+  "uninstall_isolation": {
+    "reason": "Native aaPanel V2 uninstall attempts to fetch a vendor install.sh before invoking the local plugin uninstall hook",
+    "defensive_control": "Temporary outbound TCP 80 and 443 reject rules in disposable guest only for native uninstall tests",
+    "scope": "guest_IPv4_and_IPv6_OUTPUT_only",
+    "rules_removed_after_each_uninstall": true,
+    "original_guest_UFW_rules_preserved": true,
+    "vendor_script_absent": true
+  },
+  "verification_limits": [
+    "Only aaPanel 8.0.7 on the declared isolated Debian 12 guest was exercised",
+    "The 0.1.1 tests used the primary admin account; real restricted-role browser testing was not performed",
+    "Native aaPanel update can retain old Python modules until the panel backend is restarted by an operator",
+    "No persisted schema migration beyond schema version 1 has been exercised",
+    "Nginx extension durability and PHP-FPM reset reproduction remain unverified",
+    "No Apply, automatic enforcement, rollback or production installation was executed",
+    "Browser observations are summarized evidence, not an independently replayed complete browser trace",
+    "Validated external state persistence applies to the monitored switches only, not future host-managed policies",
+    "Earlier 0.1.1 candidate SHA values in this report are historical; exact post-remediation SHA values and browser rejection evidence are recorded separately in optimistic_revision_final_candidate.",
+    "The post-review temporary-login authorization correction has targeted Python source tests and upstream-current-source context; actual aaPanel 8.0.7 token-session browser replay has not been performed."
+  ],
+  "optimistic_revision_final_candidate": {
+    "note": "Final candidate was retested after correcting pre-existing same-version 0.1.1 implementation; earlier SHA values above belong to its pre-correction ancestor, not this test.",
+    "development_zip_sha256": "661e72a44791320e858d802c233259c9946f7fb83bc0de86742823e8511e724b",
+    "source_sha256": {
+      "ach_customizer_main.py": "aedc7c2cee27902c011b365a631950dd4d34e571a59f2598bb5f9f266b96a062",
+      "ach_customizer_state.py": "ef06e092fdb9228814637ab67115a053c46f68be294f05e24ee0330fb84a0502",
+      "index.html": "b1f41552b8da417144abf790eec80945b43ace215f2de1af5fda545a64e99463"
+    },
+    "native_browser_zip_update": "Installation succeeded!",
+    "installed_source_sha256_matched": true,
+    "pre_update_state": {
+      "revision": 3,
+      "overall": true,
+      "site_inventory": true,
+      "php_fpm_file_preview": false
+    },
+    "guest_only_panel_backend_restart": "successful",
+    "authenticated_panel_ui_change": {
+      "control": "site_inventory",
+      "requested_enabled": false,
+      "expected_revision": 3,
+      "accepted_revision": 4,
+      "result": "success"
+    },
+    "authenticated_stale_request": {
+      "control": "site_inventory",
+      "requested_enabled": true,
+      "expected_revision": 3,
+      "status": false,
+      "stage": "monitor_state_write",
+      "message": "Monitor state revision changed; reopen Overview before retrying",
+      "updated_state_remained_at_revision": 4
+    },
+    "final_state": {
+      "revision": 4,
+      "overall": true,
+      "site_inventory": false,
+      "php_fpm_file_preview": false,
+      "enforcement": false
+    },
+    "state_and_lock_file_ownership": "root:root mode 0600",
+    "inspected_vhost_sha256": "c8d5232ec6f8aeba40a5de0366709f524603f4eab26a86c0d9ac26fa19bce2fb",
+    "inspected_php_fpm_sha256": "232d0c85d59e187ed0da59514f31d5f02462fd98d6964de11216542bd7074bbb",
+    "nginx_syntax": "pass",
+    "test_website_http_status": 200,
+    "temporary_test_only_guest_firewall_rules_absent": true,
+    "production_effects": "none"
+  },
+  "review_remediation_after_runtime_evidence": {
+    "finding": "PR #8 independent high-assurance review REQUIRED-01",
+    "affected_boundary": "Primary-admin-only Monitor state mutation",
+    "finding_cause": "aaPanel temporary token sessions may satisfy login=True and uid=1; previous gate checked only these flags plus POST",
+    "upstream_source": "https://github.com/aaPanel/aaPanel/blob/master/class/userlogin.py",
+    "upstream_observed_keys": [
+      "tmp_login",
+      "tmp_login_id",
+      "tmp_login_expire"
+    ],
+    "correction": "Deny a truthy tmp_login or presence of either temporary identity marker, before calling persistent state writer; preserve native aaPanel authentication/CSRF, primary uid and POST checks",
+    "corrected_main_source_sha256": "95ef83527d83355d33e15379085e580d68b7514ac0feed2513117252e9a4342e",
+    "focused_endpoint_test_source_sha256": "d5b715e31dec42376963329b1eb58fbc7c65470c4b4067b3bd222d51e500cb69",
+    "verification": "Endpoint tests using 12 forbidden session/request scenarios against both absent and already-persisted state, asserting monitor_authorization, no state-writer invocation, and no file/revision mutation; ordinary primary-admin POST success retained",
+    "guest_runtime_replay": false,
+    "aaPanel_8_0_7_temporary_token_internals_independently_verified": false,
+    "attribution": "The earlier browser observations in this file apply only to their separately recorded SHA-256 identities, not to the post-review corrected authentication guard",
+    "production_changes": false,
+    "corrected_development_zip_sha256": "58f74f08ca9f372436b1c29eb86a308f5969cde8f5998d9eeda81b061e9d33dc",
+    "local_source_test_results": "64 Python tests and 43 real-inline-JavaScript tests passed; syntax checks pass"
+  }
+}

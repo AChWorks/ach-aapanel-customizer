@@ -1,8 +1,8 @@
 {
   "title": "ACh aaPanel Customizer",
   "name": "ach_customizer",
-  "ps": "Monitor-only development candidate; native aaPanel customization foundation",
-  "versions": "0.1.0",
+  "ps": "Monitor-only development candidate; persisted enable/disable controls",
+  "versions": "0.1.1",
   "checks": "/www/server/panel/plugin/ach_customizer",
   "author": "AChWorks",
   "home": "https://github.com/AChWorks/ach-aapanel-customizer"

@@ -8,6 +8,9 @@
   #ach-customizer .ach-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:12px 0; }
   #ach-customizer .ach-fields label { display:block; font-weight:600; }
   #ach-customizer .ach-fields input { width:100%; max-width:210px; margin-top:3px; }
+  #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:14px; margin:10px 0; }
+  #ach-customizer .ach-switches label { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+  #ach-customizer .ach-switches input { margin:0; }
   #ach-customizer table { width:100%; border-collapse:collapse; }
   #ach-customizer td, #ach-customizer th { padding:7px 9px; text-align:start; border-bottom:1px solid #e1e5ec; overflow-wrap:anywhere; }
   #ach-customizer .ach-scroll { overflow-x:auto; }
@@ -28,6 +31,16 @@
     <p id="ach-message" role="status" aria-live="polite"></p>
     <section class="ach-view" data-view="overview" role="tabpanel">
       <p id="ach-overview-status">Loading...</p>
+      <div class="ach-note">
+        <strong>Monitor controls</strong>
+        <p>These switches enable or disable read-only plugin monitoring only. They never stop websites, reload services, or authorize Apply. Preferences survive a normal plugin uninstall/reinstall.</p>
+        <div class="ach-switches">
+          <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /> Overall Monitor</label>
+          <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /> Website inventory</label>
+          <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" disabled /> PHP-FPM preview</label>
+        </div>
+        <p id="ach-state-revision" role="status">Monitor state unavailable</p>
+      </div>
       <p>Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.</p>
     </section>
     <section class="ach-view" data-view="websites" role="tabpanel" hidden>
@@ -67,6 +80,7 @@
     id: 'Operation ID'
   };
   var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false;
+  var controlBusy = false, lastOverview = null;
   function msg(value, failed) { root.find('#ach-message').text(value || '').toggleClass('ach-error', Boolean(failed)); }
   function invalidateInventory(message) {
     hasMore = false;
@@ -118,11 +132,48 @@
       })
       .fail(function (_xhr, status) { msg(t.error + ': ' + status, true); done(null); });
   }
+  function displayControls(r) {
+    if (!r || r.state_schema !== 1 || !Number.isSafeInteger(r.state_revision) ||
+        r.state_revision < 0 || typeof r.overall_enabled !== 'boolean' ||
+        !r.modules_enabled || typeof r.modules_enabled !== 'object' ||
+        typeof r.modules_enabled.site_inventory !== 'boolean' ||
+        typeof r.modules_enabled.php_fpm_file_preview !== 'boolean' ||
+        r.enforcement !== false) {
+      lastOverview = null;
+      root.find('[data-monitor-control]').prop('disabled', true);
+      root.find('#ach-state-revision').text('Monitor state unavailable');
+      if (r) msg('Monitor state API mismatch: no preferences were inferred.', true);
+      return;
+    }
+    lastOverview = r;
+    root.find('#ach-monitor-enabled').prop('checked', r.overall_enabled);
+    root.find('#ach-site-enabled').prop('checked', r.modules_enabled.site_inventory);
+    root.find('#ach-fpm-enabled').prop('checked', r.modules_enabled.php_fpm_file_preview);
+    root.find('#ach-state-revision').text('State revision: ' + r.state_revision);
+    root.find('[data-monitor-control]').prop('disabled', controlBusy);
+  }
   function overview() {
     request('get_overview', {}, function (r) {
       root.find('#ach-overview-status').text(r ? r.mode + ' — ' + r.notice : t.error);
+      displayControls(r);
     });
   }
+  root.find('[data-monitor-control]').on('change', function () {
+    if (controlBusy || !lastOverview) return;
+    var control = $(this).attr('data-monitor-control');
+    var enabled = $(this).prop('checked') === true;
+    controlBusy = true;
+    root.find('[data-monitor-control]').prop('disabled', true);
+    request('set_control', {
+      control:control, enabled:enabled ? 'true' : 'false',
+      expected_revision:lastOverview.state_revision
+    }, function (r) {
+      controlBusy = false;
+      if (!r) { displayControls(lastOverview); return; }
+      root.find('#ach-overview-status').text(r.mode + ' — ' + r.notice);
+      displayControls(r);
+    });
+  });
   function sites() {
     if (siteBusy) return;
     siteBusy = true;
