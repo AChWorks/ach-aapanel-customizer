@@ -57,8 +57,19 @@
     "pm.min_spare_servers": 5,
     "pm.start_servers": 5
   },
+  "runtime_tested_commit": "080b280705ea7a416e7eaa5e7b2458e71d64436b",
   "schema_version": 1,
   "scope": "isolated_debian12_qemu_guest_only",
   "source": "plugin/ach_customizer/ach_customizer_fpm_apply.py",
-  "source_sha256": "e140a9df46923ca6377c6ac4c5ef82b2c56b292c95a639674da9527f19cc4802"
+  "source_sha256": "e140a9df46923ca6377c6ac4c5ef82b2c56b292c95a639674da9527f19cc4802",
+  "subsequent_source_only_progress": {
+    "description": "The runtime evidence belongs to the exact prior source hash. Later standalone read-only recovery-status and full-admin workflow gates were added without modifying the previously guest-tested Apply/rollback behavior.",
+    "full_suite_python_tests_passed": 89,
+    "native_UI_wired": false,
+    "native_authorization_workflow_unit_cases": 8,
+    "native_browsed_apply_unverified": true,
+    "native_browser_authorization_replayed": false,
+    "packaged_as_plugin": false,
+    "recovery_status_read_does_not_create_lock": true
+  }
 }

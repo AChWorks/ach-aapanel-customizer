@@ -276,8 +276,8 @@ def _read_journal(fd_dir):
 def _persist_journal(fd_dir, record):
     payload = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     temporary = ".ach_customizer.fpm85.journal." + uuid4().hex + ".tmp"
-    _write_new(fd_dir, temporary, payload, mode=0o600)
     try:
+        _write_new(fd_dir, temporary, payload, mode=0o600)
         os.replace(temporary, JOURNAL, src_dir_fd=fd_dir, dst_dir_fd=fd_dir)
         os.fsync(fd_dir)
     finally:
@@ -390,6 +390,45 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
             os.close(config_fd)
     finally:
         os.close(lock_fd)
+        os.close(fd_state)
+
+
+def recovery_status(config_root, state_dir, version):
+    """Read-only visibility into the one durable PHP 8.5 rollback boundary."""
+    if version != VERSION:
+        raise FpmApplyError("compatibility", "Only PHP 8.5 recovery is supported")
+    # Recovery status is a pure read: unlike a write transaction, it must not
+    # create a lock file just because a user opened the plugin UI.
+    fd_state = _dir(state_dir)
+    try:
+        record = _read_journal(fd_state)
+        if record is None:
+            if os.path.lexists(Path(state_dir) / SNAPSHOT):
+                raise FpmApplyError("recovery", "Unpaired PHP-FPM snapshot requires review")
+            return {"state": "No Recovery", "version": version, "operation_id": None}
+        snapshot, _ = _read(fd_state, SNAPSHOT, mode=0o600)
+        if _sha(snapshot) != record["before_sha256"]:
+            raise FpmApplyError("recovery", "Recovery snapshot checksum mismatch")
+        fd_config = _dir(Path(config_root) / version / "etc")
+        try:
+            current, _ = _read(fd_config, "php-fpm.conf")
+        finally:
+            os.close(fd_config)
+        # Concurrent Apply/rollback owns atomic journal replacement. A changed
+        # journal means the read is stale; the next operation must recheck.
+        if _read_journal(fd_state) != record:
+            raise FpmApplyError("conflict", "PHP-FPM recovery changed while being inspected")
+        digest = _sha(current)
+        state = ("Applied" if digest == record["after_sha256"] else
+                 "Already Baseline" if digest == record["before_sha256"] else
+                 "Needs Review")
+        return {"state": state, "version": version,
+                "phase": record["phase"], "operation_id": record["operation_id"],
+                "baseline_sha256": record["before_sha256"],
+                "applied_sha256": record["after_sha256"],
+                "observed_sha256": digest,
+                "safe_rollback_file_match": state in ("Applied", "Already Baseline")}
+    finally:
         os.close(fd_state)
 
 

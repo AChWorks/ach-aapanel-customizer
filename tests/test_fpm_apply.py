@@ -189,6 +189,27 @@ class TestFpmManualApply(unittest.TestCase):
         self.assertEqual(done["state"], "Rolled Back")
         self.assertFalse((self.data / manual.JOURNAL).exists())
 
+    def test_recovery_status_reports_file_ownership_and_conflict(self):
+        self.assertEqual(manual.recovery_status(self.root / "php", self.data, "85")["state"], "No Recovery")
+        self.assertEqual(list(self.data.iterdir()), [], "read-only recovery status created a file")
+        result = self.apply()
+        status = manual.recovery_status(self.root / "php", self.data, "85")
+        self.assertEqual(status["state"], "Applied")
+        self.assertEqual(status["phase"], "applied")
+        self.assertEqual(status["operation_id"], result["operation_id"])
+        self.assertTrue(status["safe_rollback_file_match"])
+        self.config.write_bytes(self.config.read_bytes() + b"; other writer\n")
+        changed = manual.recovery_status(self.root / "php", self.data, "85")
+        self.assertEqual(changed["state"], "Needs Review")
+        self.assertFalse(changed["safe_rollback_file_match"])
+
+    def test_unpaired_recovery_artifact_never_looks_empty(self):
+        (self.data / manual.SNAPSHOT).write_bytes(BASELINE)
+        (self.data / manual.SNAPSHOT).chmod(0o600)
+        with self.assertRaises(manual.FpmApplyError) as caught:
+            manual.recovery_status(self.root / "php", self.data, "85")
+        self.assertEqual(caught.exception.stage, "recovery")
+
     def test_concurrent_external_mutation_blocks_rollback(self):
         result = self.apply()
         contents = self.config.read_bytes()
