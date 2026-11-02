@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ACh Status Pages - Preview Index</title>
+<style>
+:root{--ink:#0b1718;--paper:#f4f2eb;--accent:#008b92;--border:#cfdbd2}*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;background:var(--paper);color:var(--ink);margin:0;line-height:1.6}
+main{max-width:1150px;margin:auto;padding:40px 22px 80px}.brand{font-size:27px;letter-spacing:-.07em;font-weight:800;text-decoration:none;color:var(--ink)}.brand b{color:var(--accent)}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--border);padding-bottom:20px}small{font-size:12px;color:#54716b}
+h1{font-size:clamp(34px,6vw,70px);letter-spacing:-.055em;line-height:1.15;margin:56px 0 12px}.intro{color:#506862;max-width:640px;margin-bottom:34px}
+.gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.tile{background:#e6ede7;border:1px solid var(--border);border-radius:14px;overflow:hidden;margin:0}.tile img{display:block;width:100%;height:auto}.tile figcaption{padding:12px 16px;font-weight:650;font-size:13px;background:#fff}
+h2{margin-top:62px;letter-spacing:-.03em}.index{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.item{background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px}.item strong{font-size:14px}.links{white-space:nowrap;display:flex;gap:7px}.links a{color:#086d71;font-weight:650;font-size:12px;text-decoration:none;border:1px solid #b9d7d0;padding:7px 9px;border-radius:7px}.links a:hover,.links a:focus-visible{background:#e6f1ed}
+footer{padding-top:20px;margin-top:44px;border-top:1px solid var(--border);color:#50706c;font-size:12px}a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+@media(max-width:690px){.gallery,.index{grid-template-columns:1fr}main{padding-top:22px}h1{margin-top:30px}}
+</style>
+</head>
+<body>
+<main>
+<header><a class="brand" href="https://ach.li">ACh<b>.</b></a><small>WEB SYSTEMS / STATUS KIT v1.0</small></header>
+<h1>Designed for moments<br>that need clarity.</h1>
+<p class="intro">A lightweight, self-contained set of bilingual error and hosting status pages. Select a page below to open its actual HTML template.</p>
+<div class="gallery">
+<figure class="tile"><img src="screenshots/en-502-1440.png" alt="English 502 status page desktop screenshot"><figcaption>502 / English - Desktop</figcaption></figure>
+<figure class="tile"><img src="screenshots/fa-502-1440.png" alt="Persian RTL 502 status page desktop screenshot"><figcaption>502 / Persian - Desktop</figcaption></figure>
+<figure class="tile"><img src="screenshots/en-404-1440.png" alt="English 404 status page desktop screenshot"><figcaption>404 / English - Desktop</figcaption></figure>
+<figure class="tile"><img src="screenshots/fa-404-390.png" alt="Persian RTL 404 status page mobile screenshot"><figcaption>404 / Persian - Mobile</figcaption></figure>
+</div>
+<h2>All templates</h2>
+<div class="index">
+<div class="item"><strong>404 - Page Not Found</strong><span class="links"><a href="en/404.html">EN</a><a href="fa/404.html">FA</a></span></div>
+<div class="item"><strong>403 - Access Restricted</strong><span class="links"><a href="en/403.html">EN</a><a href="fa/403.html">FA</a></span></div>
+<div class="item"><strong>429 - Request Limit</strong><span class="links"><a href="en/429.html">EN</a><a href="fa/429.html">FA</a></span></div>
+<div class="item"><strong>500 - Server Error</strong><span class="links"><a href="en/500.html">EN</a><a href="fa/500.html">FA</a></span></div>
+<div class="item"><strong>502 - Bad Gateway</strong><span class="links"><a href="en/502.html">EN</a><a href="fa/502.html">FA</a></span></div>
+<div class="item"><strong>503 - Unavailable</strong><span class="links"><a href="en/503.html">EN</a><a href="fa/503.html">FA</a></span></div>
+<div class="item"><strong>504 - Timeout</strong><span class="links"><a href="en/504.html">EN</a><a href="fa/504.html">FA</a></span></div>
+<div class="item"><strong>50x - Generic Fallback</strong><span class="links"><a href="en/50x.html">EN</a><a href="fa/50x.html">FA</a></span></div>
+<div class="item"><strong>New Website</strong><span class="links"><a href="en/new-site.html">EN</a><a href="fa/new-site.html">FA</a></span></div>
+<div class="item"><strong>Unbound Domain</strong><span class="links"><a href="en/unbound.html">EN</a><a href="fa/unbound.html">FA</a></span></div>
+<div class="item"><strong>Stopped Website</strong><span class="links"><a href="en/stopped.html">EN</a><a href="fa/stopped.html">FA</a></span></div>
+</div>
+<footer>ACh Status Pages / Local preview only. Deployment notes in README-FA.md and README.md.</footer>
+</main>
+</body>
+</html>
