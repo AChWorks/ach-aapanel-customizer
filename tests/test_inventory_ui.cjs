@@ -34,8 +34,18 @@ function loadUi() {
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-sites-rows',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
-    '#ach-fpm-result', '#ach-diff-rows'
+    '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision'
   ]) elements.set(name, fakeNode('div'));
+  const controls = [
+    ['#ach-monitor-enabled', 'overall'],
+    ['#ach-site-enabled', 'site_inventory'],
+    ['#ach-fpm-enabled', 'php_fpm_file_preview']
+  ].map(([name, control]) => {
+    const node = fakeNode('input', {'data-monitor-control': control});
+    node.props.disabled = true;
+    elements.set(name, node);
+    return node;
+  });
   const requests = [];
 
   function selection(nodes) {
@@ -46,6 +56,7 @@ function loadUi() {
         assert.equal(nodes[0], root, 'Only plugin-scoped selectors are allowed');
         if (query === '[data-tab]') return selection(tabs);
         if (query === '[data-view]') return selection(views);
+        if (query === '[data-monitor-control]') return selection(controls);
         if (query === '#ach-prev, #ach-next') {
           return selection([elements.get('#ach-prev'), elements.get('#ach-next')]);
         }
@@ -134,6 +145,27 @@ function loadUi() {
     request.respond(response);
     return request;
   }
+  function openOverview() {
+    trigger(tabs.find(node => node.attributes['data-tab'] === 'overview'), 'click');
+    return requests.at(-1);
+  }
+  function respondOverview(value) {
+    const request = requests.at(-1);
+    assert.match(request.options.url, /s=get_overview$/);
+    request.respond(value);
+  }
+  function toggleMonitor(controlName, enabled) {
+    const node = controls.find(item => item.attributes['data-monitor-control'] === controlName);
+    assert.ok(node, 'Unknown test control');
+    node.props.checked = enabled;
+    trigger(node, 'change');
+    return requests.at(-1);
+  }
+  function respondControl(value) {
+    const request = requests.at(-1);
+    assert.match(request.options.url, /s=set_control$/);
+    request.respond(value);
+  }
   function rows() {
     return elements.get('#ach-sites-rows').children.map(tr =>
       tr.children.map(td => td.textContent)
@@ -146,10 +178,17 @@ function loadUi() {
       errorClass: elements.get('#ach-message').classes.has('ach-error'),
       prevDisabled: elements.get('#ach-prev').props.disabled,
       nextDisabled: elements.get('#ach-next').props.disabled,
-      page: elements.get('#ach-page').textContent
+      page: elements.get('#ach-page').textContent,
+      overview: elements.get('#ach-overview-status').textContent,
+      stateRevision: elements.get('#ach-state-revision').textContent,
+      controls: Object.fromEntries(controls.map(node => [
+        node.attributes['data-monitor-control'],
+        {checked: node.props.checked, disabled: node.props.disabled}
+      ]))
     };
   }
-  return { openSites, respond, state, requests,
+  return { openSites, openOverview, respond, respondOverview, toggleMonitor,
+    respondControl, state, requests,
     clickNext: () => trigger(elements.get('#ach-next'), 'click'),
     clickPrevious: () => trigger(elements.get('#ach-prev'), 'click') };
 }
@@ -206,14 +245,14 @@ invalidCase('Missing bound_domains is rejected',
 invalidCase('Null binding is rejected without a TypeError',
   r => { r.sites[0].bound_domains = [null]; });
 invalidCase('Empty binding object is rejected without fabricated text',
-  r => { r.sites[0].bound_domains = [{}]; });
+  r => { r.sites[0].bound_domains = [{}]; r.sites[0].canonical_domain_bound = false; });
 invalidCase('Binding without name is rejected',
-  r => { r.sites[0].bound_domains = [{ port: 80 }]; });
+  r => { r.sites[0].bound_domains = [{ port: 80 }]; r.sites[0].canonical_domain_bound = false; });
 invalidCase('Binding without port is rejected',
-  r => { r.sites[0].bound_domains = [{ name: 'x.example.test' }]; });
+  r => { r.sites[0].bound_domains = [{ name: 'site.example.test' }]; });
 for (const invalidPort of ['80', 0, 65536, 80.1, null, {}, true]) {
   invalidCase('Invalid port ' + JSON.stringify(invalidPort) + ' is rejected',
-    r => { r.sites[0].bound_domains = [{ name: 'x.example.test', port: invalidPort }]; });
+    r => { r.sites[0].bound_domains = [{ name: 'site.example.test', port: invalidPort }]; });
 }
 invalidCase('Missing required numeric site ID is rejected',
   r => { delete r.sites[0].id; });
@@ -248,7 +287,10 @@ invalidCase('Incorrect page_size value is rejected',
 invalidCase('Inconsistent has_more metadata is rejected',
   r => { r.has_more = true; });
 invalidCase('Domain result count above contract bound is rejected',
-  r => { r.sites[0].bound_domains = Array.from({length:1001}, (_,i) => ({name:'x'+i+'.test',port:80})); });
+  r => {
+    r.sites[0].bound_domains = Array.from({length:1001}, (_,i) =>
+      ({name:i === 0 ? 'site.example.test' : 'x'+i+'.test',port:80}));
+  });
 
 test('Valid empty inventory renders an empty page without error or pagination', () => {
   const ui = loadUi();
@@ -333,4 +375,123 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
   assert.equal(ui.state().page, 'Unavailable');
   assert.match(ui.state().error, /website_discovery: backend unavailable/);
   assert.equal(ui.state().nextDisabled, true);
+});
+
+
+const monitorOverview = (overrides = {}) => ({
+  status: true,
+  mode: 'Monitor',
+  notice: 'Read-only Monitor controls',
+  enforcement: false,
+  state_schema: 1,
+  state_revision: 0,
+  overall_enabled: true,
+  modules_enabled: {site_inventory: true, php_fpm_file_preview: true},
+  ...overrides
+});
+
+test('Native overview shows all three safe Monitor switches and revision', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  const state = ui.state();
+  assert.equal(state.overview, 'Monitor — Read-only Monitor controls');
+  assert.equal(state.stateRevision, 'State revision: 0');
+  for (const flag of Object.values(state.controls)) {
+    assert.equal(flag.checked, true);
+    assert.equal(flag.disabled, false);
+  }
+  assert.equal(state.error, '');
+});
+
+test('Overall Monitor disable updates only the intended switch and preserves module preferences', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  ui.toggleMonitor('overall', false);
+  const pending = ui.requests.at(-1);
+  assert.match(pending.options.url, /s=set_control$/);
+  assert.equal(pending.options.type, 'POST');
+  assert.equal(pending.options.data.control, 'overall');
+  assert.equal(pending.options.data.enabled, 'false');
+  assert.equal(pending.options.data.expected_revision, 0);
+  assert.equal(ui.state().controls.overall.disabled, true);
+  ui.respondControl(monitorOverview({
+    mode: 'Disabled',
+    notice: 'Monitoring is disabled',
+    overall_enabled: false,
+    state_revision: 1
+  }));
+  const current = ui.state();
+  assert.equal(current.stateRevision, 'State revision: 1');
+  assert.equal(current.controls.overall.checked, false);
+  assert.equal(current.controls.site_inventory.checked, true);
+  assert.equal(current.controls.php_fpm_file_preview.checked, true);
+  assert.equal(current.controls.overall.disabled, false);
+  assert.equal(current.error, '');
+});
+
+test('Module-level disable does not enable enforcement or disable unrelated modules', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  ui.toggleMonitor('site_inventory', false);
+  assert.equal(ui.requests.at(-1).options.data.control, 'site_inventory');
+  assert.equal(ui.requests.at(-1).options.data.enabled, 'false');
+  assert.equal(ui.requests.at(-1).options.data.expected_revision, 0);
+  ui.respondControl(monitorOverview({
+    state_revision: 1,
+    modules_enabled: {site_inventory: false, php_fpm_file_preview: true}
+  }));
+  const current = ui.state();
+  assert.equal(current.controls.overall.checked, true);
+  assert.equal(current.controls.site_inventory.checked, false);
+  assert.equal(current.controls.php_fpm_file_preview.checked, true);
+  assert.equal(current.stateRevision, 'State revision: 1');
+});
+
+test('Failed Monitor state update restores previous switches and exposes backend error', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  ui.toggleMonitor('overall', false);
+  ui.respondControl({status: false, stage: 'monitor_authorization',
+    msg: 'Primary administrator required', operation_id: 'op123'});
+  const current = ui.state();
+  assert.equal(current.controls.overall.checked, true);
+  assert.equal(current.controls.overall.disabled, false);
+  assert.equal(current.stateRevision, 'State revision: 0');
+  assert.match(current.error, /monitor_authorization: Primary administrator required/);
+  assert.match(current.error, /op123/);
+  assert.equal(current.errorClass, true);
+});
+
+test('Unexpected Monitor state schema disables all state controls without claiming success', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_schema: 2}));
+  const current = ui.state();
+  assert.match(current.error, /Monitor state API mismatch/);
+  assert.equal(current.stateRevision, 'Monitor state unavailable');
+  assert.equal(Object.values(current.controls).every(flag => flag.disabled), true);
+  const requests = ui.requests.length;
+  ui.toggleMonitor('overall', false);
+  assert.equal(ui.requests.length, requests);
+});
+
+test('Stale control revision fails visibly without repeating the conflicting mutation', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision: 4}));
+  ui.toggleMonitor('overall', false);
+  assert.equal(ui.requests.at(-1).options.data.expected_revision, 4);
+  ui.respondControl({
+    status: false,
+    stage: 'monitor_state_write',
+    msg: 'Monitor state revision changed; reopen Overview before retrying',
+    operation_id: 'conflict'
+  });
+  const current = ui.state();
+  assert.equal(current.controls.overall.checked, true);
+  assert.equal(current.controls.overall.disabled, false);
+  assert.match(current.error, /revision changed/);
+  assert.equal(ui.requests.length, 2);
+  ui.openOverview();
+  ui.respondOverview(monitorOverview({state_revision: 5, overall_enabled: false, mode: 'Disabled'}));
+  assert.equal(ui.state().controls.overall.checked, false);
+  assert.equal(ui.state().stateRevision, 'State revision: 5');
 });

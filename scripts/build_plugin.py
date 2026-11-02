@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = ROOT / 'plugin' / 'ach_customizer'
-FILES = ('ach_customizer_main.py', 'ach_customizer_monitor.py', 'ach_customizer_cleanup.py', 'icon.png', 'index.html', 'info.json', 'install.sh')
+FILES = ('ach_customizer_main.py', 'ach_customizer_monitor.py', 'ach_customizer_state.py', 'ach_customizer_cleanup.py', 'icon.png', 'index.html', 'info.json', 'install.sh')
 
 
 def build(output):

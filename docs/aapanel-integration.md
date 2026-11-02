@@ -161,19 +161,71 @@ browser ZIP-picker upload, browser uninstall, restricted-account access,
 state migration, shared-FPM reset, cross-version compatibility, Apply,
 rollback and Production remain unverified or unimplemented.
 
+## Native browser lifecycle and durable Monitor controls (isolated guest, 2026-11-02)
+
+**Exact candidate environment:** Debian 12, aaPanel **8.0.7**, Nginx 1.28.3,
+PHP-FPM 8.5.12 in a disposable QEMU overlay. The merged 0.1.0 ZIP passed
+real third-party-plugin browser file-picker upload, Install, Settings,
+site/domain inventory, Uninstall, and Reinstall. The unmerged 0.1.1 candidate
+also passed a native browser in-place upgrade, Uninstall, and Reinstall.
+Installed source hashes matched the corresponding development ZIPs.
+
+The new controls affect **read-only Monitor operations only**. The overall
+switch denies website/FPM reads without touching hosted services. Independent
+module switches deny only their matching read-only endpoints. Their schema-v1
+JSON preferences live in /www/server/panel/data/ach_customizer.state.json
+outside aaPanel's replaceable plugin folder; the state file and lock are
+root-owned mode 0600. Reads do not create files. Native browser Uninstall
+removed code and plugin icon while preserving the disabled state and revision;
+Reinstall recovered the exact saved flags and enabled later reactivation.
+
+**Concurrency root-cause correction:** a file lock alone serialized writers
+but could allow a tab with a stale UI snapshot to overwrite a newer operator
+decision. Each administrator-only POST now sends its last-seen expected_revision.
+The backend checks this against the persisted revision **under the same lock**
+and rejects mismatches without writes. A controlled native ZIP update and
+guest-only panel restart loaded the corrected source. Through a real
+authenticated aaPanel browser session, a revision-3 update advanced to
+revision 4; a subsequent stale revision-3 request was rejected visibly with
+stage monitor_state_write and the saved revision remained 4.
+
+Atomic replacement, strict state schema, finite read bounds, ownership/mode
+checks, no-follow file opens, conflict reporting and fail-closed error
+handling are exercised in source tests. Browser and guest checks confirm
+no inspected VHost or PHP-FPM configuration changes, successful nginx -t,
+and HTTP 200 from the retained site. A missing/invalid frontend state schema
+leaves all controls disabled rather than inferring preferences.
+
+**Native aaPanel caveat:** its V2 Uninstall implementation tries to fetch
+a vendor install.sh before invoking the local plugin uninstall hook. Only
+inside the disposable guest, outbound TCP 80/443 was temporarily rejected
+for IPv4 and IPv6 during Uninstall and restored afterward with rule absence
+verified. The vendor script was not retrieved. This is a native-panel
+compatibility boundary; the plugin does not alter aaPanel core.
+
+**Still outside proof:** real browser restricted-account testing, persistent
+state schema migration, cross-version compatibility, Nginx include durability,
+PHP-FPM reset reproduction, Apply, rollback, production and public release.
+Update can leave older Python modules cached in the aaPanel worker; controlled
+panel restart is an operator action and was performed only in the guest.
+
+Full version-specific identities, original and corrected candidate source
+SHA-256 values, UI observations, host-file hashes and test limitations:
+[sanitized native browser evidence](evidence/aaPanel-8.0.7-2026-11-02-native-browser-lifecycle-state.json).
+
 ## Compatibility and outstanding acceptance
 
 | Required proof | Observed status |
 | --- | --- |
 | Official plugin layout, request syntax and ZIP extraction | Source-verified and isolated runtime accepted on aaPanel 8.0.7 |
-| Real in-panel management and read-only API | **Freshly browser-tested** for the follow-up inventory-update candidate against aaPanel 8.0.7: native plugin opened, stale backend correctly rejected, and bound-domain rendering passed after controlled guest-only panel restart. Restricted-account role remains untested |
-| Native ZIP import/backend, uninstall and reinstall | **Corrected candidate:** native backend import, isolated V2 backend uninstall and reinstall passed; **previous candidate only:** browser UI uninstall. New browser UI uninstall and ZIP file-picker upload remain untested |
+| Real in-panel management and read-only API | **Browser-tested on aaPanel 8.0.7:** Settings, bound-domain inventory, overall/module Monitor controls, disabled-read behavior, stale-update conflict refusal. Restricted-role browser authorization untested |
+| Native ZIP import/backend, uninstall and reinstall | **Browser-confirmed on aaPanel 8.0.7:** actual ZIP picker, Install, Settings, Uninstall and Reinstall for merged 0.1.0 and unmerged 0.1.1 candidate; installed source hashes checked. No production use |
 | Dynamic website source inventory | Real native create/delete and AddDomain/DelDomain verified; stable site key can differ from active bound domain. Exact updated monitor tested against actual sites and domain records; true canonical site/VHost rename and browser lifecycle remain untested |
 | PHP-FPM file-only preview and runtime truth | **Native PHP 8.5.12 pool and exact corrected parser guest-tested:** omitted `pm.max_requests=0` default and desired 300 drift confirmed. Preview is file/default-only; no live configuration-change/rollback proof |
 | Nginx virtual-host extension durability and panel regeneration | **Nginx 1.28.3 tested:** native generator removes custom include; separate asynchronous `site_total` later reinserts it. No stable plugin-owned extension contract established |
-| Overall/per-module enable-disable, persistent policy/state migration | **Not implemented or verified** |
+| Overall/per-module enable-disable, persistent policy/state migration | **Monitor-only overall/module switches and external schema-v1 state preservation browser-confirmed** across update, uninstall and reinstall; stale-revision writes rejected. Policy migrations and enforcement unimplemented |
 | Manual Apply/Auto-enforce, syntax validation, recovery/rollback | **Not implemented or verified**; monitor-only prototype |
-| More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Native in-place source update and stale-backend detection tested on aaPanel 8.0.7**; file picker, nontrivial persisted-state update, browser uninstall and cross-version compatibility unverified |
+| More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Browser update/uninstall/reinstall with persisted Monitor state verified on aaPanel 8.0.7 only**; pending cross-version/restricted-role tests and schema migration. Controlled worker restart may be required after update |
 | Production authorization, deployment, release | **Not authorized**; no production changes |
 
 The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, verify native canonical rename support separately if required, PHP-FPM configuration resets/reloads and conflict behavior, independence from `site_total`, and ownership-aware Apply/validation/rollback. The real site/regen evidence above narrows but does not close these gates. Do not install this development package on production.

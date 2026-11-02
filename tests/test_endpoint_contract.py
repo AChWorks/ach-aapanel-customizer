@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 import types
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -64,6 +65,11 @@ class MemoryDomainQuery:
 class EntrypointTests(unittest.TestCase):
     def setUp(self):
         self.plugin = MODULE.ach_customizer_main()
+        self.state_dir = tempfile.TemporaryDirectory(prefix="ach-endpoint-state-")
+        self.addCleanup(self.state_dir.cleanup)
+        state_path = patch.object(MODULE, "_STATE_DIR", self.state_dir.name)
+        state_path.start()
+        self.addCleanup(state_path.stop)
 
     def test_no_auth_bypassing_dynamic_check_or_mutation_entrypoint(self):
         self.assertNotIn('_check', vars(MODULE.ach_customizer_main))
@@ -73,6 +79,107 @@ class EntrypointTests(unittest.TestCase):
         self.assertTrue(response['status'])
         self.assertEqual(response['mode'], 'Monitor')
         self.assertIs(response['enforcement'], False)
+
+    def test_primary_administrator_only_post_can_change_monitor_flags(self):
+        flask_stub = types.ModuleType("flask")
+        flask_stub.session = {"uid": 1, "login": True}
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        with patch.dict(sys.modules, {"flask": flask_stub}):
+            response = self.plugin.set_control({"control": "overall", "enabled": "false", "expected_revision": "0"})
+            self.assertTrue(response["status"], response)
+            self.assertFalse(response["overall_enabled"])
+            self.assertEqual(response["mode"], "Disabled")
+            self.assertFalse(response["enforcement"])
+            self.assertEqual(response["state_revision"], 1)
+            self.assertTrue(response["changed"])
+            self.assertEqual(self.plugin.get_overview({})["state_revision"], 1)
+            duplicate = self.plugin.set_control({"control": "overall", "enabled": "false", "expected_revision": "1"})
+            self.assertTrue(duplicate["status"])
+            self.assertFalse(duplicate["changed"])
+            self.assertEqual(duplicate["state_revision"], 1)
+            flask_stub.session["uid"] = 2
+            refused = self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})
+            self.assertFalse(refused["status"])
+            self.assertEqual(refused["stage"], "monitor_authorization")
+            flask_stub.session["uid"] = 1
+            flask_stub.request.method = "GET"
+            refused = self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})
+            self.assertEqual(refused["stage"], "monitor_authorization")
+            flask_stub.request.method = "POST"
+            flask_stub.session["login"] = False
+            refused = self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})
+            self.assertEqual(refused["stage"], "monitor_authorization")
+            self.assertEqual(self.plugin.get_overview({})["state_revision"], 1)
+            flask_stub.session["login"] = True
+            flask_stub.has_request_context = lambda: False
+            self.assertEqual(
+                self.plugin.set_control({"control": "overall", "enabled": "true", "expected_revision": "1"})["stage"],
+                "monitor_authorization",
+            )
+
+
+    def test_optimistic_revision_rejection_through_authenticated_endpoint(self):
+        flask_stub = types.ModuleType("flask")
+        flask_stub.session = {"uid": 1, "login": True}
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        with patch.dict(sys.modules, {"flask": flask_stub}):
+            first = self.plugin.set_control({
+                "control": "overall", "enabled": "false", "expected_revision": "0"
+            })
+            self.assertTrue(first["status"], first)
+            conflict = self.plugin.set_control({
+                "control": "overall", "enabled": "true", "expected_revision": "0"
+            })
+            self.assertFalse(conflict["status"])
+            self.assertEqual(conflict["stage"], "monitor_state_write")
+            self.assertIn("revision changed", conflict["msg"])
+            self.assertEqual(self.plugin.get_overview({})["state_revision"], 1)
+            missing = self.plugin.set_control({
+                "control": "overall", "enabled": "true"
+            })
+            self.assertFalse(missing["status"])
+            self.assertIn("revision", missing["msg"])
+            valid = self.plugin.set_control({
+                "control": "overall", "enabled": "true", "expected_revision": "1"
+            })
+            self.assertTrue(valid["status"])
+            self.assertEqual(valid["state_revision"], 2)
+
+    def test_disabled_monitors_do_not_inspect_websites_or_shared_fpm(self):
+        import ach_customizer_state as state
+
+        state.set_enabled("site_inventory", False, directory=self.state_dir.name, expected_revision=0)
+        with patch.object(MODULE, "get_site_page", side_effect=AssertionError("must not scan")) as sites_call:
+            blocked = self.plugin.get_sites({})
+            self.assertFalse(blocked["status"])
+            self.assertIn("disabled", blocked["msg"])
+            sites_call.assert_not_called()
+
+        state.set_enabled("overall", False, directory=self.state_dir.name, expected_revision=1)
+        with patch.object(MODULE, "preview_php_fpm", side_effect=AssertionError("must not inspect")) as fpm_call:
+            blocked = self.plugin.preview_php_fpm({})
+            self.assertFalse(blocked["status"])
+            self.assertIn("disabled", blocked["msg"])
+            fpm_call.assert_not_called()
+        overview = self.plugin.get_overview({})
+        self.assertFalse(overview["enforcement"])
+        self.assertEqual(overview["modules"]["site_inventory"], "Disabled")
+        self.assertEqual(overview["modules"]["php_fpm_file_preview"], "Disabled")
+
+    def test_corrupted_monitor_state_is_visible_not_silently_reset(self):
+        from pathlib import Path
+        from ach_customizer_state import STATE_FILE
+        file = Path(self.state_dir.name) / STATE_FILE
+        file.write_text("{invalid")
+        file.chmod(0o600)
+        error = self.plugin.get_overview({})
+        self.assertFalse(error["status"])
+        self.assertEqual(error["stage"], "monitor_state_read")
+        self.assertTrue(error["operation_id"])
+        self.assertFalse(self.plugin.get_sites({})["status"])
+        self.assertEqual(file.read_text(), "{invalid")
 
     def test_actual_entrypoint_can_query_sites_and_handles_error(self):
         query = MemorySiteQuery([
