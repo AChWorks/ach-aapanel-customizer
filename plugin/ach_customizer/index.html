@@ -90,12 +90,27 @@
     request('get_sites', {page:page, page_size:25}, function (r) {
       siteBusy = false;
       var body = root.find('#ach-sites-rows').empty();
-      if (!r) return;
-      (r.sites || []).forEach(function (site) {
+      if (!r) {
+        hasMore = false;
+        root.find('#ach-prev, #ach-next').prop('disabled', true);
+        return;
+      }
+      // Native aaPanel can retain a previously imported Python module in a
+      // running panel worker while serving the newly imported index.html.
+      // Never reinterpret a missing binding field as an empty domain list.
+      if (r.inventory_schema !== 2 || !Array.isArray(r.sites) || r.sites.some(function (site) {
+        return !site || !Array.isArray(site.bound_domains) || typeof site.canonical_domain_bound !== 'boolean';
+      })) {
+        hasMore = false;
+        root.find('#ach-prev, #ach-next').prop('disabled', true);
+        msg('Inventory API mismatch: aaPanel may still be serving an older plugin backend after an update. Reload the panel backend during a maintenance window and reopen this view. No bindings were inferred.', true);
+        return;
+      }
+      r.sites.forEach(function (site) {
         var tr = $('<tr>');
         $('<td>').text(site.id).appendTo(tr);
         $('<td>').text(site.name + (site.canonical_domain_bound ? '' : ' (not bound)')).appendTo(tr);
-        var domains = (site.bound_domains || []).map(function (binding) {
+        var domains = site.bound_domains.map(function (binding) {
           return binding.name + (Number(binding.port) === 80 ? '' : ':' + binding.port);
         });
         $('<td>').text(domains.length ? domains.join(', ') : 'None (review required)').appendTo(tr);

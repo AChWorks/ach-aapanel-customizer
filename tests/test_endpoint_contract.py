@@ -88,12 +88,20 @@ class EntrypointTests(unittest.TestCase):
         with patch.dict(sys.modules, {'public': panel}):
             ok = self.plugin.get_sites({'page': '1', 'page_size': '1'})
             self.assertTrue(ok['status'])
+            self.assertEqual(ok['inventory_schema'], 2)
             self.assertEqual(ok['sites'][0]['name'], 'simple.test')
             self.assertTrue(ok['has_more'])
             err = self.plugin.get_sites({'page': '-1'})
             self.assertIs(err['status'], False)
             self.assertEqual(err['stage'], 'website_discovery')
             self.assertTrue(err['operation_id'])
+
+    def test_ui_rejects_older_panel_backend_without_fabricating_empty_bindings(self):
+        html = (PLUGIN_DIR / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('r.inventory_schema !== 2', html)
+        self.assertIn('!Array.isArray(site.bound_domains)', html)
+        self.assertIn('Inventory API mismatch:', html)
+        self.assertNotIn('(site.bound_domains || [])', html)
 
     def test_inventory_tracks_added_renamed_and_removed_sites(self):
         query = MemorySiteQuery([{'id': 10, 'name': 'first.example', 'path': '/srv/one', 'status': 1}])

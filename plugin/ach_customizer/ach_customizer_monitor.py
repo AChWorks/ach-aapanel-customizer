@@ -26,6 +26,9 @@ FPM_INI_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*(?:\[[A-Za-z0-9_./:-]+\])?")
 CONFIG_FILES_LIMIT = 32
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_DOMAIN_ROWS_PER_PAGE = 1000
+MAX_DOMAIN_NAME_BYTES = 1024
+MAX_DOMAIN_TEXT_BYTES_PER_PAGE = 256 * 1024
+INVENTORY_SCHEMA_VERSION = 2
 
 
 class MonitorInputError(ValueError):
@@ -70,6 +73,7 @@ def _bound_domains_for_sites(panel_public, sites):
     bindings = {site_id: [] for site_id in ids}
     seen = set()
     seen_ids = set()
+    total_name_bytes = 0
     for record in result:
         if not isinstance(record, dict):
             raise RuntimeError("aaPanel domain query returned an invalid row")
@@ -89,6 +93,15 @@ def _bound_domains_for_sites(panel_public, sites):
         domain = record.get("name")
         if row_id <= 0 or pid not in bindings or not 1 <= port <= 65535 or not isinstance(domain, str) or not domain.strip():
             raise RuntimeError("aaPanel domain query returned an invalid or out-of-page binding")
+        try:
+            name_bytes = len(domain.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise RuntimeError("aaPanel domain query returned an invalid domain encoding") from None
+        if name_bytes > MAX_DOMAIN_NAME_BYTES:
+            raise RuntimeError("aaPanel domain name exceeds the read limit")
+        total_name_bytes += name_bytes
+        if total_name_bytes > MAX_DOMAIN_TEXT_BYTES_PER_PAGE:
+            raise RuntimeError("Bound-domain inventory exceeds the response text limit; use a smaller page size")
         identity = (pid, domain, port)
         if identity in seen or row_id in seen_ids:
             raise RuntimeError("aaPanel domain query returned a duplicate binding")
@@ -138,7 +151,8 @@ def get_site_page(panel_public, page=1, page_size=25):
             "classification": "Needs Review",
         })
     _bound_domains_for_sites(panel_public, sites)
-    return {"page": page, "page_size": size, "has_more": len(result) > size, "sites": sites}
+    return {"inventory_schema": INVENTORY_SCHEMA_VERSION, "page": page, "page_size": size,
+            "has_more": len(result) > size, "sites": sites}
 
 
 def expected_pool_values(values):

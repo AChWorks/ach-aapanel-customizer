@@ -98,6 +98,7 @@ class WebsiteDiscoveryTests(unittest.TestCase):
     def test_dynamic_non_wordpress_pagination_is_read_only(self):
         panel = Panel([{'id': i, 'name': f'example{i}.test', 'path': '/srv/www/' + str(i), 'status': '1'} for i in range(1, 5)])
         data = monitor.get_site_page(panel, page=2, page_size=2)
+        self.assertEqual(data['inventory_schema'], 2)
         self.assertEqual([s['id'] for s in data['sites']], [3, 4])
         self.assertFalse(data['has_more'])
         self.assertEqual([s['classification'] for s in data['sites']], ['Needs Review'] * 2)
@@ -165,6 +166,26 @@ class WebsiteDiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate site IDs'):
             monitor.get_site_page(panel)
         self.assertEqual(panel.domain_db.calls, [])
+
+    def test_domain_response_byte_limits_preserve_realistic_names_and_fail_closed(self):
+        site = [{'id': 3, 'name': 'site.test'}]
+        valid = [
+            {'id': 1, 'pid': 3, 'name': '*.example.test', 'port': 80},
+            {'id': 2, 'pid': 3, 'name': 'مثال.ایران', 'port': 443},
+            {'id': 3, 'pid': 3, 'name': 'api.example.test', 'port': 8443},
+        ]
+        self.assertEqual(monitor.get_site_page(Panel(site, valid))['sites'][0]['bound_domains'],
+                         [{'name': item['name'], 'port': item['port']} for item in valid])
+        oversized = [dict(valid[0], name='a' * (monitor.MAX_DOMAIN_NAME_BYTES + 1))]
+        with self.assertRaisesRegex(RuntimeError, 'domain name exceeds'):
+            monitor.get_site_page(Panel(site, oversized))
+        # The bounded record count is not enough when every string is large.
+        rows = [dict(valid[0], id=i, name='a' * 1020 + str(i)) for i in range(1, 300)]
+        with self.assertRaisesRegex(RuntimeError, 'response text limit'):
+            monitor.get_site_page(Panel(site, rows))
+        bad_unicode = [dict(valid[0], name='\ud800')]
+        with self.assertRaisesRegex(RuntimeError, 'domain encoding'):
+            monitor.get_site_page(Panel(site, bad_unicode))
 
     def test_domain_query_never_silently_accepts_ambiguous_or_oversized_rows(self):
         site = [{'id': 3, 'name': 'site.test'}]

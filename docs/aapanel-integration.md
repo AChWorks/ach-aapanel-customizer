@@ -105,19 +105,56 @@ Against the actual guest pool, the corrected candidate returned `File Match` for
 
 Sanitized evidence: [aaPanel 8.0.7 native domain binding and exact candidate helper](evidence/aaPanel-8.0.7-2026-11-02-domain-binding-lifecycle.json). Treat the previous paragraphs' former claim that the newest parser had not been guest-executed as a *historical checkpoint before this later source-identified test*, not as a current unresolved parser-runtime gap.
 
+## Installed native update: frontend/backend version skew (isolated guest, 2026-11-02)
+
+The native aaPanel 8.0.7 `panelPlugin.update_zip` + `input_zip` path can replace
+`index.html` and plugin source files while an already-running panel Python
+worker continues serving previously imported `ach_customizer_monitor` code.
+This was **reproduced**, not inferred: after importing the exact merged PR #6
+package, the new browser table showed `None (review required)` for a real
+domain row. The aaPanel SQLite `domain` table and a freshly started Python
+entrypoint confirmed the binding. Restarting only the **isolated test panel**
+then returned the correct bindings in the browser.
+
+The follow-up monitor response now includes an explicit
+`inventory_schema=2` marker; the UI rejects missing/mismatched versions or
+missing binding fields and displays **Inventory API mismatch** instead of
+fabricating an unbound website. Under this verified case, a controlled panel
+backend restart in a suitable maintenance window and reopening the native
+plugin UI restored the expected view. The plugin does **not** silently
+restart aaPanel and does not mutate host website/FPM configurations.
+
+The same bounded change also rejects domain names longer than 1024 UTF-8
+bytes, malformed UTF-8 encodings and aggregate domain name text exceeding
+256 KiB per site page (in addition to the existing 1000 domain-row limit);
+ordinary wildcard domains, Unicode names and non-default ports remain
+supported. These limits are *domain-name payload* bounds, not a global
+response-size cap. Truncated or invalid inventories fail visibly rather
+than claiming successful discovery.
+
+**Actual candidate native integration and browser evidence:** Debian 12,
+aaPanel **8.0.7**, Nginx **1.28.3**, PHP-FPM **8.5.12** in a disposable
+non-production QEMU guest. Exact candidate SHA-256 values, A/B browser
+assertions, unchanged VHost/pool hashes and limitations:
+[aaPanel 8.0.7 inventory update compatibility](evidence/aaPanel-8.0.7-2026-11-02-inventory-update-contract.json).
+Native update and existing administrator UI were exercised; native
+browser ZIP-picker upload, browser uninstall, restricted-account access,
+state migration, shared-FPM reset, cross-version compatibility, Apply,
+rollback and Production remain unverified or unimplemented.
+
 ## Compatibility and outstanding acceptance
 
 | Required proof | Observed status |
 | --- | --- |
 | Official plugin layout, request syntax and ZIP extraction | Source-verified and isolated runtime accepted on aaPanel 8.0.7 |
-| Real in-panel management and read-only API | **Previously observed** on Debian 12 + aaPanel 8.0.7 for the older candidate (including session/CSRF). These browser checks were **not freshly rerun** on the corrected candidate |
+| Real in-panel management and read-only API | **Freshly browser-tested** for the follow-up inventory-update candidate against aaPanel 8.0.7: native plugin opened, stale backend correctly rejected, and bound-domain rendering passed after controlled guest-only panel restart. Restricted-account role remains untested |
 | Native ZIP import/backend, uninstall and reinstall | **Corrected candidate:** native backend import, isolated V2 backend uninstall and reinstall passed; **previous candidate only:** browser UI uninstall. New browser UI uninstall and ZIP file-picker upload remain untested |
 | Dynamic website source inventory | Real native create/delete and AddDomain/DelDomain verified; stable site key can differ from active bound domain. Exact updated monitor tested against actual sites and domain records; true canonical site/VHost rename and browser lifecycle remain untested |
 | PHP-FPM file-only preview and runtime truth | **Native PHP 8.5.12 pool and exact corrected parser guest-tested:** omitted `pm.max_requests=0` default and desired 300 drift confirmed. Preview is file/default-only; no live configuration-change/rollback proof |
 | Nginx virtual-host extension durability and panel regeneration | **Nginx 1.28.3 tested:** native generator removes custom include; separate asynchronous `site_total` later reinserts it. No stable plugin-owned extension contract established |
 | Overall/per-module enable-disable, persistent policy/state migration | **Not implemented or verified** |
 | Manual Apply/Auto-enforce, syntax validation, recovery/rollback | **Not implemented or verified**; monitor-only prototype |
-| More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Unverified** |
+| More aaPanel versions, Linux families, update, uninstall after nontrivial state | **Native in-place source update and stale-backend detection tested on aaPanel 8.0.7**; file picker, nontrivial persisted-state update, browser uninstall and cross-version compatibility unverified |
 | Production authorization, deployment, release | **Not authorized**; no production changes |
 
 The remaining end-to-end acceptance in [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1) is deliberately still open. Before selecting a reversible Nginx/PHP-FPM adapter, verify native canonical rename support separately if required, PHP-FPM configuration resets/reloads and conflict behavior, independence from `site_total`, and ownership-aware Apply/validation/rollback. The real site/regen evidence above narrows but does not close these gates. Do not install this development package on production.

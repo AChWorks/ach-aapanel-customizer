@@ -1,0 +1,79 @@
+{
+  "evidence_type": "native_aaPanel_browser_update_backend_consistency",
+  "date_utc": "2026-11-02",
+  "authority": "isolated_nonproduction_disposable_qemu_guest_only",
+  "environment": {
+    "guest": "Debian 12",
+    "panel_version": "8.0.7",
+    "nginx_version": "1.28.3",
+    "php_fpm_version": "8.5.12",
+    "guest_storage": "disposable_copy_on_write_overlay_over_retained_nonproduction_lab"
+  },
+  "source_identity": {
+    "integrated_base_commit": "389c80205712fa54ae041b1e53f7c1b8b485772c",
+    "previous_installed_monitor_sha256": "97f2c1cddb311bef1ecf15069863efcd70934d943d95b20e00ac29fbcca3fe2a",
+    "candidate_main_sha256": "6d30413a7e3b3df1046f29e48cb73ae95c76d88a519dd95d5180f01437db9a20",
+    "candidate_monitor_sha256": "65d6576a71c9f3ea92b044dcbcb866beef344945c7d0a59c28e13198e8b76928",
+    "candidate_ui_sha256": "6e716af420c735290ff57f73a3eea41c55d303dbb3db9782b7ee5905e29cbc80",
+    "candidate_development_zip_sha256": "db808b43060cb0d976ba6b538576a41296704647d77cf475e904ce7987c5b7b8"
+  },
+  "native_api_and_browser_observations": {
+    "prior_update": {
+      "native_import": "pass_after_resuming_validated_stage_without_repeating_unzip",
+      "native_domain_database_row": {
+        "site_id": 3,
+        "site_key": "site-a.ach-customizer.invalid",
+        "domain": "site-a.ach-customizer.invalid",
+        "port": 80
+      },
+      "fresh_interpreter_backend": "returns_bound_domain_and_canonical_domain_bound_true",
+      "existing_running_panel_worker": "served_old_monitor_payload_without_binding_fields",
+      "new_html_with_old_payload": "rendered_misleading_no_bound_domains",
+      "guest_panel_restart": "new_backend_returns_correct_bound_domains",
+      "conclusion": "source_replacement_does_not_guarantee_running_python_module_refresh"
+    },
+    "candidate_update": {
+      "native_panel_update_zip": "pass",
+      "native_panel_input_zip": "pass",
+      "installed_source_hashes": "exact_candidate_verified",
+      "browser_native_plugin_open": "pass",
+      "browser_websites_tab": "pass",
+      "before_guest_panel_restart": {
+        "assertion": "Inventory API mismatch",
+        "result": "pass",
+        "rendered_unverified_domain_bindings": false,
+        "next_action": "controlled_panel_backend_restart_during_maintenance_then_reopen"
+      },
+      "after_guest_panel_restart": {
+        "browser_reopened_native_plugin": true,
+        "assertion": "site-a.ach-customizer.invalid in bound-domains cell",
+        "result": "pass"
+      },
+      "site_http_status_after": 200,
+      "nginx_syntax_after": "pass"
+    }
+  },
+  "read_only_host_configuration_evidence": {
+    "nginx_vhost_sha256_before_and_after": "c8d5232ec6f8aeba40a5de0366709f524603f4eab26a86c0d9ac26fa19bce2fb",
+    "php_fpm_pool_sha256_before_and_after": "232d0c85d59e187ed0da59514f31d5f02462fd98d6964de11216542bd7074bbb",
+    "no_plugin_apply_or_enforcement_added": true,
+    "guest_panel_restart_performed": true,
+    "production_changes": false
+  },
+  "source_validation": {
+    "python_tests": 49,
+    "python_tests_result": "pass",
+    "embedded_javascript_syntax": "pass_via_pinned_node_v24.18.1",
+    "python_compilation": "pass",
+    "shell_syntax": "pass",
+    "git_diff_check": "pass"
+  },
+  "limitations": [
+    "The exact candidate was checked in an isolated aaPanel 8.0.7 guest; no cross-version assertion.",
+    "The browser test used an isolated lab administrator account, not a restricted role.",
+    "Native ZIP file-picker upload and browser-triggered uninstall were not exercised.",
+    "PHP-FPM concurrency reset, persistence, manual Apply, rollback, and production installation are not covered.",
+    "The domain-byte budget covers domain binding names, not a hard overall HTTP JSON response-byte limit.",
+    "This evidence record is a sanitized test summary, not a complete independently replayed browser transcript."
+  ]
+}
