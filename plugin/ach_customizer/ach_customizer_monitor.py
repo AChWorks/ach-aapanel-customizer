@@ -116,6 +116,10 @@ def _parse_pool_file(file_path, allowed_include=None):
             continue
         if line.startswith("[") and line.endswith("]"):
             section = line[1:-1].strip()
+            # The monitor only supports one canonical [www] pool. Reject case
+            # variants rather than accidentally treating them as other pools.
+            if section.lower() == "www" and section != "www":
+                raise MonitorInputError("Noncanonical [www] pool section")
             if section in seen_sections and section == "www":
                 raise MonitorInputError("Duplicate [www] pool section")
             seen_sections.add(section)
@@ -127,30 +131,42 @@ def _parse_pool_file(file_path, allowed_include=None):
         key, value = (part.strip() for part in line.split("=", 1))
         if not FPM_INI_KEY.fullmatch(key):
             raise MonitorInputError("Unsupported PHP-FPM directive key on line " + str(line_number))
-        if key == "include":
-            # Include expansion is not implemented. Trust only the explicit root
-            # include already preflighted above; nested includes need review.
+        # PHP-FPM directive names are case-insensitive. Normalize only for
+        # comparisons; preserve the original key (and any array-key suffix).
+        canonical_key = key.lower()
+        if canonical_key == "include":
+            # Includes inside a pool inherit parser context. The independent
+            # file parser cannot safely infer defaults across that boundary.
+            if section == "www":
+                raise MonitorInputError("include inside [www] pool needs review")
+            # Trust only the explicit root include preflighted above; nested
+            # or separately scoped includes require context-aware expansion.
             candidate = value.split(";", 1)[0].split("#", 1)[0].strip()
             if allowed_include is None or candidate != allowed_include:
                 raise MonitorInputError("Unexpanded or unsupported PHP-FPM include")
             continue
         if section != "www":
+            # Headerless include fragments may inherit an active pool from the
+            # parent. Never skip process-manager values outside our explicit
+            # [www] context and then infer pm.max_requests=0.
+            if canonical_key == "pm" or canonical_key.startswith("pm."):
+                raise MonitorInputError("Unscoped or unsupported PHP-FPM pool setting: " + key)
             continue
-        if key == "pm":
+        if canonical_key == "pm":
             if pool_mode is not None:
                 raise MonitorInputError("Duplicate PHP-FPM pool mode")
             pool_mode = value.split(";", 1)[0].split("#", 1)[0].strip()
             continue
-        if key not in POOL_KEYS:
-            if key.startswith("pm.") and key not in PM_PASSTHROUGH_KEYS:
+        if canonical_key not in POOL_KEYS:
+            if canonical_key.startswith("pm.") and canonical_key not in PM_PASSTHROUGH_KEYS:
                 raise MonitorInputError("Unsupported PHP-FPM process-manager setting: " + key)
             continue
-        if key in pool:
-            raise MonitorInputError("Duplicate setting inside [www]: " + key)
+        if canonical_key in pool:
+            raise MonitorInputError("Duplicate setting inside [www]: " + canonical_key)
         value = value.split(";", 1)[0].split("#", 1)[0].strip()
         if not re.fullmatch(r"[0-9]{1,10}", value):
-            raise MonitorInputError("Unsupported value inside [www]: " + key)
-        pool[key] = int(value)
+            raise MonitorInputError("Unsupported value inside [www]: " + canonical_key)
+        pool[canonical_key] = int(value)
     if "www" in seen_sections and pool_mode != "dynamic":
         raise MonitorInputError("Only an explicit dynamic [www] pool is supported")
     return "www" in seen_sections, pool
@@ -176,7 +192,7 @@ def preview_php_fpm(config_root, version, expected):
             line = line.split(";", 1)[0].split("#", 1)[0].strip()
             if "=" in line:
                 key, value = (x.strip() for x in line.split("=", 1))
-                if key == "include":
+                if key.lower() == "include":
                     include_values.append(value)
         if len(include_values) > 1:
             raise MonitorInputError("Multiple PHP-FPM include directives need review")

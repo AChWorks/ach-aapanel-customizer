@@ -165,6 +165,124 @@ class PHPMonitorTests(unittest.TestCase):
                     self.assertEqual(result['state'], 'Needs Review', result)
                     self.assertEqual(root_conf.read_bytes(), before)
 
+    def test_mixed_case_pm_directive_is_not_treated_as_omitted(self):
+        self.pool.unlink()
+        main = self.root / '85' / 'etc' / 'php-fpm.conf'
+        desired_zero = dict(EXPECTED, **{'pm.max_requests': '0'})
+        required = ''.join(f'{k} = {v}\n' for k, v in EXPECTED.items()
+                           if k != 'pm.max_requests')
+        # The lowercase pm mode plus uppercase max_requests used to produce
+        # a false File Match for desired=0. The uppercase mode is separately
+        # checked without relying on that pre-existing failure.
+        for mode in ('pm', 'PM'):
+            for key in ('PM.MAX_REQUESTS', 'Pm.Max_Requests'):
+                with self.subTest(mode=mode, key=key):
+                    main.write_text(f'[global]\n[www]\n{mode} = dynamic\n' + required
+                                    + f'{key} = 300\nPM.STATUS_PATH = /fpm-status\n'
+                                    + 'env[PATH] = /bin\nphp_admin_value[error_log] = /tmp/php.log\n',
+                                    encoding='utf-8')
+                    before = main.read_bytes()
+                    match = self.preview(EXPECTED)
+                    self.assertEqual(match['state'], 'File Match', match)
+                    self.assertEqual(match['implicit_defaults'], [])
+                    drift = self.preview(desired_zero)
+                    self.assertEqual(drift['state'], 'File Drift', drift)
+                    self.assertEqual(drift['changes'],
+                                     [{'setting': 'pm.max_requests', 'desired': 0, 'actual': 300}])
+                    self.assertEqual(main.read_bytes(), before)
+
+    def test_mixed_case_duplicates_sections_and_unknown_pm_fail_closed(self):
+        self.pool.unlink()
+        main = self.root / '85' / 'etc' / 'php-fpm.conf'
+        desired_zero = dict(EXPECTED, **{'pm.max_requests': '0'})
+        native = ('[global]\n[www]\npm = dynamic\n'
+                  + ''.join(f'{k} = {v}\n' for k, v in EXPECTED.items()
+                            if k != 'pm.max_requests'))
+        cases = (
+            native + 'pm.max_requests=0\nPM.MAX_REQUESTS=300\n',
+            native + 'PM.MAX_CHILDREN=20\n',
+            native + 'PM = dynamic\n',
+            native + 'Pm.Unknown_Option=300\n',
+            native.replace('[www]', '[WWW]'),
+            native + '[WWW]\nPM.MAX_REQUESTS=300\n',
+            native.replace('[www]', '[wWw]'),
+        )
+        for case in cases:
+            with self.subTest(case=case[-75:]):
+                main.write_text(case, encoding='utf-8')
+                before = main.read_bytes()
+                for expected in (desired_zero, EXPECTED):
+                    result = self.preview(expected)
+                    self.assertEqual(result['state'], 'Needs Review', result)
+                    self.assertEqual(main.read_bytes(), before)
+
+    def test_include_in_active_www_pool_fails_closed(self):
+        self.pool.unlink()
+        main = self.root / '85' / 'etc' / 'php-fpm.conf'
+        desired_zero = dict(EXPECTED, **{'pm.max_requests': '0'})
+        required = ''.join(f'{k} = {v}\n' for k, v in EXPECTED.items()
+                           if k != 'pm.max_requests')
+        for included in ('pm.max_requests = 300\n',
+                         'PM.MAX_REQUESTS = 300\n',
+                         '[www]\npm.max_requests=300\n',
+                         ''):
+            with self.subTest(included=included):
+                main.write_text('[global]\n[www]\npm=dynamic\n' + required
+                                + 'include=php-fpm.d/*.conf\n', encoding='utf-8')
+                self.pool.write_text(included, encoding='utf-8')
+                before_main = main.read_bytes()
+                before_pool = self.pool.read_bytes()
+                result = self.preview(desired_zero)
+                self.assertEqual(result['state'], 'Needs Review', result)
+                self.assertEqual(main.read_bytes(), before_main)
+                self.assertEqual(self.pool.read_bytes(), before_pool)
+
+    def test_root_include_case_and_cross_file_pool_duplicates(self):
+        main = self.root / '85' / 'etc' / 'php-fpm.conf'
+        before_pool = self.pool.read_bytes()
+        main.write_text('InClUdE=php-fpm.d/*.conf\n', encoding='utf-8')
+        before_main = main.read_bytes()
+        self.assertEqual(self.preview()['state'], 'File Match')
+        self.assertEqual((main.read_bytes(), self.pool.read_bytes()),
+                         (before_main, before_pool))
+        # Case variants are the same include and may not bypass duplicate checks.
+        main.write_text('include=php-fpm.d/*.conf\nInClUdE=php-fpm.d/*.conf\n',
+                        encoding='utf-8')
+        self.assertEqual(self.preview()['state'], 'Needs Review')
+        # Two explicit [www] pools in different files are not one supported pool.
+        main.write_text('include=php-fpm.d/*.conf\n', encoding='utf-8')
+        other = self.pool.parent / 'another.conf'
+        other.write_text('[www]\npm=dynamic\npm.max_requests=300\n', encoding='utf-8')
+        before = (main.read_bytes(), self.pool.read_bytes(), other.read_bytes())
+        self.assertEqual(self.preview()['state'], 'Needs Review')
+        self.assertEqual((main.read_bytes(), self.pool.read_bytes(), other.read_bytes()), before)
+
+    def test_unscoped_included_policy_is_never_silently_ignored(self):
+        main = self.root / '85' / 'etc' / 'php-fpm.conf'
+        desired_zero = dict(EXPECTED, **{'pm.max_requests': '0'})
+        native = ('[global]\ninclude=php-fpm.d/*.conf\n[www]\npm=dynamic\n'
+                  + ''.join(f'{k} = {v}\n' for k, v in EXPECTED.items()
+                            if k != 'pm.max_requests'))
+        for fragment in ('pm.max_requests = 300\n', 'PM.MAX_REQUESTS = 300\n',
+                         'pm = dynamic\n', 'Pm.Unknown = 2\n'):
+            with self.subTest(fragment=fragment):
+                main.write_text(native, encoding='utf-8')
+                self.pool.write_text(fragment, encoding='utf-8')
+                before = (main.read_bytes(), self.pool.read_bytes())
+                result = self.preview(desired_zero)
+                self.assertEqual(result['state'], 'Needs Review', result)
+                self.assertEqual((main.read_bytes(), self.pool.read_bytes()), before)
+        # A canonical root include followed by an explicit pool with a genuine
+        # omission is still a supported, read-only case.
+        main.write_text('[global]\ninclude=php-fpm.d/*.conf\n', encoding='utf-8')
+        self.pool.write_text('[www]\npm = dynamic\n'
+                             + ''.join(f'{k} = {v}\n' for k, v in EXPECTED.items()
+                                       if k != 'pm.max_requests'), encoding='utf-8')
+        before = (main.read_bytes(), self.pool.read_bytes())
+        self.assertEqual(self.preview(desired_zero)['state'], 'File Match')
+        self.assertEqual(self.preview(EXPECTED)['state'], 'File Drift')
+        self.assertEqual((main.read_bytes(), self.pool.read_bytes()), before)
+
     def test_explicit_optional_directive_retains_no_implicit_default(self):
         self.pool.unlink()
         root_conf = self.root / '85' / 'etc' / 'php-fpm.conf'
