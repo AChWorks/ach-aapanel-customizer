@@ -804,6 +804,42 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         site.write_text('x' * (monitor.MAX_NGINX_SITE_BYTES + 1))
         self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
 
+    def test_php_snippet_counts_every_active_fastcgi_destination_fail_closed(self):
+        include = self.nginx / 'enable-php-85.conf'
+        baseline = include.read_bytes()
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+
+        routes = {
+            'named-upstream': 'location /legacy-php/ {\n fastcgi_pass php_alt_backend;\n}\n',
+            'variable-upstream': 'location /dynamic/ {\n fastcgi_pass $backend;\n}\n',
+            'other-unix-socket': 'location /other/ {\n fastcgi_pass unix:/tmp/other.sock;\n}\n',
+            'tcp-backend': 'location /legacy/ {\n fastcgi_pass 127.0.0.1:9000;\n}\n',
+            'unknown-fastcgi-shape': 'location /other/ {\n fastcgi_pass unix:/tmp/other.sock extra;\n}\n',
+            'proxy-upstream': 'location /proxy/ {\n proxy_pass http://127.0.0.1:8000;\n}\n',
+            'uwsgi-upstream': 'location /uwsgi/ {\n uwsgi_pass backend;\n}\n',
+            'grpc-upstream': 'location /grpc/ {\n grpc_pass grpc://backend;\n}\n',
+        }
+        for name, appended in routes.items():
+            with self.subTest(route=name):
+                modified = baseline + appended.encode('utf-8')
+                include.write_bytes(modified)
+                got = self.inspect()
+                self.assertEqual(got['state'], 'Needs Review')
+                self.assertEqual(got['site_count'], 0)
+                self.assertEqual(got['matched_sites'], [])
+                self.assertNotIn('dependency_sha256', got)
+                self.assertEqual(include.read_bytes(), modified, 'Inspection is read only')
+
+        include.write_text('location ~ \\.php$ {\n fastcgi_pass php_alt_backend;\n}\n')
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+        include.write_bytes(baseline + b'# fastcgi_pass php_alt_backend;\n')
+        ignored_comment = self.inspect()
+        self.assertEqual(ignored_comment['state'], 'File Mapping')
+        self.assertNotEqual(ignored_comment['dependency_sha256'], good['dependency_sha256'])
+        include.write_bytes(baseline)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
     def test_socket_mismatch_invalidates_global_mapping_before_site_scan(self):
         include = self.nginx / 'enable-php-85.conf'
         include.write_text('fastcgi_pass unix:/tmp/unrelated.sock;\n')

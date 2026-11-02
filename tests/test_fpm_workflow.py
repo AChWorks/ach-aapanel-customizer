@@ -163,6 +163,63 @@ class TestManualFpmWorkflow(unittest.TestCase):
             self.controller.apply(payload)
         self.assertEqual(caught.exception.stage,"fpm_conflict")
 
+    def test_real_nginx_mapping_rejects_ambiguous_prepare_and_apply(self):
+        from ach_customizer_monitor import inspect_php_fpm_site_impact
+
+        nginx = self.base / "nginx-conf"
+        vhosts = self.base / "nginx-vhosts"
+        rewrites = self.base / "nginx-rewrites"
+        for folder in (nginx, vhosts, rewrites):
+            folder.mkdir()
+        include = nginx / "enable-php-85.conf"
+        conventional = (
+            "location ~ \\.php$ {\n"
+            " fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n"
+        )
+        include.write_text(conventional)
+        (vhosts / "example-a.test.conf").write_text(
+            "server {\n include enable-php-85.conf;\n}\n")
+
+        class Query:
+            def order(self, _): return self
+            def limit(self, _): return self
+            def field(self, _): return self
+            def select(self):
+                return [{"id": 3, "name": "example-a.test"}]
+
+        self.panel.M = lambda table: Query()
+        self.controller.impact_lookup = lambda panel, version, source: (
+            inspect_php_fpm_site_impact(
+                panel, version, source,
+                vhost_root=vhosts, nginx_conf_root=nginx, rewrite_root=rewrites,
+            )
+        )
+        # This approval is valid only while the conventional dependency is
+        # unmodified. Changing it must block both Prepare and Apply.
+        previously_approved = self.payload()
+        original_config = self.config.read_bytes()
+        self.assertRegex(previously_approved["expected_impact"], r"^[0-9a-f]{64}$")
+        for unsupported in (
+            "location /legacy/ {\n fastcgi_pass php_alt_backend;\n}\n",
+            "location /dynamic/ {\n fastcgi_pass $php_target;\n}\n",
+            "location /other/ {\n fastcgi_pass unix:/tmp/other.sock;\n}\n",
+            "location /proxy/ {\n proxy_pass http://backend;\n}\n",
+        ):
+            with self.subTest(unsupported=unsupported):
+                include.write_text(conventional + unsupported)
+                for action, args in (
+                    (self.controller.prepare, VALUES),
+                    (self.controller.apply, previously_approved),
+                ):
+                    with self.assertRaises(core.FpmApplyError) as caught:
+                        action(args)
+                    self.assertEqual(caught.exception.stage, "fpm_impact")
+                self.assertEqual(self.config.read_bytes(), original_config)
+                self.assertFalse((self.state_dir / core.JOURNAL).exists())
+                self.assertFalse((self.state_dir / core.SNAPSHOT).exists())
+        include.write_text(conventional)
+        self.assertRegex(self.controller.prepare(VALUES)["impact_sha256"], r"^[0-9a-f]{64}$")
+
     def test_last_moment_site_mapping_change_blocks_apply_before_backup(self):
         payload=self.payload()
         count=0

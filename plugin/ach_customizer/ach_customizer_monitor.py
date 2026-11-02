@@ -512,12 +512,24 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                          params_active):
                 raise MonitorInputError("Unsafe Nginx FastCGI parameter include needs review")
             dependencies.append({"kind": name, "signature": params_signature})
-        fastcgi = re.findall(
-            r"(?m)^[ \t]*fastcgi_pass[ \t]+unix:([^;\s]+)[ \t]*;",
-            php_include,
+        # Count *all* active FastCGI directives independently of the one
+        # supported Unix-socket shape. A named upstream, variable, malformed
+        # directive or additional location must never escape this comparison.
+        # Ignore Nginx comments, but fail closed on unrecognized syntax.
+        if re.search(
+            r"\b(?:proxy_pass|uwsgi_pass|scgi_pass|grpc_pass|memcached_pass)\b",
+            php_active,
+        ):
+            raise MonitorInputError("Unsupported Nginx PHP upstream routing needs review")
+        all_fastcgi = re.findall(r"\bfastcgi_pass\b", php_active)
+        unix_fastcgi = re.findall(
+            r"(?m)^[ \t]*fastcgi_pass[ \t]+unix:([^;\s]+)[ \t]*;[ \t]*$",
+            php_active,
         )
-        if len(fastcgi) != 1 or fastcgi[0] != socket:
-            raise MonitorInputError("Nginx PHP include is not mapped to the inspected [www] socket")
+        if len(all_fastcgi) != 1 or len(unix_fastcgi) != 1 or unix_fastcgi[0] != socket:
+            raise MonitorInputError(
+                "Nginx PHP include has ambiguous FastCGI destinations or is not mapped to the [www] socket"
+            )
         # Native DB is the authority for website IDs. Refuse partial sets:
         # missing later pages would create an unsafe shared-resource claim.
         rows = (
