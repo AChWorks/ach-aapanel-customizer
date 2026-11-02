@@ -1,0 +1,64 @@
+{
+  "after_rollback_sha256": "9b61c3d7532790c3501242c44dee9a7cf493e338b9ed2efb0fe4d3c8ccd087c6",
+  "applied": {
+    "pm.max_children": 20,
+    "pm.max_requests": 300,
+    "pm.max_spare_servers": 10,
+    "pm.min_spare_servers": 5,
+    "pm.start_servers": 5
+  },
+  "base_commit": "13c567b8309e0c26b5497dc37f81de6376743a6c",
+  "before": {
+    "pm.max_children": 50,
+    "pm.max_requests": 0,
+    "pm.max_spare_servers": 30,
+    "pm.min_spare_servers": 5,
+    "pm.start_servers": 5
+  },
+  "before_sha256": "9b61c3d7532790c3501242c44dee9a7cf493e338b9ed2efb0fe4d3c8ccd087c6",
+  "date_utc": "2026-11-02",
+  "environment": {
+    "Nginx": "1.28.3",
+    "PHP-FPM": "8.5.12",
+    "aaPanel": "8.0.7",
+    "websites": [
+      "site-a.ach-customizer.invalid",
+      "site-b.ach-customizer.invalid"
+    ]
+  },
+  "limits": [
+    "Only a direct, single [www] PHP 8.5 file was exercised; no alternate pool/include/cross-version evidence.",
+    "File configuration dump and PHP HTTP health were verified after reload; the daemon's internal PM counters were not independently instrumented.",
+    "The implementation is currently a standalone, non-packaged development module with no HTTP Apply/rollback endpoints or user-interface controls.",
+    "Server-side aaPanel primary-administrator/temporary-session authorization, CSRF, operator approval and discovered site-impact preconditions must be integrated and independently reviewed before making Apply accessible.",
+    "Production deployment and release are not authorized.",
+    "Simulated failure and concurrency paths were source-unit tested; only successful Apply/rollback was replayed in the guest."
+  ],
+  "observations": {
+    "backend_plan_before_write": true,
+    "exact_bytes_restored": true,
+    "native_nginx_syntax_checked": true,
+    "operator_supplied_baseline_sha_guard": true,
+    "persistent_snapshot_and_journal_removed_after_verified_rollback": true,
+    "php_fpm_syntax_and_effective_config_dump_checked": true,
+    "shared_pool_policy_applied": true,
+    "two_real_sites_served_php_after_rollback": true,
+    "two_real_sites_served_php_while_applied": true,
+    "unit_negative_regressions_count": 15,
+    "versioned_php_fpm_reload": true
+  },
+  "operator_execution": "direct_root_scoped_lab_python_script_not_aaPanel_authenticated_UI",
+  "production_changes": false,
+  "repo": "AChWorks/ach-aapanel-customizer",
+  "rollback": {
+    "pm.max_children": 50,
+    "pm.max_requests": 0,
+    "pm.max_spare_servers": 30,
+    "pm.min_spare_servers": 5,
+    "pm.start_servers": 5
+  },
+  "schema_version": 1,
+  "scope": "isolated_debian12_qemu_guest_only",
+  "source": "plugin/ach_customizer/ach_customizer_fpm_apply.py",
+  "source_sha256": "e140a9df46923ca6377c6ac4c5ef82b2c56b292c95a639674da9527f19cc4802"
+}
