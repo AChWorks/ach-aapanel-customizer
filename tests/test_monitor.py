@@ -45,14 +45,53 @@ class SiteDB:
         return self.rows[self.start:self.start + self.size]
 
 
-class Panel:
+
+class DomainDB:
     def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+        self.pids = ()
+
+    def where(self, clause, pids):
+        self.calls.append(('where', clause, pids))
+        assert clause == 'pid IN (' + ','.join('?' for _ in pids) + ')'
+        self.pids = pids
+        return self
+
+    def order(self, order):
+        self.calls.append(('order', order))
+        assert order == 'pid asc, id asc'
+        return self
+
+    def limit(self, expression):
+        self.calls.append(('limit', expression))
+        assert expression == '0,1001'
+        return self
+
+    def field(self, fields):
+        self.calls.append(('field', fields))
+        assert fields == 'id,pid,name,port'
+        return self
+
+    def select(self):
+        self.calls.append(('select',))
+        return sorted(
+            (row for row in self.rows if row.get('pid') in self.pids),
+            key=lambda row: (row.get('pid', 0), row.get('id', 0)),
+        )[:1001]
+
+
+class Panel:
+    def __init__(self, rows, domains=None):
         self.db = SiteDB(rows)
+        self.domain_db = DomainDB(domains if domains is not None else [])
 
     def M(self, table):
-        if table != 'sites':
-            raise AssertionError('unexpected table')
-        return self.db
+        if table == 'sites':
+            return self.db
+        if table == 'domain':
+            return self.domain_db
+        raise AssertionError('unexpected table')
 
 
 class WebsiteDiscoveryTests(unittest.TestCase):
@@ -77,6 +116,83 @@ class WebsiteDiscoveryTests(unittest.TestCase):
             monitor.get_site_page(Panel([]), page_size=101)
         with self.assertRaises(RuntimeError):
             monitor.get_site_page(Panel([{'id': 'abc', 'name': 'bad.example'}]))
+
+
+    def test_native_binding_lifecycle_keeps_site_id_even_if_site_key_is_not_bound(self):
+        site_name = 'old.example.test'
+        alias = 'new.example.test'
+        domains = [{'id': 10, 'pid': 6, 'name': site_name, 'port': 80}]
+        panel = Panel([{'id': 6, 'name': site_name, 'path': '/srv/site', 'status': 1}], domains)
+        created = monitor.get_site_page(panel)['sites'][0]
+        self.assertEqual(created['id'], 6)
+        self.assertTrue(created['canonical_domain_bound'])
+        self.assertEqual(created['bound_domains'], [{'name': site_name, 'port': 80}])
+
+        domains.append({'id': 11, 'pid': 6, 'name': alias, 'port': 80})
+        added = monitor.get_site_page(panel)['sites'][0]
+        self.assertEqual(len(added['bound_domains']), 2)
+
+        domains.pop(0)
+        switched = monitor.get_site_page(panel)['sites'][0]
+        self.assertEqual(switched['id'], 6)
+        self.assertEqual(switched['name'], site_name)
+        self.assertFalse(switched['canonical_domain_bound'])
+        self.assertEqual(switched['bound_domains'], [{'name': alias, 'port': 80}])
+        self.assertTrue(all(call[0] != 'update' for call in panel.domain_db.calls))
+
+    def test_bound_domains_are_one_bounded_query_for_the_current_site_page_only(self):
+        panel = Panel(
+            [{'id': i, 'name': f'site{i}.test', 'status': 1} for i in range(1, 4)],
+            [{'id': i, 'pid': i, 'name': f'active{i}.test', 'port': 80 if i < 3 else 8443}
+             for i in range(1, 4)],
+        )
+        page = monitor.get_site_page(panel, page=2, page_size=2)
+        self.assertEqual([s['id'] for s in page['sites']], [3])
+        self.assertEqual(page['sites'][0]['bound_domains'], [{'name': 'active3.test', 'port': 8443}])
+        self.assertFalse(page['sites'][0]['canonical_domain_bound'])
+        self.assertEqual(panel.domain_db.calls, [
+            ('where', 'pid IN (?)', (3,)), ('order', 'pid asc, id asc'),
+            ('limit', '0,1001'), ('field', 'id,pid,name,port'), ('select',),
+        ])
+
+    def test_empty_site_page_skips_domain_query(self):
+        panel = Panel([])
+        self.assertEqual(monitor.get_site_page(panel)['sites'], [])
+        self.assertEqual(panel.domain_db.calls, [])
+
+    def test_duplicate_site_id_is_rejected_before_domain_query(self):
+        panel = Panel([{'id': 3, 'name': 'a.test'}, {'id': 3, 'name': 'b.test'}])
+        with self.assertRaisesRegex(RuntimeError, 'duplicate site IDs'):
+            monitor.get_site_page(panel)
+        self.assertEqual(panel.domain_db.calls, [])
+
+    def test_domain_query_never_silently_accepts_ambiguous_or_oversized_rows(self):
+        site = [{'id': 3, 'name': 'site.test'}]
+        normal = {'id': 1, 'pid': 3, 'name': 'site.test', 'port': 80}
+        bad_responses = [
+            [normal, dict(normal, id=2)],
+            [dict(normal, name='')],
+            [dict(normal, port=0)],
+            [dict(normal, port='80;DROP TABLE')],
+            [dict(normal, pid=4)],
+            [dict(normal, name=None)],
+            [dict(normal, port=65536)],
+            [dict(normal, id=0)],
+            [dict(normal, id='2.4')],
+            [dict(normal, pid=3.9)],
+            [None],
+            [dict(normal, id=i, name=f'alias{i}.test') for i in range(1001)],
+        ]
+        for rows in bad_responses:
+            with self.subTest(rows=len(rows)):
+                panel = Panel(site)
+                panel.domain_db.select = lambda rows=rows: rows
+                with self.assertRaises(RuntimeError):
+                    monitor.get_site_page(panel)
+        panel = Panel(site)
+        panel.domain_db.select = lambda: {'unexpected': 'type'}
+        with self.assertRaisesRegex(RuntimeError, 'did not return a list'):
+            monitor.get_site_page(panel)
 
 
 class PHPMonitorTests(unittest.TestCase):

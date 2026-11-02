@@ -35,6 +35,32 @@ class MemorySiteQuery:
         return self.rows[self.start:self.start + self.count]
 
 
+class MemoryDomainQuery:
+    def __init__(self, rows=None):
+        self.rows = rows if rows is not None else []
+        self.pids = ()
+
+    def where(self, clause, values):
+        assert clause == 'pid IN (' + ','.join('?' for _ in values) + ')'
+        self.pids = values
+        return self
+
+    def order(self, key):
+        assert key == 'pid asc, id asc'
+        return self
+
+    def limit(self, expression):
+        assert expression == '0,1001'
+        return self
+
+    def field(self, projection):
+        assert projection == 'id,pid,name,port'
+        return self
+
+    def select(self):
+        return [row for row in self.rows if row['pid'] in self.pids]
+
+
 class EntrypointTests(unittest.TestCase):
     def setUp(self):
         self.plugin = MODULE.ach_customizer_main()
@@ -54,9 +80,10 @@ class EntrypointTests(unittest.TestCase):
             {'id': 12, 'name': 'static.test', 'path': '/test/static', 'status': 0},
         ])
         panel = types.ModuleType('public')
+        domains = MemoryDomainQuery([{'id': 1, 'pid': 11, 'name': 'simple.test', 'port': 80}])
         def database(table):
-            assert table == 'sites'
-            return query
+            assert table in ('sites', 'domain')
+            return query if table == 'sites' else domains
         panel.M = database
         with patch.dict(sys.modules, {'public': panel}):
             ok = self.plugin.get_sites({'page': '1', 'page_size': '1'})
@@ -71,7 +98,8 @@ class EntrypointTests(unittest.TestCase):
     def test_inventory_tracks_added_renamed_and_removed_sites(self):
         query = MemorySiteQuery([{'id': 10, 'name': 'first.example', 'path': '/srv/one', 'status': 1}])
         panel = types.ModuleType('public')
-        panel.M = lambda table: query if table == 'sites' else None
+        domains = MemoryDomainQuery([{'id': 1, 'pid': 10, 'name': 'first.example', 'port': 80}])
+        panel.M = lambda table: query if table == 'sites' else domains if table == 'domain' else None
         with patch.dict(sys.modules, {'public': panel}):
             original = self.plugin.get_sites({})
             self.assertEqual([row['name'] for row in original['sites']], ['first.example'])
@@ -81,6 +109,8 @@ class EntrypointTests(unittest.TestCase):
             query.rows[0]['name'] = 'renamed.example'
             renamed = self.plugin.get_sites({})
             self.assertEqual(renamed['sites'][0]['name'], 'renamed.example')
+            self.assertFalse(renamed['sites'][0]['canonical_domain_bound'])
+            self.assertEqual(renamed['sites'][0]['bound_domains'][0]['name'], 'first.example')
             query.rows.pop(0)
             removed = self.plugin.get_sites({})
             self.assertEqual([row['id'] for row in removed['sites']], [20])

@@ -25,6 +25,7 @@ FPM_INI_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*(?:\[[A-Za-z0-9_./:-]+\])?")
 
 CONFIG_FILES_LIMIT = 32
 MAX_CONFIG_BYTES = 256 * 1024
+MAX_DOMAIN_ROWS_PER_PAGE = 1000
 
 
 class MonitorInputError(ValueError):
@@ -41,8 +42,68 @@ def parse_page(value, *, maximum=100000):
     return number
 
 
+def _bound_domains_for_sites(panel_public, sites):
+    """Read recorded domain bindings in one bounded aaPanel domain-table query.
+
+    aaPanel's native AddDomain/DelDomain can change HTTP domains without
+    changing sites.name or its VHost filename. Never infer active domains
+    from the canonical site key.
+    """
+    if not sites:
+        return
+    ids = [site["id"] for site in sites]
+    if len(set(ids)) != len(ids):
+        raise RuntimeError("aaPanel sites query returned duplicate site IDs")
+    placeholders = ",".join("?" for _ in ids)
+    result = (
+        panel_public.M("domain")
+        .where("pid IN (" + placeholders + ")", tuple(ids))
+        .order("pid asc, id asc")
+        .limit(f"0,{MAX_DOMAIN_ROWS_PER_PAGE + 1}")
+        .field("id,pid,name,port")
+        .select()
+    )
+    if not isinstance(result, list):
+        raise RuntimeError("aaPanel domain query did not return a list")
+    if len(result) > MAX_DOMAIN_ROWS_PER_PAGE:
+        raise RuntimeError("Bound-domain inventory exceeded the read limit; use a smaller page size")
+    bindings = {site_id: [] for site_id in ids}
+    seen = set()
+    seen_ids = set()
+    for record in result:
+        if not isinstance(record, dict):
+            raise RuntimeError("aaPanel domain query returned an invalid row")
+        try:
+            raw_pid = str(record["pid"])
+            raw_id = str(record["id"])
+            if not re.fullmatch(r"[0-9]+", raw_pid) or not re.fullmatch(r"[0-9]+", raw_id):
+                raise ValueError("invalid row identity")
+            pid = int(raw_pid)
+            row_id = int(raw_id)
+            port_text = str(record["port"])
+            if not re.fullmatch(r"[0-9]{1,5}", port_text):
+                raise ValueError("invalid port")
+            port = int(port_text)
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError("aaPanel domain query returned an invalid site ID or port") from None
+        domain = record.get("name")
+        if row_id <= 0 or pid not in bindings or not 1 <= port <= 65535 or not isinstance(domain, str) or not domain.strip():
+            raise RuntimeError("aaPanel domain query returned an invalid or out-of-page binding")
+        identity = (pid, domain, port)
+        if identity in seen or row_id in seen_ids:
+            raise RuntimeError("aaPanel domain query returned a duplicate binding")
+        seen.add(identity)
+        seen_ids.add(row_id)
+        bindings[pid].append({"name": domain, "port": port})
+    for site in sites:
+        site["bound_domains"] = bindings[site["id"]]
+        site["canonical_domain_bound"] = any(
+            binding["name"] == site["name"] for binding in site["bound_domains"]
+        )
+
+
 def get_site_page(panel_public, page=1, page_size=25):
-    """Read aaPanel's sites table with a bounded, constant-field projection."""
+    """Read aaPanel site IDs and actual bound domains; never write host state."""
     page = parse_page(page)
     size = parse_page(page_size, maximum=100)
     offset = (page - 1) * size
@@ -76,6 +137,7 @@ def get_site_page(panel_public, page=1, page_size=25):
             "application": "Unclassified",
             "classification": "Needs Review",
         })
+    _bound_domains_for_sites(panel_public, sites)
     return {"page": page, "page_size": size, "has_more": len(result) > size, "sites": sites}
 
 
