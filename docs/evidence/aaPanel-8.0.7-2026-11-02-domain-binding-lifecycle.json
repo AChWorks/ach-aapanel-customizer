@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "sanitized native aaPanel domain-binding lifecycle and current-helper runtime regression",
+  "observation_date_utc": "2026-11-02",
+  "host_class": "isolated non-production Debian 12 QEMU TCG disposable overlay",
+  "panel_version": "8.0.7",
+  "nginx_version": "1.28.3",
+  "php_fpm_version": "8.5.12",
+  "production_host_touched": false,
+  "source_identity": {
+    "integration_base_main": "2f899a8551a1aa6ec396a1930e6483963a3d3ee2",
+    "candidate_monitor_helper_sha256": "97f2c1cddb311bef1ecf15069863efcd70934d943d95b20e00ac29fbcca3fe2a",
+    "candidate_entrypoint_sha256": "6d30413a7e3b3df1046f29e48cb73ae95c76d88a519dd95d5180f01437db9a20",
+    "guest_exec": "verified copies of the above two exact source files, executed with the installed panel Python and native APIs; not a native ZIP import or browser UI test"
+  },
+  "native_paths": {
+    "site_create": "class_v2.panel_site_v2.panelSite.AddSite",
+    "bind_domain": "class_v2.panel_site_v2.panelSite.AddDomain",
+    "unbind_domain": "class_v2.panel_site_v2.panelSite.DelDomain",
+    "site_delete": "class_v2.panel_site_v2.panelSite.DeleteSite",
+    "plugin_sites": "ach_customizer_main.get_sites",
+    "plugin_fpm": "ach_customizer_main.preview_php_fpm"
+  },
+  "disposable_site": {
+    "site_id": 6,
+    "canonical_site_key": "native-domain-probe.ach-customizer.invalid",
+    "new_bound_domain": "native-domain-new.ach-customizer.invalid",
+    "native_create_result_status": 0,
+    "native_add_domain_status": 0,
+    "native_del_original_domain_status": 0,
+    "site_id_unchanged_after_domain_operations": true,
+    "site_key_unchanged_after_domain_operations": true,
+    "bound_domain_table_after_original_unbind": [
+      {
+        "name": "native-domain-new.ach-customizer.invalid",
+        "port": 80
+      }
+    ],
+    "nginx_server_name_after_unbind": [
+      "native-domain-new.ach-customizer.invalid"
+    ],
+    "vhost_filename_remained_canonical": true,
+    "document_root_remained_canonical": true,
+    "new_bound_domain_http_status": 200,
+    "old_unbound_domain_http_status": 404,
+    "nginx_syntax_test_exit_code": 0,
+    "unrelated_site_vhost_sha256_unchanged": true
+  },
+  "monitor_current_source_guest_validation": {
+    "success": true,
+    "site_ids": [
+      3,
+      6
+    ],
+    "site_3_canonical_domain_bound": true,
+    "site_6_canonical_domain_bound": false,
+    "site_6_bound_domains": [
+      {
+        "name": "native-domain-new.ach-customizer.invalid",
+        "port": 80
+      }
+    ],
+    "fpm_file_match": true,
+    "fpm_implicit_default": {
+      "setting": "pm.max_requests",
+      "value": 0
+    },
+    "fpm_file_drift_desired_300_actual_0": true,
+    "fpm_config_file_sha256_unchanged": true,
+    "test_vhost_and_unrelated_vhost_sha256_unchanged": true,
+    "nginx_syntax_test_exit_code": 0
+  },
+  "source_unit_tests": {
+    "test_count": 47,
+    "passed": 47,
+    "new_test_cases": 5,
+    "native_domain_table_query": "parameterized, bounded to at most 1001 observed rows and at most 100 site IDs per page"
+  },
+  "cleanup": {
+    "native_delete_site_status": 0,
+    "disposable_site_db_record_absent": true,
+    "disposable_vhost_absent": true,
+    "disposable_root_absent": true,
+    "disposable_root_immutable_user_ini_removed_after_exact_owned_path_verification": true,
+    "unrelated_site_3_retained": true,
+    "unrelated_site_http_status": 200,
+    "nginx_syntax_test_exit_code": 0,
+    "guest_candidate_staging_removed": true,
+    "guest_shutdown_requested": true,
+    "qemu_service_completed_exit_code": 0
+  },
+  "limitations": [
+    "AddDomain/DelDomain does not rename sites.name or canonical VHost filename in this observed version; true canonical rename remains unverified.",
+    "Bound domain records are aaPanel database bindings, not proof of public DNS resolution, certificate correctness, or the live Nginx routing state.",
+    "Only one aaPanel version and one isolated web stack were exercised; cross-version compatibility not established.",
+    "No browser ZIP picker, corrected-candidate UI uninstall, restricted-role session authorization, plugin update, or state persistence acceptance.",
+    "No PHP-FPM active-setting mutation, runtime reload, rollback, aaPanel/WP Toolkit reset reproduction, Apply or auto-enforcement.",
+    "Guest Python helper source was executed outside the installed plugin directory; this is real native API/source runtime evidence, not packaged install verification."
+  ]
+}

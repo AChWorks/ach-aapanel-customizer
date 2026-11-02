@@ -31,7 +31,8 @@
       <p>Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.</p>
     </section>
     <section class="ach-view" data-view="websites" role="tabpanel" hidden>
-      <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
+      <p class="ach-note">The ID identifies the site in aaPanel. The site key is aaPanel's recorded site name, which may remain after its domain binding is removed. Bound domains are aaPanel database records, not independently verified DNS or live Nginx routes.</p>
+      <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
     </section>
     <section class="ach-view" data-view="php" role="tabpanel" hidden>
@@ -93,12 +94,16 @@
       (r.sites || []).forEach(function (site) {
         var tr = $('<tr>');
         $('<td>').text(site.id).appendTo(tr);
-        $('<td>').text(site.name).appendTo(tr);
+        $('<td>').text(site.name + (site.canonical_domain_bound ? '' : ' (not bound)')).appendTo(tr);
+        var domains = (site.bound_domains || []).map(function (binding) {
+          return binding.name + (Number(binding.port) === 80 ? '' : ':' + binding.port);
+        });
+        $('<td>').text(domains.length ? domains.join(', ') : 'None (review required)').appendTo(tr);
         $('<td>').text(site.document_root).appendTo(tr);
         $('<td>').text(site.classification).appendTo(tr);
         body.append(tr);
       });
-      if (!r.sites.length) body.append($('<tr>').append($('<td colspan="4">').text(t.noSites)));
+      if (!r.sites.length) body.append($('<tr>').append($('<td colspan="5">').text(t.noSites)));
       hasMore = Boolean(r.has_more);
       root.find('#ach-page').text(page);
       root.find('#ach-prev').prop('disabled', page <= 1);
