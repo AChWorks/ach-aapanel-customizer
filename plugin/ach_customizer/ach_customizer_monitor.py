@@ -48,8 +48,81 @@ class MonitorInputError(ValueError):
 
 
 def _active_nginx_text(source):
-    """Conservative shared comment removal for bounded source inspection."""
-    return "\n".join(line.split("#", 1)[0] for line in source.splitlines())
+    """Keep active Nginx text; strip only comments at argument boundaries.
+
+    nginx's ngx_conf_read_token() treats '#' as a comment only when it
+    begins a token, not inside quotes, unquoted arguments or escapes.
+    Preserve quoted values and same-line directives for downstream
+    conservative routing checks. Refuse incomplete lexical forms.
+    The caller already bounds source bytes and validates file identity.
+    """
+    active = []
+    token_start = True
+    quote = None
+    escaped = False
+    in_comment = False
+    after_quote = False
+    variable = False
+
+    for ch in source:
+        if in_comment:
+            if ch == "\n":
+                active.append(ch)
+                in_comment = False
+                token_start = True
+            continue
+        if escaped:
+            active.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            active.append(ch)
+            escaped = True
+            token_start = False
+            variable = False
+            continue
+        if quote is not None:
+            active.append(ch)
+            if ch == quote:
+                quote = None
+                after_quote = True
+            continue
+        if after_quote:
+            # Nginx requires a delimiter or ')' after a quoted argument.
+            if ch not in " \t\r\n;{)":
+                raise MonitorInputError("Ambiguous Nginx text after quoted argument")
+            active.append(ch)
+            token_start = True
+            after_quote = False
+            continue
+        if token_start:
+            if ch == "#":
+                in_comment = True
+                continue
+            active.append(ch)
+            if ch in " \t\r\n;{}":
+                continue
+            if ch in ("'", '"'):
+                quote = ch
+            if ch == "$":
+                variable = True
+            token_start = False
+            continue
+
+        active.append(ch)
+        if ch in " \t\r\n;":
+            token_start = True
+            variable = False
+        elif ch == "$":
+            variable = True
+        elif ch == "{" and not variable:
+            token_start = True
+        else:
+            variable = False
+
+    if quote is not None or escaped or after_quote:
+        raise MonitorInputError("Unterminated or ambiguous Nginx argument")
+    return "".join(active)
 
 
 def _unsupported_nginx_upstream(active_text, *, allow_fastcgi=False):

@@ -260,7 +260,7 @@ class TestManualFpmWorkflow(unittest.TestCase):
                 vhost_root=vhosts, nginx_conf_root=nginx, rewrite_root=rewrites,
             )
         )
-        safe_files = {p: p.read_text() for p in (fastcgi, pathinfo, rewrite, vhost)}
+        safe_files = {p: p.read_text() for p in (php, fastcgi, pathinfo, rewrite, vhost)}
         cases = (
             (fastcgi, "grpc_pass grpc://backend;"),
             (fastcgi, "memcached_pass backend;"),
@@ -271,6 +271,12 @@ class TestManualFpmWorkflow(unittest.TestCase):
             (vhost, "proxy_pass http://backend;"),
             (vhost, "grpc_pass grpc://backend;"),
             (vhost, "memcached_pass backend;"),
+            (php, 'set $marker "tag#1"; fastcgi_pass unix:/tmp/other.sock;'),
+            (php, 'set $marker tag#1; proxy_pass http://backend;'),
+            (fastcgi, 'set $marker "tag#1"; grpc_pass grpc://backend;'),
+            (pathinfo, r'set $marker tag\#1; memcached_pass backend;'),
+            (rewrite, "set $marker 'tag#1'; grpc_pass grpc://backend;"),
+            (vhost, 'set $marker "tag#1"; grpc_pass grpc://backend;'),
         )
 
         def unsafe_file_text(path, directive):
@@ -281,7 +287,7 @@ class TestManualFpmWorkflow(unittest.TestCase):
                     "\n location /unsupported {\n  " + directive + "\n }\n}\n",
                     1,
                 )
-            if path == rewrite:
+            if path in (rewrite, php):
                 return base + "\nlocation /unsupported {\n " + directive + "\n}\n"
             return base + "\n" + directive + "\n"
 

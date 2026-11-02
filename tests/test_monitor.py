@@ -932,6 +932,120 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         include.write_bytes(baseline)
         self.assertEqual(self.inspect()['state'], 'File Mapping')
 
+    def test_nginx_hash_tokenization_preserves_active_same_line_routing(self):
+        # Nginx recognizes '#' as a comment only at an argument boundary.
+        # Do not discard active directives after a quoted/unquoted/escaped hash.
+        safe = (
+            'set $marker "tag#1"; # grpc_pass grpc://commented;\n'
+            "set $single 'tag#2'; # proxy_pass http://commented;\n"
+            'set $plain tag#3; # memcached_pass commented;\n'
+            r'set $escaped tag\#4; # fastcgi_pass backend;' + '\n'
+            '# fastcgi_pass another_backend;\n'
+        )
+        active = monitor._active_nginx_text(safe)
+        self.assertIn('"tag#1"', active)
+        self.assertIn("'tag#2'", active)
+        self.assertIn("tag#3", active)
+        self.assertIn(r'tag\#4', active)
+        self.assertNotIn('grpc_pass', active)
+        self.assertNotIn('proxy_pass', active)
+        self.assertNotIn('memcached_pass', active)
+        self.assertNotIn('fastcgi_pass', active)
+
+        variants = {
+            'double-quoted': 'set $marker "tag#1"; fastcgi_pass unix:/tmp/other.sock;',
+            'single-quoted': "set $marker 'tag#1'; grpc_pass grpc://backend;",
+            'unquoted-token': 'set $marker tag#1; proxy_pass http://backend;',
+            'escaped-hash': r'set $marker tag\#1; memcached_pass backend;',
+            'escaped-double-quote': 'set $marker "tag\\"#1"; grpc_pass grpc://backend;',
+            'multiple-directives': 'set $marker "tag#1"; set $next "ok"; fastcgi_pass php_alt_backend;',
+            'quoted-multiline': 'set $marker "line\n#literal"; grpc_pass grpc://backend;',
+        }
+        include = self.nginx / 'enable-php-85.conf'
+        baseline = include.read_text()
+        expected = self.inspect()
+        self.assertEqual(expected['state'], 'File Mapping')
+        for label, statement in variants.items():
+            with self.subTest(variant=label):
+                self.assertTrue(
+                    any(name in monitor._active_nginx_text(statement) for name in
+                        ('fastcgi_pass', 'proxy_pass', 'grpc_pass', 'memcached_pass'))
+                )
+                include.write_text(baseline + 'location /legacy {\n ' + statement + '\n}\n')
+                rejected = self.inspect()
+                self.assertEqual(rejected['state'], 'Needs Review')
+                self.assertEqual(rejected['matched_sites'], [])
+                self.assertEqual(rejected['site_count'], 0)
+                self.assertNotIn('dependency_sha256', rejected)
+        for ambiguous in ('set $marker "unclosed;\n',
+                          "set $marker 'unclosed;\n",
+                          'set $marker "ok"bad;\n',
+                          'set $marker ' + '\\'):
+            with self.subTest(ambiguous=ambiguous):
+                include.write_text(baseline + ambiguous)
+                self.assertEqual(self.inspect()['state'], 'Needs Review')
+        include.write_text(baseline + '\n# fastcgi_pass another_backend;\n')
+        allowed_comment = self.inspect()
+        self.assertEqual(allowed_comment['state'], 'File Mapping')
+        self.assertNotEqual(allowed_comment['dependency_sha256'], expected['dependency_sha256'])
+        include.write_text(baseline + 'location /safe {\n set $marker "tag#1";\n}\n')
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_native_dependencies_keep_active_routes_after_literal_hash(self):
+        php = self.nginx / 'enable-php-85.conf'
+        php.write_text('location ~ \\.php$ {\n include fastcgi.conf;\n'
+                       ' include pathinfo.conf;\n'
+                       ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n')
+        params = {
+            self.nginx / 'fastcgi.conf':
+                'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n',
+            self.nginx / 'pathinfo.conf': 'fastcgi_param PATH_INFO $path_info;\n',
+        }
+        for file, data in params.items():
+            file.write_text(data)
+        rewrite = self.rewrites / 'site-a.example.test.conf'
+        rewrite.write_text('location / {\n rewrite ^(.*)$ /index.php?s=$1 last;\n}\n')
+        vhost = self.vhost('site-a.example.test')
+        original_vhost = vhost.read_text()
+        vhost.write_text(original_vhost.replace(
+            'include enable-php-85.conf;',
+            'include enable-php-85.conf;\n include ' + str(rewrite) + ';'
+        ))
+        files = {
+            **params,
+            rewrite: rewrite.read_text(),
+            vhost: vhost.read_text(),
+        }
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+        for file, data in files.items():
+            with self.subTest(file=file.name):
+                statement = 'set $marker "tag#1"; grpc_pass grpc://backend;'
+                if file == vhost:
+                    invalid = data.replace(
+                        '\n}\n',
+                        '\n location /hidden {\n ' + statement + '\n }\n}\n',
+                        1,
+                    )
+                elif file == rewrite:
+                    invalid = data + '\nlocation /hidden {\n ' + statement + '\n}\n'
+                else:
+                    invalid = data + statement + '\n'
+                file.write_text(invalid)
+                rejected = self.inspect()
+                self.assertEqual(rejected['state'], 'Needs Review')
+                self.assertNotIn('dependency_sha256', rejected)
+                self.assertEqual(file.read_text(), invalid)
+                file.write_text(data)
+                self.assertEqual(self.inspect()['state'], 'File Mapping')
+        for file, data in files.items():
+            with self.subTest(commented_file=file.name):
+                file.write_text(data + '\n# grpc_pass grpc://commented;\n')
+                allowed = self.inspect()
+                self.assertEqual(allowed['state'], 'File Mapping')
+                self.assertNotEqual(allowed['dependency_sha256'], good['dependency_sha256'])
+                file.write_text(data)
+
     def test_socket_mismatch_invalidates_global_mapping_before_site_scan(self):
         include = self.nginx / 'enable-php-85.conf'
         include.write_text('fastcgi_pass unix:/tmp/unrelated.sock;\n')
