@@ -131,10 +131,15 @@ def _parse_pool_file(file_path, allowed_include=None):
         key, value = (part.strip() for part in line.split("=", 1))
         if not FPM_INI_KEY.fullmatch(key):
             raise MonitorInputError("Unsupported PHP-FPM directive key on line " + str(line_number))
-        # PHP-FPM directive names are case-insensitive. Normalize only for
-        # comparisons; preserve the original key (and any array-key suffix).
+        # Ordinary PHP-FPM directive names are case-insensitive. Normalize
+        # comparisons, but preserve the original key and array-key suffix.
         canonical_key = key.lower()
         if canonical_key == "include":
+            # PHP-FPM special-cases lowercase "include" with a case-sensitive
+            # comparison, unlike ordinary pool directives. Never expand an
+            # unrecognized mixed-case variant as a valid include.
+            if key != "include":
+                raise MonitorInputError("Noncanonical PHP-FPM include directive")
             # Includes inside a pool inherit parser context. The independent
             # file parser cannot safely infer defaults across that boundary.
             if section == "www":
@@ -193,6 +198,10 @@ def preview_php_fpm(config_root, version, expected):
             if "=" in line:
                 key, value = (x.strip() for x in line.split("=", 1))
                 if key.lower() == "include":
+                    # Reject variants before selecting files to inspect: they
+                    # are not recognized as includes by PHP-FPM itself.
+                    if key != "include":
+                        raise MonitorInputError("Noncanonical PHP-FPM include directive")
                     include_values.append(value)
         if len(include_values) > 1:
             raise MonitorInputError("Multiple PHP-FPM include directives need review")

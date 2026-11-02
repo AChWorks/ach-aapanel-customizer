@@ -240,15 +240,33 @@ class PHPMonitorTests(unittest.TestCase):
     def test_root_include_case_and_cross_file_pool_duplicates(self):
         main = self.root / '85' / 'etc' / 'php-fpm.conf'
         before_pool = self.pool.read_bytes()
-        main.write_text('InClUdE=php-fpm.d/*.conf\n', encoding='utf-8')
+        main.write_text('include=php-fpm.d/*.conf\n', encoding='utf-8')
         before_main = main.read_bytes()
         self.assertEqual(self.preview()['state'], 'File Match')
         self.assertEqual((main.read_bytes(), self.pool.read_bytes()),
                          (before_main, before_pool))
-        # Case variants are the same include and may not bypass duplicate checks.
-        main.write_text('include=php-fpm.d/*.conf\nInClUdE=php-fpm.d/*.conf\n',
-                        encoding='utf-8')
-        self.assertEqual(self.preview()['state'], 'Needs Review')
+        # Unlike ordinary FPM options, the special include label is
+        # case-sensitive in upstream PHP-FPM and these variants are invalid.
+        for label in ('InClUdE', 'INCLUDE', 'Include'):
+            for prefix in ('', '[global]\n'):
+                with self.subTest(label=label, prefix=prefix):
+                    main.write_text(f'{prefix}{label}=php-fpm.d/*.conf\n',
+                                    encoding='utf-8')
+                    before = (main.read_bytes(), self.pool.read_bytes())
+                    result = self.preview()
+                    self.assertEqual(result['state'], 'Needs Review', result)
+                    self.assertIn('include', result['reason'].lower())
+                    self.assertEqual((main.read_bytes(), self.pool.read_bytes()), before)
+        # A mixed-case include must not bypass duplicate or include checks,
+        # regardless of its order relative to an otherwise accepted include.
+        for entries in (('include', 'InClUdE'), ('INCLUDE', 'include'),
+                        ('include', 'include')):
+            with self.subTest(entries=entries):
+                main.write_text(''.join(f'{label}=php-fpm.d/*.conf\n'
+                                        for label in entries), encoding='utf-8')
+                before = (main.read_bytes(), self.pool.read_bytes())
+                self.assertEqual(self.preview()['state'], 'Needs Review')
+                self.assertEqual((main.read_bytes(), self.pool.read_bytes()), before)
         # Two explicit [www] pools in different files are not one supported pool.
         main.write_text('include=php-fpm.d/*.conf\n', encoding='utf-8')
         other = self.pool.parent / 'another.conf'
@@ -256,6 +274,53 @@ class PHPMonitorTests(unittest.TestCase):
         before = (main.read_bytes(), self.pool.read_bytes(), other.read_bytes())
         self.assertEqual(self.preview()['state'], 'Needs Review')
         self.assertEqual((main.read_bytes(), self.pool.read_bytes(), other.read_bytes()), before)
+
+    def test_special_include_inside_www_and_nested_include_fail_closed(self):
+        main = self.root / '85' / 'etc' / 'php-fpm.conf'
+        current_pool = self.pool.read_text(encoding='utf-8')
+        for label in ('include', 'InClUdE', 'INCLUDE'):
+            with self.subTest(label=label, location='pool'):
+                self.pool.write_text(current_pool + f'{label}=other/*.conf\n',
+                                     encoding='utf-8')
+                before = (main.read_bytes(), self.pool.read_bytes())
+                result = self.preview()
+                self.assertEqual(result['state'], 'Needs Review', result)
+                self.assertEqual((main.read_bytes(), self.pool.read_bytes()), before)
+            with self.subTest(label=label, location='root-www'):
+                self.pool.write_text(current_pool, encoding='utf-8')
+                main.write_text('[www]\npm=dynamic\n' +
+                                f'{label}=php-fpm.d/*.conf\n', encoding='utf-8')
+                before = (main.read_bytes(), self.pool.read_bytes())
+                self.assertEqual(self.preview()['state'], 'Needs Review')
+                self.assertEqual((main.read_bytes(), self.pool.read_bytes()), before)
+            main.write_text('include=php-fpm.d/*.conf\n', encoding='utf-8')
+        self.pool.write_text(current_pool, encoding='utf-8')
+
+    def test_canonical_include_preserves_optional_default_and_explicit_values(self):
+        main = self.root / '85' / 'etc' / 'php-fpm.conf'
+        main.write_text('[global]\ninclude=php-fpm.d/*.conf\n', encoding='utf-8')
+        values = ''.join(f'{key}={value}\n' for key, value in EXPECTED.items()
+                         if key != 'pm.max_requests')
+        zero = dict(EXPECTED, **{'pm.max_requests': '0'})
+        for declared in (None, 0, 300):
+            with self.subTest(declared=declared):
+                extra = '' if declared is None else f'pm.max_requests={declared}\n'
+                self.pool.write_text('[www]\npm=dynamic\n' + values + extra,
+                                     encoding='utf-8')
+                before = (main.read_bytes(), self.pool.read_bytes())
+                actual = 0 if declared is None else declared
+                for desired in (zero, EXPECTED):
+                    result = self.preview(desired)
+                    self.assertEqual(result['state'],
+                                     'File Match' if actual == int(desired['pm.max_requests'])
+                                     else 'File Drift')
+                    if declared is None:
+                        self.assertEqual(result['implicit_defaults'], [
+                            {'setting': 'pm.max_requests', 'value': 0,
+                             'origin': 'PHP-FPM default'}])
+                    else:
+                        self.assertEqual(result['implicit_defaults'], [])
+                    self.assertEqual((main.read_bytes(), self.pool.read_bytes()), before)
 
     def test_unscoped_included_policy_is_never_silently_ignored(self):
         main = self.root / '85' / 'etc' / 'php-fpm.conf'
