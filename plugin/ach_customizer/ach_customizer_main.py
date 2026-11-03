@@ -24,6 +24,10 @@ from ach_customizer_monitor import (
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
 from ach_customizer_state import DATA_DIR, StateError, read_state, set_enabled
+from ach_customizer_status_pages import (
+    DEFAULT_BRAND, BRAND_KEYS, PAGES, LOCALES, StatusPageError,
+    read_preferences, render_page, select_brand, update_preferences, validate_brand,
+)
 
 _STATE_DIR = DATA_DIR
 
@@ -168,6 +172,114 @@ class ach_customizer_main:
                     **result, "shared_impact": impact}
         except Exception as exc:
             return self._fail("php_fpm_file_preview", exc, operation_id)
+
+    @staticmethod
+    def _status_site_id(args):
+        value = ach_customizer_main._argument(args, "site_id", "")
+        if value in (None, ""):
+            return None
+        if type(value) is int:
+            number = value
+        elif isinstance(value, str) and value.isascii() and value.isdecimal() and len(value) <= 10 and str(int(value)) == value:
+            number = int(value)
+        else:
+            raise StatusPageError("Invalid aaPanel site ID")
+        if not 1 <= number <= 2147483647:
+            raise StatusPageError("Invalid aaPanel site ID")
+        import public
+        site = public.M("sites").where("id=?", (number,)).field("id,name,path,status").find()
+        if not isinstance(site, dict) or int(site.get("id", 0)) != number or not site.get("name"):
+            raise StatusPageError("Website not found in native aaPanel inventory")
+        return number
+
+    @staticmethod
+    def _status_values(args):
+        values = {key: ach_customizer_main._argument(args, key) for key in BRAND_KEYS}
+        if values["footer_enabled"] == "true":
+            values["footer_enabled"] = True
+        elif values["footer_enabled"] == "false":
+            values["footer_enabled"] = False
+        return validate_brand(values)
+
+    @staticmethod
+    def _status_primary_admin_post():
+        from flask import has_request_context, request, session
+        if (not has_request_context() or request.method != "POST"
+                or session.get("login") is not True
+                or type(session.get("uid")) is not int or session["uid"] != 1
+                or bool(session.get("tmp_login"))
+                or "tmp_login_id" in session or "tmp_login_expire" in session):
+            raise PermissionError("Full primary aaPanel administrator POST is required")
+
+    def status_preferences(self, args):
+        """Read-only global and requested native-site branding; no file creation."""
+        request_id = uuid4().hex
+        try:
+            site_id = self._status_site_id(args)
+            state = read_preferences(_STATE_DIR)
+            effective, source = select_brand(state, site_id)
+            return {
+                "status": True, "request_id": request_id, "schema": 1,
+                "revision": state["revision"], "global": state["global"],
+                "effective": effective, "source": source, "site_id": site_id,
+                "templates": list(PAGES), "locales": list(LOCALES),
+                "mode": "Preview only", "apply_supported": False,
+            }
+        except Exception as exc:
+            return self._fail("status_preferences", exc, request_id)
+
+    def status_preview(self, args):
+        """Safe offline HTML preview; never touches a website or a service."""
+        request_id = uuid4().hex
+        try:
+            site_id = self._status_site_id(args)
+            template = self._argument(args, "template")
+            locale = self._argument(args, "locale")
+            state = read_preferences(_STATE_DIR)
+            effective, source = select_brand(state, site_id)
+            if self._argument(args, "brand_name") is not None:
+                effective = self._status_values(args)
+                source = "Unsaved preview"
+            rendered = render_page(locale, template, effective)
+            return {
+                "status": True, "request_id": request_id, "schema": 1,
+                "revision": state["revision"], "site_id": site_id,
+                "template": template, "locale": locale, "source": source,
+                "mode": "Preview only", "apply_supported": False,
+                **rendered,
+            }
+        except Exception as exc:
+            return self._fail("status_preview", exc, request_id)
+
+    def status_save(self, args):
+        """Persist operator branding only; never apply to any website."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            scope = self._argument(args, "scope")
+            site_id = self._status_site_id(args)
+            action = self._argument(args, "action")
+            if (scope == "site") != (site_id is not None):
+                raise StatusPageError("Selected scope and website do not match")
+            from ach_customizer_state import parse_revision
+            revision = parse_revision(self._argument(args, "expected_revision"))
+            values = self._status_values(args) if action == "save" else None
+            state, changed = update_preferences(
+                scope=scope, site_id=site_id, action=action,
+                expected_revision=revision, values=values, directory=_STATE_DIR,
+            )
+            effective, source = select_brand(state, site_id)
+            return {
+                "status": True, "request_id": request_id,
+                "schema": 1, "revision": state["revision"],
+                "changed": changed, "scope": scope, "site_id": site_id,
+                "source": source, "effective": effective,
+                "message": "Branding preferences saved; no site files or services changed",
+            }
+        except PermissionError as exc:
+            return self._fail("status_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("status_settings", exc, request_id)
 
     @staticmethod
     def _fpm_native_audit(action, response, request_id):

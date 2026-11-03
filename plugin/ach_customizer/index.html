@@ -17,6 +17,13 @@
   #ach-customizer .ach-controls { display:flex; align-items:center; gap:8px; margin-top:12px; }
   #ach-customizer button:focus-visible, #ach-customizer input:focus-visible { outline:2px solid #2486d1; outline-offset:2px; }
   #ach-customizer .ach-error { color:#ad2525; }
+  #ach-customizer .ach-status-preview { width:100%; min-height:480px; border:1px solid #d4d9e0; border-radius:6px; background:#fff; }
+  #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #ach-customizer select { max-width:240px; margin-top:3px; }
+  #ach-customizer .ach-status-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:12px 0; }
+  #ach-customizer .ach-status-fields label { display:block; font-weight:600; }
+  #ach-customizer .ach-status-fields input { width:100%; }
+
   @media(max-width:600px) { #ach-customizer .ach-fields { grid-template-columns:1fr; } }
 </style>
 <div class="bt-form" id="ach-customizer" dir="ltr" lang="en">
@@ -27,6 +34,7 @@
       <button type="button" data-tab="overview" role="tab" aria-selected="true">Overview</button>
       <button type="button" data-tab="websites" role="tab" aria-selected="false">Websites</button>
       <button type="button" data-tab="php" role="tab" aria-selected="false">PHP-FPM Preview</button>
+      <button type="button" data-tab="status" role="tab" aria-selected="false">Status Pages</button>
     </div>
     <p id="ach-message" role="status" aria-live="polite"></p>
     <section class="ach-view" data-view="overview" role="tabpanel">
@@ -86,6 +94,49 @@
         </div>
       </div>
     </section>
+    <section class="ach-view" data-view="status" role="tabpanel" hidden>
+      <p class="ach-note"><strong>Offline Status Pages — Preview only.</strong> Eleven templates in English and Persian. This module saves branding preferences only; it does not install pages, configure Nginx, alter site files, or change HTTP status codes. Apply and Restore need a separately verified native adapter.</p>
+      <div class="ach-fields">
+        <div><label for="ach-status-template">Template</label><select id="ach-status-template">
+          <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
+          <option value="429">429 Too Many Requests</option><option value="500">500 Internal Server Error</option>
+          <option value="502">502 Bad Gateway</option><option value="503">503 Unavailable</option>
+          <option value="504">504 Gateway Timeout</option><option value="50x">50x Generic</option>
+          <option value="new-site">New site</option><option value="stopped">Stopped</option>
+          <option value="unbound">Unbound domain</option>
+        </select></div>
+        <div><label for="ach-status-locale">Page language</label><select id="ach-status-locale">
+          <option value="en">English / LTR</option><option value="fa">فارسی / RTL</option>
+        </select></div>
+        <div><label for="ach-status-scope">Branding scope</label><select id="ach-status-scope">
+          <option value="global">Global defaults</option><option value="site">Website override</option>
+        </select></div>
+        <div><label for="ach-status-site-id">aaPanel site ID (website scope)</label>
+          <input id="ach-status-site-id" type="number" min="1" max="2147483647" placeholder="See Websites tab" disabled /></div>
+      </div>
+      <p id="ach-status-source" role="status">Branding not loaded.</p>
+      <div class="ach-status-fields">
+        <div><label for="ach-status-name">Brand name</label><input id="ach-status-name" maxlength="80" autocomplete="off" /></div>
+        <div><label for="ach-status-tagline">Tagline</label><input id="ach-status-tagline" maxlength="120" autocomplete="off" /></div>
+        <div><label for="ach-status-url">Brand URL (HTTPS)</label><input id="ach-status-url" type="url" maxlength="512" autocomplete="off" /></div>
+        <div><label for="ach-status-label">Brand link label</label><input id="ach-status-label" maxlength="100" autocomplete="off" /></div>
+        <div><label for="ach-status-accent">Accent color</label><input id="ach-status-accent" maxlength="7" placeholder="#008b92" /></div>
+        <div><label for="ach-status-background">Background color</label><input id="ach-status-background" maxlength="7" placeholder="#f4f2eb" /></div>
+        <div><label for="ach-status-foreground">Text color</label><input id="ach-status-foreground" maxlength="7" placeholder="#0b1718" /></div>
+      </div>
+      <label><input id="ach-status-footer" type="checkbox" checked /> Show footer attribution</label>
+      <div class="ach-controls">
+        <button id="ach-status-load" type="button">Recheck saved branding</button>
+        <button id="ach-status-preview-button" type="button" disabled>Preview unsaved settings</button>
+        <button id="ach-status-save" type="button" class="btn btn-success" disabled>Save branding preferences</button>
+      </div>
+      <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
+      <label><input id="ach-status-reset-approve" type="checkbox" /> I approve resetting this scope to inherited or ACh defaults.</label>
+      <button id="ach-status-reset" type="button" disabled>Reset selected branding scope</button>
+      <p id="ach-status-result" role="status" aria-live="polite">Open Status Pages to load saved preferences.</p>
+      <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
+      <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
+    </section>
   </div>
 </div>
 <script>
@@ -104,6 +155,7 @@
   var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false;
   var controlBusy = false, lastOverview = null;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
+  var statusBusy = false, statusRevision = null, statusTicket = 0;
   function msg(value, failed) { root.find('#ach-message').text(value || '').toggleClass('ach-error', Boolean(failed)); }
   function invalidateInventory(message) {
     hasMore = false;
@@ -239,6 +291,169 @@
       root.find('#ach-next').prop('disabled', !hasMore);
     });
   }
+  function statusScope() {
+    var scope = root.find('#ach-status-scope').val();
+    var id = root.find('#ach-status-site-id').val();
+    if (scope !== 'global' && scope !== 'site') return null;
+    if (scope === 'site' && !/^[1-9][0-9]{0,9}$/.test(String(id || ''))) return null;
+    return {scope:scope, site_id:scope === 'site' ? String(id) : ''};
+  }
+  function statusFields() {
+    return {
+      brand_name:root.find('#ach-status-name').val(),
+      tagline:root.find('#ach-status-tagline').val(),
+      brand_url:root.find('#ach-status-url').val(),
+      brand_label:root.find('#ach-status-label').val(),
+      accent:root.find('#ach-status-accent').val(),
+      background:root.find('#ach-status-background').val(),
+      foreground:root.find('#ach-status-foreground').val(),
+      footer_enabled:root.find('#ach-status-footer').prop('checked') === true ? 'true' : 'false'
+    };
+  }
+  function statusSetFields(brand) {
+    var map = {
+      brand_name:'#ach-status-name', tagline:'#ach-status-tagline',
+      brand_url:'#ach-status-url', brand_label:'#ach-status-label',
+      accent:'#ach-status-accent', background:'#ach-status-background',
+      foreground:'#ach-status-foreground'
+    };
+    Object.keys(map).forEach(function (key) {
+      root.find(map[key]).val(typeof brand[key] === 'string' ? brand[key] : '');
+    });
+    root.find('#ach-status-footer').prop('checked', brand.footer_enabled === true);
+  }
+  function statusLock(busy) {
+    statusBusy = busy;
+    root.find('#ach-status-load').prop('disabled', busy);
+    root.find('#ach-status-scope, #ach-status-template, #ach-status-locale').prop('disabled', busy);
+    root.find('#ach-status-site-id').prop('disabled', busy ||
+      root.find('#ach-status-scope').val() !== 'site');
+    root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer').prop('disabled', busy);
+    root.find('#ach-status-preview-button, #ach-status-save').prop(
+      'disabled', busy || statusRevision === null);
+    root.find('#ach-status-reset').prop('disabled',
+      busy || statusRevision === null ||
+      root.find('#ach-status-reset-approve').prop('checked') !== true);
+  }
+  function statusClearPreview() {
+    root.find('#ach-status-iframe').prop('srcdoc', '');
+    root.find('#ach-status-sha').text('');
+  }
+  function statusLoad() {
+    var scope = statusScope();
+    var ticket = ++statusTicket;
+    statusRevision = null;
+    statusClearPreview();
+    root.find('#ach-status-source').text('Branding preferences not loaded.');
+    statusLock(false);
+    if (!scope) {
+      root.find('#ach-status-result').text('Select a valid native aaPanel site ID first.');
+      return;
+    }
+    statusLock(true);
+    request('status_preferences', {site_id:scope.site_id}, function (r) {
+      if (ticket !== statusTicket) return;
+      if (!r || r.schema !== 1 || r.apply_supported !== false ||
+          !Number.isSafeInteger(r.revision) || r.revision < 0 ||
+          !r.effective || !r.global ||
+          typeof r.source !== 'string' || !Array.isArray(r.templates) ||
+          !Array.isArray(r.locales)) {
+        root.find('#ach-status-result').text('Unable to load safe branding preferences.');
+      } else {
+        statusRevision = r.revision;
+        statusSetFields(r.effective);
+        root.find('#ach-status-source').text(r.source + '; revision ' + r.revision +
+          '; scope: ' + (scope.scope === 'site' ? 'site ID ' + scope.site_id : 'global'));
+        root.find('#ach-status-result').text('Saved preferences loaded. Preview before saving changes.');
+        root.find('#ach-status-reset-approve').prop('checked', false);
+      }
+      statusLock(false);
+    });
+  }
+  root.find('#ach-status-load').on('click', statusLoad);
+  root.find('#ach-status-scope').on('change', function () {
+    root.find('#ach-status-site-id').prop('disabled', $(this).val() !== 'site');
+    statusLoad();
+  });
+  root.find('#ach-status-site-id').on('change', statusLoad);
+  root.find('#ach-status-reset-approve').on('change', function () { statusLock(statusBusy); });
+  root.find('#ach-status-preview-button').on('click', function () {
+    if (statusBusy || statusRevision === null) return;
+    var scope = statusScope();
+    if (!scope) { root.find('#ach-status-result').text('Select a native site ID.'); return; }
+    statusClearPreview();
+    var ticket = statusTicket;
+    statusLock(true);
+    request('status_preview', Object.assign({}, scope, statusFields(), {
+      template:root.find('#ach-status-template').val(),
+      locale:root.find('#ach-status-locale').val()
+    }), function (r) {
+      if (ticket !== statusTicket) return;
+      if (!r || r.schema !== 1 || r.apply_supported !== false ||
+          typeof r.html !== 'string' || r.html.length > 32768 ||
+          !/^[0-9a-f]{64}$/.test(r.rendered_sha256 || '') ||
+          !/^[0-9a-f]{64}$/.test(r.source_sha256 || '') ||
+          r.locale !== root.find('#ach-status-locale').val() ||
+          r.template !== root.find('#ach-status-template').val()) {
+        root.find('#ach-status-result').text('Preview failed or response incompatible. Nothing applied.');
+      } else {
+        root.find('#ach-status-iframe').prop('srcdoc', r.html);
+        root.find('#ach-status-sha').text(
+          'Bundled SHA-256: ' + r.source_sha256 + '\nRendered SHA-256: ' + r.rendered_sha256);
+        root.find('#ach-status-result').text(
+          'Rendered offline ' + r.locale + '/' + r.template +
+          ' preview using ' + r.source + '. No site changes.');
+      }
+      statusLock(false);
+    });
+  });
+  root.find('#ach-status-save').on('click', function () {
+    if (statusBusy || statusRevision === null) return;
+    var scope = statusScope();
+    if (!scope) { root.find('#ach-status-result').text('Select a native site ID.'); return; }
+    statusLock(true);
+    request('status_save', Object.assign({}, scope, statusFields(), {
+      action:'save', expected_revision:String(statusRevision)
+    }), function (r) {
+      if (!r || r.schema !== 1 || !Number.isSafeInteger(r.revision) ||
+          !r.effective || typeof r.changed !== 'boolean') {
+        statusRevision = null;
+        root.find('#ach-status-result').text('Save not confirmed. Recheck before retrying.');
+      } else {
+        statusRevision = r.revision;
+        statusSetFields(r.effective);
+        root.find('#ach-status-source').text(r.source + '; revision ' + r.revision);
+        root.find('#ach-status-result').text(
+          'Saved ' + scope.scope + ' branding preferences. No page or service changed.');
+        statusClearPreview();
+      }
+      statusLock(false);
+    });
+  });
+  root.find('#ach-status-reset').on('click', function () {
+    if (statusBusy || statusRevision === null ||
+        root.find('#ach-status-reset-approve').prop('checked') !== true) return;
+    var scope = statusScope();
+    if (!scope) return;
+    statusLock(true);
+    request('status_save', Object.assign({}, scope, {
+      action:'reset', expected_revision:String(statusRevision)
+    }), function (r) {
+      root.find('#ach-status-reset-approve').prop('checked', false);
+      if (!r || r.schema !== 1 || !Number.isSafeInteger(r.revision) || !r.effective) {
+        statusRevision = null;
+        root.find('#ach-status-result').text('Reset not confirmed. Recheck before retrying.');
+      } else {
+        statusRevision = r.revision;
+        statusSetFields(r.effective);
+        statusClearPreview();
+        root.find('#ach-status-source').text(r.source + '; revision ' + r.revision);
+        root.find('#ach-status-result').text('Branding preferences reset for this scope only.');
+      }
+      statusLock(false);
+    });
+  });
+  root.find('#ach-status-template, #ach-status-locale').on('change', statusClearPreview);
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     root.find('[data-tab]').attr('aria-selected', 'false');
@@ -248,6 +463,7 @@
     msg('', false);
     if (tab === 'overview') overview();
     if (tab === 'websites') sites();
+    if (tab === 'status') statusLoad();
   });
   root.find('#ach-prev').on('click', function () { if (page > 1 && !siteBusy) { page -= 1; sites(); } });
   root.find('#ach-next').on('click', function () { if (hasMore && !siteBusy) { page += 1; sites(); } });

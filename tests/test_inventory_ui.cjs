@@ -25,10 +25,10 @@ function fakeNode(tag, attributes = {}) {
 function loadUi() {
   const root = fakeNode('div');
   const elements = new Map();
-  const tabs = ['overview', 'websites', 'php'].map(name => fakeNode('button', {
+  const tabs = ['overview', 'websites', 'php', 'status'].map(name => fakeNode('button', {
     'data-tab': name, 'aria-selected': name === 'overview' ? 'true' : 'false'
   }));
-  const views = ['overview', 'websites', 'php'].map(name => fakeNode('section', {
+  const views = ['overview', 'websites', 'php', 'status'].map(name => fakeNode('section', {
     'data-view': name
   }));
   for (const name of [
@@ -40,8 +40,18 @@ function loadUi() {
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
     '#ach-fpm-recovery-impact', '#ach-fpm-restore-rows',
-    '#ach-fpm-rollback-controls', '#ach-fpm-rollback-approval', '#ach-fpm-rollback'
+    '#ach-fpm-rollback-controls', '#ach-fpm-rollback-approval', '#ach-fpm-rollback',
+    '#ach-status-template', '#ach-status-locale', '#ach-status-scope', '#ach-status-site-id',
+    '#ach-status-name', '#ach-status-tagline', '#ach-status-url', '#ach-status-label',
+    '#ach-status-accent', '#ach-status-background', '#ach-status-foreground',
+    '#ach-status-footer', '#ach-status-load', '#ach-status-preview-button',
+    '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
+    '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe'
   ]) elements.set(name, fakeNode('div'));
+  for (const [selector, val] of [
+    ['#ach-status-template','404'], ['#ach-status-locale','en'],
+    ['#ach-status-scope','global'], ['#ach-status-site-id','']
+  ]) elements.get(selector).props.value = val;
   const controls = [
     ['#ach-monitor-enabled', 'overall'],
     ['#ach-site-enabled', 'site_inventory'],
@@ -65,6 +75,11 @@ function loadUi() {
         if (query === '[data-monitor-control]') return selection(controls);
         if (query === '#ach-prev, #ach-next') {
           return selection([elements.get('#ach-prev'), elements.get('#ach-next')]);
+        }
+        if (query.startsWith('#ach-status-') && query.includes(', ')) {
+          const selected = query.split(', ').map(key => elements.get(key));
+          assert.ok(selected.every(Boolean), 'Unknown Status Pages selector group: ' + query);
+          return selection(selected);
         }
         const view = /^\[data-view="([^"]+)"\]$/.exec(query);
         if (view) return selection(views.filter(node => node.attributes['data-view'] === view[1]));
@@ -108,6 +123,11 @@ function loadUi() {
       prop(name, value) {
         if (arguments.length === 1) return nodes[0]?.props[name];
         for (const node of nodes) node.props[name] = value;
+        return this;
+      },
+      val(value) {
+        if (arguments.length === 0) return nodes[0]?.props.value;
+        for (const node of nodes) node.props.value = value;
         return this;
       },
       serializeArray() {
@@ -187,6 +207,12 @@ function loadUi() {
       page: elements.get('#ach-page').textContent,
       overview: elements.get('#ach-overview-status').textContent,
       stateRevision: elements.get('#ach-state-revision').textContent,
+      statusResult: elements.get('#ach-status-result').textContent,
+      statusSource: elements.get('#ach-status-source').textContent,
+      statusHtml: elements.get('#ach-status-iframe').props.srcdoc,
+      statusHash: elements.get('#ach-status-sha').textContent,
+      statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
+      statusResetDisabled: elements.get('#ach-status-reset').props.disabled,
       impactSummary: elements.get('#ach-impact-summary').textContent,
       fpmPlan: elements.get('#ach-fpm-plan').textContent,
       fpmDetails: elements.get('#ach-fpm-details').textContent,
@@ -233,7 +259,25 @@ function loadUi() {
     assert.ok(entry); entry.value = value;
     trigger(elements.get('#ach-php-form'), 'input change');
   }
-  return { openSites, openOverview, respond, respondOverview, toggleMonitor, submitPhp,
+  function statusClick(selector, event = 'click') {
+    trigger(elements.get(selector), event);
+    return requests.at(-1);
+  }
+  function openStatus() {
+    trigger(tabs.find(node => node.attributes['data-tab'] === 'status'), 'click');
+    return requests.at(-1);
+  }
+  function statusSetValue(selector, value, event = null) {
+    assert.ok(elements.has(selector));
+    elements.get(selector).props.value = value;
+    if (event) trigger(elements.get(selector), event);
+  }
+  function statusSetChecked(selector, value) {
+    elements.get(selector).props.checked = value;
+    trigger(elements.get(selector), 'change');
+  }
+  return { openSites, openOverview, openStatus, statusSetValue, statusSetChecked,
+    statusClick, respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -814,4 +858,104 @@ test('Manual host change success never hides missing aaPanel audit persistence',
   assert.match(state.fpmPlan,/Applied/);
   assert.equal(state.errorClass,true);
   assert.match(state.error,/activity-log persistence/);
+});
+
+const brand = () => ({
+  brand_name:'ACh', tagline:'WEB SYSTEMS', brand_url:'https://ach.li',
+  brand_label:'ach.li',accent:'#008b92',background:'#f4f2eb',
+  foreground:'#0b1718',footer_enabled:true
+});
+function statusPrefs(revision = 2, source = 'Global default', effective = brand()) {
+  return {
+    status:true, schema:1, revision, apply_supported:false, mode:'Preview only',
+    global:brand(), effective, source, site_id:null,
+    templates:['403','404','429','500','502','503','504','50x','new-site','stopped','unbound'],
+    locales:['en','fa']
+  };
+}
+
+test('Status Pages tab loads saved branding and safely renders sandbox-only preview', () => {
+  const ui=loadUi();
+  const initial=ui.openStatus();
+  assert.match(initial.options.url, /s=status_preferences$/);
+  assert.equal(initial.options.data.site_id,'');
+  initial.respond(statusPrefs());
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.match(ui.state().statusSource,/Global default.*revision 2/);
+  ui.statusSetValue('#ach-status-name','Acme');
+  ui.statusSetValue('#ach-status-url','https://acme.example');
+  const preview=ui.statusClick('#ach-status-preview-button');
+  assert.match(preview.options.url,/s=status_preview$/);
+  assert.equal(preview.options.data.brand_name,'Acme');
+  assert.equal(preview.options.data.brand_url,'https://acme.example');
+  assert.equal(preview.options.data.locale,'en');
+  assert.equal(preview.options.data.template,'404');
+  preview.respond({
+    status:true,schema:1,locale:'en',template:'404',
+    source:'Unsaved preview',apply_supported:false,
+    html:'<!doctype html><html><body>Acme &amp; HQ</body></html>',
+    source_sha256:'a'.repeat(64),rendered_sha256:'b'.repeat(64)
+  });
+  assert.match(ui.state().statusHtml,/Acme &amp; HQ/);
+  assert.match(ui.state().statusHash,/Rendered SHA-256: b/);
+  assert.match(ui.state().statusResult,/No site changes/);
+  ui.statusSetValue('#ach-status-locale','fa','change');
+  assert.equal(ui.state().statusHtml,'','Changed locale invalidates stale preview');
+  assert.equal(ui.state().statusHash,'');
+});
+
+test('Status Pages save is revision-bound and failed response requires recheck', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(4));
+  ui.statusSetValue('#ach-status-name','New brand');
+  const save=ui.statusClick('#ach-status-save');
+  assert.match(save.options.url,/s=status_save$/);
+  assert.equal(save.options.data.action,'save');
+  assert.equal(save.options.data.expected_revision,'4');
+  assert.equal(save.options.data.scope,'global');
+  save.respond({status:false,stage:'status_settings',msg:'Branding was changed elsewhere'});
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.match(ui.state().statusResult,/Recheck before retrying/);
+  assert.match(ui.state().error,/Branding was changed elsewhere/);
+});
+
+test('Status Pages site override is explicit and reset needs confirmation', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.state().statusSaveDisabled,true,'Missing site ID must block mutations');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  const load=ui.requests.at(-1);
+  assert.match(load.options.url,/s=status_preferences$/);
+  assert.equal(load.options.data.site_id,'7');
+  load.respond(statusPrefs(5,'Site override',{
+    ...brand(),brand_name:'Site Seven',brand_url:'https://site7.example'
+  }));
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.equal(ui.state().statusResetDisabled,true);
+  ui.statusSetChecked('#ach-status-reset-approve',true);
+  assert.equal(ui.state().statusResetDisabled,false);
+  const reset=ui.statusClick('#ach-status-reset');
+  assert.equal(reset.options.data.scope,'site');
+  assert.equal(reset.options.data.site_id,'7');
+  assert.equal(reset.options.data.action,'reset');
+  assert.equal(reset.options.data.expected_revision,'5');
+  reset.respond({
+    status:true,schema:1,revision:6,changed:true,
+    source:'Global default',effective:brand()
+  });
+  assert.equal(ui.state().statusResetDisabled,true);
+  assert.match(ui.state().statusResult,/reset for this scope only/);
+});
+
+test('Status Pages rejects malformed preview and never renders fallback HTML', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(1));
+  ui.statusClick('#ach-status-preview-button').respond({
+    status:true,schema:1,template:'404',locale:'en',
+    html:'<script>alert(1)</script>',apply_supported:true,
+    source_sha256:'a'.repeat(64),rendered_sha256:'b'.repeat(64)
+  });
+  assert.equal(ui.state().statusHtml,'');
+  assert.match(ui.state().statusResult,/Preview failed or response incompatible/);
 });
