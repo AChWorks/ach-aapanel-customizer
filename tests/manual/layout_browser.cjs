@@ -81,6 +81,38 @@ const {chromium} = require('playwright');
       }
       layerCount++;
     }
+    // Reproduce aaPanel 8.0.7's actual fixed launcher: top:20% with a
+    // 1100x672 area. The plugin's inline script may execute before aaPanel
+    // attaches its wrapper; the shipped CSS must fit it without a resize.
+    let launcherCount = 0;
+    for (const [width,height] of [[1280,720],[900,700],[740,600],[390,844],[1280,500]]) {
+      await page.setViewportSize({width,height});
+      await page.setContent(
+        '<div class="layui-layer" style="position:fixed;left:90px;top:20%;width:1100px;height:672px">' +
+        '<div class="layui-layer-title" style="height:42px">ACh aaPanel Customizer</div>' +
+        '<div class="layui-layer-content" style="height:630px;overflow:hidden">' + html +
+        '</div></div>', {waitUntil:'domcontentloaded'});
+      const actual = await page.evaluate(()=>{
+        const layer=document.querySelector('.layui-layer');
+        const content=layer.querySelector('.layui-layer-content');
+        const main=document.querySelector('#ach-content');
+        const bound=layer.getBoundingClientRect();
+        const contentBound=content.getBoundingClientRect();
+        return {left:bound.left,top:bound.top,right:bound.right,bottom:bound.bottom,
+          contentBottom:contentBound.bottom,mainOverflow:getComputedStyle(main).overflowY,
+          rootHeight:document.querySelector('#ach-customizer').getBoundingClientRect().height,
+          cssSupported:CSS.supports('selector(.layui-layer:has(#ach-customizer))')};
+      });
+      if (!actual.cssSupported || actual.left<8 || actual.top<8 ||
+          actual.right>width-8 || actual.bottom>height-8 ||
+          actual.contentBottom>height-8 || actual.rootHeight<170 ||
+          actual.mainOverflow!=='auto') {
+        throw Error('Real aaPanel launcher overflow at 100% zoom '+
+          JSON.stringify({width,height,...actual}));
+      }
+      launcherCount++;
+    }
+    console.log('NATIVE_LAUNCHER_LAYOUT_PASS '+launcherCount+' viewport checks');
     console.log('SIMULATED_LAYER_PASS '+layerCount+' viewport checks');
     console.log('LAYOUT_PASS '+output.length+' section/viewport combinations');
     for(const entry of output) console.log(JSON.stringify(entry));

@@ -1,5 +1,27 @@
 <style>
-  /* Instance-scoped, aaPanel-native operations layout. No global layer/style overrides. */
+  /* Instance-scoped, aaPanel-native operations layout. Never change unrelated layers. */
+  /*
+   * aaPanel 8.0.7's native launcher uses a fixed layer at top:20%.
+   * The plugin script can execute before the layer is attached, so its
+   * fitNativeLayer() startup call cannot always find the host wrapper.
+   * :has() reapplies safe geometry when aaPanel attaches the plugin DOM,
+   * even without any resize event. The JS fit helper remains a fallback
+   * for browsers that do not support :has().
+   */
+  @supports selector(.layui-layer:has(#ach-customizer)) {
+    .layui-layer:has(#ach-customizer) {
+      width:min(1100px,calc(100vw - 32px)) !important;
+      height:min(820px,calc(100dvh - 48px)) !important;
+      max-height:calc(100dvh - 48px) !important;
+      left:max(16px,calc((100vw - min(1100px,calc(100vw - 32px)))/2)) !important;
+      top:max(8px,calc((100dvh - min(820px,calc(100dvh - 48px)))/2)) !important;
+    }
+    .layui-layer:has(#ach-customizer) > .layui-layer-content {
+      height:calc(100% - 42px) !important;
+      overflow:hidden !important;
+    }
+    .layui-layer:has(#ach-customizer) #ach-customizer { height:100% !important; }
+  }
   #ach-customizer, #ach-customizer * { box-sizing:border-box; }
   #ach-customizer { color:#444; background:#fff; width:100%; height:min(740px,calc(100dvh - 104px)); min-height:280px; font-size:13px; line-height:1.55; overflow:hidden; }
   #ach-customizer .ach-shell { display:flex; flex-direction:column; height:100%; min-width:0; }

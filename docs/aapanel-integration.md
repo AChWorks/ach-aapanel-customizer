@@ -394,6 +394,20 @@ the actual exception class and stage, never its untrusted message. This
 prevents a successful file-only preview from becoming a covert exception
 detail transport.
 
+**Native aaPanel modal viewport safety (exact aaPanel 8.0.7 guest evidence):**
+aaPanel's plugin launcher initially positions its fixed .layui-layer at
+top:20% even when the lower part of the 672 px modal exceeds the browser
+viewport. At 1280x720/100% zoom, the original modal bottom reached 816 px
+(96 px offscreen), despite the static layout and mocked layer tests passing.
+The plugin uses a strictly scoped .layui-layer:has(#ach-customizer) rule
+to constrain this one native launcher horizontally and vertically and keep
+its internal scrollbar visible without requiring a browser resize. The
+existing fitNativeLayer() resize helper remains as a fallback for
+browsers without :has() support; the CSS does not target unrelated
+aaPanel dialogs. The exact launcher top:20% overflow has an
+explicit five-viewport Chromium regression case in
+tests/manual/layout_browser.cjs.
+
 The native PHP-FPM form uses a generation and immutable field snapshot for
 each Preview/Prepare request. Editing fields or starting another Preview,
 including a byte-identical repeated Preview, invalidates ALL pending Prepare
