@@ -334,6 +334,16 @@ The bounded source inspector reads without following symbolic links on any path 
 
 **Remaining verification boundary:** Source unit/UI tests prove fixture and deployed-script behavior; the non-production native QA above exercises the installed backend and existing site files in a fresh Python process. Real authenticated browser session/CSRF, VHost regeneration timing for this exact candidate, cross-version support, and effective Nginx error-page routing remain unverified. No public release or Production deployment is authorized.
 
+## Read-only origin-local hosts inspection (Issue #2)
+
+**Unreleased development candidate 0.1.6; no Production, file/DNS edits or auto-correction.** The Websites tab provides an explicit native site-ID diagnostic for the historic WordPress Toolkit hosts-override symptom recorded in Issue #2. The primary-aaPanel-admin-only POST resolves the site and its actual bound-domain table, then rechecks the native site record and domain bindings after inspection. Nonprimary/temporary and GET sessions are refused before file access; no client-supplied hostname or file path is accepted.
+
+The inspector reads only origin-local /etc/hosts with descriptor-anchored O_NOFOLLOW and O_RDONLY, rejects untrusted/multiply linked/group-writable/symlinked sources, caps file size to 64 KiB, line count to 2048 and matching entries to 100, and verifies file metadata before/after the bounded read. IDNA, IPv4 loopback, IPv6 loopback and IPv4-mapped IPv6 loopback are handled. Wildcard domains are not resolved as exact hosts aliases. The frontend shows only the matched native domains, local addresses and line numbers, plus file SHA-256; it never exposes unrelated hosts-file lines.
+
+**Meaning:** Local Loopback Entry is an origin-local source observation, not evidence of a Gateway DNS or reachability error. No Local Loopback Entry excludes only explicit loopback records for the exact inspected domains in that file snapshot, not hidden resolver/caching mechanisms. Needs Review applies to uninspected wildcard domains or unsupported inputs. No writer is attributed; an intentional hosts override is not changed. Local NSS resolution, public DNS, Cloudflare, TLS/HTTP from origin and a genuinely separate remote Gateway path still require independent evidence before any proposed fix. No repair or Apply API exists.
+
+**Verification boundary:** Source tests exercise native site/domain identity, authorization with synthetic Flask context, file bounds, symlinks, parser semantics and deployed frontend validation. Authenticated real-browser/CSRF and cross-version results are not claimed without separate guest testing. Related tracking stays in Issue #2.
+
 ### Review REQUIRED-01: contrast-safe customized themes (2026-11-03)
 
 The independent exact-source review of PR #11 at HEAD ccd9f23ed4cdd33f4e5de1e0b88fbe519997f96f found that the first custom palette path validated only foreground/background and accent/background. The original CSS included hard-coded light-theme text and control colors: a white foreground over a black background produced white-on-white button text, and the descriptions and secondary links dropped below 4.5:1. This is a genuine accessibility defect in the white-label preview, even though original-reference rendering remained correct.

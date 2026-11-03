@@ -55,6 +55,9 @@
       <p class="ach-note">The ID identifies the site in aaPanel. The site key is aaPanel's recorded site name, which may remain after its domain binding is removed. Bound domains are aaPanel database records, not independently verified DNS or live Nginx routes.</p>
       <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
+      <p class="ach-note"><strong>Local hosts override check (read-only):</strong> inspect exact site-bound names in origin-local /etc/hosts. Loopback does not prove DNS or Gateway failure; no correction is offered.</p>
+      <div class="ach-controls"><label for="ach-hosts-site-id">Site ID</label><input id="ach-hosts-site-id" type="number" min="1" max="2147483647" autocomplete="off" placeholder="Native site ID" /><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts</button></div>
+      <p id="ach-hosts-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native site ID for read-only inspection.</p>
     </section>
     <section class="ach-view" data-view="php" role="tabpanel" hidden>
       <p class="ach-note">Read-only PHP-FPM file/default comparison. Conventional aaPanel Nginx site-to-pool file assignments are listed separately; neither file mapping nor this preview verifies effective routing/runtime state or authorizes Apply.</p>
@@ -294,6 +297,76 @@
       root.find('#ach-next').prop('disabled', !hasMore);
     });
   }
+  var hostsBusy = false, hostsTicket = 0;
+  function hostsSiteId() {
+    var raw = String(root.find('#ach-hosts-site-id').val() || '');
+    return /^[1-9][0-9]{0,9}$/.test(raw) && Number(raw) <= 2147483647 ? raw : null;
+  }
+  function hostsLock(busy) {
+    hostsBusy = busy;
+    root.find('#ach-hosts-site-id').prop('disabled', busy);
+    root.find('#ach-hosts-inspect-button').prop('disabled', busy || !hostsSiteId());
+  }
+  function validHostsResult(r, siteId) {
+    if (!r || r.status !== true || r.schema !== 1 || r.read_only !== true ||
+        r.fix_supported !== false || r.resolver_verified !== false ||
+        r.remote_dns_verified !== false || r.gateway_verified !== false ||
+        !Number.isSafeInteger(r.site_id) || r.site_id !== Number(siteId) ||
+        typeof r.site_key !== 'string' || !r.site_key || r.site_key.length > 255 ||
+        !/^[0-9a-f]{64}$/.test(r.hosts_sha256 || '') ||
+        typeof r.reason !== 'string' || r.reason.length > 300 ||
+        typeof r.note !== 'string' || r.note.length > 600 ||
+        !['Local Loopback Entry','No Local Loopback Entry','Needs Review'].includes(r.state) ||
+        !Array.isArray(r.domains) || r.domains.length < 1 || r.domains.length > 100 ||
+        !Array.isArray(r.uninspected_wildcards) || r.uninspected_wildcards.length > 100 ||
+        !Array.isArray(r.entries) || r.entries.length > 100) return false;
+    var nameOK = x => typeof x === 'string' && x.length > 0 && x.length <= 253 &&
+      /^[a-z0-9.-]+$/.test(x);
+    if (!r.domains.every(nameOK) || !r.uninspected_wildcards.every(
+      x => typeof x === 'string' && x.startsWith('*.') && x.length <= 253)) return false;
+    var hasLoopback = false;
+    for (const item of r.entries) {
+      if (!item || !r.domains.includes(item.domain) ||
+          typeof item.address !== 'string' || !/^[0-9a-f:.]{2,45}$/i.test(item.address) ||
+          !Number.isSafeInteger(item.line) || item.line < 1 || item.line > 2048 ||
+          typeof item.loopback !== 'boolean') return false;
+      hasLoopback = hasLoopback || item.loopback;
+    }
+    return (r.state !== 'Local Loopback Entry' || hasLoopback) &&
+      (r.state !== 'No Local Loopback Entry' ||
+       (!hasLoopback && r.uninspected_wildcards.length === 0)) &&
+      (r.state !== 'Needs Review' || r.uninspected_wildcards.length > 0);
+  }
+  root.find('#ach-hosts-site-id').on('input change', function () {
+    ++hostsTicket;
+    root.find('#ach-hosts-result').text('Site selection changed; recheck.');
+    hostsLock(hostsBusy);
+  });
+  root.find('#ach-hosts-inspect-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || hostsBusy) return;
+    var ticket = ++hostsTicket;
+    root.find('#ach-hosts-result').text('Inspecting origin-local file only...');
+    hostsLock(true);
+    request('inspect_local_hosts', {site_id:id}, function (r) {
+      if (ticket !== hostsTicket) { hostsLock(false); return; }
+      if (id !== hostsSiteId() || !validHostsResult(r, id)) {
+        root.find('#ach-hosts-result').text('Inspection unconfirmed; no DNS or Gateway inference.');
+      } else {
+        var rows = r.entries.map(x =>
+          'Line ' + x.line + ': ' + x.domain + ' -> ' + x.address +
+          (x.loopback ? ' (loopback)' : ' (non-loopback)'));
+        root.find('#ach-hosts-result').text(
+          'State: ' + r.state + ' — ' + r.reason +
+          '\nSite: ' + r.site_key + ' (ID ' + r.site_id + ')' +
+          '\nBound names: ' + r.domains.join(', ') +
+          '\nWildcard exceptions: ' + (r.uninspected_wildcards.join(', ') || 'None') +
+          '\nMatching /etc/hosts entries: ' + (rows.join('\n') || 'None') +
+          '\nFile SHA-256: ' + r.hosts_sha256 + '\n' + r.note);
+      }
+      hostsLock(false);
+    });
+  });
   function statusScope() {
     var scope = root.find('#ach-status-scope').val();
     var id = root.find('#ach-status-site-id').val();
@@ -553,7 +626,7 @@
     root.find('[data-view="' + tab + '"]').prop('hidden', false);
     msg('', false);
     if (tab === 'overview') overview();
-    if (tab === 'websites') sites();
+    if (tab === 'websites') { hostsLock(false); sites(); }
     if (tab === 'status') statusLoad();
   });
   root.find('#ach-prev').on('click', function () { if (page > 1 && !siteBusy) { page -= 1; sites(); } });

@@ -33,6 +33,7 @@ function loadUi() {
   }));
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-sites-rows',
+    '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -201,6 +202,8 @@ function loadUi() {
   function state() {
     return {
       rows: rows(),
+      hostsResult: elements.get('#ach-hosts-result').textContent,
+      hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
       error: elements.get('#ach-message').textContent,
       errorClass: elements.get('#ach-message').classes.has('ach-error'),
       prevDisabled: elements.get('#ach-prev').props.disabled,
@@ -876,6 +879,72 @@ function statusPrefs(revision = 2, source = 'Global default', effective = brand(
     locales:['en','fa']
   };
 }
+
+
+const hostsInspection = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  read_only:true,fix_supported:false,resolver_verified:false,
+  remote_dns_verified:false,gateway_verified:false,
+  state:'Local Loopback Entry',reason:'Exact hosts entry observed',
+  hosts_sha256:'a'.repeat(64),domains:['site.test'],
+  uninspected_wildcards:[],
+  entries:[{domain:'site.test',address:'127.0.0.2',line:3,loopback:true}],
+  note:'Origin local only; Gateway unverified.',...overrides
+});
+
+test('Native-site local hosts inspection reports loopback without claiming Gateway failure', () => {
+  const ui=loadUi();
+  ui.openSites();
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  const query=ui.statusClick('#ach-hosts-inspect-button');
+  assert.match(query.options.url,/s=inspect_local_hosts$/);
+  assert.equal(query.options.data.site_id,'7');
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  query.respond(hostsInspection());
+  assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+  assert.match(ui.state().hostsResult,/127.0.0.2 \(loopback\)/);
+  assert.match(ui.state().hostsResult,/Gateway unverified/);
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.match(ui.state().hostsResult,/Site selection changed/);
+});
+
+test('Invalid or cross-site hosts responses cannot masquerade as confirmed result', () => {
+  for (const bad of [
+    hostsInspection({site_id:8}),
+    hostsInspection({fix_supported:true}),
+    hostsInspection({gateway_verified:true}),
+    hostsInspection({resolver_verified:true}),
+    hostsInspection({hosts_sha256:'bad'}),
+    hostsInspection({entries:null}),
+    hostsInspection({state:'Installed'}),
+    hostsInspection({state:'Local Loopback Entry', entries:[]}),
+    hostsInspection({state:'No Local Loopback Entry'}),
+    hostsInspection({uninspected_wildcards:null}),
+    hostsInspection({entries:[{domain:'wrong.test',address:'127.0.0.1',line:1,loopback:true}]})
+  ]) {
+    const ui=loadUi();
+    ui.openSites();
+    ui.statusSetValue('#ach-hosts-site-id','7','input change');
+    ui.statusClick('#ach-hosts-inspect-button').respond(bad);
+    assert.match(ui.state().hostsResult,/unconfirmed/);
+    assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  }
+});
+
+test('Unrelated site keys are treated as text, failed inspection clears stale evidence', () => {
+  const ui=loadUi();
+  ui.openSites();
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection({
+    site_key:'<img src=x onerror=alert(1)>'
+  }));
+  assert.match(ui.state().hostsResult,/<img src=x onerror=alert\(1\)>/);
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  request.respond({status:false,stage:'hosts_inspection',msg:'Hosts source changed'});
+  assert.match(ui.state().hostsResult,/unconfirmed/);
+  assert.match(ui.state().error,/Hosts source changed/);
+});
 
 test('Status Pages tab loads saved branding and safely renders sandbox-only preview', () => {
   const ui=loadUi();

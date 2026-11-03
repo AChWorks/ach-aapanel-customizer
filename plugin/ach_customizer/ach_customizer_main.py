@@ -19,8 +19,10 @@ if os.path.isdir(_PANEL_CLASS_DIR) and _PANEL_CLASS_DIR not in sys.path:
     sys.path.append(_PANEL_CLASS_DIR)
 
 from ach_customizer_monitor import (
-    MonitorInputError, get_site_page, inspect_php_fpm_site_impact, preview_php_fpm,
+    MonitorInputError, _bound_domains_for_sites, get_site_page,
+    inspect_php_fpm_site_impact, preview_php_fpm,
 )
+from ach_customizer_hosts import HostsInspectionError, inspect_local_hosts as inspect_hosts_file
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
 from ach_customizer_state import DATA_DIR, StateError, read_state, set_enabled
@@ -132,6 +134,46 @@ class ach_customizer_main:
             return {"status": True, "operation_id": operation_id, **result}
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
+
+    def inspect_local_hosts(self, args):
+        """Full-admin-only, read-only origin-local /etc/hosts diagnosis.
+
+        Native site identity and real domain bindings are rechecked before
+        returning; no client path/domain is trusted, and no correction exists.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            site_id = self._status_site_id(args)
+            if site_id is None:
+                raise HostsInspectionError("Choose an existing native aaPanel site ID")
+            import public
+            def current_site():
+                record = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(record, dict) or type(record.get("id")) not in
+                        (int, str) or str(record["id"]) != str(site_id)
+                        or not isinstance(record.get("name"), str)
+                        or not record["name"]):
+                    raise HostsInspectionError("Native site identity changed")
+                site = {"id": site_id, "name": record["name"],
+                        "path": record.get("path"), "status": record.get("status")}
+                _bound_domains_for_sites(public, [site])
+                return site
+            before = current_site()
+            names = [item["name"] for item in before["bound_domains"]]
+            result = inspect_hosts_file(names)
+            if current_site() != before:
+                raise HostsInspectionError("Native site or bound domains changed; recheck")
+            return {
+                "status": True, "request_id": request_id,
+                "site_id": site_id, "site_key": before["name"], **result,
+            }
+        except PermissionError as exc:
+            return self._fail("hosts_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("hosts_inspection", exc, request_id)
 
     def preview_php_fpm(self, args):
         operation_id = uuid4().hex
