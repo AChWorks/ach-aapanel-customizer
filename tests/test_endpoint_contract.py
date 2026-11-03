@@ -248,7 +248,10 @@ class EntrypointTests(unittest.TestCase):
                             self.assertEqual(file.read_bytes(), original)
                             self.assertEqual(state.read_state(self.state_dir.name)["revision"], revision)
                         else:
-                            self.assertEqual(list(Path(self.state_dir.name).iterdir()), [])
+                            self.assertFalse(file.exists(), "Denied operation must not create Monitor state")
+                            self.assertTrue(all(
+                                child.name.startswith("ach_customizer.activity.")
+                                for child in Path(self.state_dir.name).iterdir()))
 
     def test_optimistic_revision_rejection_through_authenticated_endpoint(self):
         flask_stub = types.ModuleType("flask")

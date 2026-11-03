@@ -1,6 +1,6 @@
 # ACh aaPanel Customizer — Project Specification
 
-- **Status:** Canonical product intent — pre-implementation
+- **Status:** Canonical product intent — staged unreleased native development
 - **Repository:** `AChWorks/ach-aapanel-customizer`
 - **Owner:** AChWorks
 - **Product:** ACh aaPanel Customizer
@@ -54,6 +54,18 @@ The primary workflows must be understandable without editing Nginx, PHP, or Word
 5. See changes detected after a site is added or aaPanel modifies an existing setting.
 6. Apply or approve a safe change, inspect validation results, and recover the prior state if needed.
 7. Disable, upgrade, or uninstall without unintentionally disabling websites or erasing operator state.
+
+### Current interface and operational acceptance (Owner update, 2026-11-03)
+
+The native UI must follow the installed aaPanel visual and interaction conventions, particularly the Nginx plugin's left navigation and independently scrollable content. Operators must not need browser zoom-out to reach controls. The supported acceptance viewports include 1280x720, 1366x768 and 1920x1080 at 100% browser zoom, plus narrow and reduced-height cases. Preserve keyboard/focus semantics, explicit loading/empty/error/recovery states, scope awareness and clear separation of Monitor, Preview, guarded Manual Apply and unsupported capabilities.
+
+Provide site selectors from validated, paginated aaPanel inventory rather than requiring operators to type raw IDs in routine workflows. The Status Pages module is initially a safe branding/offline preview and read-only site-file inspection; a production Apply/Restore adapter must be separately implemented and proven.
+
+The plugin must expose a built-in Activity/Diagnostics view backed by bounded persistent structured log records. Include UTC timestamp, severity, module/action, stage/outcome/error class, target/service identity, correlation ID and relevant recovery reference. Keep useful bounded troubleshooting context without recording session tokens, credentials, request payloads or arbitrary exception messages. Preserve successful operation outcomes if audit persistence fails; surface that failure separately. Diagnose real authorizations, failures and recoveries. Use aaPanel-compatible ownership/permissions, bounded retention and configurable verbosity.
+
+**PHP compatibility:** Inspect/manage installed PHP 8.1 and newer versions, but distinguish *detected*, *file-only preview*, *native Apply eligible* and *recoverably tested*. The current guarded 8.5 shared-[www] adapter is not authorization to write another version by string substitution. Each other version and pool shape must pass native aaPanel PHP discovery, mapping, syntax/reload, shared-service attribution, after-state, website and rollback/fault tests before Apply eligibility. Unsupported configurations fail closed. PHP 8.1+ remains an acceptance target, not a claim of tested compatibility.
+
+These are durable product requirements; verified implementation and release readiness must be recorded against the exact candidate and non-production environment, independently reviewed and separately approved by the Owner. Production changes, publication and automatic enforcement remain unapproved.
 
 ## 4. Product boundary and modular evolution
 

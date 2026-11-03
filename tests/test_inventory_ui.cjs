@@ -25,10 +25,10 @@ function fakeNode(tag, attributes = {}) {
 function loadUi() {
   const root = fakeNode('div');
   const elements = new Map();
-  const tabs = ['overview', 'websites', 'php', 'status'].map(name => fakeNode('button', {
+  const tabs = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('button', {
     'data-tab': name, 'aria-selected': name === 'overview' ? 'true' : 'false'
   }));
-  const views = ['overview', 'websites', 'php', 'status'].map(name => fakeNode('section', {
+  const views = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
   for (const name of [
@@ -47,11 +47,15 @@ function loadUi() {
     '#ach-status-footer', '#ach-status-load', '#ach-status-preview-button',
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
-    '#ach-status-inspect-button', '#ach-status-inspect-result'
+    '#ach-status-inspect-button', '#ach-status-inspect-result',
+    '#ach-status-sites-more', '#ach-status-sites-state',
+    '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
+    '#ach-activity-result', '#ach-activity-rows'
   ]) elements.set(name, fakeNode('div'));
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
-    ['#ach-status-scope','global'], ['#ach-status-site-id','']
+    ['#ach-status-scope','global'], ['#ach-status-site-id',''],
+    ['#ach-activity-level',''], ['#ach-activity-module','']
   ]) elements.get(selector).props.value = val;
   const controls = [
     ['#ach-monitor-enabled', 'overall'],
@@ -116,6 +120,10 @@ function loadUi() {
         }
         return this;
       },
+      addClass(name) {
+        for (const node of nodes) node.classes.add(name);
+        return this;
+      },
       attr(name, value) {
         if (arguments.length === 1) return nodes[0]?.attributes[name];
         for (const node of nodes) node.attributes[name] = value;
@@ -140,8 +148,8 @@ function loadUi() {
   function $(value) {
     if (value === '#ach-customizer') return selection([root]);
     if (value && typeof value === 'object' && value.handlers) return selection([value]);
-    if (typeof value === 'string' && /^<(tr|td)\b/.test(value)) {
-      return selection([fakeNode(value.startsWith('<tr') ? 'tr' : 'td')]);
+    if (typeof value === 'string' && /^<(tr|td|option)\b/.test(value)) {
+      return selection([fakeNode(value.slice(1).split(/\W/)[0])]);
     }
     throw new Error('Unexpected unscoped jQuery target: ' + String(value));
   }
@@ -270,6 +278,10 @@ function loadUi() {
     trigger(tabs.find(node => node.attributes['data-tab'] === 'status'), 'click');
     return requests.at(-1);
   }
+  function openActivity() {
+    trigger(tabs.find(node => node.attributes['data-tab'] === 'activity'), 'click');
+    return requests.at(-1);
+  }
   function statusSetValue(selector, value, event = null) {
     assert.ok(elements.has(selector));
     elements.get(selector).props.value = value;
@@ -280,7 +292,7 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, openOverview, openStatus, statusSetValue, statusSetChecked,
-    statusClick, respond, respondOverview, toggleMonitor, submitPhp,
+    statusClick, openActivity, respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -290,7 +302,24 @@ function loadUi() {
     changePhp,
     respondControl, state, requests,
     clickNext: () => trigger(elements.get('#ach-next'), 'click'),
-    clickPrevious: () => trigger(elements.get('#ach-prev'), 'click') };
+    clickPrevious: () => trigger(elements.get('#ach-prev'), 'click'),
+    activityRows: () => elements.get('#ach-activity-rows').children.map(tr => tr.children.map(td => td.textContent)),
+    activityMessage: () => elements.get('#ach-activity-result').textContent,
+    activityFilter: (selector, value) => {
+      elements.get(selector).props.value = value;
+      trigger(elements.get(selector), 'change');
+      return requests.at(-1);
+    },
+    statusSiteChoices: () => elements.get('#ach-status-site-id').children.map(option => ({
+      id: option.props.value, text: option.textContent
+    })),
+    statusSiteInfo: () => elements.get('#ach-status-sites-state').textContent,
+    statusSiteDisabled: () => elements.get('#ach-status-site-id').props.disabled,
+    loadMoreSites: () => {
+      trigger(elements.get('#ach-status-sites-more'), 'click');
+      return requests.at(-1);
+    }
+  };
 }
 
 const site = () => ({
@@ -1056,4 +1085,85 @@ test('Backend inspection failure does not display previous disk-match evidence',
   });
   assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
   assert.match(ui.state().error,/Native VHost changed/);
+});
+
+test('Native sidebar sections are linked to panels and scrollable content', () => {
+  for (const name of ['overview','websites','php','status','activity']) {
+    assert.match(html, new RegExp('id="ach-tab-' + name + '"[^>]*aria-controls="ach-panel-' + name + '"'));
+    assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*aria-labelledby="ach-tab-' + name + '"'));
+  }
+  assert.match(html, /\.ach-main \{[^}]*overflow-y:auto/);
+  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:190px/);
+  assert.match(html, /@media \(max-width:720px\)/);
+  assert.doesNotMatch(html, /class="ach-tabs"/);
+  assert.match(html, /function fitNativeLayer/);
+});
+
+test('Activity panel filters read-only structured events and uses text rendering', () => {
+  const ui = loadUi();
+  const req = ui.openActivity();
+  assert.match(req.options.url, /s=get_activity$/);
+  assert.equal(req.options.data.limit, 50);
+  req.respond({
+    status:true, schema:1, read_only:true, configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03T00:00:00+00:00',
+      level:'ERROR',module:'php_fpm',action:'fpm_apply',
+      stage:'reload',outcome:'failed',error_class:'FpmApplyError',
+      detail:'<img src=x onerror=alert(1)>',operation_id:'a'.repeat(32),
+      recovery_id:'b'.repeat(32),target:'PHP85-www-shared-service'}]
+  });
+  assert.equal(ui.activityRows().length, 1);
+  assert.equal(ui.activityRows()[0][3], 'failed · reload (FpmApplyError): <img src=x onerror=alert(1)>');
+  assert.match(ui.activityMessage(), /1 record\(s\)/);
+  const filtered = ui.activityFilter('#ach-activity-level', 'ERROR');
+  assert.equal(filtered.options.data.level, 'ERROR');
+  filtered.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.deepEqual(ui.activityRows(), [['No matching activity records.']]);
+});
+
+test('Activity errors clear stale records and do not invent successful logs', () => {
+  const ui=loadUi();
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03',level:'INFO',module:'websites',
+      action:'inventory',stage:'complete',outcome:'success',error_class:'',
+      detail:'',operation_id:'c'.repeat(32),recovery_id:'',target:''}]});
+  assert.equal(ui.activityRows().length, 1);
+  ui.activityFilter('#ach-activity-module','websites').respond({
+    status:true,schema:1,read_only:true,configured_level:'INFO',entries:[
+      {schema:1,level:'WARNING',time_utc:'x',operation_id:'malformed',detail:'',module:'websites',
+       action:'inventory',stage:'complete',outcome:'success',error_class:'',recovery_id:''}]
+  });
+  assert.deepEqual(ui.activityRows(), []);
+  assert.match(ui.activityMessage(), /unavailable or incompatible/);
+});
+
+test('Website-scope branding selects only native inventory IDs, not manually typed IDs', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const inventory = ui.requests.at(-1);
+  assert.match(inventory.options.url, /s=get_sites$/);
+  const seven = {...site(), id:7, name:'site-seven.test',
+    bound_domains:[{name:'site-seven.test',port:80}],canonical_domain_bound:true};
+  inventory.respond(page([seven]));
+  assert.deepEqual(ui.statusSiteChoices(), [
+    {id:'',text:'Choose a website...'},
+    {id:'7',text:'site-seven.test (ID 7)'}
+  ]);
+  assert.equal(ui.statusSiteDisabled(),false);
+  assert.match(ui.statusSiteInfo(),/1 website\(s\) loaded/);
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  const load=ui.requests.at(-1);
+  assert.match(load.options.url,/s=status_preferences$/);
+  assert.equal(load.options.data.site_id,'7');
+});
+
+test('Invalid website inventory prevents selecting a site to mutate branding', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.requests.at(-1).respond({status:true,inventory_schema:3,sites:[]});
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(), /inventory unavailable or changed/);
+  assert.equal(ui.state().statusSaveDisabled,true);
 });
