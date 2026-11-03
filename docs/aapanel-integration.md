@@ -17,6 +17,37 @@ The aaPanel PDF explicitly warns: **dynamic plugin routes do not inherit aaPanel
 
 This first candidate intentionally **does not define `_check`** and only uses the conventional in-panel `/plugin?action=a` route. In the isolated aaPanel **8.0.7** test, unauthenticated requests returned HTTP 404, authenticated requests without aaPanel's `x-http-token` header returned `INIT_CSRF_ERR`, and the same read-only methods succeeded through the panel's own UI. This verifies the observed version/route, **not** a general security guarantee for other versions or future privileged methods. No Apply/write endpoint is exposed in this candidate.
 
+## Native aaPanel dialog UI (unreleased UI refinement)
+
+The ACh Customizer management surface follows the compact Nginx-management
+dialog pattern illustrated by the official [Nginx deployment guide](https://www.aapanel.com/docs/Function/Deployment.html):
+use the **host-managed layer title**, a light side navigation, immediate in-place
+section switching, compact labeled fields, and semantic primary actions.
+Do not add a second dialog title, a browser-style route transition, or
+unscoped styles that could alter other aaPanel layers.
+
+The plugin CSS stays scoped under `#ach-customizer` and uses common roles for
+surfaces, typography, borders, inputs, selects, buttons, focus, and dangerous
+actions. Normal text inputs, selects and action buttons have consistent 34px
+minimum visual height; form labels, notes, wrapping and responsive layout
+share one rhythm. Keep the bounded native modal sizing fallback and small
+viewport horizontal navigation.
+
+First-time read-only requests use stable **per-panel** pending/empty/error text
+rather than a dialog-wide loading flash. A tab retains its DOM and already
+validated data on return instead of re-fetching blindly. Operators can
+explicitly **Refresh state**, **Refresh websites**, use existing Activity
+**Refresh**, and **Recheck saved branding** in Status Pages when external
+state changes. Re-entering Status Pages never erases unsaved branding text;
+explicit recheck or a deliberate scope change may reload. PHP-FPM
+Apply/Restore safety, recovery and audit outcomes are unchanged.
+
+Evidence: automated JS behavior tests and Chromium simulations measure the
+shipped DOM, viewport/control geometry and navigation. The Nginx reference
+is based on official aaPanel screenshots, **not** a currently authenticated
+live Nginx guest inspection. Source tests do not establish native guest
+acceptance, supported release status or production readiness.
+
 ## First non-production implementation slice
 
 `plugin/ach_customizer/` is a prototype native plugin package with an English-only in-panel read-only UI, following aaPanel conventions, and two narrowly bounded read operations:

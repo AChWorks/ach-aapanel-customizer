@@ -32,7 +32,8 @@ function loadUi() {
     'data-view': name
   }));
   for (const name of [
-    '#ach-message', '#ach-overview-status', '#ach-sites-rows',
+    '#ach-message', '#ach-overview-status', '#ach-overview-refresh',
+    '#ach-sites-rows', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -184,6 +185,14 @@ function loadUi() {
     trigger(tabs.find(node => node.attributes['data-tab'] === 'overview'), 'click');
     return requests.at(-1);
   }
+  function refreshSites() {
+    trigger(elements.get('#ach-sites-refresh'), 'click');
+    return requests.at(-1);
+  }
+  function refreshOverview() {
+    trigger(elements.get('#ach-overview-refresh'), 'click');
+    return requests.at(-1);
+  }
   function respondOverview(value) {
     const request = requests.at(-1);
     assert.match(request.options.url, /s=get_overview$/);
@@ -218,6 +227,8 @@ function loadUi() {
       stateRevision: elements.get('#ach-state-revision').textContent,
       statusResult: elements.get('#ach-status-result').textContent,
       statusSource: elements.get('#ach-status-source').textContent,
+      statusName: elements.get('#ach-status-name').props.value,
+      siteStatus: elements.get('#ach-sites-status').textContent,
       statusHtml: elements.get('#ach-status-iframe').props.srcdoc,
       statusHash: elements.get('#ach-status-sha').textContent,
       statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
@@ -292,7 +303,8 @@ function loadUi() {
     elements.get(selector).props.checked = value;
     trigger(elements.get(selector), 'change');
   }
-  return { openSites, openOverview, openStatus, statusSetValue, statusSetChecked,
+  return { openSites, refreshSites, openOverview, refreshOverview,
+    openStatus, statusSetValue, statusSetChecked,
     statusClick, openActivity, respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
@@ -499,7 +511,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
   ui.respond(page());
   ui.clickNext(); // With has_more=false this must not dispatch another request.
   assert.equal(ui.requests.length, 2); // overview plus one inventory request
-  ui.openSites();
+  ui.refreshSites();
   ui.respond({status:false, stage:'website_discovery',msg:'backend unavailable',operation_id:'abc'});
   assert.deepEqual(ui.state().rows, []);
   assert.equal(ui.state().page, 'Unavailable');
@@ -1596,4 +1608,52 @@ test('Reviewer: mismatched native Apply identities, config digests and source ar
     assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(response));
     assert.equal(ui.state().fpmCommitDisabled,true);
   }
+});
+
+
+test('Native tab navigation reuses loaded panels and explicit Refresh fetches latest', () => {
+  const ui=loadUi();
+  ui.requests[0].respond(monitorOverview({state_revision:9}));
+  ui.openSites();
+  ui.respond(page());
+  assert.match(ui.state().siteStatus,/Page 1/);
+  const before=ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,before,'revisit must not re-fetch');
+  const refresh=ui.refreshSites();
+  assert.equal(ui.requests.length,before+1);
+  assert.match(refresh.options.url,/s=get_sites$/);
+  refresh.respond(page([]));
+  assert.match(ui.state().siteStatus,/0 website/);
+  const monitor=ui.refreshOverview();
+  assert.match(monitor.options.url,/s=get_overview$/);
+  monitor.respond(monitorOverview({state_revision:10}));
+  assert.equal(ui.state().stateRevision,'State revision: 10');
+});
+
+test('Status Pages unsaved brand values survive native tab switching', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-name','Unsaved operator change');
+  ui.openSites(); ui.respond(page());
+  const before=ui.requests.length;
+  ui.openStatus();
+  assert.equal(ui.requests.length,before,'no unnecessary status_preferences request');
+  assert.equal(ui.state().statusName,'Unsaved operator change');
+  ui.statusClick('#ach-status-load').respond(statusPrefs());
+  assert.notEqual(ui.state().statusName,'Unsaved operator change');
+});
+
+test('Native lazy navigation uses per-view loading state, not a global flash', () => {
+  const ui=loadUi();
+  assert.equal(ui.state().error,'');
+  const inventory=ui.openSites();
+  assert.match(inventory.options.url,/s=get_sites$/);
+  assert.match(ui.state().siteStatus,/Loading website inventory/);
+  assert.equal(ui.state().error,'');
+  const activity=ui.openActivity();
+  assert.match(activity.options.url,/s=get_activity$/);
+  assert.equal(ui.state().error,'');
+  inventory.respond(page());
+  assert.equal(ui.state().error,'');
 });

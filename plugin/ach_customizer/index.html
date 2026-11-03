@@ -22,59 +22,173 @@
     }
     .layui-layer:has(#ach-customizer) #ach-customizer { height:100% !important; }
   }
+  /* All tokens and component rules stay inside the plugin; host/Layui are untouched. */
   #ach-customizer, #ach-customizer * { box-sizing:border-box; }
-  #ach-customizer { color:#444; background:#fff; width:100%; height:min(740px,calc(100dvh - 104px)); min-height:280px; font-size:13px; line-height:1.55; overflow:hidden; }
+  #ach-customizer {
+    --ach-surface:#fff; --ach-sidebar-bg:#f5f6f7; --ach-soft:#f8f9fa;
+    --ach-text:#374151; --ach-muted:#667582; --ach-line:#dde3e7;
+    --ach-green:#188531; --ach-green-hover:#137229;
+    --ach-danger:#bd3935; --ach-warn:#986615; --ach-focus:#297dc0;
+    color:var(--ach-text); background:var(--ach-surface); width:100%;
+    height:min(740px,calc(100dvh - 104px)); min-height:280px;
+    font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
+    font-size:13px; line-height:1.55; overflow:hidden;
+  }
   #ach-customizer .ach-shell { display:flex; flex-direction:column; height:100%; min-width:0; }
-  #ach-customizer .ach-head { padding:12px 20px; border-bottom:1px solid #e3e6e8; background:#fff; flex:none; }
-  #ach-customizer .ach-head h3 { margin:0; font-size:16px; font-weight:600; }
-  #ach-customizer .ach-head p { margin:2px 0 0; font-size:12px; color:#737b82; }
+  #ach-customizer .ach-sr-only {
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
   #ach-customizer .ach-workspace { display:grid; grid-template-columns:190px minmax(0,1fr); flex:1; min-height:0; }
-  #ach-customizer .ach-sidebar { min-width:0; overflow-y:auto; background:#f3f3f3; border-right:1px solid #e6e6e6; padding:12px 0; }
-  #ach-customizer .ach-sidebar-label { padding:6px 16px; font-size:11px; color:#888; font-weight:600; letter-spacing:.035em; }
-  #ach-customizer .ach-sidebar button { appearance:none; border:0; border-left:3px solid transparent; border-radius:0; background:transparent; display:block; width:100%; padding:10px 14px; text-align:left; color:#555; line-height:1.35; cursor:pointer; }
-  #ach-customizer .ach-sidebar button:hover { background:#e9e9e9; }
-  #ach-customizer .ach-sidebar button[aria-selected="true"] { background:#fff; border-left-color:#20a53a; color:#222; font-weight:600; }
-  #ach-customizer .ach-main { overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:18px 22px 38px; min-width:0; min-height:0; scrollbar-gutter:stable; }
-  #ach-customizer .ach-main h4 { font-size:15px; font-weight:600; margin:0 0 12px; }
+  #ach-customizer .ach-sidebar { min-width:0; overflow-y:auto; background:var(--ach-sidebar-bg); border-right:1px solid var(--ach-line); padding:10px 0; }
+  #ach-customizer .ach-sidebar-label { display:block; padding:12px 17px 5px; color:var(--ach-muted); font-size:11px; font-weight:600; letter-spacing:.04em; }
+  #ach-customizer .ach-sidebar button {
+    appearance:none; display:block; width:100%; min-height:39px; padding:9px 14px;
+    border:0; border-left:3px solid transparent; border-radius:0; background:transparent;
+    text-align:left; color:var(--ach-text); font:inherit; line-height:1.4; cursor:pointer;
+  }
+  #ach-customizer .ach-sidebar button:hover { background:#e9edef; }
+  #ach-customizer .ach-sidebar button[aria-selected="true"] {
+    background:var(--ach-surface); border-left-color:var(--ach-green); color:#1f2937; font-weight:600;
+  }
+  #ach-customizer .ach-main {
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+    padding:18px 22px 30px; min-width:0; min-height:0; scrollbar-gutter:stable;
+  }
+  #ach-customizer .ach-main h4 {
+    margin:0 0 14px; font-size:15px; line-height:21px; color:#263544; font-weight:600;
+  }
+  #ach-customizer .ach-view > :not(h4) { margin-top:14px; margin-bottom:0; }
+  #ach-customizer .ach-view > h4 + :not(h4) { margin-top:0; }
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
-  #ach-customizer .ach-note { padding:10px 12px; border:1px solid #dee2e6; background:#fafafa; border-radius:3px; margin:0 0 14px; overflow-wrap:anywhere; }
+  #ach-customizer .ach-note {
+    padding:11px 13px; background:var(--ach-soft); border:1px solid #e8ecef;
+    border-radius:3px; overflow-wrap:anywhere; color:#52606d;
+  }
+  #ach-customizer .ach-note p { margin:6px 0 0; }
   #ach-customizer .ach-note p:last-child { margin-bottom:0; }
-  #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr)); gap:12px 14px; margin:12px 0; }
-  #ach-customizer .ach-fields label, #ach-customizer .ach-status-fields label { display:block; font-weight:600; }
-  #ach-customizer .ach-fields input, #ach-customizer .ach-fields select, #ach-customizer .ach-status-fields input { width:100%; min-width:0; max-width:none; margin-top:4px; }
-  #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:12px; margin:10px 0; }
-  #ach-customizer .ach-switches label { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+  #ach-customizer .ach-fields, #ach-customizer .ach-status-fields {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));
+    gap:14px 16px; margin:14px 0;
+  }
+  #ach-customizer .ach-fields label, #ach-customizer .ach-status-fields label {
+    display:block; font-size:12px; font-weight:600; color:#4b5964;
+  }
+  #ach-customizer .ach-fields input:not([type="checkbox"]),
+  #ach-customizer .ach-fields select,
+  #ach-customizer .ach-status-fields input:not([type="checkbox"]) {
+    display:block; width:100%; min-width:0; max-width:none; margin:5px 0 0;
+  }
+  #ach-customizer .ach-main input:not([type="checkbox"]),
+  #ach-customizer .ach-main select,
+  #ach-customizer .ach-main textarea {
+    appearance:auto; min-width:0; max-width:100%; min-height:34px; height:34px;
+    padding:6px 10px; border:1px solid #d4dade; border-radius:3px;
+    background:#fff; color:var(--ach-text); font:inherit; line-height:20px;
+    transition:border-color .12s ease, box-shadow .12s ease;
+  }
+  #ach-customizer .ach-main textarea { height:auto; min-height:64px; }
+  #ach-customizer .ach-main input:not([type="checkbox"]):disabled,
+  #ach-customizer .ach-main select:disabled { background:#f4f6f7; color:#75818a; }
+  #ach-customizer .ach-main input[type="checkbox"] {
+    appearance:auto; width:16px; height:16px; min-width:16px;
+    padding:0; margin:0 6px 0 0; vertical-align:middle; accent-color:var(--ach-green);
+  }
+  #ach-customizer .ach-main label:has(> input[type="checkbox"]) {
+    display:inline-flex; align-items:flex-start; gap:5px; line-height:1.6;
+  }
+  #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:12px 20px; margin:12px 0; }
+  #ach-customizer .ach-switches label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
   #ach-customizer .ach-switches input { margin:0; }
-  #ach-customizer table { width:100%; border-collapse:collapse; }
-  #ach-customizer td, #ach-customizer th { padding:8px; text-align:start; border-bottom:1px solid #e1e5ec; overflow-wrap:anywhere; vertical-align:top; }
-  #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; }
-  #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; }
-  #ach-customizer button:focus-visible, #ach-customizer input:focus-visible, #ach-customizer select:focus-visible, #ach-customizer .ach-main:focus-visible { outline:2px solid #267fc6; outline-offset:2px; }
-  #ach-customizer .ach-error { color:#b22424; }
-  #ach-customizer .ach-fpm-operation-notice { position:sticky; top:0; z-index:2; padding:9px 10px; background:#f2f8f3; border:1px solid #d4e4d6; font-weight:600; overflow-wrap:anywhere; }
+  #ach-customizer .ach-main button {
+    appearance:none; display:inline-flex; align-items:center; justify-content:center;
+    min-height:34px; max-width:100%; padding:6px 13px; border:1px solid #cbd3d8;
+    border-radius:3px; background:#fff; color:#374151; font:inherit; line-height:20px;
+    white-space:normal; text-align:center; cursor:pointer;
+    transition:background-color .12s ease, border-color .12s ease;
+  }
+  #ach-customizer .ach-main button:hover:not(:disabled) { background:#f4f6f7; border-color:#b8c3ca; }
+  #ach-customizer .ach-main button.btn-success {
+    color:#fff; background:var(--ach-green); border-color:var(--ach-green);
+  }
+  #ach-customizer .ach-main button.btn-success:hover:not(:disabled) { background:var(--ach-green-hover); border-color:var(--ach-green-hover); }
+  #ach-customizer .ach-main button.btn-danger {
+    color:#fff; background:var(--ach-danger); border-color:var(--ach-danger);
+  }
+  #ach-customizer .ach-main button.btn-danger:hover:not(:disabled) { background:#a52b28; border-color:#a52b28; }
+  #ach-customizer .ach-main button.btn-warning {
+    background:#fff8eb; border-color:#e8c68e; color:#79500e;
+  }
+  #ach-customizer .ach-main button:disabled { opacity:.58; cursor:not-allowed; box-shadow:none; }
+  #ach-customizer .ach-main button:focus-visible, #ach-customizer .ach-sidebar button:focus-visible,
+  #ach-customizer input:focus-visible, #ach-customizer select:focus-visible,
+  #ach-customizer .ach-main:focus-visible {
+    outline:2px solid var(--ach-focus); outline-offset:2px;
+  }
+  #ach-customizer .ach-main input:not([type="checkbox"]):focus-visible,
+  #ach-customizer .ach-main select:focus-visible {
+    border-color:var(--ach-focus); box-shadow:0 0 0 2px rgba(41,125,192,.12);
+  }
+  #ach-customizer table { width:100%; border-collapse:collapse; font-size:12px; }
+  #ach-customizer td, #ach-customizer th {
+    padding:10px 11px; text-align:start; border-bottom:1px solid #e8edf0;
+    overflow-wrap:anywhere; vertical-align:top;
+  }
+  #ach-customizer th { background:#f7f9fa; color:#586775; font-weight:600; white-space:nowrap; }
+  #ach-customizer tbody tr:hover { background:#fafcfd; }
+  #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:3px; }
+  #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0 0; }
+  #ach-customizer .ach-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
+  #ach-customizer .ach-toolbar [role="status"] { color:var(--ach-muted); }
+  #ach-customizer #ach-message {
+    margin:0 0 14px; padding:9px 12px; border:1px solid #e1e7ed;
+    border-radius:3px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
+  }
+  #ach-customizer #ach-message:empty { display:none; }
+  #ach-customizer #ach-message.ach-error,
+  #ach-customizer .ach-error { color:#ac3431; }
+  #ach-customizer #ach-message.ach-error { background:#fff5f3; border-color:#f0d1ce; }
+  #ach-customizer .ach-fpm-operation-notice {
+    position:sticky; top:0; z-index:2; padding:10px 12px; margin:12px 0;
+    background:#f2f8f3; border:1px solid #d4e4d6; border-radius:3px;
+    font-weight:600; overflow-wrap:anywhere;
+  }
   #ach-customizer .ach-fpm-operation-notice.ach-error { background:#fff5f4; border-color:#e4c8c7; }
-
-  #ach-customizer .ach-status-preview { width:100%; min-height:440px; border:1px solid #d4d9e0; border-radius:3px; background:#fff; }
+  #ach-customizer .ach-status-preview {
+    display:block; width:100%; min-height:440px; border:1px solid var(--ach-line);
+    border-radius:3px; background:#fff;
+  }
   #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
   #ach-customizer .ach-badge { display:inline-block; font-size:11px; padding:2px 7px; border-radius:3px; background:#e9f2ec; color:#21642d; }
-  #ach-customizer .ach-activity-error { color:#b22424; font-weight:600; }
-  #ach-customizer .ach-activity-warning { color:#91630b; font-weight:600; }
+  #ach-customizer .ach-activity-error { color:#ac3431; font-weight:600; }
+  #ach-customizer .ach-activity-warning { color:#8c601c; font-weight:600; }
   #ach-customizer .ach-activity-info { color:#3b6474; }
-  #ach-customizer .ach-activity-table { font-size:12px; }
   #ach-customizer .ach-activity-table td { overflow-wrap:anywhere; }
+  #ach-customizer .ach-main hr { border:0; border-top:1px solid var(--ach-line); margin:20px 0; }
+  #ach-customizer .ach-main small { display:block; margin-top:6px; color:var(--ach-muted); line-height:1.55; }
   @media (max-width:720px) {
     #ach-customizer .ach-workspace { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
-    #ach-customizer .ach-sidebar { display:flex; align-items:stretch; gap:2px; overflow-x:auto; overflow-y:hidden; border-right:0; border-bottom:1px solid #e1e1e1; padding:0 6px; }
+    #ach-customizer .ach-sidebar {
+      display:flex; align-items:stretch; gap:2px; overflow-x:auto; overflow-y:hidden;
+      border-right:0; border-bottom:1px solid var(--ach-line); padding:0 6px;
+    }
     #ach-customizer .ach-sidebar-label { display:none; }
     #ach-customizer .ach-sidebar button { white-space:nowrap; width:auto; flex:none; border-left:0; border-bottom:3px solid transparent; padding:10px 12px; }
-    #ach-customizer .ach-sidebar button[aria-selected="true"] { border-bottom-color:#20a53a; }
-    #ach-customizer .ach-main { padding:14px 14px 28px; }
+    #ach-customizer .ach-sidebar button[aria-selected="true"] { border-bottom-color:var(--ach-green); }
+    #ach-customizer .ach-main { padding:14px 14px 26px; }
+    #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr)); }
   }
   @media (max-height:550px) { #ach-customizer { height:calc(100dvh - 64px); min-height:200px; } }
+  @media (prefers-reduced-motion:reduce) {
+    #ach-customizer .ach-main button,
+    #ach-customizer .ach-main input:not([type="checkbox"]),
+    #ach-customizer .ach-main select { transition:none; }
+  }
+
 </style>
 <div class="bt-form" id="ach-customizer" dir="ltr" lang="en">
   <div class="ach-shell">
-    <header class="ach-head"><h3>ACh aaPanel Customizer</h3><p>Native aaPanel plugin · Monitor by default · No automatic enforcement</p></header>
+    <h2 class="ach-sr-only">ACh aaPanel Customizer</h2>
     <div class="ach-workspace">
       <nav class="ach-sidebar" role="tablist" aria-label="Plugin sections" aria-orientation="vertical">
         <span class="ach-sidebar-label">OPERATIONS</span>
@@ -90,7 +204,10 @@
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
       <h4>Overview</h4>
       <p class="ach-note">This unreleased development candidate includes read-only monitoring and a separately confirmed, guarded PHP 8.5 shared-service Apply/Restore for verified aaPanel 8.0.7 + Nginx. No automatic enforcement.</p>
-      <p id="ach-overview-status">Loading...</p>
+      <div class="ach-toolbar">
+        <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
+        <button type="button" id="ach-overview-refresh">Refresh state</button>
+      </div>
       <div class="ach-note">
         <strong>Monitor controls</strong>
         <p>These switches control read-only monitoring only. They do not stop sites, reload services, or approve manual changes. Preferences survive a normal plugin uninstall/reinstall.</p>
@@ -106,7 +223,11 @@
     <section class="ach-view" id="ach-panel-websites" aria-labelledby="ach-tab-websites" data-view="websites" role="tabpanel" hidden>
       <h4>Websites</h4>
       <p class="ach-note">The ID identifies the site in aaPanel. The site key is aaPanel's recorded site name, which may remain after its domain binding is removed. Bound domains are aaPanel database records, not independently verified DNS or live Nginx routes.</p>
-      <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
+      <div class="ach-toolbar">
+        <p id="ach-sites-status" role="status" aria-live="polite">Open this section to load native website inventory.</p>
+        <button id="ach-sites-refresh" type="button">Refresh websites</button>
+      </div>
+      <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"><tr><td colspan="5">Website inventory not loaded.</td></tr></tbody></table></div>
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
@@ -192,8 +313,10 @@
         <button id="ach-status-save" type="button" class="btn btn-success" disabled>Save branding preferences</button>
       </div>
       <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
-      <label><input id="ach-status-reset-approve" type="checkbox" /> I approve resetting this scope to inherited or ACh defaults.</label>
-      <button id="ach-status-reset" type="button" disabled>Reset selected branding scope</button>
+      <div class="ach-controls">
+        <label><input id="ach-status-reset-approve" type="checkbox" /> I approve resetting this scope to inherited or ACh defaults.</label>
+        <button id="ach-status-reset" type="button" class="btn btn-warning" disabled>Reset selected branding scope</button>
+      </div>
       <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect selected site 404/502 (read-only)</button></div>
       <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
       <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
@@ -239,6 +362,10 @@
   var statusBusy = false, statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
+  // Keep the native dialog mounted. Switching panels does not discard unsaved
+  // edits or re-fetch previously accepted read-only data without Refresh.
+  var sectionsLoaded = {overview:false, websites:false, status:false, activity:false};
+  var overviewBusy = false;
   function fitNativeLayer() {
     // Only resize the aaPanel layer that actually owns this plugin instance.
     if (!root[0] || typeof window === 'undefined') return;
@@ -307,7 +434,10 @@
     // status of the latest initiated request; stale callbacks still complete
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
-    msg(t.loading, false);
+    // Read-only navigation updates the per-panel status, not a global banner.
+    if (/^(set_control|status_(save|reset)|fpm_(apply|rollback))$/.test(method)) {
+      msg(t.loading, false);
+    }
     $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
@@ -432,11 +562,21 @@
     root.find('[data-monitor-control]').prop('disabled', controlBusy);
   }
   function overview() {
+    if (overviewBusy) return;
+    overviewBusy = true;
+    root.find('#ach-overview-refresh').prop('disabled', true);
+    root.find('#ach-overview-status').text(
+      sectionsLoaded.overview ? 'Refreshing monitor state...' : 'Loading monitor state...');
     request('get_overview', {}, function (r) {
-      root.find('#ach-overview-status').text(r ? r.mode + ' — ' + r.notice : t.error);
+      overviewBusy = false;
+      root.find('#ach-overview-refresh').prop('disabled', false);
+      root.find('#ach-overview-status').text(r ? r.mode + ' — ' + r.notice :
+        'Monitor state unavailable. Use Refresh state to retry.');
       displayControls(r);
+      sectionsLoaded.overview = Boolean(lastOverview);
     });
   }
+  root.find('#ach-overview-refresh').on('click', overview);
   root.find('[data-monitor-control]').on('change', function () {
     if (controlBusy || !lastOverview) return;
     var control = $(this).attr('data-monitor-control');
@@ -448,7 +588,7 @@
       expected_revision:lastOverview.state_revision
     }, function (r) {
       controlBusy = false;
-      if (!r) { displayControls(lastOverview); return; }
+      if (!r) { sectionsLoaded.overview = false; displayControls(lastOverview); return; }
       root.find('#ach-overview-status').text(r.mode + ' — ' + r.notice);
       displayControls(r);
     });
@@ -456,17 +596,28 @@
   function sites() {
     if (siteBusy) return;
     siteBusy = true;
+    root.find('#ach-sites-refresh').prop('disabled', true);
+    root.find('#ach-sites-status').text('Loading website inventory...');
     request('get_sites', {page:page, page_size:sitePageSize}, function (r) {
       siteBusy = false;
+      root.find('#ach-sites-refresh').prop('disabled', false);
       var body = root.find('#ach-sites-rows').empty();
-      if (!r) { invalidateInventory(); return; }
+      if (!r) {
+        sectionsLoaded.websites = false;
+        root.find('#ach-sites-status').text('Website inventory unavailable. Refresh to retry.');
+        invalidateInventory(); return;
+      }
       // aaPanel can serve new HTML with a stale Python module. Reject schema
       // drift and malformed records before rendering any inventory row.
       if (r.inventory_schema !== 2) {
+        sectionsLoaded.websites = false;
+        root.find('#ach-sites-status').text('Inventory version mismatch. Refresh after updating backend.');
         invalidateInventory('Inventory API mismatch: aaPanel may still be serving an older plugin backend after an update. Reload the panel backend during a maintenance window and reopen this view. No bindings were inferred.');
         return;
       }
       if (!validInventoryPage(r, page)) {
+        sectionsLoaded.websites = false;
+        root.find('#ach-sites-status').text('Website inventory inconsistent. Refresh to retry.');
         invalidateInventory('Invalid inventory response: website or domain data is incomplete or inconsistent. No bindings were inferred.');
         return;
       }
@@ -483,12 +634,23 @@
         body.append(tr);
       });
       if (!r.sites.length) body.append($('<tr>').append($('<td colspan="5">').text(t.noSites)));
+      sectionsLoaded.websites = true;
       hasMore = r.has_more;
+      root.find('#ach-sites-status').text(
+        'Page ' + page + ' · ' + r.sites.length + ' website(s) · ' +
+        (hasMore ? 'More pages available' : 'Last page') +
+        '. Use Refresh to check recent aaPanel changes.');
       root.find('#ach-page').text(page);
       root.find('#ach-prev').prop('disabled', page <= 1);
       root.find('#ach-next').prop('disabled', !hasMore);
     });
   }
+  root.find('#ach-sites-refresh').on('click', function () {
+    if (siteBusy) return;
+    page = 1;
+    sectionsLoaded.websites = false;
+    sites();
+  });
   function statusScope() {
     var scope = root.find('#ach-status-scope').val();
     var id = root.find('#ach-status-site-id').val();
@@ -544,6 +706,7 @@
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
   }
   function statusLoad() {
+    sectionsLoaded.status = false;
     var scope = statusScope();
     var ticket = ++statusTicket;
     statusRevision = null;
@@ -566,6 +729,7 @@
         root.find('#ach-status-result').text('Unable to load safe branding preferences.');
       } else {
         statusRevision = r.revision;
+        sectionsLoaded.status = true;
         statusLoadedScope = scope.scope + ':' + scope.site_id;
         statusSetFields(r.effective);
         root.find('#ach-status-source').text(r.source + '; revision ' + r.revision +
@@ -843,6 +1007,7 @@
         root.find('#ach-activity-result').text('Activity unavailable or incompatible API. Retry after checking administrator access.');
         return;
       }
+      sectionsLoaded.activity = true;
       r.entries.forEach(function (entry) {
         var tr = $('<tr>');
         $('<td>').text(entry.time_utc).appendTo(tr);
@@ -861,16 +1026,21 @@
   root.find('#ach-activity-module').on('change', loadActivity);
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
+    if (['overview','websites','php','status','activity'].indexOf(tab) < 0) return;
     root.find('[data-tab]').attr('aria-selected', 'false').attr('tabindex', '-1');
     $(this).attr('aria-selected', 'true').attr('tabindex', '0');
     root.find('[data-view]').prop('hidden', true);
     root.find('[data-view="' + tab + '"]').prop('hidden', false);
     if (root[0]) { var body = root[0].querySelector('#ach-content'); if (body) body.scrollTop = 0; }
     msg('', false);
-    if (tab === 'overview') overview();
-    if (tab === 'websites') sites();
-    if (tab === 'status') { statusLoad(); if (root.find('#ach-status-scope').val() === 'site' && !statusSites.length) loadStatusSites(true); }
-    if (tab === 'activity') loadActivity();
+    if (tab === 'overview' && !sectionsLoaded.overview) overview();
+    if (tab === 'websites' && !sectionsLoaded.websites) sites();
+    if (tab === 'status') {
+      // Preserve unsaved branding and its preview across native tab switches.
+      if (!sectionsLoaded.status) statusLoad();
+      if (root.find('#ach-status-scope').val() === 'site' && !statusSites.length) loadStatusSites(true);
+    }
+    if (tab === 'activity' && !sectionsLoaded.activity) loadActivity();
   });
   root.find('[data-tab]').on('keydown', function (event) {
     if (!root[0] || !event) return;

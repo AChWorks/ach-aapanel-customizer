@@ -21,7 +21,7 @@ const {chromium} = require('playwright');
     for(const [width,height] of [[1280,720],[1366,768],[1920,1080],[720,650],[375,650]]) {
       await page.setViewportSize({width,height});
       await page.setContent(html, {waitUntil:'domcontentloaded'});
-      for(const name of ['overview','status','php','activity']) {
+      for(const name of ['overview','websites','status','php','activity']) {
         await page.evaluate((name)=>{
           document.querySelectorAll('[data-view]').forEach(v=>v.hidden=v.getAttribute('data-view')!==name);
         },name);
@@ -40,6 +40,25 @@ const {chromium} = require('playwright');
             contentBottom:Math.round(mb.bottom),
             controlsHiddenBehindBody:body.scrollHeight>innerHeight+1};
         });
+        // Verify reusable control geometry in the actual rendered plugin DOM.
+        // This detects aaPanel-style drift even if the parent layer still fits.
+        const controls=await page.evaluate(()=>{
+          const main=document.getElementById('ach-content');
+          const edge=main.getBoundingClientRect();
+          const found=[...main.querySelectorAll('button,input:not([type="checkbox"]),select')]
+            .filter(el=>el.getClientRects().length>0 && !el.closest('[hidden]'));
+          const failures=found.filter(el=>{
+            const r=el.getBoundingClientRect();
+            const css=getComputedStyle(el);
+            return r.height<33 || r.height>96 || r.width<15 ||
+              r.left<edge.left-1 || r.right>edge.right+1 ||
+              css.borderRadius!=='3px';
+          }).map(el=>el.id||el.tagName);
+          return {visible:found.length,failures};
+        });
+        if(controls.failures.length) {
+          throw Error('Inconsistent native control sizing '+JSON.stringify({width,height,name,...controls}));
+        }
         output.push({section:name,...x});
         if(x.documentOverflow || !x.rootVisible || !x.navVisible || !x.contentWithinViewport ||
           x.contentOverflowMode!=='auto') {
