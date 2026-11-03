@@ -24,6 +24,7 @@ from ach_customizer_monitor import (
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
 from ach_customizer_state import DATA_DIR, StateError, read_state, set_enabled
+from ach_customizer_status_inspect import SUPPORTED_PAGES, inspect_site_files
 from ach_customizer_status_pages import (
     DEFAULT_BRAND, BRAND_KEYS, PAGES, LOCALES, StatusPageError,
     read_preferences, render_page, select_brand, update_preferences, validate_brand,
@@ -250,6 +251,51 @@ class ach_customizer_main:
             }
         except Exception as exc:
             return self._fail("status_preview", exc, request_id)
+
+    def status_inspect(self, args):
+        """Admin-only read-only file/source comparison for a single native site.
+
+        No Nginx -T/HTTP/Apply or recovery promises are made. Do not expose
+        filesystem diagnostics to lesser/temporary aaPanel identities.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            site_id = self._status_site_id(args)
+            if site_id is None:
+                raise StatusPageError("Select an existing native website")
+            template = self._argument(args, "template")
+            locale = self._argument(args, "locale")
+            if template not in SUPPORTED_PAGES or locale not in LOCALES:
+                raise StatusPageError("Site inspection supports only English/Persian 404/502")
+            state = read_preferences(_STATE_DIR)
+            effective, source = select_brand(state, site_id)
+            if self._argument(args, "brand_name") is not None:
+                effective = self._status_values(args)
+                source = "Unsaved comparison"
+            rendered = render_page(locale, template, effective)
+
+            import public
+            def native_record():
+                return public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+            before = native_record()
+            if not isinstance(before, dict) or int(before.get("id", 0)) != site_id:
+                raise StatusPageError("Native site changed before inspection")
+            inspected = inspect_site_files(
+                before, template=template, locale=locale,
+                rendered_sha256=rendered["rendered_sha256"],
+            )
+            if native_record() != before:
+                raise StatusPageError("Native site changed during inspection; recheck")
+            return {
+                "status": True, "request_id": request_id, "revision": state["revision"],
+                "selection_source": source, **inspected,
+            }
+        except PermissionError as exc:
+            return self._fail("status_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("status_inspect", exc, request_id)
 
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""

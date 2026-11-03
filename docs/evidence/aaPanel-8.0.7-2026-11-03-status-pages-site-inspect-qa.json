@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "project": "ACh aaPanel Customizer",
+  "date_utc": "2026-11-03",
+  "scope": "Issue #10 nonproduction read-only site-file/Nginx source comparison; unreleased 0.1.5",
+  "base_main_sha": "e42161a960c4ba425b9f91c8a822938d87e3b13d",
+  "environment": {
+    "isolation": "disposable task-owned QEMU QCOW2 child of retained isolated native aaPanel lab; no production network or hosts modified",
+    "os": "Debian 12",
+    "aapanel": "8.0.7",
+    "nginx": "1.28.3",
+    "php_fpm": "8.5.12",
+    "website_ids": [
+      7,
+      8
+    ],
+    "site_keys": [
+      "site-c.ach-customizer.invalid",
+      "site-d.ach-customizer.invalid"
+    ]
+  },
+  "artifact": {
+    "version": "0.1.5 development only",
+    "zip_sha256": "f4cf90f2661d68e1ecb3dc270aed59cb7e96dcca23788caaef631e3fa1f558aa",
+    "native_import": "PASS",
+    "installed_zip_member_sha256_matches": 35,
+    "native_update_method": "panelPlugin.update_zip then input_zip",
+    "native_qa_script_sha256": "89f22d64aeefc85e95510351852d866561f877e78e32585197e772c0cbad8f43",
+    "native_machine_result_sha256": "840ab40cbadb4568a7df564551d2fce74797eab6d3f818ef330de87c83caa727"
+  },
+  "source_tests": {
+    "python_unittest_pass": 157,
+    "node_ui_tests_pass": 62
+  },
+  "observations": {
+    "installed_endpoint_invoked_in_fresh_panel_python": "PASS",
+    "native_site_ids_7_and_8_recognized": "PASS",
+    "site_404_and_502_before_fixture": {
+      "7": {
+        "404": "Conflict / Different bytes",
+        "502": "Conflict / Different bytes"
+      },
+      "8": {
+        "404": "Conflict / Different bytes",
+        "502": "Conflict / Different bytes"
+      }
+    },
+    "site_vhost_text_has_error_page_conflicts": true,
+    "site_vhost_text_has_extension_include": true,
+    "nonprimary_synthetic_session": "DENIED",
+    "temporary_token_synthetic_session": "DENIED",
+    "GET_synthetic_request": "DENIED",
+    "fixture_only_temporary_html_hash_match": "PASS; page_file_state Same bytes but Conflict due other native rules",
+    "fixture_html_restored_exact_original": "PASS",
+    "read_only_status_report_no_apply_supported": true,
+    "nginx_runtime_verified_by_plugin": false,
+    "host_fpm_baseline_sha256_unchanged": true,
+    "both_site_vhost_sha256_unchanged": true,
+    "both_site_404_502_sha256_unchanged_after_fixture": true,
+    "external_branding_and_monitor_state_sha256_unchanged": true,
+    "nginx_t": "PASS",
+    "both_site_HTTP_200_before_and_after": "PASS",
+    "graceful_guest_poweroff": "PASS",
+    "child_qcow2_integrity": "No errors",
+    "production_touched": false
+  },
+  "limits": [
+    "Native backend authorization exercised via synthetic Flask POST; not an authenticated aaPanel browser session or platform CSRF/role replay",
+    "Direct source inspection is not effective Nginx routing analysis, an nginx -T audit, a verified 404/502 error response, or Apply readiness",
+    "Temporary test-only page bytes placed in isolated guest; restored exactly; not a product Apply/Restore test",
+    "One aaPanel 8.0.7/Nginx 1.28.3/PHP-FPM 8.5.12 setup; no other versions or Apache tested",
+    "Native update can leave an existing aaPanel worker with stale Python imports; installed entrypoint tested in a fresh panel Python process",
+    "No release, production deployment, live Status Pages installation, backup or rollback authorized/implemented"
+  ],
+  "reproduction_notes": [
+    "Source suite: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p test_*.py -q",
+    "UI suite: node --test tests/test_inventory_ui.cjs",
+    "Build: python3 -B scripts/build_plugin.py --output <QA ZIP>",
+    "Native evidence script retained in isolated task-owned QA folder until review; exact script SHA-256 recorded above",
+    "Test owned guest image isolated and powered off after verification; upstream lab images and separate FPM worktree untouched"
+  ]
+}
