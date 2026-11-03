@@ -68,6 +68,22 @@ def _site_domains(domains):
     return resolved, unsupported
 
 
+def native_site_snapshot(site):
+    """Canonical comparison-only snapshot of the selected native inventory.
+
+    The browser sees the same fields through get_site_page; only native
+    database reads determine which hostnames will actually be inspected.
+    Sorting makes the precondition independent of database row ordering.
+    """
+    bindings = site["bound_domains"]
+    return [
+        site["id"], site["name"], str(site.get("path") or ""),
+        "" if site.get("status") is None else str(site["status"]),
+        sorted(([item["name"], item["port"]] for item in bindings),
+               key=lambda item: (item[0], item[1])),
+    ]
+
+
 def _file_bytes(path):
     """Descriptor-anchored, stable small-file read. Fixture path only in tests."""
     if (not isinstance(path, str) or not path.startswith("/")
@@ -104,6 +120,18 @@ def _file_bytes(path):
                 getattr(before, k) != getattr(after, k) for k in fields
             ):
                 raise HostsInspectionError("Hosts file changed during inspection")
+            # fstat() alone misses rename(2) replacing the pathname while
+            # our descriptor still points to the now-superseded old inode.
+            # Recheck the *fixed* final basename relative to the same pinned
+            # parent. Never follow a replacement symlink or open a new file.
+            try:
+                pathname = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+            except OSError as exc:
+                raise HostsInspectionError("Hosts source changed; retry inspection") from exc
+            if (not stat.S_ISREG(pathname.st_mode) or any(
+                getattr(after, k) != getattr(pathname, k) for k in fields
+            )):
+                raise HostsInspectionError("Hosts source changed; retry inspection")
             return bytes(data)
         finally:
             os.close(source)

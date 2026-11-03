@@ -334,6 +334,7 @@ const site = () => ({
   id: 3,
   name: 'site.example.test',
   document_root: '/www/site.example.test',
+  panel_status: '1',
   classification: 'Needs Review',
   bound_domains: [
     { name: 'site.example.test', port: 80 },
@@ -380,6 +381,8 @@ invalidCase('Missing sites array is rejected',
   r => { delete r.sites; });
 invalidCase('Null sites array is rejected',
   r => { r.sites = null; });
+invalidCase('Missing panel status is rejected before any hosts selector is populated',
+  r => { delete r.sites[0].panel_status; });
 invalidCase('Missing bound_domains is rejected',
   r => { delete r.sites[0].bound_domains; });
 invalidCase('Null binding is rejected without a TypeError',
@@ -981,6 +984,9 @@ test('Native-site local hosts inspection reports loopback without claiming Gatew
   assert.match(query.options.url,/s=inspect_local_hosts$/);
   assert.equal(query.options.data.site_id,'7');
   assert.equal(query.options.data.expected_site_key,'site.test');
+  assert.deepEqual(JSON.parse(query.options.data.expected_site_snapshot), [
+    7, 'site.test', '/www/site.test', '1', [['site.test', 80]]
+  ]);
   assert.equal(ui.state().hostsInspectDisabled,true);
   query.respond(hostsInspection());
   assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
@@ -1035,9 +1041,49 @@ test('Discovered site selection is bounded to current inventory and text-rendere
   const r=hostsInspection({site_key:malicious});
   const request=ui.statusClick('#ach-hosts-inspect-button');
   assert.equal(request.options.data.expected_site_key,malicious);
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot), [
+    7, malicious, '/www/site.test', '1', [['site.test', 80]]
+  ]);
   request.respond(r);
   assert.match(ui.state().hostsResult,/<img src=x onerror=alert\(1\)>/);
   ui.statusSetValue('#ach-hosts-site-id','9','input change');
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('Hosts optimistic snapshot binds domains, ports, root and native status', () => {
+  const ui=loadUi();
+  const chosen=hostsInventory();
+  const record=chosen.sites[0];
+  record.panel_status='0';
+  record.document_root='/www/relocated';
+  record.bound_domains=[
+    {name:'sub.site.test',port:8443},
+    {name:'site.test',port:80},
+    {name:'sub.site.test',port:443}
+  ];
+  record.canonical_domain_bound=true;
+  selectHostsSite(ui,'7',chosen);
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot), [
+    7,'site.test','/www/relocated','0',
+    [['site.test',80],['sub.site.test',443],['sub.site.test',8443]]
+  ]);
+  request.respond(hostsInspection());
+  assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+  // Reopening the inventory prevents a previous selection from surviving.
+  ui.openSites();
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('Oversized website binding snapshots never create an inspectable option', () => {
+  const ui=loadUi();
+  const inventory=hostsInventory();
+  inventory.sites[0].bound_domains=Array.from({length:101},(_,n)=>({
+    name:'site'+n+'.test',port:80
+  }));
+  inventory.sites[0].canonical_domain_bound=false;
+  ui.openSites();ui.respond(inventory);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['','8']);
   assert.equal(ui.state().hostsInspectDisabled,true);
 });
 

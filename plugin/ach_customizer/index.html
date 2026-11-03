@@ -288,6 +288,7 @@
           !Number.isSafeInteger(site.id) || site.id <= 0 || seenIds.has(site.id) ||
           typeof site.name !== 'string' || !site.name.trim() ||
           typeof site.document_root !== 'string' ||
+          typeof site.panel_status !== 'string' ||
           typeof site.classification !== 'string' || !site.classification.trim() ||
           typeof site.canonical_domain_bound !== 'boolean' ||
           !Array.isArray(site.bound_domains)) return false;
@@ -497,6 +498,19 @@
     });
   }
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
+  function nativeHostsSnapshot(site) {
+    var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
+    bindings.sort(function (a, b) {
+      // Compare Unicode code points, as Python does, not locale-dependent collation.
+      var left = Array.from(a[0]), right = Array.from(b[0]);
+      for (var i = 0; i < Math.min(left.length, right.length); i++) {
+        var diff = left[i].codePointAt(0) - right[i].codePointAt(0);
+        if (diff) return diff;
+      }
+      return left.length - right.length || a[1] - b[1];
+    });
+    return JSON.stringify([site.id, site.name, site.document_root, site.panel_status, bindings]);
+  }
   function hostsSiteId() {
     var raw = String(root.find('#ach-hosts-site-id').val() || '');
     return /^[1-9][0-9]{0,9}$/.test(raw) && Number(raw) <= 2147483647 &&
@@ -522,11 +536,15 @@
     hostsPageSites = new Map();
     sites.forEach(function (site) {
       var id = String(site.id);
-      hostsPageSites.set(id, site.name);
+      // A snapshot is an optimistic *comparison only*, not a domain/path source.
+      var snapshot = nativeHostsSnapshot(site);
+      if (site.bound_domains.length > 100 || snapshot.length > 110000) return;
+      hostsPageSites.set(id, {name:site.name, snapshot:snapshot});
       $('<option>').val(id).text(site.name + ' (#' + id + ')').appendTo(select);
     });
     root.find('#ach-hosts-result').text(
-      sites.length ? 'Select a website to inspect its origin-local /etc/hosts entries.' : 'No websites on this page.');
+      hostsPageSites.size ? 'Select a website to inspect its origin-local /etc/hosts entries.' :
+      'No supported website selection on this page (domain inventory may be too large).');
     hostsLock(false);
   }
   function validHostsResult(r, siteId) {
@@ -535,7 +553,7 @@
         r.remote_dns_verified !== false || r.gateway_verified !== false ||
         !Number.isSafeInteger(r.site_id) || r.site_id !== Number(siteId) ||
         typeof r.site_key !== 'string' || !r.site_key || r.site_key.length > 255 ||
-        r.site_key !== hostsPageSites.get(siteId) ||
+        r.site_key !== hostsPageSites.get(siteId)?.name ||
         !/^[0-9a-f]{64}$/.test(r.hosts_sha256 || '') ||
         typeof r.reason !== 'string' || r.reason.length > 300 ||
         typeof r.note !== 'string' || r.note.length > 600 ||
@@ -571,7 +589,10 @@
     var ticket = ++hostsTicket;
     root.find('#ach-hosts-result').text('Inspecting origin-local file only...');
     hostsLock(true);
-    request('inspect_local_hosts', {site_id:id, expected_site_key:hostsPageSites.get(id)}, function (r) {
+    request('inspect_local_hosts', {site_id:id,
+      expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r) {
       if (ticket !== hostsTicket) return;
       if (id !== hostsSiteId() || !validHostsResult(r, id)) {
         root.find('#ach-hosts-result').text('Inspection unconfirmed; no DNS or Gateway inference.');

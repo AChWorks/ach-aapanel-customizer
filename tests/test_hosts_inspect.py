@@ -1,5 +1,6 @@
 """Regression tests for bounded, origin-local /etc/hosts inspection."""
 import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from unittest.mock import patch
 PLUGIN = Path(__file__).resolve().parents[1] / "plugin" / "ach_customizer"
 sys.path.insert(0, str(PLUGIN))
 from ach_customizer_hosts import HostsInspectionError, inspect_local_hosts
+import ach_customizer_hosts as hosts
 import ach_customizer_main as endpoint
 
 
@@ -130,6 +132,109 @@ class LocalHostsTests(unittest.TestCase):
         with self.assertRaises(HostsInspectionError):
             self.inspect()
 
+    def test_atomic_pathname_replacement_during_read_refuses_old_inode(self):
+        """Atomic rename during read must fail, regardless of which guard fires."""
+        self.write("127.0.0.1 example.test\n")
+        old_content = self.path.read_bytes()
+        replacement = self.root / "next-hosts"
+        replacement.write_text("192.0.2.20 example.test\n", encoding="utf-8")
+        replacement.chmod(0o644)
+        original_read = os.read
+        replaced = False
+
+        def read_and_replace(fd, count):
+            nonlocal replaced
+            content = original_read(fd, count)
+            if not replaced:
+                os.replace(replacement, self.path)
+                replaced = True
+            return content
+
+        with patch.object(hosts.os, "read", side_effect=read_and_replace):
+            with self.assertRaisesRegex(HostsInspectionError, "Hosts (?:file changed during inspection|source changed; retry)"):
+                self.inspect()
+        self.assertTrue(replaced)
+        self.assertNotEqual(self.path.read_bytes(), old_content)
+
+    def test_symlink_and_removal_replacements_during_read_are_controlled(self):
+        original_read = os.read
+        for kind in ("symlink", "missing"):
+            with self.subTest(kind=kind):
+                if self.path.is_symlink() or self.path.exists():
+                    self.path.unlink()
+                self.write("127.0.0.1 example.test\n")
+                replacement = self.root / "safe-source"
+                replacement.write_text("127.0.0.1 unrelated.test\n", encoding="utf-8")
+                replaced = False
+
+                def read_and_swap(fd, count):
+                    nonlocal replaced
+                    content = original_read(fd, count)
+                    if not replaced:
+                        self.path.unlink()
+                        if kind == "symlink":
+                            self.path.symlink_to(replacement)
+                        replaced = True
+                    return content
+
+                with patch.object(hosts.os, "read", side_effect=read_and_swap):
+                    with self.assertRaisesRegex(HostsInspectionError, "Hosts (?:file changed during inspection|source changed; retry)"):
+                        self.inspect()
+                self.assertTrue(replaced)
+                if self.path.is_symlink():
+                    self.path.unlink()
+
+    def test_replacement_detected_by_pathname_even_with_frozen_fd_metadata(self):
+        """Prove the new path check independently of fstat's unlink detection.
+
+        Real Linux rename generally also updates the old inode link count or
+        ctime; freeze only second-fstat *test evidence* so that pathname
+        revalidation is the rejecting guard.
+        """
+        self.write("127.0.0.1 example.test\n")
+        successor = self.root / "next-hosts"
+        successor.write_text("203.0.113.90 example.test\n")
+        successor.chmod(0o644)
+        original_read = os.read
+        original_fstat = os.fstat
+        first_stat = None
+
+        def frozen_fstat(fd):
+            nonlocal first_stat
+            if first_stat is None:
+                first_stat = original_fstat(fd)
+            return first_stat
+
+        def replacement(fd, count):
+            chunk = original_read(fd, count)
+            if successor.exists():
+                os.replace(successor, self.path)
+            return chunk
+
+        with patch.object(hosts.os, "read", side_effect=replacement), \
+             patch.object(hosts.os, "fstat", side_effect=frozen_fstat):
+            with self.assertRaisesRegex(HostsInspectionError, "Hosts source changed; retry"):
+                self.inspect()
+        self.assertEqual(self.path.read_text(), "203.0.113.90 example.test\n")
+
+    def test_in_place_modification_during_read_still_refused(self):
+        self.write("127.0.0.1 example.test\n")
+        original_read = os.read
+        changed = False
+
+        def read_and_edit(fd, count):
+            nonlocal changed
+            chunk = original_read(fd, count)
+            if not changed:
+                self.path.write_text("127.0.0.1 example.test changed.test\n")
+                changed = True
+            return chunk
+
+        with patch.object(hosts.os, "read", side_effect=read_and_edit):
+            with self.assertRaisesRegex(HostsInspectionError, "Hosts file changed"):
+                self.inspect()
+        self.assertTrue(changed)
+
     def test_bounded_sizes_line_counts_and_matches(self):
         self.write("127.0.0.1 localhost\n" * 2050)
         with self.assertRaises(HostsInspectionError):
@@ -163,7 +268,18 @@ class NativeEndpointTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.reads = 0
 
-    def panel(self, changed=False, domains_changed=False, site_name="site.test"):
+    @staticmethod
+    def snapshot(*, site_name="site.test", path="/www/site.test",
+                 status="1", domains=None):
+        # The browser receives these fields from the validated native page.
+        if domains is None:
+            domains = [["*.site.test", 443], ["site.test", 80]]
+        return json.dumps([7, site_name, path, status, domains],
+                          separators=(",", ":"), ensure_ascii=False)
+
+    def panel(self, changed=False, domains_changed=False, site_name="site.test",
+              prechanged_domains=False, prechanged_path=False,
+              prechanged_status=False):
         module = types.ModuleType("public")
         outer = self
 
@@ -177,8 +293,9 @@ class NativeEndpointTests(unittest.TestCase):
             def find(self):
                 outer.reads += 1
                 return {"id": 7, "name": site_name,
-                        "path": "/changed" if changed and outer.reads == 3 else "/www/site.test",
-                        "status": "1"}
+                        "path": "/changed" if prechanged_path or changed and outer.reads == 3
+                                else "/www/site.test",
+                        "status": "0" if prechanged_status else "1"}
 
         class DomainQuery:
             def where(self, expression, values):
@@ -196,7 +313,8 @@ class NativeEndpointTests(unittest.TestCase):
             def select(self):
                 return [{"id": 41, "pid": 7, "name": "site.test", "port": 80},
                         {"id": 42, "pid": 7,
-                         "name": "changed.test" if domains_changed and outer.reads == 3
+                         "name": "changed.test" if prechanged_domains or
+                                domains_changed and outer.reads == 3
                          else "*.site.test", "port": 443}]
         module.M = lambda name: SiteQuery() if name == "sites" else DomainQuery()
         return module
@@ -216,7 +334,7 @@ class NativeEndpointTests(unittest.TestCase):
         with patch.dict(sys.modules, {"public":self.panel(), "flask":self.flask()}):
             with patch.object(endpoint, "inspect_hosts_file", return_value=response) as spy:
                 result = self.plugin.inspect_local_hosts(
-                    {"site_id":"7", "expected_site_key":"site.test",
+                    {"site_id":"7", "expected_site_key":"site.test", "expected_site_snapshot":self.snapshot(),
                      "domains":["attacker.test"], "path":"/etc/shadow"})
         self.assertTrue(result["status"], result)
         self.assertEqual(result["site_id"], 7)
@@ -235,7 +353,7 @@ class NativeEndpointTests(unittest.TestCase):
                        self.flask(method="GET")):
             with patch.dict(sys.modules, {"flask":access, "public":self.panel()}):
                 with patch.object(endpoint, "inspect_hosts_file", side_effect=AssertionError("Must not read")):
-                    response = self.plugin.inspect_local_hosts({"site_id":"7", "expected_site_key":"site.test"})
+                    response = self.plugin.inspect_local_hosts({"site_id":"7", "expected_site_key":"site.test", "expected_site_snapshot":self.snapshot()})
             self.assertFalse(response["status"])
             self.assertEqual(response["stage"], "hosts_authorization")
         self.assertEqual(self.reads, 0)
@@ -243,7 +361,7 @@ class NativeEndpointTests(unittest.TestCase):
     def test_site_change_during_inspection_fails_closed(self):
         with patch.dict(sys.modules, {"flask":self.flask(), "public":self.panel(changed=True)}):
             with patch.object(endpoint, "inspect_hosts_file", return_value={"schema":1}) as spy:
-                response = self.plugin.inspect_local_hosts({"site_id":"7", "expected_site_key":"site.test"})
+                response = self.plugin.inspect_local_hosts({"site_id":"7", "expected_site_key":"site.test", "expected_site_snapshot":self.snapshot()})
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
         self.assertIn("changed", response["msg"])
@@ -272,7 +390,7 @@ class NativeEndpointTests(unittest.TestCase):
                                   side_effect=lambda names: inspect_local_hosts(
                                       names, source_path=str(source))) as inspected:
                     response = self.plugin.inspect_local_hosts(
-                        {"site_id": "7", "expected_site_key": "site.test",
+                        {"site_id": "7", "expected_site_key": "site.test", "expected_site_snapshot":self.snapshot(),
                          "domains": ["attacker.example"], "source_path": "/etc/shadow"})
                     activity = self.plugin.get_activity({"module": "websites"})
             self.assertTrue(response["status"], response)
@@ -303,7 +421,7 @@ class NativeEndpointTests(unittest.TestCase):
         with patch.dict(sys.modules, {"flask": self.flask(),
                                       "public": self.panel(domains_changed=True)}):
             with patch.object(endpoint, "inspect_hosts_file", return_value={"schema": 1}) as inspected:
-                response = self.plugin.inspect_local_hosts({"site_id": "7", "expected_site_key": "site.test"})
+                response = self.plugin.inspect_local_hosts({"site_id": "7", "expected_site_key": "site.test", "expected_site_snapshot":self.snapshot()})
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
         self.assertIn("bound domains changed", response["msg"])
@@ -315,7 +433,7 @@ class NativeEndpointTests(unittest.TestCase):
         with patch.dict(sys.modules, {"public": self.panel(), "flask": self.flask()}):
             with patch.object(endpoint, "inspect_hosts_file",
                               side_effect=OSError("private filesystem failure detail")):
-                response = self.plugin.inspect_local_hosts({"site_id": "7", "expected_site_key": "site.test"})
+                response = self.plugin.inspect_local_hosts({"site_id": "7", "expected_site_key": "site.test", "expected_site_snapshot":self.snapshot()})
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
         self.assertNotIn("private filesystem", str(response))
@@ -327,6 +445,65 @@ class NativeEndpointTests(unittest.TestCase):
                             e["error_class"] == "OSError" and
                             "private filesystem" not in e["detail"] for e in entries))
 
+    def test_pre_request_domain_or_site_metadata_drift_never_reads_hosts(self):
+        """The browser selected a *previous* native inventory snapshot.
+
+        aaPanel changes domain bindings independently of sites.name, so a
+        valid site ID/name is not enough to approve this inspection.
+        """
+        for change in ({"prechanged_domains": True},
+                       {"prechanged_path": True},
+                       {"prechanged_status": True}):
+            with self.subTest(change=change):
+                self.reads = 0
+                with patch.dict(sys.modules, {"flask": self.flask(),
+                                              "public": self.panel(**change)}):
+                    with patch.object(endpoint, "inspect_hosts_file",
+                                      side_effect=AssertionError("stale selection must not read")) as inspect:
+                        result = self.plugin.inspect_local_hosts({
+                            "site_id": "7", "expected_site_key": "site.test",
+                            "expected_site_snapshot": self.snapshot(),
+                        })
+                self.assertFalse(result["status"])
+                self.assertEqual(result["stage"], "hosts_inspection")
+                self.assertIn("identity or bound domains changed", result["msg"])
+                self.assertNotIn("changed.test", str(result))
+                inspect.assert_not_called()
+                self.assertEqual(self.reads, 2)
+
+    def test_snapshot_domain_order_is_canonical_and_comparison_only(self):
+        """Changing database row order must not fabricate a stale selection."""
+        with patch.dict(sys.modules, {"flask": self.flask(), "public": self.panel()}):
+            with patch.object(endpoint, "inspect_hosts_file", return_value={
+                    "schema": 1, "state": "No Local Loopback Entry"}) as inspect:
+                result = self.plugin.inspect_local_hosts({
+                    "site_id": "7", "expected_site_key": "site.test",
+                    "expected_site_snapshot": self.snapshot(
+                        domains=[["*.site.test", 443], ["site.test", 80]]),
+                    "domains": ["attacker.example"], "source_path": "/etc/shadow",
+                })
+        self.assertTrue(result["status"], result)
+        inspect.assert_called_once_with(["site.test", "*.site.test"])
+        self.assertEqual(self.reads, 3)
+
+    def test_malformed_or_missing_snapshot_fails_before_hosts_access(self):
+        for snapshot in ("", "not json", "[]", "[true]", " " * 110001,
+                         json.dumps([7, "site.test", "/www/site.test", "1",
+                                     [["site.test", True]]] ),
+                         self.snapshot(domains=[["attacker.example", 80]])):
+            with self.subTest(snapshot=str(snapshot)[:30]):
+                self.reads = 0
+                with patch.dict(sys.modules, {"flask": self.flask(), "public": self.panel()}):
+                    with patch.object(endpoint, "inspect_hosts_file",
+                                      side_effect=AssertionError("must not read")) as inspect:
+                        response = self.plugin.inspect_local_hosts({
+                            "site_id": "7", "expected_site_key": "site.test",
+                            "expected_site_snapshot": snapshot,
+                        })
+                self.assertFalse(response["status"])
+                self.assertEqual(response["stage"], "hosts_inspection")
+                inspect.assert_not_called()
+
     def test_reassigned_site_id_is_denied_before_file_read(self):
         """An inventory site key is a stale-selection precondition, not authority."""
         with patch.dict(sys.modules, {"flask": self.flask(),
@@ -334,10 +511,10 @@ class NativeEndpointTests(unittest.TestCase):
             with patch.object(endpoint, "inspect_hosts_file",
                               side_effect=AssertionError("must not inspect")) as inspected:
                 response = self.plugin.inspect_local_hosts(
-                    {"site_id": "7", "expected_site_key": "site.test"})
+                    {"site_id": "7", "expected_site_key": "site.test", "expected_site_snapshot":self.snapshot()})
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
-        self.assertIn("identity changed", response["msg"])
+        self.assertIn("identity or bound domains changed", response["msg"])
         self.assertNotIn("reassigned.test", str(response))
         inspected.assert_not_called()
         self.assertEqual(self.reads, 2)
@@ -355,7 +532,7 @@ class NativeEndpointTests(unittest.TestCase):
     def test_invalid_site_id_never_reads_hosts(self):
         with patch.dict(sys.modules, {"flask":self.flask(), "public":self.panel()}):
             with patch.object(endpoint, "inspect_hosts_file", side_effect=AssertionError("not reached")):
-                response = self.plugin.inspect_local_hosts({"site_id":"../../etc", "expected_site_key":"site.test"})
+                response = self.plugin.inspect_local_hosts({"site_id":"../../etc", "expected_site_key":"site.test", "expected_site_snapshot":self.snapshot()})
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
 

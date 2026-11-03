@@ -24,7 +24,10 @@ from ach_customizer_monitor import (
     MonitorInputError, _bound_domains_for_sites, get_site_page,
     inspect_php_fpm_site_impact, preview_php_fpm,
 )
-from ach_customizer_hosts import HostsInspectionError, inspect_local_hosts as inspect_hosts_file
+from ach_customizer_hosts import (
+    HostsInspectionError, inspect_local_hosts as inspect_hosts_file,
+    native_site_snapshot,
+)
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
 from ach_customizer_state import DATA_DIR, StateError, read_state, set_enabled
@@ -233,9 +236,29 @@ class ach_customizer_main:
             # The browser-selected site key is a precondition, never a lookup
             # source. Refuse stale/reassigned aaPanel IDs before reading hosts.
             expected_site_key = self._argument(args, "expected_site_key")
+            expected_snapshot = self._argument(args, "expected_site_snapshot")
             if (not isinstance(expected_site_key, str) or not expected_site_key
-                    or len(expected_site_key) > 255):
+                    or len(expected_site_key) > 255 or
+                    not isinstance(expected_snapshot, str) or
+                    not 1 <= len(expected_snapshot) <= 110000):
                 raise HostsInspectionError("Refresh the native website inventory before inspection")
+            try:
+                selected_identity = json.loads(expected_snapshot)
+            except (ValueError, TypeError):
+                raise HostsInspectionError(
+                    "Invalid selected website inventory snapshot; refresh inventory") from None
+            if (not isinstance(selected_identity, list) or len(selected_identity) != 5 or
+                    type(selected_identity[0]) is not int or
+                    not isinstance(selected_identity[1], str) or
+                    not isinstance(selected_identity[2], str) or
+                    not isinstance(selected_identity[3], str) or
+                    not isinstance(selected_identity[4], list) or
+                    len(selected_identity[4]) > 100 or
+                    any(not isinstance(pair, list) or len(pair) != 2 or
+                        not isinstance(pair[0], str) or
+                        type(pair[1]) is not int
+                        for pair in selected_identity[4])):
+                raise HostsInspectionError("Invalid selected website snapshot; refresh inventory")
             site_id = self._status_site_id(args)
             if site_id is None:
                 raise HostsInspectionError("Choose an existing native aaPanel site ID")
@@ -253,8 +276,10 @@ class ach_customizer_main:
                 _bound_domains_for_sites(public, [site])
                 return site
             before = current_site()
-            if before["name"] != expected_site_key:
-                raise HostsInspectionError("Selected website identity changed; refresh native inventory")
+            if (before["name"] != expected_site_key or
+                    native_site_snapshot(before) != selected_identity):
+                raise HostsInspectionError(
+                    "Selected website identity or bound domains changed; refresh native inventory")
             names = [item["name"] for item in before["bound_domains"]]
             result = inspect_hosts_file(names)
             if current_site() != before:
