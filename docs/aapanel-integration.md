@@ -347,3 +347,110 @@ The independent exact-source review of PR #11 at HEAD ccd9f23ed4cdd33f4e5de1e0b8
 **Approval gates:** Source, native, and computed-style checks are evidence for review remediation only; exact-current-head CI plus focused independent re-review must still succeed before an Owner-authorized Merge.
 
 **Not implemented in this slice:** Nginx error_page/alias Apply, modifying panel default templates, live site 404/502 installation, automatic onboarding, HTTP status verification, actual installed-file conflict/drift checks, backups and Rollback for live pages. Any host-writing adapter must independently prove version support, target ownership and path safety, operator authorization, live HTTP response correctness, conflict detection, rollback and independent review before being exposed.
+
+### Unreleased operator UI and plugin-owned Activity diagnostics
+
+The Status Pages site selector uses a dedicated native `status_sites`
+POST action requiring a full primary aaPanel administrator session, returning
+bounded, paginated native inventory with the `status_site_selection`
+purpose marker. It works even when optional Website Monitor is disabled.
+This listing authorizes only operator choice; `status_preferences`,
+`status_save`, and `status_inspect` recheck native site identity,
+authorization and operation. The Monitor `get_sites` endpoint retains
+its own enable/disable policy. No Status Pages Apply/Restore is implied.
+
+Plugin-owned Activity is stored under aaPanel's panel data directory
+(`/www/server/panel/data/ach_customizer.activity.jsonl`), with a
+rotated `.1` segment and a lock. Files use panel-process ownership,
+private 0600 mode, no-follow opens and a serializing lock. Retention is
+bounded to 256 KiB per active/rotated segment; the full-primary-admin
+`get_activity` POST action returns at most 100 records (UI requests 50).
+
+Process environment `ACH_CUSTOMIZER_ACTIVITY_LEVEL` selects DEBUG,
+INFO (default), WARNING or ERROR. High-volume successful read-only
+queries are DEBUG-only; deliberate state changes and guarded PHP actions
+are INFO, PHP pool/site mapping that needs review is WARNING, and
+classified failures are ERROR. Filtering an event by verbosity is not
+a persistence failure. Records retain bounded time, module, action,
+severity, stage, outcome, target and request/recovery IDs, but not
+request payloads, cookies, tokens or arbitrary unexpected exception text.
+Absent recovery IDs stay empty. Unexpected exceptions yield a generic
+browser error and only the private exception class/stage for diagnostics.
+Existing native aaPanel audit logging for consequential PHP-FPM actions
+remains separate. Failed audit/Activity persistence never reverses or
+falsifies an already completed operation.
+
+These are source-level contracts for unreleased development. Native aaPanel
+installation of the exact candidate, authenticated browser/CSRF and real
+service/site impact require independent verification before release.
+
+
+### Independent-review remediation: native UI sequencing and lifecycle evidence
+
+The read-only PHP-FPM shared-impact secondary inspector must never emit raw
+unexpected exception text to the browser. It returns a bounded Needs Review
+reason with the request operation ID; a WARNING Activity record retains
+the actual exception class and stage, never its untrusted message. This
+prevents a successful file-only preview from becoming a covert exception
+detail transport.
+
+**Native aaPanel modal viewport safety (exact aaPanel 8.0.7 guest evidence):**
+aaPanel's plugin launcher initially positions its fixed .layui-layer at
+top:20% even when the lower part of the 672 px modal exceeds the browser
+viewport. At 1280x720/100% zoom, the original modal bottom reached 816 px
+(96 px offscreen), despite the static layout and mocked layer tests passing.
+The plugin uses a strictly scoped .layui-layer:has(#ach-customizer) rule
+to constrain this one native launcher horizontally and vertically and keep
+its internal scrollbar visible without requiring a browser resize. The
+existing fitNativeLayer() resize helper remains as a fallback for
+browsers without :has() support; the CSS does not target unrelated
+aaPanel dialogs. The exact launcher top:20% overflow has an
+explicit five-viewport Chromium regression case in
+tests/manual/layout_browser.cjs.
+
+The native PHP-FPM form uses a generation and immutable field snapshot for
+each Preview/Prepare request. Editing fields or starting another Preview,
+including a byte-identical repeated Preview, invalidates ALL pending Prepare
+tickets and approvals. A stale Prepare cannot restore an approval panel,
+unlock a different pending request, or authorize Apply, and duplicate pending
+Prepare clicks do not start another request. The server-side
+revalidation/hash/authorization gates remain independent and mandatory.
+
+Only operation-specific, schema-compatible PHP-FPM Apply/Restore results
+can display a confirmed host mutation: Apply must return the supported PHP
+8.5 shared-[www] source and expected before/after SHA-256 values together
+with an actual durable operation ID. Restore must return the approved
+operation ID and a valid restored SHA-256 matching the inspected baseline.
+A structurally valid "No Change" with null operation ID and matching
+before/after hashes is explicitly non-mutating, never an Applied result.
+Unknown, incomplete, mismatched and transport-uncertain results always
+require saved-recovery inspection before considering any retry.
+
+Confirmed shared-service Apply/Restore results and missing native-audit or
+plugin-Activity persistence are displayed in a dedicated PHP-FPM panel notice.
+Concurrent Website/Activity/other panel requests must not hide or clear
+these consequential warnings. Existing backend authorization, revision,
+impact, re-prepare, expected-hash and recovery gates are unchanged.
+
+The native install/uninstall shell hook uses fixed plugin-local paths and a
+strict allowlisted Python lifecycle logger. Repeated install invocations
+are recorded as install-hook registrations: the hook cannot reliably claim
+whether aaPanel called it for first install or update/reinstall. Uninstall
+records verified icon-copy removal, preserved icon-copy on cleanup failure,
+or unavailable cleanup as distinct outcomes. The cleanup helper's exit
+status reflects actual verification rather than a false success. Activity
+logging errors produce an explicit installer warning but cannot corrupt
+plugin install/uninstall behavior. Retained Monitor state, site branding,
+existing manually applied PHP-FPM configuration and durable recovery files
+remain outside the replaceable plugin source and are never purged by
+these hooks. Lifecycle records use the same bounded private JSONL
+rotation and no-follow, descriptor-anchored directory ancestry, with action,
+stage, severity, UTC time, error classification
+and a generated operation ID. Verbosity filtering is reported as filtering,
+not a persistence failure.
+
+**Evidence boundary:** isolated source/unit and simulated native-layer
+browser checks verify these contracts but do not by themselves establish
+aaPanel authenticated-browser, upgrade/uninstall hook timing, CSRF,
+actual PHP-FPM service reload or on-host lifecycle retention. Native QA
+requires the exact built ZIP and an explicitly isolated aaPanel guest.

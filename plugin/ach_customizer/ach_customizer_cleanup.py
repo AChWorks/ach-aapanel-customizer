@@ -114,9 +114,9 @@ def cleanup_owned_icon(*, trusted_root="/", panel_components=_PANEL_COMPONENTS,
 
 
 if __name__ == "__main__":
-    # Native aaPanel uninstall invokes this as root. No environment or CLI path
-    # overrides are accepted for privileged execution.
+    # The shell records whether verified icon cleanup succeeded. Preserve
+    # legacy nonfatal uninstall semantics in install.sh, not a false exit 0.
     if os.geteuid() != 0:
         print("ACh aaPanel Customizer: icon copy preserved (requires root)")
-    else:
-        cleanup_owned_icon()
+        raise SystemExit(1)
+    raise SystemExit(0 if cleanup_owned_icon() else 1)
