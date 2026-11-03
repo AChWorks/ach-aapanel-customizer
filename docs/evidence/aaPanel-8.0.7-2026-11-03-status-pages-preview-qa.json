@@ -37,6 +37,69 @@
     "task_lab": "/srv/ai-workspace/ach-aapanel-lab-20261101/qa-status-pages-20261103"
   },
   "reference_source_commit": "6c9412f3b220a563b64b82ce3d8ee65ff324fbbe",
+  "required_01_remediation": {
+    "corrected_development_zip_sha256": "7cf00cd1f71c770873cd30233fd9eee148e436fca53a07b335478ebc7ad0cc1c",
+    "correction": "Contrast checked semantic CSS override for customized output only; fixed backgrounds and button text/hover, links, descriptions, visual labels, border and keyboard focus",
+    "finding": "REQUIRED-01: custom dark page palette rendered white-on-white primary button and low-contrast muted labels/links",
+    "minimum_focus_and_panel_border_contrast": 3.0,
+    "minimum_normal_text_and_button_contrast": 4.5,
+    "native_exact_zip_update": {
+      "authenticated_browser_csrf": "NOT TESTED",
+      "guest": "Debian 12 / aaPanel 8.0.7 / Nginx 1.28.3 / PHP-FPM 8.5.12",
+      "guest_shutdown": "graceful",
+      "installed_file_hash_matches": 34,
+      "invalid_palette_rejected": true,
+      "live_status_page_apply": "NOT IMPLEMENTED",
+      "native_unsaved_dark_previews": 22,
+      "nginx_syntax": "PASS",
+      "prior_monitor_fpm_vhosts_unchanged": true,
+      "qcow2_integrity": "no errors",
+      "real_site_http_codes": [
+        200,
+        200
+      ],
+      "saved_preferences_revision_preserved": 3
+    },
+    "original_assets_changed": false,
+    "prior_review_verdict": "COMPLETE / CHANGES_REQUIRED",
+    "prior_reviewed_head": "ccd9f23ed4cdd33f4e5de1e0b88fbe519997f96f",
+    "representative_browser": {
+      "computed_style_contrast_failures": 0,
+      "engine": "Chromium; isolated task-owned local-only HTML server",
+      "horizontal_overflow_failures": 0,
+      "limitation": "Static custom-output computed styles, not native aaPanel authenticated browser",
+      "locales": [
+        "en",
+        "fa"
+      ],
+      "palettes": [
+        "reviewer_dark",
+        "light",
+        "navy_dark",
+        "fallback_link"
+      ],
+      "real_reduced_motion_hover_and_keyboard_focus": true,
+      "rendered_checks": 48,
+      "reviewer_dark": {
+        "focus_outline_contrast": 19.556,
+        "hover_button_contrast": 15.908,
+        "muted_description_contrast": 4.558,
+        "primary_button_contrast": 21.0,
+        "secondary_link_contrast": 19.556
+      },
+      "templates": [
+        "404",
+        "502",
+        "stopped"
+      ],
+      "viewports_px": [
+        375,
+        1280
+      ]
+    },
+    "source_manifest_changed": false,
+    "test_lab_locator": "/srv/ai-workspace/ach-aapanel-lab-20261101/qa-status-pages-20261103"
+  },
   "root_cause_and_correction": {
     "failure": "ZIP constant 1980 source timestamps, same-size edited Python source, valid-looking stale .pyc; new process continued old 2.7 contrast behavior",
     "separate_caveat": "already running aaPanel Python worker may retain imported old modules until controlled restart; this was not tested for this new candidate",

@@ -330,6 +330,137 @@ def _asset(locale, page):
         os.close(root)
 
 
+
+def _mix_color(base, target, fraction):
+    """Mix two validated #RRGGBB colors in sRGB; emitted CSS is always hex."""
+    left = _rgb(base)
+    right = _rgb(target)
+    channels = (
+        round((a + (b - a) * fraction) * 255)
+        for a, b in zip(left, right)
+    )
+    return "#" + "".join(f"{value:02x}" for value in channels)
+
+
+def _readable_tint(background, foreground, minimum):
+    """Find the least foreground tint meeting contrast on the page background.
+
+    The original foreground has already passed the 4.5:1 check. Test the
+    rounded output explicitly; unusual multichannel palettes must fail safe.
+    """
+    if _contrast(foreground, background) < minimum:
+        return foreground
+    low, high = 0.0, 1.0
+    for _ in range(24):
+        middle = (low + high) / 2
+        color = _mix_color(background, foreground, middle)
+        if _contrast(color, background) >= minimum:
+            high = middle
+        else:
+            low = middle
+    candidate = _mix_color(background, foreground, high)
+    return candidate if _contrast(candidate, background) >= minimum else foreground
+
+
+def _safe_surface(background, foreground, fraction):
+    """Tint a visual panel without dropping its small labels below 4.5:1."""
+    candidate = _mix_color(background, foreground, fraction)
+    return (candidate if _contrast(candidate, foreground) >= 4.5
+            else background)
+
+
+def _semantic_palette(brand):
+    """Resolve every meaningful custom-theme color, not only base CSS vars.
+
+    Original ACh HTML is returned verbatim; this palette is used only for
+    customized output. All text/background relationships are checked against
+    the actual elements used by the reference CSS.
+    """
+    paper = brand["background"]
+    ink = brand["foreground"]
+    accent = brand["accent"]
+    muted = _readable_tint(paper, ink, 4.55)
+    link = accent if _contrast(accent, paper) >= 4.5 else ink
+    button_hover = _mix_color(ink, paper, 0.12)
+    if _contrast(button_hover, paper) < 4.5:
+        button_hover = ink
+    palette = {
+        "muted": muted,
+        "link": link,
+        "line": _readable_tint(paper, ink, 3.05),
+        "button_bg": ink,
+        "button_text": paper,
+        "button_hover": button_hover,
+        "visual_a": _safe_surface(paper, ink, 0.04),
+        "visual_b": _safe_surface(paper, ink, 0.10),
+        "visual_ink": ink,
+        "grid": ink + "18",
+        "halo": _mix_color(paper, accent, 0.18),
+    }
+    for name in ("muted", "link"):
+        if _contrast(palette[name], paper) < 4.5:
+            raise StatusPageError("Custom theme text contrast unavailable: " + name)
+    for name in ("button_bg", "button_hover"):
+        if _contrast(palette[name], palette["button_text"]) < 4.5:
+            raise StatusPageError("Custom theme button contrast unavailable: " + name)
+    for name in ("visual_a", "visual_b"):
+        if _contrast(palette["visual_ink"], palette[name]) < 4.5:
+            raise StatusPageError("Custom theme visual text contrast unavailable: " + name)
+    if _contrast(palette["line"], paper) < 3.0:
+        raise StatusPageError("Custom theme border contrast unavailable")
+    return palette
+
+
+def _semantic_css(brand):
+    """Append a tiny semantic override to the immutable original stylesheet.
+
+    The original reference CSS contains fixed light-theme colors for small
+    labels, links, button text/hover and decorative-panel typography. Changing
+    --paper and --ink alone cannot safely theme those elements.
+    """
+    palette = _semantic_palette(brand)
+    tokens = (
+        ("--muted", palette["muted"]),
+        ("--line", palette["line"]),
+        ("--ach-link", palette["link"]),
+        ("--ach-button-text", palette["button_text"]),
+        ("--ach-button-hover", palette["button_hover"]),
+        ("--ach-visual-a", palette["visual_a"]),
+        ("--ach-visual-b", palette["visual_b"]),
+        ("--ach-visual-ink", palette["visual_ink"]),
+        ("--ach-grid", palette["grid"]),
+        ("--ach-halo", palette["halo"]),
+    )
+    variables = ";".join(key + ":" + value for key, value in tokens)
+    return (
+        "\n/* Derived accessible semantic colors: customized pages only. */\n"
+        ":root{" + variables + "}\n"
+        ".eyebrow,.secondary,.bottom a{color:var(--ach-link)}\n"
+        ".button{background:var(--ink);border-color:var(--ink);"
+        "color:var(--ach-button-text)}\n"
+        ".button:hover{background:var(--ach-button-hover);"
+        "border-color:var(--ach-button-hover);color:var(--ach-button-text)}\n"
+        ".button:focus-visible{outline-color:var(--accent)}\n"
+        ".visual{background:linear-gradient(145deg,var(--ach-visual-a) 0%,"
+        "var(--ach-visual-b) 100%);border-color:var(--line)}\n"
+        ".visual::before{background:linear-gradient(90deg,"
+        "transparent calc(50% - .5px),var(--ach-grid) 50%,"
+        "transparent calc(50% + .5px)),linear-gradient("
+        "transparent calc(50% - .5px),var(--ach-grid) 50%,"
+        "transparent calc(50% + .5px))}\n"
+        ".visual-top,.visual-bottom,.orbit-mark{color:var(--ach-visual-ink)}\n"
+        ".visual-bottom{border-top-color:var(--line)}\n"
+        ".orbit,.orbit::before,.orbit::after{border-color:var(--line)}\n"
+        ".orbit::after{background:var(--ach-visual-a)}\n"
+        ".orbit-dot{border-color:var(--ach-visual-a);"
+        "box-shadow:0 0 0 1px var(--line)}\n"
+        ".orbit-notch{background:var(--accent)}\n"
+        ".eyebrow::before{box-shadow:0 0 0 5px var(--ach-halo)}\n"
+        "body::before{background-image:"
+        "linear-gradient(var(--ach-grid) 1px,transparent 1px),"
+        "linear-gradient(90deg,var(--ach-grid) 1px,transparent 1px)}\n"
+    )
+
 def render_page(locale, page, brand=None):
     brand = validate_brand(brand or DEFAULT_BRAND)
     source = _asset(locale, page)
@@ -359,6 +490,9 @@ def render_page(locale, page, brand=None):
         "زیرساخت و تجربه وب": html.escape(brand["tagline"], quote=True),
     }
     text = TOKEN_RE.sub(lambda match: token_values[match.group()], original)
+    if text.count("</style>") != 1:
+        raise StatusPageError("Bundled Status Page stylesheet structure changed")
+    text = text.replace("</style>", _semantic_css(brand) + "</style>", 1)
     if not brand["footer_enabled"]:
         text, count = re.subn(r'<footer class="bottom">.*?</footer>', "", text, count=1, flags=re.S)
         if count != 1:
