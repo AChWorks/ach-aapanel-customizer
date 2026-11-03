@@ -133,6 +133,9 @@
       <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
       <label><input id="ach-status-reset-approve" type="checkbox" /> I approve resetting this scope to inherited or ACh defaults.</label>
       <button id="ach-status-reset" type="button" disabled>Reset selected branding scope</button>
+      <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect selected site 404/502 (read-only)</button></div>
+      <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
+      <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
       <p id="ach-status-result" role="status" aria-live="polite">Open Status Pages to load saved preferences.</p>
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
       <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
@@ -155,7 +158,7 @@
   var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false;
   var controlBusy = false, lastOverview = null;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
-  var statusBusy = false, statusRevision = null, statusTicket = 0;
+  var statusBusy = false, statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   function msg(value, failed) { root.find('#ach-message').text(value || '').toggleClass('ach-error', Boolean(failed)); }
   function invalidateInventory(message) {
     hasMore = false;
@@ -334,15 +337,22 @@
     root.find('#ach-status-reset').prop('disabled',
       busy || statusRevision === null ||
       root.find('#ach-status-reset-approve').prop('checked') !== true);
+    var scope = statusScope(), template = root.find('#ach-status-template').val();
+    root.find('#ach-status-inspect-button').prop('disabled', busy || statusRevision === null ||
+      !scope || scope.scope !== 'site' ||
+      statusLoadedScope !== scope.scope + ':' + scope.site_id ||
+      (template !== '404' && template !== '502'));
   }
   function statusClearPreview() {
     root.find('#ach-status-iframe').prop('srcdoc', '');
     root.find('#ach-status-sha').text('');
+    root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
   }
   function statusLoad() {
     var scope = statusScope();
     var ticket = ++statusTicket;
     statusRevision = null;
+    statusLoadedScope = null;
     statusClearPreview();
     root.find('#ach-status-source').text('Branding preferences not loaded.');
     statusLock(false);
@@ -361,6 +371,7 @@
         root.find('#ach-status-result').text('Unable to load safe branding preferences.');
       } else {
         statusRevision = r.revision;
+        statusLoadedScope = scope.scope + ':' + scope.site_id;
         statusSetFields(r.effective);
         root.find('#ach-status-source').text(r.source + '; revision ' + r.revision +
           '; scope: ' + (scope.scope === 'site' ? 'site ID ' + scope.site_id : 'global'));
@@ -403,6 +414,83 @@
         root.find('#ach-status-result').text(
           'Rendered offline ' + r.locale + '/' + r.template +
           ' preview using ' + r.source + '. No site changes.');
+      }
+      statusLock(false);
+    });
+  });
+  function validStatusInspection(r, scope, template, locale) {
+    var states = ['Needs Review','Conflict','Unsupported','Unmanaged','File Match'];
+    var pageStates = ['Uninspected','Absent','Same bytes','Different bytes'];
+    var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
+    var maybeHash = function (value) { return value === null || hash(value); };
+    var boundedStrings = function (value, max) {
+      return Array.isArray(value) && value.length <= max &&
+        value.every(function (entry) { return typeof entry === 'string' && entry.length > 0 && entry.length <= 256; });
+    };
+    return r && r.schema === 1 && r.status === true &&
+      r.read_only === true && r.apply_supported === false &&
+      r.nginx_runtime_verified === false &&
+      Number(r.site_id) === Number(scope.site_id) && Number.isSafeInteger(r.site_id) &&
+      r.template === template && r.locale === locale &&
+      states.includes(r.state) && pageStates.includes(r.page_file_state) &&
+      typeof r.reason === 'string' && r.reason.length <= 300 &&
+      typeof r.note === 'string' && r.note.length <= 600 &&
+      typeof r.site_key === 'string' && r.site_key.length <= 255 &&
+      typeof r.page_file === 'string' && r.page_file === template + '.html' &&
+      hash(r.rendered_sha256) && maybeHash(r.page_file_sha256) &&
+      maybeHash(r.vhost_sha256) &&
+      (r.page_file_bytes === null || (Number.isSafeInteger(r.page_file_bytes) && r.page_file_bytes >= 0 && r.page_file_bytes <= 65536)) &&
+      typeof r.extension_include_textual === 'boolean' &&
+      boundedStrings(r.extensions_scanned, 32) &&
+      boundedStrings(r.error_page_sources, 33) &&
+      ((r.page_file_state === 'Absent' || r.page_file_state === 'Uninspected') ?
+        r.page_file_sha256 === null && r.page_file_bytes === null :
+        hash(r.page_file_sha256) && Number.isSafeInteger(r.page_file_bytes)) &&
+      (r.page_file_state !== 'Same bytes' || r.page_file_sha256 === r.rendered_sha256) &&
+      (r.page_file_state !== 'Different bytes' || r.page_file_sha256 !== r.rendered_sha256) &&
+      (r.state !== 'File Match' ||
+        (r.page_file_state === 'Same bytes' && hash(r.vhost_sha256) &&
+         r.error_page_sources.length === 0 && r.extension_include_textual === true)) &&
+      (r.state !== 'Unmanaged' ||
+        (r.page_file_state === 'Absent' && hash(r.vhost_sha256) &&
+         r.error_page_sources.length === 0 && r.extension_include_textual === true)) &&
+      (r.state !== 'Conflict' ||
+        r.page_file_state === 'Different bytes' || r.error_page_sources.length > 0);
+  }
+  root.find('#ach-status-inspect-button').on('click', function () {
+    var scope = statusScope();
+    var template = root.find('#ach-status-template').val();
+    var locale = root.find('#ach-status-locale').val();
+    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'site' ||
+        statusLoadedScope !== scope.scope + ':' + scope.site_id ||
+        (template !== '404' && template !== '502')) return;
+    var ticket = statusTicket;
+    root.find('#ach-status-inspect-result').text('Inspecting on-disk site and Nginx sources only...');
+    statusLock(true);
+    request('status_inspect', Object.assign({}, scope, statusFields(), {
+      template:template, locale:locale
+    }), function (r) {
+      if (ticket !== statusTicket) return;
+      var sameSelection = scope.site_id === statusScope()?.site_id &&
+        statusLoadedScope === scope.scope + ':' + scope.site_id &&
+        template === root.find('#ach-status-template').val() &&
+        locale === root.find('#ach-status-locale').val();
+      if (!sameSelection || !validStatusInspection(r, scope, template, locale)) {
+        root.find('#ach-status-inspect-result').text(
+          'Inspection unconfirmed or incompatible. No site routing was inferred.');
+      } else {
+        root.find('#ach-status-inspect-result').text(
+          'State: ' + r.state + ' — ' + r.reason +
+          '\nNative site: ' + r.site_key + ' (ID ' + r.site_id + ')' +
+          '\nSelected page: ' + r.locale + '/' + r.page_file +
+          '\nSite file: ' + r.page_file_state +
+          '\nCurrent file SHA-256: ' + (r.page_file_sha256 || 'Not available') +
+          '\nSelected render SHA-256: ' + r.rendered_sha256 +
+          '\nVHost SHA-256: ' + (r.vhost_sha256 || 'Not available') +
+          '\nExtension include mentioned in VHost text: ' + (r.extension_include_textual ? 'Yes' : 'No') +
+          '\nScanned extension files: ' + (r.extensions_scanned.join(', ') || 'None') +
+          '\nPotential error_page declarations: ' + (r.error_page_sources.join(', ') || 'None observed') +
+          '\n' + r.note);
       }
       statusLock(false);
     });
@@ -453,7 +541,10 @@
       statusLock(false);
     });
   });
-  root.find('#ach-status-template, #ach-status-locale').on('change', statusClearPreview);
+  root.find('#ach-status-template, #ach-status-locale').on('change', function () {
+    statusClearPreview();
+    statusLock(statusBusy);
+  });
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     root.find('[data-tab]').attr('aria-selected', 'false');

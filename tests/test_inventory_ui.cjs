@@ -46,7 +46,8 @@ function loadUi() {
     '#ach-status-accent', '#ach-status-background', '#ach-status-foreground',
     '#ach-status-footer', '#ach-status-load', '#ach-status-preview-button',
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
-    '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe'
+    '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
+    '#ach-status-inspect-button', '#ach-status-inspect-result'
   ]) elements.set(name, fakeNode('div'));
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
@@ -213,6 +214,8 @@ function loadUi() {
       statusHash: elements.get('#ach-status-sha').textContent,
       statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
       statusResetDisabled: elements.get('#ach-status-reset').props.disabled,
+      statusInspectDisabled: elements.get('#ach-status-inspect-button').props.disabled,
+      statusInspect: elements.get('#ach-status-inspect-result').textContent,
       impactSummary: elements.get('#ach-impact-summary').textContent,
       fpmPlan: elements.get('#ach-fpm-plan').textContent,
       fpmDetails: elements.get('#ach-fpm-details').textContent,
@@ -958,4 +961,99 @@ test('Status Pages rejects malformed preview and never renders fallback HTML', (
   });
   assert.equal(ui.state().statusHtml,'');
   assert.match(ui.state().statusResult,/Preview failed or response incompatible/);
+});
+
+const statusInspection = (overrides = {}) => ({
+  status:true, schema:1, site_id:7, site_key:'demo.test',
+  locale:'en', template:'404', state:'Unmanaged', reason:'Not installed',
+  read_only:true, apply_supported:false, nginx_runtime_verified:false,
+  rendered_sha256:'a'.repeat(64), page_file:'404.html',
+  page_file_state:'Absent',page_file_sha256:null,page_file_bytes:null,
+  vhost_sha256:'b'.repeat(64),extension_include_textual:true,
+  extensions_scanned:['site_total.conf'],error_page_sources:[],
+  note:'Textual source only; no HTTP verification.',...overrides
+});
+
+test('Site inspection is scoped, read-only, renders a bounded disk/source diagnosis', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  assert.equal(ui.state().statusInspectDisabled,true, 'Global scope cannot inspect a site');
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.state().statusInspectDisabled,true, 'Site ID is required');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs(7));
+  assert.equal(ui.state().statusInspectDisabled,false);
+  ui.statusSetValue('#ach-status-site-id','8');
+  const requestCount=ui.requests.length;
+  ui.statusClick('#ach-status-inspect-button');
+  assert.equal(ui.requests.length,requestCount,'Inspect cannot silently use branding loaded for another site ID');
+  ui.statusSetValue('#ach-status-site-id','7');
+  ui.statusSetValue('#ach-status-name','Acme');
+  const req=ui.statusClick('#ach-status-inspect-button');
+  assert.match(req.options.url,/s=status_inspect$/);
+  assert.equal(req.options.data.site_id,'7');
+  assert.equal(req.options.data.template,'404');
+  assert.equal(req.options.data.brand_name,'Acme');
+  assert.equal(ui.state().statusInspectDisabled,true, 'Prevent duplicate read while busy');
+  req.respond(statusInspection());
+  assert.match(ui.state().statusInspect,/State: Unmanaged/);
+  assert.match(ui.state().statusInspect,/VHost SHA-256:/);
+  assert.match(ui.state().statusInspect,/Textual source only/);
+  assert.doesNotMatch(ui.state().statusInspect,/HTTP status verified|Apply ready/);
+  assert.equal(ui.state().statusInspectDisabled,false);
+  ui.statusSetValue('#ach-status-template','new-site','change');
+  assert.equal(ui.state().statusInspectDisabled,true);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-inspect-button');
+  assert.equal(ui.requests.length,count, 'Unsupported page does not invoke endpoint');
+  assert.match(ui.state().statusInspect,/not run/);
+});
+
+test('Invalid, cross-site and routing-overclaim inspection replies fail closed', () => {
+  for (const bad of [
+    statusInspection({site_id:8}),
+    statusInspection({schema:2}),
+    statusInspection({read_only:false}),
+    statusInspection({apply_supported:true}),
+    statusInspection({nginx_runtime_verified:true}),
+    statusInspection({vhost_sha256:'bad'}),
+    statusInspection({state:'Installed'}),
+    statusInspection({page_file_state:'Applied'}),
+    statusInspection({extensions_scanned:['x'.repeat(512)]}),
+    statusInspection({page_file:'../../etc/passwd'}),
+    statusInspection({error_page_sources:null}),
+    statusInspection({state:'File Match'}),
+    statusInspection({state:'Unmanaged',page_file_state:'Same bytes',page_file_sha256:'a'.repeat(64),page_file_bytes:20}),
+    statusInspection({state:'Conflict',page_file_state:'Absent'}),
+    statusInspection({page_file_state:'Absent',page_file_sha256:'a'.repeat(64)}),
+    statusInspection({page_file_state:'Same bytes',page_file_sha256:'b'.repeat(64),page_file_bytes:20}),
+    statusInspection({page_file_state:'Different bytes',page_file_sha256:'a'.repeat(64),page_file_bytes:20})
+  ]) {
+    const ui=loadUi();
+    ui.openStatus().respond(statusPrefs());
+    ui.statusSetValue('#ach-status-scope','site','change');
+    ui.statusSetValue('#ach-status-site-id','7','change');
+    ui.requests.at(-1).respond(statusPrefs());
+    ui.statusClick('#ach-status-inspect-button').respond(bad);
+    assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
+    assert.doesNotMatch(ui.state().statusInspect,/State: Installed|State: File Match/);
+  }
+});
+
+test('Backend inspection failure does not display previous disk-match evidence', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs());
+  ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
+    state:'File Match',page_file_state:'Same bytes',
+    page_file_sha256:'a'.repeat(64),page_file_bytes:50
+  }));
+  assert.match(ui.state().statusInspect,/State: File Match/);
+  ui.statusClick('#ach-status-inspect-button').respond({
+    status:false,stage:'status_inspect',msg:'Native VHost changed'
+  });
+  assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
+  assert.match(ui.state().error,/Native VHost changed/);
 });
