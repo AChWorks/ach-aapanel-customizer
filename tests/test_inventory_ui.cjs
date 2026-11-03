@@ -36,6 +36,7 @@ function loadUi() {
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
+    '#ach-php-version', '#ach-php-discover', '#ach-php-discovery-status',
     '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-operation-notice', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
@@ -67,6 +68,8 @@ function loadUi() {
     elements.set(name, node);
     return node;
   });
+  elements.get('#ach-php-version').props.value = '';
+  elements.get('#ach-php-version').props.disabled = true;
   const requests = [];
 
   function selection(nodes) {
@@ -225,6 +228,12 @@ function loadUi() {
       statusInspectDisabled: elements.get('#ach-status-inspect-button').props.disabled,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       impactSummary: elements.get('#ach-impact-summary').textContent,
+      phpDiscovery: elements.get('#ach-php-discovery-status').textContent,
+      phpVersion: elements.get('#ach-php-version').props.value,
+      phpVersionDisabled: elements.get('#ach-php-version').props.disabled,
+      phpOptions: elements.get('#ach-php-version').children.map(option => ({
+        value:option.props.value, disabled:option.props.disabled, text:option.textContent
+      })),
       fpmPlan: elements.get('#ach-fpm-plan').textContent,
       fpmOperationNotice: elements.get('#ach-fpm-operation-notice').textContent,
       fpmDetails: elements.get('#ach-fpm-details').textContent,
@@ -245,7 +254,31 @@ function loadUi() {
       ]))
     };
   }
-  function submitPhp(version = '85') {
+  function phpVersions(versions = [
+    {code:'81',label:'PHP 8.1',state:'File Preview Candidate',
+      binary_present:true,config_present:true,preview_candidate:true,
+      manual_apply_adapter:'none',apply_eligible:false,reason:'Preview only'},
+    {code:'84',label:'PHP 8.4',state:'File Preview Candidate',
+      binary_present:true,config_present:true,preview_candidate:true,
+      manual_apply_adapter:'none',apply_eligible:false,reason:'Preview only'},
+    {code:'85',label:'PHP 8.5',state:'File Preview Candidate',
+      binary_present:true,config_present:true,preview_candidate:true,
+      manual_apply_adapter:'guarded_php85',apply_eligible:false,reason:'Prepare required'}
+  ]) {
+    return {status:true,schema:1,state:'Observed',read_only:true,
+      runtime_verified:false,versions,reason:'',note:'File presence, not process verification'};
+  }
+  function openPhp() {
+    trigger(tabs.find(node => node.attributes['data-tab'] === 'php'), 'click');
+    return requests.at(-1);
+  }
+  function submitPhp(version = '85', autoDiscover = true) {
+    if (autoDiscover && elements.get('#ach-php-version').props.disabled !== false) {
+      const discovered = openPhp();
+      assert.match(discovered.options.url, /s=get_php_versions$/);
+      discovered.respond(phpVersions());
+    }
+    elements.get('#ach-php-version').props.value = version;
     elements.get('#ach-php-form').props.fields = [
       {name: 'php_version', value: version},
       {name: 'max_children', value: '50'},
@@ -293,7 +326,8 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, openOverview, openStatus, statusSetValue, statusSetChecked,
-    statusClick, openActivity, respond, respondOverview, toggleMonitor, submitPhp,
+    statusClick, openActivity, openPhp, phpVersions,
+    respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -1596,4 +1630,88 @@ test('Reviewer: mismatched native Apply identities, config digests and source ar
     assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(response));
     assert.equal(ui.state().fpmCommitDisabled,true);
   }
+});
+
+test('Native PHP discovery selects actual PHP 8.1+ file candidates without enabling Apply', () => {
+  const ui=loadUi();
+  const discovered=ui.openPhp();
+  assert.match(discovered.options.url,/s=get_php_versions$/);
+  assert.equal(ui.state().phpVersionDisabled,true);
+  discovered.respond(ui.phpVersions());
+  const state=ui.state();
+  assert.equal(state.phpVersionDisabled,false);
+  assert.deepEqual(state.phpOptions.map(o=>o.value),['','81','84','85']);
+  assert.match(state.phpDiscovery,/3 file-preview candidate/);
+  assert.match(state.phpDiscovery,/not process verification/);
+  const preview=ui.submitPhp('81');
+  assert.match(preview.options.url,/s=preview_php_fpm$/);
+  assert.equal(preview.options.data.php_version,'81');
+  preview.respond(phpPreview(phpImpact({version:'81'})));
+  assert.equal(ui.state().fpmPrepareDisabled,true,
+    'An 8.1 file mapping must never open the PHP85 Manual Apply gate');
+  assert.match(ui.state().fpmPlan,/manual Apply unavailable/);
+});
+
+test('Partial PHP installation inventory disables missing and unsupported versions', () => {
+  const ui=loadUi();
+  const supported=ui.phpVersions().versions[0];
+  const obsolete={code:'80',label:'PHP 8.0',state:'Unsupported',
+    binary_present:true,config_present:true,preview_candidate:false,
+    manual_apply_adapter:'none',apply_eligible:false,reason:'Unsupported'};
+  const partial={code:'85',label:'PHP 8.5',state:'Needs Review',
+    binary_present:false,config_present:true,preview_candidate:false,
+    manual_apply_adapter:'none',apply_eligible:false,reason:'Missing binary'};
+  ui.openPhp().respond({...ui.phpVersions([obsolete,supported,partial]),state:'Partial',
+    reason:'One installation is incomplete'});
+  const rows=ui.state().phpOptions;
+  assert.equal(rows.find(o=>o.value==='80').disabled,true);
+  assert.equal(rows.find(o=>o.value==='85').disabled,true);
+  assert.equal(rows.find(o=>o.value==='81').disabled,undefined);
+  assert.match(ui.state().phpDiscovery,/incomplete/);
+  const previous=ui.requests.length;
+  ui.submitPhp('85');
+  assert.equal(ui.requests.length,previous,
+    'An unsupported or unverified PHP version must not even start Preview');
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.match(ui.state().error,/not selected from the verified inventory/);
+});
+
+test('Missing, malformed and privilege-escalating PHP inventory never enables a selection', () => {
+  for (const invalid of [
+    null,
+    {status:true,schema:2},
+    {...uiPhpVersionsFixture(),read_only:false},
+    {...uiPhpVersionsFixture(),runtime_verified:true},
+    {...uiPhpVersionsFixture(),versions:[{...uiPhpVersionsFixture().versions[0],
+      apply_eligible:true}]},
+    {...uiPhpVersionsFixture(),versions:[{...uiPhpVersionsFixture().versions[0],
+      label:'<img src=x onerror=alert(1)>'}]},
+    {...uiPhpVersionsFixture(),versions:[uiPhpVersionsFixture().versions[0],
+      uiPhpVersionsFixture().versions[0]]}
+  ]) {
+    const ui=loadUi();
+    const request=ui.openPhp();
+    request.respond(invalid);
+    assert.equal(ui.state().phpVersionDisabled,true);
+    assert.equal(ui.state().phpOptions.length,1);
+    assert.match(ui.state().phpDiscovery,/unavailable or incompatible/);
+  }
+  function uiPhpVersionsFixture() {
+    const ui=loadUi();
+    return ui.phpVersions();
+  }
+});
+
+test('Stale PHP discovery response after a refresh cannot restore old version choices', () => {
+  const ui=loadUi();
+  const prior=ui.openPhp();
+  const current=ui.openPhp();
+  current.respond({...ui.phpVersions([]),state:'Needs Review',reason:'Not installed'});
+  prior.respond(ui.phpVersions());
+  assert.equal(ui.state().phpVersionDisabled,true);
+  assert.equal(ui.state().phpOptions.length,1);
+  assert.match(ui.state().phpDiscovery,/Not installed/);
+  const previous=ui.requests.length;
+  ui.submitPhp('85', false);
+  assert.equal(ui.requests.length,previous);
 });

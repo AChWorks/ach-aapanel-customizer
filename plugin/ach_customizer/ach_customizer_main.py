@@ -21,7 +21,7 @@ if os.path.isdir(_PANEL_CLASS_DIR) and _PANEL_CLASS_DIR not in sys.path:
 
 from ach_customizer_activity import ActivityError, append_activity, configured_level, read_activity, record
 from ach_customizer_monitor import (
-    MonitorInputError, get_site_page, inspect_php_fpm_site_impact, preview_php_fpm,
+    MonitorInputError, discover_php_fpm_versions, get_site_page, inspect_php_fpm_site_impact, preview_php_fpm,
 )
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
@@ -217,6 +217,21 @@ class ach_customizer_main:
                                          target="page:" + str(result["page"]), level="DEBUG")
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
+
+    def get_php_versions(self, args):
+        """Primary-admin-only, read-only installed PHP file discovery."""
+        operation_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            result = discover_php_fpm_versions("/www/server/php")
+            response = {"status": True, "operation_id": operation_id, **result}
+            return self._activity_result(
+                response, "php_fpm", "get_php_versions",
+                target="native-php", level="WARNING" if result["state"] == "Partial" else "DEBUG")
+        except PermissionError as exc:
+            return self._fail("php_versions_authorization", exc, operation_id)
+        except Exception as exc:
+            return self._fail("php_versions_discovery", exc, operation_id)
 
     def preview_php_fpm(self, args):
         operation_id = uuid4().hex

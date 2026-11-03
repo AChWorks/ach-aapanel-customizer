@@ -47,6 +47,121 @@ class MonitorInputError(ValueError):
     pass
 
 
+PHP_DISCOVERY_SCHEMA_VERSION = 1
+MAX_PHP_ROOT_ENTRIES = 128
+MAX_PHP_VERSION_DIRECTORIES = 32
+
+
+def discover_php_fpm_versions(config_root):
+    """Bounded aaPanel PHP installation *file presence*, never runtime proof.
+
+    Names are discovered from the trusted aaPanel PHP root, not user input.
+    Open each directory relative to the pinned parent with O_NOFOLLOW;
+    never execute a PHP binary, probe ports, reload services or read PHP config.
+    """
+    import os
+    import stat
+
+    response = {
+        "schema": PHP_DISCOVERY_SCHEMA_VERSION,
+        "state": "Needs Review",
+        "versions": [],
+        "read_only": True,
+        "runtime_verified": False,
+        "reason": "",
+        "note": ("Observed aaPanel versioned files only. This does not prove installed "
+                 "processes, effective pool configuration, or runtime compatibility. "
+                 "PHP 8.5 has a separate guarded Manual Apply adapter; discovery "
+                 "never authorizes a change or enables another adapter."),
+    }
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    path = Path(config_root)
+    if not path.is_absolute() or ".." in path.parts:
+        raise MonitorInputError("Invalid aaPanel PHP installation root")
+    try:
+        # A no-follow final open alone is insufficient: anchor every ancestor.
+        root = os.open("/", directory_flags)
+        try:
+            for name in path.parts[1:]:
+                following = os.open(name, directory_flags, dir_fd=root)
+                os.close(root)
+                root = following
+        except OSError:
+            os.close(root)
+            raise
+    except OSError:
+        response["reason"] = "aaPanel PHP installation root missing or inaccessible"
+        return response
+    try:
+        # scandir processes at most LIMIT+1 items; os.listdir() would first
+        # materialize an arbitrarily large vendor-managed directory in memory.
+        names = []
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if len(names) >= MAX_PHP_ROOT_ENTRIES:
+                    raise MonitorInputError("Too many entries in aaPanel PHP installation root")
+                names.append(entry.name)
+        version_names = [name for name in names if re.fullmatch(r"[1-9][0-9]{1,2}", name)]
+        if len(version_names) > MAX_PHP_VERSION_DIRECTORIES:
+            raise MonitorInputError("Too many PHP version directories for bounded discovery")
+        for code in sorted(version_names, key=lambda x: (int(x[0]), int(x[1:]))):
+            major, minor = int(code[0]), int(code[1:])
+            version = {"code": code, "label": "PHP " + str(major) + "." + str(minor),
+                       "state": "Needs Review", "binary_present": False,
+                       "config_present": False, "preview_candidate": False,
+                       "manual_apply_adapter": "none", "apply_eligible": False,
+                       "reason": ""}
+            response["versions"].append(version)
+            try:
+                ver = os.open(code, directory_flags, dir_fd=root)
+            except OSError:
+                version["reason"] = "Versioned PHP directory is inaccessible or linked"
+                continue
+            try:
+                def file_present(dirname, filename, *, executable=False):
+                    try:
+                        sub = os.open(dirname, directory_flags, dir_fd=ver)
+                    except OSError:
+                        return False
+                    try:
+                        try:
+                            meta = os.stat(filename, dir_fd=sub, follow_symlinks=False)
+                        except OSError:
+                            return False
+                        return (stat.S_ISREG(meta.st_mode) and meta.st_size > 0 and
+                                (not executable or bool(meta.st_mode & 0o111)))
+                    finally:
+                        os.close(sub)
+
+                version["binary_present"] = file_present("sbin", "php-fpm", executable=True)
+                version["config_present"] = file_present("etc", "php-fpm.conf")
+                if (major, minor) < (8, 1):
+                    version["state"] = "Unsupported"
+                    version["reason"] = "Below the PHP 8.1+ inspection target"
+                elif version["binary_present"] and version["config_present"]:
+                    version["state"] = "File Preview Candidate"
+                    version["preview_candidate"] = True
+                    # This indicates only that an adapter exists in source;
+                    # even PHP85 must pass a separate exact Prepare/approval.
+                    if code == "85":
+                        version["manual_apply_adapter"] = "guarded_php85"
+                    version["reason"] = "Pool parser and runtime still require separate verification"
+                else:
+                    version["reason"] = "Native PHP-FPM binary or main config is missing or unsupported"
+            finally:
+                os.close(ver)
+        if not response["versions"]:
+            response["reason"] = "No versioned aaPanel PHP installation directories found"
+        elif any(item["state"] != "File Preview Candidate" for item in response["versions"]):
+            response["state"] = "Partial"
+            response["reason"] = "Some PHP installations are incomplete or outside the inspection target"
+        else:
+            response["state"] = "Observed"
+    finally:
+        os.close(root)
+    return response
+
+
 def _active_nginx_text(source):
     """Keep active Nginx text; strip only comments at argument boundaries.
 

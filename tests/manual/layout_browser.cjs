@@ -46,6 +46,23 @@ const {chromium} = require('playwright');
           throw Error('Layout invariant failed '+JSON.stringify({width,height,name,...x}));
         }
         if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
+        if(name==='php') {
+          const picker=await page.evaluate(()=>{
+            const input=document.querySelector('#ach-php-version'),
+              refresh=document.querySelector('#ach-php-discover'),
+              status=document.querySelector('#ach-php-discovery-status'),
+              viewport=document.documentElement.clientWidth;
+            return {tag:input?.tagName, disabled:input?.disabled,
+              required:input?.required, refreshText:refresh?.textContent?.trim(),
+              status:status?.getAttribute('role'),
+              right:input?.getBoundingClientRect().right, viewport};
+          });
+          if(picker.tag!=='SELECT' || picker.disabled!==true || picker.required!==true ||
+              !picker.refreshText?.includes('Refresh installed PHP') ||
+              picker.status!=='status' || picker.right>picker.viewport+1) {
+            throw Error('Native PHP version picker unsafe or inaccessible '+JSON.stringify(picker));
+          }
+        }
       }
     }
     // Exercise the shipped resize helper inside a simulated aaPanel layer.
