@@ -213,6 +213,7 @@
   var controlBusy = false, lastOverview = null;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
   var fpmFormGeneration = 0, fpmPreviewTicket = 0, fpmPrepareTicket = 0;
+  var fpmActivePrepareTicket = 0;
   var statusBusy = false, statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
@@ -279,7 +280,7 @@
     }
     return true;
   }
-  function request(method, data, done, shouldReport) {
+  function request(method, data, done, shouldReport, expectedRestoreSha) {
     // Multiple independent panels may load in parallel. Preserve the global
     // status of the latest initiated request; stale callbacks still complete
     // their own view, subject to each view's selection/version checks.
@@ -287,10 +288,14 @@
     msg(t.loading, false);
     $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : 20000, dataType:'json' })
       .done(function (response) {
-        if (/^fpm_(apply|rollback)$/.test(method)) showFpmOperationResult(method, response);
-        if (!response || response.status !== true) {
+        var mutating = /^fpm_(apply|rollback)$/.test(method);
+        var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
+        if (mutating) showFpmOperationResult(method, response, outcome);
+        var incompatible = mutating && response && response.status === true && outcome === 'unconfirmed';
+        if (!response || response.status !== true || incompatible) {
           if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
-            msg((response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
+            msg(incompatible ? 'PHP-FPM operation response incompatible or incomplete. Inspect saved recovery before retrying.' :
+              (response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
               (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
               (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
           }
@@ -310,7 +315,7 @@
         }
       })
       .fail(function (_xhr, status) {
-        if (/^fpm_(apply|rollback)$/.test(method)) showFpmOperationResult(method, null);
+        if (/^fpm_(apply|rollback)$/.test(method)) showFpmOperationResult(method, null, 'unconfirmed');
         if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
           msg(t.error + ': ' + status + (/^fpm_(apply|rollback)$/.test(method) ?
             '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
@@ -318,9 +323,40 @@
         done(null);
       });
   }
-  function showFpmOperationResult(method, response) {
+  function fpmOutcome(method, response, requestData, expectedRestoreSha) {
+    // Match the real PHP 8.5 workflow's result fields, not just status=true.
+    // This is display-only evidence: backend authorization/recovery gates stand.
+    if (!response || response.status !== true || Array.isArray(response)) return 'unconfirmed';
+    var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
+    var operation = function (value) { return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value); };
+    if (method === 'fpm_apply') {
+      var sourceMatches = response.version === '85' &&
+        response.scope === 'shared_service' && response.pool === 'www' &&
+        response.source === '/www/server/php/85/etc/php-fpm.conf';
+      if (!sourceMatches || !hash(response.before_sha256) || !hash(response.after_sha256)) {
+        return 'unconfirmed';
+      }
+      if (response.state === 'Applied' &&
+          operation(response.operation_id) &&
+          response.before_sha256 !== response.after_sha256 &&
+          response.before_sha256 === requestData.expected_before &&
+          response.after_sha256 === requestData.expected_after) return 'applied';
+      if (response.state === 'No Change' && response.operation_id === null &&
+          response.before_sha256 === response.after_sha256) return 'no-change';
+      return 'unconfirmed';
+    }
+    if (method === 'fpm_rollback' && response.state === 'Rolled Back' &&
+        operation(response.operation_id) &&
+        response.operation_id === requestData.operation_id &&
+        hash(response.restored_sha256) &&
+        hash(expectedRestoreSha) &&
+        response.restored_sha256 === expectedRestoreSha) return 'restored';
+    return 'unconfirmed';
+  }
+  function showFpmOperationResult(method, response, outcome) {
     var label = method === 'fpm_rollback' ? 'Restore' : 'Apply';
-    var confirmed = response && response.status === true;
+    var confirmed = outcome === 'applied' || outcome === 'restored';
+    var noChange = outcome === 'no-change';
     var warnings = [];
     if (response && response.audit_logged !== true) {
       warnings.push(response.audit_warning || 'Native aaPanel audit persistence unconfirmed.');
@@ -331,16 +367,18 @@
     if (response && response.activity_logged === null) {
       warnings.push('Plugin Activity event excluded by configured verbosity.');
     }
-    if (confirmed && response.activity_logged === undefined) {
+    if (response && response.status === true && response.activity_logged === undefined) {
       warnings.push('Plugin Activity persistence unconfirmed.');
     }
-    var outcome = confirmed ?
-      label + ' confirmed: ' + (response.state || 'successful operation') +
-        '; recovery ID: ' + (response.operation_id || 'not returned') :
+    var result = confirmed ?
+      label + ' confirmed: ' + response.state +
+        '; recovery ID: ' + response.operation_id +
+        (outcome === 'restored' ? '; restored SHA-256: ' + response.restored_sha256 : '') :
+      noChange ? 'No host change performed: PHP-FPM already matches the requested values; no recovery operation created.' :
       label + ' NOT confirmed. Inspect saved recovery before retrying.';
-    var needsAttention = !confirmed || warnings.length > 0;
+    var needsAttention = !confirmed && !noChange || warnings.length > 0;
     var notice = root.find('#ach-fpm-operation-notice');
-    notice.text(outcome + (warnings.length ? ' Diagnostics: ' + warnings.join(' ') : ''))
+    notice.text(result + (warnings.length ? ' Diagnostics: ' + warnings.join(' ') : ''))
       .prop('hidden', false).toggleClass('ach-error', needsAttention)
       .attr('role', needsAttention ? 'alert' : 'status')
       .attr('aria-live', needsAttention ? 'assertive' : 'polite');
@@ -905,12 +943,17 @@
     resetFpmPlan();
     var fields = phpFields(), snapshot = JSON.stringify(fields);
     var generation = fpmFormGeneration, ticket = ++fpmPrepareTicket;
+    fpmActivePrepareTicket = ticket;
     var fresh = function () {
       return ticket === fpmPrepareTicket && generation === fpmFormGeneration &&
         JSON.stringify(phpFields()) === snapshot;
     };
     fpmLock(true);
     request('fpm_prepare', fields, function (r) {
+      // Only this request may release its Prepare lock. Even if a newer
+      // Preview invalidated it, the callback must not restore approval.
+      if (fpmActivePrepareTicket !== ticket) return;
+      fpmActivePrepareTicket = 0;
       fpmLock(false);
       if (!fresh()) return;
       if (!r || !validFpmPlan(r)) {
@@ -959,10 +1002,12 @@
     markFpmOperationPending('Apply');
     request('fpm_apply', Object.assign({}, fieldsNow, approval), function (r) {
       fpmLock(false);
-      root.find('#ach-fpm-plan').text(r ?
-        'Apply result: ' + r.state + '; recovery operation: ' + (r.operation_id || 'none') +
-        '. Inspect saved recovery before any subsequent change.' :
-        'Apply did not return confirmed success. Inspect saved recovery before retrying.');
+      root.find('#ach-fpm-plan').text(!r ?
+        'Apply did not return confirmed success. Inspect saved recovery before retrying.' :
+        r.state === 'No Change' ?
+        'No Change: no host mutation or recovery record created. Repeat a read-only preview before further action.' :
+        'Apply result: Applied; recovery operation: ' + r.operation_id +
+        '. Inspect saved recovery before any subsequent change.');
     });
   });
   root.find('#ach-fpm-check-recovery').on('click', function () {
@@ -983,6 +1028,8 @@
       var safe = typeof r.operation_id === 'string' && /^[0-9a-f]{32}$/.test(r.operation_id) &&
         r.version === '85' && r.safe_rollback_file_match === true &&
         (r.state === 'Applied' || r.state === 'Already Baseline') &&
+        typeof r.baseline_sha256 === 'string' &&
+        /^[0-9a-f]{64}$/.test(r.baseline_sha256) &&
         validValues && validImpact(r.shared_impact, '85') &&
         r.shared_impact.state === 'File Mapping' && r.shared_impact.matched_sites.length > 0 &&
         typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256) &&
@@ -1032,13 +1079,16 @@
       expected_recovery:current.recovery_decision_sha256}, function (r) {
       fpmLock(false);
       root.find('#ach-fpm-recovery-status').text(r ?
-        'Recovery result: ' + r.state + '; original SHA-256: ' + r.restored_sha256 +
+        'Recovery result: Rolled Back; original SHA-256: ' + r.restored_sha256 +
         '. Verify websites and repeat read-only preview.' :
         'Recovery not confirmed. Inspect saved recovery before retrying.');
-    });
+    }, null, current.baseline_sha256);
   });
   root.find('#ach-php-form').on('submit', function (event) {
     event.preventDefault();
+    // A newer Preview invalidates ALL prior Prepare results and approvals,
+    // even if inputs are byte-for-byte identical.
+    fpmPrepareTicket++;
     invalidatePhpPreview('Checking current PHP-FPM settings and site impact...');
     var data = phpFields(), snapshot = JSON.stringify(data);
     var generation = fpmFormGeneration, ticket = ++fpmPreviewTicket;

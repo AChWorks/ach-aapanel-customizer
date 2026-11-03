@@ -735,6 +735,25 @@ const recoveryPreview = (overrides = {}) => ({
   ...overrides
 });
 
+const appliedResult = (overrides = {}) => ({
+  status:true,state:'Applied',operation_id:'d'.repeat(32),
+  version:'85',scope:'shared_service',pool:'www',
+  source:'/www/server/php/85/etc/php-fpm.conf',
+  before_sha256:'a'.repeat(64),after_sha256:'b'.repeat(64),
+  audit_logged:true,activity_logged:true,...overrides
+});
+const rolledBackResult = (overrides = {}) => ({
+  status:true,state:'Rolled Back',operation_id:'d'.repeat(32),
+  restored_sha256:'a'.repeat(64),audit_logged:true,activity_logged:true,...overrides
+});
+const noChangeResult = (overrides = {}) => ({
+  status:true,state:'No Change',operation_id:null,
+  version:'85',scope:'shared_service',pool:'www',
+  source:'/www/server/php/85/etc/php-fpm.conf',
+  before_sha256:'a'.repeat(64),after_sha256:'a'.repeat(64),
+  audit_logged:true,activity_logged:true,...overrides
+});
+
 test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit approval', () => {
   const ui = loadUi();
   assert.notEqual(ui.state().fpmPrepareDisabled, false);
@@ -757,7 +776,7 @@ test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit
   assert.equal(changed.options.data.expected_impact, 'c'.repeat(64));
   assert.equal(changed.options.data.expected_before, 'a'.repeat(64));
   assert.equal(changed.options.data.approved_scope, 'PHP85-www-shared-service');
-  changed.respond({status:true, state:'Applied', operation_id:'d'.repeat(32), audit_logged:true});
+  changed.respond(appliedResult());
   assert.match(ui.state().fpmPlan, /Applied/);
   assert.equal(ui.state().fpmPrepareDisabled, true);
   assert.notEqual(ui.state().fpmReviewHidden, false);
@@ -783,7 +802,7 @@ test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit
   assert.equal(rollback.options.data.operation_id, 'd'.repeat(32));
   assert.equal(rollback.options.data.expected_impact, 'c'.repeat(64));
   assert.equal(rollback.options.data.expected_recovery, 'f'.repeat(64));
-  rollback.respond({status:true, state:'Rolled Back', restored_sha256:'a'.repeat(64), audit_logged:true});
+  rollback.respond(rolledBackResult());
   assert.match(ui.state().fpmRecovery, /Rolled Back/);
   assert.equal(ui.state().fpmRollbackDisabled, true);
 });
@@ -835,6 +854,7 @@ test('Unknown or stale recovery data cannot enable shared-service rollback', () 
     recoveryPreview({recovery_decision_sha256:'bad'}),
     recoveryPreview({impact_sha256:'bad'}),
     recoveryPreview({baseline_values:null}),
+    recoveryPreview({baseline_sha256:'bad'}),
     recoveryPreview({safe_rollback_file_match:false,
       manual_recovery:'Preserved; supervised manual restoration required.'})
   ]) {
@@ -885,8 +905,8 @@ test('Manual host change success never hides missing aaPanel audit persistence',
   ui.submitPhp().respond(phpPreview());
   ui.prepareFpm().respond(guardedPlan());
   ui.approveFpm(true);
-  ui.commitFpm().respond({status:true,state:'Applied',operation_id:'f'.repeat(32),
-    audit_logged:false,audit_warning:'aaPanel activity-log persistence was not confirmed'});
+  ui.commitFpm().respond(appliedResult({operation_id:'f'.repeat(32),
+    audit_logged:false,audit_warning:'aaPanel activity-log persistence was not confirmed'}));
   const state=ui.state();
   assert.match(state.fpmPlan,/Applied/);
   assert.equal(state.errorClass,true);
@@ -898,9 +918,9 @@ test('Completed PHP Apply reports both missing audit and plugin Activity writes'
   ui.submitPhp().respond(phpPreview());
   ui.prepareFpm().respond(guardedPlan());
   ui.approveFpm(true);
-  ui.commitFpm().respond({status:true,state:'Applied',operation_id:'a'.repeat(32),
+  ui.commitFpm().respond(appliedResult({operation_id:'a'.repeat(32),
     audit_logged:false,audit_warning:'Native audit persistence failed',
-    activity_logged:false,activity_warning:'Plugin Activity persistence failed'});
+    activity_logged:false,activity_warning:'Plugin Activity persistence failed'}));
   assert.match(ui.state().fpmPlan,/Applied/);
   assert.match(ui.state().error,/Native audit persistence failed/);
   assert.match(ui.state().error,/Plugin Activity persistence failed/);
@@ -1339,9 +1359,9 @@ test('Confirmed Apply warnings stay in PHP panel despite unrelated Activity traf
   ui.approveFpm(true);
   const apply=ui.commitFpm();
   const activity=ui.openActivity();
-  apply.respond({status:true,state:'Applied',operation_id:'d'.repeat(32),
+  apply.respond(appliedResult({
     audit_logged:false,audit_warning:'Native audit unavailable',
-    activity_logged:false,activity_warning:'Plugin log unavailable'});
+    activity_logged:false,activity_warning:'Plugin log unavailable'}));
   activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
   assert.match(ui.state().fpmPlan,/Apply result: Applied/);
   assert.match(ui.state().fpmOperationNotice,/Native audit unavailable/);
@@ -1354,9 +1374,8 @@ test('Confirmed Restore warning persists after unrelated read and response', () 
   ui.approveFpmRollback(true);
   const restore=ui.rollbackFpm();
   const activity=ui.openActivity();
-  restore.respond({status:true,state:'Rolled Back',restored_sha256:'a'.repeat(64),
-    operation_id:'d'.repeat(32),audit_logged:true,
-    activity_logged:false,activity_warning:'Plugin Restore log unavailable'});
+  restore.respond(rolledBackResult({
+    activity_logged:false,activity_warning:'Plugin Restore log unavailable'}));
   activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
   assert.match(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
   assert.match(ui.state().fpmOperationNotice,/Plugin Restore log unavailable/);
@@ -1396,9 +1415,9 @@ test('Restore warning retains both audit and Activity failures across unrelated 
   ui.approveFpmRollback(true);
   const restore=ui.rollbackFpm();
   const activity=ui.openActivity();
-  restore.respond({status:true,state:'Rolled Back',restored_sha256:'a'.repeat(64),
-    operation_id:'d'.repeat(32),audit_logged:false,audit_warning:'Native restore audit missing',
-    activity_logged:false,activity_warning:'Plugin restore Activity missing'});
+  restore.respond(rolledBackResult({
+    audit_logged:false,audit_warning:'Native restore audit missing',
+    activity_logged:false,activity_warning:'Plugin restore Activity missing'}));
   activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
   assert.match(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
   assert.match(ui.state().fpmOperationNotice,/Native restore audit missing/);
@@ -1420,4 +1439,161 @@ test('Lifecycle Activity can be filtered and displayed with canonical fields', (
   assert.equal(ui.activityRows().length,1);
   assert.match(ui.activityRows()[0][2],/lifecycle \/ uninstall/);
   assert.match(ui.activityRows()[0][3],/IconCleanupFailed/);
+});
+
+test('Reviewer: pending Prepare A cannot revive approval after a newer identical Preview B fails', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const oldPrepare=ui.prepareFpm();
+  const newPreview=ui.submitPhp(); // Same fields; a newer user intent.
+  oldPrepare.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,true);
+  newPreview.respond({status:false,stage:'php_fpm_file_preview',msg:'Latest preview failed'});
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  ui.approveFpm(true);
+  const before=ui.requests.length;
+  ui.commitFpm();
+  assert.equal(ui.requests.length,before,'No Apply can follow stale Prepare and failed preview');
+});
+
+test('Reviewer: newer identical Preview B succeeds before Prepare A, which must stay stale', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const oldPrepare=ui.prepareFpm();
+  const newerPreview=ui.submitPhp();
+  newerPreview.respond(phpPreview());
+  oldPrepare.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  const fresh=ui.prepareFpm();
+  assert.notEqual(fresh,oldPrepare);
+  fresh.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,false);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+});
+
+test('Reviewer: stale Prepare failure after newer identical Preview does not replace current feedback', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const oldPrepare=ui.prepareFpm();
+  const newerPreview=ui.submitPhp();
+  oldPrepare.respond({status:false,stage:'fpm_prepare',msg:'STALE PREPARE ERROR'});
+  newerPreview.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.doesNotMatch(ui.state().error,/STALE PREPARE ERROR/);
+});
+
+test('Reviewer: malformed successful Apply replies never imply a completed host change', () => {
+  const replies=[
+    {status:true,audit_logged:true,activity_logged:true},
+    {status:true,state:'Applied',operation_id:'bad',audit_logged:true,activity_logged:true},
+    {status:true,state:'Applied',operation_id:'c'.repeat(32),audit_logged:true,activity_logged:true},
+    {status:true,state:'Rolled Back',operation_id:'c'.repeat(32),audit_logged:true,activity_logged:true},
+    {status:true,state:'No Change',operation_id:'c'.repeat(32),audit_logged:true,activity_logged:true},
+  ];
+  for(const reply of replies) {
+    const ui=loadUi();
+    ui.submitPhp().respond(phpPreview());
+    ui.prepareFpm().respond(guardedPlan());
+    ui.approveFpm(true);
+    ui.commitFpm().respond(reply);
+    assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(reply));
+    assert.doesNotMatch(ui.state().fpmOperationNotice,/Apply confirmed/);
+    assert.match(ui.state().fpmPlan,/Inspect saved recovery/);
+    assert.equal(ui.state().fpmCommitDisabled,true);
+  }
+});
+
+test('Reviewer: malformed successful Restore replies never imply completed rollback', () => {
+  const valid=rolledBackResult();
+  for (const reply of [
+    {status:true,audit_logged:true,activity_logged:true},
+    {...valid,operation_id:'bad'},
+    {...valid,operation_id:'e'.repeat(32)},
+    {...valid,restored_sha256:'bad'},
+    {...valid,restored_sha256:'b'.repeat(64)},
+    {...valid,state:'Applied'}
+  ]) {
+    const ui=loadUi();
+    ui.inspectFpmRecovery().respond(recoveryPreview());
+    ui.approveFpmRollback(true);
+    ui.rollbackFpm().respond(reply);
+    assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(reply));
+    assert.match(ui.state().fpmRecovery,/Inspect saved recovery/);
+    assert.doesNotMatch(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
+  }
+});
+
+test('Reviewer: valid No Change is explicitly non-mutating and never invents recovery', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  ui.commitFpm().respond(noChangeResult());
+  assert.match(ui.state().fpmOperationNotice,/No host change performed/);
+  assert.doesNotMatch(ui.state().fpmOperationNotice,/Apply confirmed/);
+  assert.doesNotMatch(ui.state().fpmPlan,/recovery operation: none/);
+});
+
+test('Reviewer: incomplete successful Apply preserves independent persistence warnings', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  const write=ui.commitFpm();
+  const background=ui.openActivity();
+  write.respond({status:true,audit_logged:false,audit_warning:'Native audit missing',
+    activity_logged:false,activity_warning:'Plugin Activity missing'});
+  background.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmOperationNotice,/NOT confirmed/);
+  assert.match(ui.state().fpmOperationNotice,/Native audit missing/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin Activity missing/);
+});
+
+
+test('Reviewer: failed Apply and Restore never fabricate confirmation', () => {
+  const apply=loadUi();
+  apply.submitPhp().respond(phpPreview());
+  apply.prepareFpm().respond(guardedPlan());
+  apply.approveFpm(true);
+  apply.commitFpm().respond({status:false,stage:'fpm_apply',msg:'Reload uncertain',
+    operation_id:'f'.repeat(32),audit_logged:false,
+    audit_warning:'Native audit failed',activity_logged:false,
+    activity_warning:'Plugin Activity failed'});
+  assert.match(apply.state().fpmOperationNotice,/Apply NOT confirmed/);
+  assert.match(apply.state().fpmOperationNotice,/Native audit failed/);
+  assert.match(apply.state().fpmOperationNotice,/Plugin Activity failed/);
+  assert.match(apply.state().fpmPlan,/Inspect saved recovery/);
+
+  const restore=loadUi();
+  restore.inspectFpmRecovery().respond(recoveryPreview());
+  restore.approveFpmRollback(true);
+  restore.rollbackFpm().reject(null,'timeout');
+  assert.match(restore.state().fpmOperationNotice,/Restore NOT confirmed/);
+  assert.match(restore.state().fpmRecovery,/Inspect saved recovery/);
+});
+
+test('Reviewer: mismatched native Apply identities, config digests and source are never confirmed', () => {
+  const tampered=[
+    appliedResult({operation_id:'not-an-operation'}),
+    appliedResult({before_sha256:'e'.repeat(64)}),
+    appliedResult({after_sha256:'f'.repeat(64)}),
+    appliedResult({source:'/www/server/php/84/etc/php-fpm.conf'}),
+    appliedResult({version:'84'}),
+    appliedResult({state:'No Change',operation_id:null}),
+    noChangeResult({operation_id:'d'.repeat(32)}),
+    noChangeResult({after_sha256:'b'.repeat(64)})
+  ];
+  for(const response of tampered) {
+    const ui=loadUi();
+    ui.submitPhp().respond(phpPreview());
+    ui.prepareFpm().respond(guardedPlan());
+    ui.approveFpm(true);
+    ui.commitFpm().respond(response);
+    assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(response));
+    assert.equal(ui.state().fpmCommitDisabled,true);
+  }
 });

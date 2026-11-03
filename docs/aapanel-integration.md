@@ -395,17 +395,28 @@ prevents a successful file-only preview from becoming a covert exception
 detail transport.
 
 The native PHP-FPM form uses a generation and immutable field snapshot for
-each Preview/Prepare request. Editing fields or starting another preview
-invalidates older replies, including errors. A stale Prepare cannot restore
-an approval panel, and duplicate pending Prepare clicks do not start another
-request. The server-side revalidation/hash/authorization gates remain
-independent and mandatory.
+each Preview/Prepare request. Editing fields or starting another Preview,
+including a byte-identical repeated Preview, invalidates ALL pending Prepare
+tickets and approvals. A stale Prepare cannot restore an approval panel,
+unlock a different pending request, or authorize Apply, and duplicate pending
+Prepare clicks do not start another request. The server-side
+revalidation/hash/authorization gates remain independent and mandatory.
+
+Only operation-specific, schema-compatible PHP-FPM Apply/Restore results
+can display a confirmed host mutation: Apply must return the supported PHP
+8.5 shared-[www] source and expected before/after SHA-256 values together
+with an actual durable operation ID. Restore must return the approved
+operation ID and a valid restored SHA-256 matching the inspected baseline.
+A structurally valid "No Change" with null operation ID and matching
+before/after hashes is explicitly non-mutating, never an Applied result.
+Unknown, incomplete, mismatched and transport-uncertain results always
+require saved-recovery inspection before considering any retry.
 
 Confirmed shared-service Apply/Restore results and missing native-audit or
 plugin-Activity persistence are displayed in a dedicated PHP-FPM panel notice.
 Concurrent Website/Activity/other panel requests must not hide or clear
-these consequential warnings. Transport-uncertain outcomes explicitly
-require recovery inspection before any retry.
+these consequential warnings. Existing backend authorization, revision,
+impact, re-prepare, expected-hash and recovery gates are unchanged.
 
 The native install/uninstall shell hook uses fixed plugin-local paths and a
 strict allowlisted Python lifecycle logger. Repeated install invocations
