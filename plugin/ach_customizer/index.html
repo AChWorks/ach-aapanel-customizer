@@ -209,8 +209,8 @@
   var controlBusy = false, lastOverview = null;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
   var statusBusy = false, statusRevision = null, statusLoadedScope = null, statusTicket = 0;
-  var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false;
-  var activityBusy = false;
+  var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
+  var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
   function fitNativeLayer() {
     // Only resize the aaPanel layer that actually owns this plugin instance.
     if (!root[0] || typeof window === 'undefined') return;
@@ -218,7 +218,7 @@
     if (tablist) tablist.setAttribute('aria-orientation', window.innerWidth <= 720 ? 'horizontal' : 'vertical');
     var layer = root[0].closest('.layui-layer');
     if (!layer) return; // Static tests/embedded pages keep intrinsic dimensions.
-    var width = Math.min(1100, Math.max(320, window.innerWidth - 32));
+    var width = Math.min(1100, Math.max(240, window.innerWidth - 32));
     var height = Math.min(820, Math.max(280, window.innerHeight - 48));
     layer.style.width = width + 'px';
     layer.style.height = height + 'px';
@@ -275,24 +275,41 @@
     return true;
   }
   function request(method, data, done) {
+    // Multiple independent panels may load in parallel. Preserve the global
+    // status of the latest initiated request; stale callbacks still complete
+    // their own view, subject to each view's selection/version checks.
+    var messageTicket = ++requestMessageTicket;
     msg(t.loading, false);
     $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : 20000, dataType:'json' })
       .done(function (response) {
         if (!response || response.status !== true) {
-          msg((response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
-            (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
-            (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
+          if (messageTicket === requestMessageTicket) {
+            msg((response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
+              (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
+              (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
+          }
           done(null);
         } else {
-          if (/^fpm_(apply|rollback)$/.test(method) && response.audit_logged !== true) {
-            msg(response.audit_warning || 'aaPanel activity-log persistence was not confirmed.', true);
-          } else if (response.activity_logged === false) {
-            msg(response.activity_warning || 'Plugin activity-log persistence was not confirmed.', true);
-          } else { msg('', false); }
+          if (messageTicket === requestMessageTicket) {
+            var warnings = [];
+            if (/^fpm_(apply|rollback)$/.test(method) && response.audit_logged !== true) {
+              warnings.push(response.audit_warning || 'aaPanel activity-log persistence was not confirmed.');
+            }
+            if (response.activity_logged === false) {
+              warnings.push(response.activity_warning || 'Plugin activity-log persistence was not confirmed.');
+            }
+            msg(warnings.join(' '), warnings.length > 0);
+          }
           done(response);
         }
       })
-      .fail(function (_xhr, status) { msg(t.error + ': ' + status + (/^fpm_(apply|rollback)$/.test(method) ? '. Outcome unknown: inspect saved recovery before any retry.' : ''), true); done(null); });
+      .fail(function (_xhr, status) {
+        if (messageTicket === requestMessageTicket) {
+          msg(t.error + ': ' + status + (/^fpm_(apply|rollback)$/.test(method) ?
+            '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
+        }
+        done(null);
+      });
   }
   function displayControls(r) {
     if (!r || r.state_schema !== 1 || !Number.isSafeInteger(r.state_revision) ||
@@ -460,19 +477,27 @@
     });
   }
   function loadStatusSites(reset) {
-    if (statusSitesBusy || root.find('#ach-status-scope').val() !== 'site') return;
-    if (reset) { statusSites = []; statusSitePage = 1; statusSitesMore = true; }
-    if (!statusSitesMore) return;
+    if (root.find('#ach-status-scope').val() !== 'site') return;
+    if (reset) {
+      // Invalidate every older response, even after site -> global -> site.
+      statusSitesTicket += 1;
+      statusSites = []; statusSitePage = 1; statusSitesMore = true;
+      statusSitesBusy = false;
+      root.find('#ach-status-site-id').empty().prop('disabled', true);
+      $('<option>').val('').text('Loading websites...').appendTo(root.find('#ach-status-site-id'));
+    }
+    if (statusSitesBusy || !statusSitesMore) return;
     statusSitesBusy = true;
     root.find('#ach-status-sites-more, #ach-status-sites-retry').prop('disabled', true);
     root.find('#ach-status-sites-state').text('Loading website inventory...');
-    var expectedPage = statusSitePage;
-    request('get_sites', {page:expectedPage, page_size:sitePageSize}, function (r) {
+    var expectedPage = statusSitePage, ticket = statusSitesTicket;
+    request('status_sites', {page:expectedPage, page_size:sitePageSize}, function (r) {
+      if (ticket !== statusSitesTicket || root.find('#ach-status-scope').val() !== 'site') return;
       statusSitesBusy = false;
       root.find('#ach-status-sites-retry').prop('disabled', false);
-      if (root.find('#ach-status-scope').val() !== 'site') return;
-      if (!r || r.inventory_schema !== 2 || !validInventoryPage(r, expectedPage)) {
-        root.find('#ach-status-sites-state').text('Website inventory unavailable or changed. Enable the Website monitor and retry.');
+      if (!r || r.purpose !== 'status_site_selection' ||
+          r.inventory_schema !== 2 || !validInventoryPage(r, expectedPage)) {
+        root.find('#ach-status-sites-state').text('Website inventory unavailable or changed. Check administrator access and retry.');
         root.find('#ach-status-sites-more').prop('hidden', true);
         if (!statusSites.length) root.find('#ach-status-site-id').prop('disabled', true);
         return;
@@ -508,6 +533,14 @@
   root.find('#ach-status-load').on('click', statusLoad);
   root.find('#ach-status-scope').on('change', function () {
     var siteMode = $(this).val() === 'site';
+    if (!siteMode) {
+      statusSitesTicket += 1;
+      statusSitesBusy = false; statusSitesMore = false;
+      statusSites = []; statusSitePage = 1;
+      root.find('#ach-status-site-id').empty();
+      $('<option>').val('').text('Select website scope first').appendTo(root.find('#ach-status-site-id'));
+      root.find('#ach-status-sites-state').text('Choose website scope to load current site options.');
+    }
     root.find('#ach-status-site-id').prop('disabled', !siteMode || !statusSites.length);
     root.find('#ach-status-sites-retry').prop('hidden', !siteMode);
     root.find('#ach-status-sites-more').prop('hidden', !siteMode || !statusSitesMore);
@@ -674,7 +707,9 @@
     statusLock(statusBusy);
   });
   function loadActivity() {
-    if (activityBusy) return;
+    // Filters and refresh may change while a request is pending. Accept only
+    // the latest selection, not the fastest outdated network reply.
+    var ticket = ++activityTicket;
     activityBusy = true;
     root.find('#ach-activity-refresh').prop('disabled', true);
     root.find('#ach-activity-result').text('Loading recent activity...');
@@ -682,6 +717,7 @@
       level:root.find('#ach-activity-level').val() || '',
       module:root.find('#ach-activity-module').val() || '', limit:50
     }, function (r) {
+      if (ticket !== activityTicket) return;
       activityBusy = false;
       root.find('#ach-activity-refresh').prop('disabled', false);
       var rows = root.find('#ach-activity-rows').empty();
@@ -689,13 +725,19 @@
         ['DEBUG','INFO','WARNING','ERROR'].indexOf(r.configured_level) >= 0 &&
         Array.isArray(r.entries) && r.entries.length <= 50 &&
         r.entries.every(function (item) {
-          return item && item.schema === 1 && typeof item.time_utc === 'string' &&
-            typeof item.module === 'string' && typeof item.action === 'string' &&
-            typeof item.stage === 'string' && typeof item.level === 'string' &&
-            ['DEBUG','INFO','WARNING','ERROR'].indexOf(item.level) >= 0 &&
+          return item && item.schema === 1 &&
+            typeof item.time_utc === 'string' && item.time_utc.length <= 40 &&
+            typeof item.module === 'string' && ['monitor','websites','php_fpm','status_pages','diagnostics'].indexOf(item.module) >= 0 &&
+            typeof item.action === 'string' && item.action.length <= 48 &&
+            typeof item.stage === 'string' && item.stage.length <= 72 &&
+            typeof item.level === 'string' && ['DEBUG','INFO','WARNING','ERROR'].indexOf(item.level) >= 0 &&
             typeof item.operation_id === 'string' && /^[0-9a-f]{32}$/.test(item.operation_id) &&
-            typeof item.outcome === 'string' && typeof item.detail === 'string' &&
-            typeof item.recovery_id === 'string' && typeof item.error_class === 'string';
+            typeof item.outcome === 'string' && item.outcome.length <= 40 &&
+            typeof item.target === 'string' && item.target.length <= 120 &&
+            typeof item.detail === 'string' && item.detail.length <= 240 &&
+            typeof item.recovery_id === 'string' &&
+              (item.recovery_id === '' || /^[0-9a-f]{32}$/.test(item.recovery_id)) &&
+            typeof item.error_class === 'string' && item.error_class.length <= 64;
         });
       if (!valid) {
         root.find('#ach-activity-result').text('Activity unavailable or incompatible API. Retry after checking administrator access.');

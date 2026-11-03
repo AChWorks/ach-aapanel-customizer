@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -42,7 +43,7 @@ class ach_customizer_main:
         return getattr(args, key, default)
 
     @staticmethod
-    def _activity_result(response, module, action, *, target="", error=None):
+    def _activity_result(response, module, action, *, target="", error=None, level="INFO"):
         """Best-effort plugin diagnostics, independent of operation success."""
         correlation = response.get("request_id", response.get("operation_id"))
         try:
@@ -52,18 +53,29 @@ class ach_customizer_main:
             controlled = (PermissionError, StateError, StatusPageError,
                           MonitorInputError, FpmApplyError, ActivityError)
             detail = str(error) if isinstance(error, controlled) else ""
+            impact = response.get("shared_impact")
+            needs_review = (not failed and
+                            (response.get("state") == "Needs Review" or
+                             isinstance(impact, dict) and impact.get("state") == "Needs Review"))
+            severity = "ERROR" if failed else "WARNING" if needs_review else level
+            outcome = ("failed" if failed else "Needs Review" if needs_review else
+                       response.get("state", "success"))
+            recovery = response.get("operation_id")
+            if (not response.get("request_id") or not isinstance(recovery, str)
+                    or re.fullmatch(r"[0-9a-f]{32}", recovery) is None):
+                recovery = ""
             entry = record(
-                level="ERROR" if failed else "INFO", module=module,
+                level=severity, module=module,
                 action=action, operation_id=correlation,
                 stage=response.get("stage", "complete"),
-                outcome="failed" if failed else response.get("state", "success"),
+                outcome=outcome,
                 target=target, error_class=type(error).__name__ if error else "",
                 detail=detail,
-                recovery_id=response.get("operation_id", "") if not failed and
-                            response.get("request_id") else "",
+                recovery_id=recovery if not failed else "",
             )
-            append_activity(_STATE_DIR, entry)
-            response["activity_logged"] = True
+            persisted = append_activity(_STATE_DIR, entry)
+            # None means below verbosity threshold, NOT a persistence failure.
+            response["activity_logged"] = True if persisted else None
         except Exception:
             response["activity_logged"] = False
             response["activity_warning"] = "Plugin activity-log persistence was not confirmed"
@@ -72,14 +84,25 @@ class ach_customizer_main:
         return response
 
     @staticmethod
-    def _fail(stage, error, operation_id):
+    def _fail(stage, error, operation_id, *, diagnostic_error=None):
+        # Ordinary controlled validation/auth failures remain actionable.
+        # Do not expose arbitrary DB/filesystem/internal exception text to
+        # browsers: retain the precise exception class in private Activity.
+        controlled = (PermissionError, StateError, StatusPageError,
+                      MonitorInputError, FpmApplyError, ActivityError)
+        if isinstance(error, controlled) or (
+                isinstance(error, str) and diagnostic_error is not None):
+            message = str(error)[:300]
+        else:
+            message = "Unexpected plugin error; inspect Activity using Operation ID"
         response = {"status": False, "stage": stage,
-                    "msg": str(error)[:300], "operation_id": operation_id}
+                    "msg": message, "operation_id": operation_id}
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_")) else
                   "status_pages" if stage.startswith("status_") else
                   "websites" if stage.startswith("website_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
-        return ach_customizer_main._activity_result(response, module, stage, error=error)
+        return ach_customizer_main._activity_result(
+            response, module, stage, error=diagnostic_error or error)
 
     def get_activity(self, args):
         """Native full-primary-admin-only diagnostics. No arbitrary paths."""
@@ -128,7 +151,8 @@ class ach_customizer_main:
     def get_overview(self, args):
         operation_id = uuid4().hex
         try:
-            return self._overview(read_state(_STATE_DIR), operation_id)
+            response = self._overview(read_state(_STATE_DIR), operation_id)
+            return self._activity_result(response, "monitor", "get_overview", level="DEBUG")
         except Exception as exc:
             return self._fail("monitor_state_read", exc, operation_id)
 
@@ -187,7 +211,9 @@ class ach_customizer_main:
                 self._argument(args, "page", 1),
                 self._argument(args, "page_size", 25),
             )
-            return {"status": True, "operation_id": operation_id, **result}
+            response = {"status": True, "operation_id": operation_id, **result}
+            return self._activity_result(response, "websites", "get_sites",
+                                         target="page:" + str(result["page"]), level="DEBUG")
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
 
@@ -271,6 +297,33 @@ class ach_customizer_main:
                 or "tmp_login_id" in session or "tmp_login_expire" in session):
             raise PermissionError("Full primary aaPanel administrator POST is required")
 
+    def status_sites(self, args):
+        """Admin-only bounded native site choices, independent of Monitor.
+
+        Monitor disabling must not prevent choosing a real site for separately
+        authorized Status Pages previews, inspections or branding preferences.
+        Uses the same validated native discovery contract as get_sites, but
+        never changes the Monitor state or host configuration.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            import public
+            result = get_site_page(
+                public,
+                self._argument(args, "page", 1),
+                self._argument(args, "page_size", 25),
+            )
+            response = {"status": True, "request_id": request_id,
+                        "purpose": "status_site_selection", **result}
+            return self._activity_result(
+                response, "status_pages", "status_sites",
+                target="page:" + str(result["page"]), level="DEBUG")
+        except PermissionError as exc:
+            return self._fail("status_sites_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("status_sites_read", exc, request_id)
+
     def status_preferences(self, args):
         """Read-only global and requested native-site branding; no file creation."""
         request_id = uuid4().hex
@@ -278,13 +331,16 @@ class ach_customizer_main:
             site_id = self._status_site_id(args)
             state = read_preferences(_STATE_DIR)
             effective, source = select_brand(state, site_id)
-            return {
+            response = {
                 "status": True, "request_id": request_id, "schema": 1,
                 "revision": state["revision"], "global": state["global"],
                 "effective": effective, "source": source, "site_id": site_id,
                 "templates": list(PAGES), "locales": list(LOCALES),
                 "mode": "Preview only", "apply_supported": False,
             }
+            return self._activity_result(
+                response, "status_pages", "status_preferences",
+                target="site:" + str(site_id) if site_id else "global", level="DEBUG")
         except Exception as exc:
             return self._fail("status_preferences", exc, request_id)
 
@@ -301,13 +357,16 @@ class ach_customizer_main:
                 effective = self._status_values(args)
                 source = "Unsaved preview"
             rendered = render_page(locale, template, effective)
-            return {
+            response = {
                 "status": True, "request_id": request_id, "schema": 1,
                 "revision": state["revision"], "site_id": site_id,
                 "template": template, "locale": locale, "source": source,
                 "mode": "Preview only", "apply_supported": False,
                 **rendered,
             }
+            return self._activity_result(
+                response, "status_pages", "status_preview",
+                target="site:" + str(site_id) if site_id else "global", level="DEBUG")
         except Exception as exc:
             return self._fail("status_preview", exc, request_id)
 
@@ -435,9 +494,12 @@ class ach_customizer_main:
             response = {"status": True, "request_id": request_id, **result}
         except FpmApplyError as exc:
             response = self._fail(exc.stage, exc, request_id)
-        except Exception:
-            # Do not send arbitrary privileged exception details to a browser.
-            response = self._fail("fpm_" + action, "Unexpected manual PHP-FPM error; no automatic retry", request_id)
+        except Exception as exc:
+            # Keep the real type for authorized troubleshooting without exposing
+            # privileged exception content to the browser or activity history.
+            response = self._fail(
+                "fpm_" + action, "Unexpected manual PHP-FPM error; no automatic retry",
+                request_id, diagnostic_error=exc)
         if action in ("apply", "rollback"):
             response["audit_logged"] = self._fpm_native_audit(action, response, request_id)
             if not response["audit_logged"]:

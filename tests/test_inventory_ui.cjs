@@ -892,6 +892,19 @@ test('Manual host change success never hides missing aaPanel audit persistence',
   assert.match(state.error,/activity-log persistence/);
 });
 
+test('Completed PHP Apply reports both missing audit and plugin Activity writes', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  ui.commitFpm().respond({status:true,state:'Applied',operation_id:'a'.repeat(32),
+    audit_logged:false,audit_warning:'Native audit persistence failed',
+    activity_logged:false,activity_warning:'Plugin Activity persistence failed'});
+  assert.match(ui.state().fpmPlan,/Applied/);
+  assert.match(ui.state().error,/Native audit persistence failed/);
+  assert.match(ui.state().error,/Plugin Activity persistence failed/);
+});
+
 const brand = () => ({
   brand_name:'ACh', tagline:'WEB SYSTEMS', brand_url:'https://ach.li',
   brand_label:'ach.li',accent:'#008b92',background:'#f4f2eb',
@@ -1142,10 +1155,10 @@ test('Website-scope branding selects only native inventory IDs, not manually typ
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
   const inventory = ui.requests.at(-1);
-  assert.match(inventory.options.url, /s=get_sites$/);
+  assert.match(inventory.options.url, /s=status_sites$/);
   const seven = {...site(), id:7, name:'site-seven.test',
     bound_domains:[{name:'site-seven.test',port:80}],canonical_domain_bound:true};
-  inventory.respond(page([seven]));
+  inventory.respond({...page([seven]),purpose:'status_site_selection'});
   assert.deepEqual(ui.statusSiteChoices(), [
     {id:'',text:'Choose a website...'},
     {id:'7',text:'site-seven.test (ID 7)'}
@@ -1175,9 +1188,10 @@ test('Stale website inventory response cannot enable site selector in global bra
   ui.statusSetValue('#ach-status-scope','site','change');
   const stale=ui.requests.at(-1);
   ui.statusSetValue('#ach-status-scope','global','change');
-  stale.respond(page([site()]));
+  stale.respond({...page([site()]),purpose:'status_site_selection'});
   assert.equal(ui.statusSiteDisabled(),true);
-  assert.deepEqual(ui.statusSiteChoices(),[]);
+  assert.deepEqual(ui.statusSiteChoices(),
+    [{id:'',text:'Select website scope first'}]);
 });
 
 test('Website inventory failure supports an explicit refresh and no inferred site', () => {
@@ -1188,8 +1202,84 @@ test('Website inventory failure supports an explicit refresh and no inferred sit
   assert.equal(ui.statusSiteDisabled(),true);
   assert.match(ui.statusSiteInfo(),/inventory unavailable/);
   const refresh=ui.statusClick('#ach-status-sites-retry');
-  assert.match(refresh.options.url,/s=get_sites$/);
-  refresh.respond(page([site()]));
+  assert.match(refresh.options.url,/s=status_sites$/);
+  refresh.respond({...page([site()]),purpose:'status_site_selection'});
   assert.equal(ui.statusSiteDisabled(),false);
   assert.equal(ui.statusSiteChoices()[1].id,'3');
+});
+
+test('Legacy Monitor-only endpoint reply cannot be trusted for Status Pages selector', () => {
+  const ui = loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const req=ui.requests.at(-1);
+  assert.match(req.options.url,/s=status_sites$/);
+  req.respond(page([site()])); // Old/mismatched backend without purpose marker.
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(), /inventory unavailable or changed/);
+});
+
+
+test('Returning to website scope cannot consume a prior in-flight site list', () => {
+  const ui = loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const older = ui.requests.at(-1);
+  ui.statusSetValue('#ach-status-scope','global','change');
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const newer = ui.requests.at(-1);
+  assert.notEqual(older, newer);
+  const oldSite = {...site(),id:3,name:'old.example.test'};
+  older.respond({...page([oldSite]),purpose:'status_site_selection'});
+  assert.equal(ui.statusSiteDisabled(),true);
+  const newSite = {...site(),id:7,name:'new.example.test',
+    bound_domains:[{name:'new.example.test',port:80}]};
+  newer.respond({...page([newSite]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSiteChoices(),[
+    {id:'',text:'Choose a website...'},
+    {id:'7',text:'new.example.test (ID 7)'}
+  ]);
+});
+
+test('Newest Activity filter wins when responses arrive out of order', () => {
+  const ui=loadUi();
+  const earlier=ui.openActivity();
+  const later=ui.activityFilter('#ach-activity-level','ERROR');
+  assert.equal(later.options.data.level,'ERROR');
+  const row = (level,id)=>({schema:1,time_utc:'2026-11-03T04:00:00+00:00',
+    level,module:'php_fpm',action:'fpm_apply',stage:'complete',
+    outcome:level==='ERROR'?'failed':'success',
+    error_class:'',detail:'',operation_id:id.repeat(32),
+    recovery_id:'',target:'PHP85-www-shared-service'});
+  later.respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[row('ERROR','e')]});
+  earlier.respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[row('INFO','a')]});
+  assert.equal(ui.activityRows().length,1);
+  assert.match(ui.activityRows()[0][1],/ERROR/);
+  assert.match(ui.activityRows()[0][4],/^e{32}/);
+  assert.match(ui.activityMessage(),/1 record/);
+});
+
+
+test('A stale Activity request error cannot replace the newest filter message', () => {
+  const ui=loadUi();
+  const earlier=ui.openActivity();
+  const later=ui.activityFilter('#ach-activity-module','php_fpm');
+  later.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  earlier.respond({status:false,stage:'activity_read',msg:'stale background error',
+    operation_id:'a'.repeat(32)});
+  assert.equal(ui.state().error,'');
+  assert.match(ui.activityMessage(),/0 record/);
+});
+
+test('Oversized Activity record is rejected before it reaches a table row', () => {
+  const ui=loadUi();
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03',level:'ERROR',
+      module:'status_pages',action:'status_preview',stage:'complete',
+      outcome:'failed',error_class:'StatusPageError',detail:'x'.repeat(4096),
+      operation_id:'d'.repeat(32),recovery_id:'',target:''}]});
+  assert.deepEqual(ui.activityRows(),[]);
+  assert.match(ui.activityMessage(),/unavailable or incompatible/);
 });

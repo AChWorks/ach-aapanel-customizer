@@ -113,7 +113,8 @@ def append_activity(directory, event):
             or event.get("module") not in MODULES):
         raise ActivityError("Invalid activity record")
     if LEVELS[event["level"]] < LEVELS[configured_level()]:
-        return True
+        # Skipped by explicit verbosity policy, not a persisted log.
+        return None
     body = (json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             + "\n").encode("utf-8")
     if len(body) > MAX_RECORD_BYTES:

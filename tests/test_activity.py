@@ -117,6 +117,88 @@ class ActivityTests(unittest.TestCase):
         self.assertFalse(result["activity_logged"])
         self.assertIn("persistence", result["activity_warning"])
 
+    def test_unexpected_fpm_exception_keeps_real_error_class_without_leaking_details(self):
+        from unittest.mock import Mock
+        fake_public = types.ModuleType("public")
+        fake_public.WriteLog = Mock(return_value=1)
+        with patch.object(main, "_STATE_DIR", self.directory), patch.dict(
+                sys.modules, {"public": fake_public}), patch.object(
+                main, "ManualFpmWorkflow") as factory:
+            factory.return_value.rollback.side_effect = RuntimeError(
+                "PRIVATE debug context should not reach browser or activity history")
+            response = main.ach_customizer_main().fpm_rollback({})
+        self.assertFalse(response["status"])
+        self.assertEqual(response["stage"], "fpm_rollback")
+        self.assertNotIn("PRIVATE", json.dumps(response))
+        self.assertEqual(activity.read_activity(self.directory)[0]["error_class"],
+                         "RuntimeError")
+        self.assertNotIn("PRIVATE", json.dumps(activity.read_activity(self.directory)))
+
+    def test_debug_success_is_silent_at_info_but_visible_with_debug(self):
+        with patch.object(main, "_STATE_DIR", self.directory), patch.dict(
+                os.environ, {"ACH_CUSTOMIZER_ACTIVITY_LEVEL": "INFO"}):
+            info = main.ach_customizer_main().get_overview({})
+            self.assertTrue(info["status"])
+            self.assertEqual(activity.read_activity(self.directory), [])
+        with patch.object(main, "_STATE_DIR", self.directory):
+            debug = main.ach_customizer_main().get_overview({})
+            self.assertTrue(debug["status"])
+            entries = activity.read_activity(self.directory)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["level"], "DEBUG")
+            self.assertEqual(entries[0]["action"], "get_overview")
+
+    def test_degraded_php_mapping_is_a_warning_without_fabricating_failure(self):
+        with patch.object(main, "_STATE_DIR", self.directory):
+            response = {"status": True, "operation_id": "a" * 32,
+                        "state": "File Drift",
+                        "shared_impact": {"state": "Needs Review"}}
+            logged = main.ach_customizer_main._activity_result(
+                response, "php_fpm", "preview_php_fpm", target="85")
+            self.assertTrue(logged["status"])
+            result = activity.read_activity(self.directory)[0]
+            self.assertEqual(result["level"], "WARNING")
+            self.assertEqual(result["outcome"], "Needs Review")
+
+    def test_unexpected_native_inventory_error_is_safe_for_browser_and_logged_by_class(self):
+        fake_flask = types.ModuleType("flask")
+        fake_flask.session = {"login": True, "uid": 1}
+        fake_flask.request = types.SimpleNamespace(method="POST")
+        fake_flask.has_request_context = lambda: True
+        fake_public = types.ModuleType("public")
+        with patch.object(main, "_STATE_DIR", self.directory), patch.dict(
+                sys.modules, {"flask": fake_flask, "public": fake_public}), patch.object(
+                main, "get_site_page",
+                side_effect=RuntimeError("SECRET-DATABASE-CREDENTIAL")):
+            response = main.ach_customizer_main().status_sites({"page": "1"})
+        self.assertFalse(response["status"])
+        self.assertEqual(response["stage"], "status_sites_read")
+        self.assertNotIn("SECRET-DATABASE-CREDENTIAL", json.dumps(response))
+        event = activity.read_activity(self.directory)[0]
+        self.assertEqual(event["error_class"], "RuntimeError")
+        self.assertEqual(event["detail"], "")
+        self.assertNotIn("SECRET-DATABASE-CREDENTIAL", json.dumps(event))
+
+    def test_absent_recovery_reference_is_not_rendered_as_none(self):
+        with patch.object(main, "_STATE_DIR", self.directory):
+            result = main.ach_customizer_main._activity_result(
+                {"status": True, "request_id": "c" * 32,
+                 "operation_id": None, "state": "No Recovery"},
+                "php_fpm", "fpm_recovery")
+            self.assertTrue(result["status"])
+        entry = activity.read_activity(self.directory)[0]
+        self.assertEqual(entry["recovery_id"], "")
+        self.assertEqual(entry["outcome"], "No Recovery")
+
+    def test_concurrent_appends_preserve_unique_operation_records(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            assert all(pool.map(lambda n: activity.append_activity(
+                self.directory, self.event(n)), range(1, 61)))
+        entries = activity.read_activity(self.directory, limit=100)
+        self.assertEqual(len(entries), 60)
+        self.assertEqual(len({entry["operation_id"] for entry in entries}), 60)
+
     def test_unexpected_exceptions_do_not_persist_details(self):
         with patch.object(main, "_STATE_DIR", self.directory):
             main.ach_customizer_main._fail("monitor_state_read", RuntimeError("SECRET"), "a" * 32)

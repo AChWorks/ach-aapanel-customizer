@@ -347,3 +347,39 @@ The independent exact-source review of PR #11 at HEAD ccd9f23ed4cdd33f4e5de1e0b8
 **Approval gates:** Source, native, and computed-style checks are evidence for review remediation only; exact-current-head CI plus focused independent re-review must still succeed before an Owner-authorized Merge.
 
 **Not implemented in this slice:** Nginx error_page/alias Apply, modifying panel default templates, live site 404/502 installation, automatic onboarding, HTTP status verification, actual installed-file conflict/drift checks, backups and Rollback for live pages. Any host-writing adapter must independently prove version support, target ownership and path safety, operator authorization, live HTTP response correctness, conflict detection, rollback and independent review before being exposed.
+
+### Unreleased operator UI and plugin-owned Activity diagnostics
+
+The Status Pages site selector uses a dedicated native `status_sites`
+POST action requiring a full primary aaPanel administrator session, returning
+bounded, paginated native inventory with the `status_site_selection`
+purpose marker. It works even when optional Website Monitor is disabled.
+This listing authorizes only operator choice; `status_preferences`,
+`status_save`, and `status_inspect` recheck native site identity,
+authorization and operation. The Monitor `get_sites` endpoint retains
+its own enable/disable policy. No Status Pages Apply/Restore is implied.
+
+Plugin-owned Activity is stored under aaPanel's panel data directory
+(`/www/server/panel/data/ach_customizer.activity.jsonl`), with a
+rotated `.1` segment and a lock. Files use panel-process ownership,
+private 0600 mode, no-follow opens and a serializing lock. Retention is
+bounded to 256 KiB per active/rotated segment; the full-primary-admin
+`get_activity` POST action returns at most 100 records (UI requests 50).
+
+Process environment `ACH_CUSTOMIZER_ACTIVITY_LEVEL` selects DEBUG,
+INFO (default), WARNING or ERROR. High-volume successful read-only
+queries are DEBUG-only; deliberate state changes and guarded PHP actions
+are INFO, PHP pool/site mapping that needs review is WARNING, and
+classified failures are ERROR. Filtering an event by verbosity is not
+a persistence failure. Records retain bounded time, module, action,
+severity, stage, outcome, target and request/recovery IDs, but not
+request payloads, cookies, tokens or arbitrary unexpected exception text.
+Absent recovery IDs stay empty. Unexpected exceptions yield a generic
+browser error and only the private exception class/stage for diagnostics.
+Existing native aaPanel audit logging for consequential PHP-FPM actions
+remains separate. Failed audit/Activity persistence never reverses or
+falsifies an already completed operation.
+
+These are source-level contracts for unreleased development. Native aaPanel
+installation of the exact candidate, authenticated browser/CSRF and real
+service/site impact require independent verification before release.

@@ -48,6 +48,40 @@ const {chromium} = require('playwright');
         if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
       }
     }
+    // Exercise the shipped resize helper inside a simulated aaPanel layer.
+    // This is NOT an authenticated aaPanel guest/browser acceptance test.
+    const complete = fs.readFileSync(filename, 'utf8');
+    const helperMatch = complete.match(/  function fitNativeLayer\(\) \{[\s\S]*?\n  \}\n  if \(typeof window/);
+    if (!helperMatch) throw Error('Deployed native layer helper not found');
+    const helper = helperMatch[0].replace(/\n  if \(typeof window$/, '');
+    let layerCount = 0;
+    for (const [width,height] of [[320,480],[375,650],[720,650],[1280,720],[1920,1080]]) {
+      await page.setViewportSize({width,height});
+      await page.setContent(
+        '<div class="layui-layer" style="position:absolute;left:0;top:0;width:100px;height:100px;background:#fff">' +
+        '<div class="layui-layer-title" style="height:42px">Plugin</div>' +
+        '<div class="layui-layer-content">' + html + '</div></div>',
+        {waitUntil:'domcontentloaded'});
+      await page.addScriptTag({content:"(function(){ const root={0:document.getElementById('ach-customizer')}; " + helper + "\nfitNativeLayer(); })();"});
+      const info = await page.evaluate(()=>{
+        const layer=document.querySelector('.layui-layer');
+        const main=document.getElementById('ach-content');
+        const rect=layer.getBoundingClientRect();
+        const m=main.getBoundingClientRect();
+        return {right:rect.right,left:rect.left,top:rect.top,bottom:rect.bottom,
+          mainHeight:m.height,rootHeight:document.getElementById('ach-customizer').getBoundingClientRect().height,
+          mainOverflow:getComputedStyle(main).overflowY,
+          direction:document.querySelector('.ach-sidebar').getAttribute('aria-orientation')};
+      });
+      if (info.left < 0 || info.top < 0 || info.right > width+1 || info.bottom > height+1 ||
+          info.mainHeight < 120 || info.mainOverflow !== 'auto' ||
+          info.direction !== (width <= 720 ? 'horizontal' : 'vertical')) {
+        throw Error('Simulated native layer invariant failed '+
+          JSON.stringify({width,height,...info}));
+      }
+      layerCount++;
+    }
+    console.log('SIMULATED_LAYER_PASS '+layerCount+' viewport checks');
     console.log('LAYOUT_PASS '+output.length+' section/viewport combinations');
     for(const entry of output) console.log(JSON.stringify(entry));
   } finally {
