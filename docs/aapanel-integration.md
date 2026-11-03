@@ -28,10 +28,11 @@ unscoped styles that could alter other aaPanel layers.
 
 The plugin CSS stays scoped under `#ach-customizer` and uses common roles for
 surfaces, typography, borders, inputs, selects, buttons, focus, and dangerous
-actions. Normal text inputs, selects and action buttons have consistent 34px
-minimum visual height; form labels, notes, wrapping and responsive layout
-share one rhythm. Keep the bounded native modal sizing fallback and small
-viewport horizontal navigation.
+actions. Normal text inputs, selects and action buttons have consistent 32px
+visual height, with 10px form-field and 6px action-button corner radii;
+form labels, notes, wrapping and responsive layout share one rhythm.
+Keep the bounded native modal sizing fallback and small-viewport
+horizontal navigation.
 
 First-time read-only requests use stable **per-panel** pending/empty/error text
 rather than a dialog-wide loading flash. A tab retains its DOM and already
@@ -43,10 +44,20 @@ explicit recheck or a deliberate scope change may reload. PHP-FPM
 Apply/Restore safety, recovery and audit outcomes are unchanged.
 
 Evidence: automated JS behavior tests and Chromium simulations measure the
-shipped DOM, viewport/control geometry and navigation. The Nginx reference
-is based on official aaPanel screenshots, **not** a currently authenticated
-live Nginx guest inspection. Source tests do not establish native guest
-acceptance, supported release status or production readiness.
+shipped DOM, viewport/control geometry and navigation. A **real authenticated
+Nginx management dialog** was inspected end-to-end on aaPanel's **official
+public Demo** (8.0.7 / Nginx 1.24.0): all seven tabs, modal/nav/form
+measurements, selected state, scrolling, network requests, narrow viewports,
+and a dialog-cropped screenshot. See the [measured native Nginx UI study](evidence/aaPanel-demo-8.0.7-nginx-1.24.0-2026-11-04-study.md).
+The separately authenticated **QEMU guest** (aaPanel 8.0.7 / Nginx 1.28.3)
+did not expose Nginx in Official Installed App Store (Total 0), so its own
+**Nginx dialog inspection remains unverified**. The public Demo is a real,
+different environment, **not a substitute for this guest-specific gap**.
+The refined PR16 UI **was** installed through the guest's native browser
+file-picker and inspected across tabs, viewport sizes, cached data, retained
+branding and synthetic network failure/retry; see the [native QEMU UI QA](evidence/aaPanel-8.0.7-2026-11-04-native-ui-pr16-qa.md).
+Source tests and these focused browser probes do not establish
+supported release status or production readiness.
 
 ## First non-production implementation slice
 

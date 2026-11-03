@@ -50,9 +50,9 @@ const {chromium} = require('playwright');
           const failures=found.filter(el=>{
             const r=el.getBoundingClientRect();
             const css=getComputedStyle(el);
-            return r.height<33 || r.height>96 || r.width<15 ||
+            return r.height<31 || r.height>96 || r.width<15 ||
               r.left<edge.left-1 || r.right>edge.right+1 ||
-              css.borderRadius!=='3px';
+              css.borderRadius!==(el.tagName==='BUTTON' ? '6px' : '10px');
           }).map(el=>el.id||el.tagName);
           return {visible:found.length,failures};
         });

@@ -1139,10 +1139,16 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
     assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*aria-labelledby="ach-tab-' + name + '"'));
   }
   assert.match(html, /\.ach-main \{[^}]*overflow-y:auto/);
-  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:190px/);
+  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:170px/);
   assert.match(html, /@media \(max-width:720px\)/);
   assert.doesNotMatch(html, /class="ach-tabs"/);
   assert.match(html, /function fitNativeLayer/);
+  assert.match(html, /--ach-green:#20a53a/);
+  assert.match(html, /--ach-sidebar-bg:#f0f0f1/);
+  assert.doesNotMatch(html, /class="ach-sidebar-label"/);
+  assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
+  assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
+  assert.match(html, /<h4 class="ach-sr-only">Overview<\/h4>/);
 });
 
 test('Activity panel filters read-only structured events and uses text rendering', () => {

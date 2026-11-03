@@ -10,11 +10,14 @@
    */
   @supports selector(.layui-layer:has(#ach-customizer)) {
     .layui-layer:has(#ach-customizer) {
-      width:min(1100px,calc(100vw - 32px)) !important;
-      height:min(820px,calc(100dvh - 48px)) !important;
+      width:min(980px,calc(100vw - 32px)) !important;
+      height:min(760px,calc(100dvh - 48px)) !important;
       max-height:calc(100dvh - 48px) !important;
-      left:max(16px,calc((100vw - min(1100px,calc(100vw - 32px)))/2)) !important;
-      top:max(8px,calc((100dvh - min(820px,calc(100dvh - 48px)))/2)) !important;
+      left:max(16px,calc((100vw - min(980px,calc(100vw - 32px)))/2)) !important;
+      top:max(8px,calc((100dvh - min(760px,calc(100dvh - 48px)))/2)) !important;
+    }
+    .layui-layer:has(#ach-customizer) > .layui-layer-title {
+      background:#fff !important; border-bottom:1px solid #e5e5e5 !important;
     }
     .layui-layer:has(#ach-customizer) > .layui-layer-content {
       height:calc(100% - 42px) !important;
@@ -25,41 +28,41 @@
   /* All tokens and component rules stay inside the plugin; host/Layui are untouched. */
   #ach-customizer, #ach-customizer * { box-sizing:border-box; }
   #ach-customizer {
-    --ach-surface:#fff; --ach-sidebar-bg:#f5f6f7; --ach-soft:#f8f9fa;
-    --ach-text:#374151; --ach-muted:#667582; --ach-line:#dde3e7;
-    --ach-green:#188531; --ach-green-hover:#137229;
-    --ach-danger:#bd3935; --ach-warn:#986615; --ach-focus:#297dc0;
+    --ach-surface:#fff; --ach-sidebar-bg:#f0f0f1; --ach-soft:#f8f9fa;
+    --ach-text:#333; --ach-muted:#666; --ach-line:#e1e1e1;
+    --ach-green:#20a53a; --ach-green-hover:#1d9534;
+    --ach-danger:#bd3935; --ach-warn:#986615; --ach-focus:#20a53a;
     color:var(--ach-text); background:var(--ach-surface); width:100%;
-    height:min(740px,calc(100dvh - 104px)); min-height:280px;
+    height:min(718px,calc(100dvh - 90px)); min-height:280px;
     font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
-    font-size:13px; line-height:1.55; overflow:hidden;
+    font-size:13px; line-height:1.5; overflow:hidden;
   }
   #ach-customizer .ach-shell { display:flex; flex-direction:column; height:100%; min-width:0; }
   #ach-customizer .ach-sr-only {
     position:absolute; width:1px; height:1px; padding:0; margin:-1px;
     overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
   }
-  #ach-customizer .ach-workspace { display:grid; grid-template-columns:190px minmax(0,1fr); flex:1; min-height:0; }
-  #ach-customizer .ach-sidebar { min-width:0; overflow-y:auto; background:var(--ach-sidebar-bg); border-right:1px solid var(--ach-line); padding:10px 0; }
-  #ach-customizer .ach-sidebar-label { display:block; padding:12px 17px 5px; color:var(--ach-muted); font-size:11px; font-weight:600; letter-spacing:.04em; }
+  #ach-customizer .ach-workspace { display:grid; grid-template-columns:170px minmax(0,1fr); flex:1; min-height:0; }
+  #ach-customizer .ach-sidebar { min-width:0; overflow-y:auto; background:var(--ach-sidebar-bg); border-right:1px solid var(--ach-line); padding:0; }
   #ach-customizer .ach-sidebar button {
-    appearance:none; display:block; width:100%; min-height:39px; padding:9px 14px;
-    border:0; border-left:3px solid transparent; border-radius:0; background:transparent;
+    appearance:none; display:block; width:100%; min-height:40px; padding:10px 20px;
+    border:0; border-radius:0; background:transparent;
     text-align:left; color:var(--ach-text); font:inherit; line-height:1.4; cursor:pointer;
   }
-  #ach-customizer .ach-sidebar button:hover { background:#e9edef; }
+  #ach-customizer .ach-sidebar button:hover:not([aria-selected="true"]) { background:#e7e7e8; }
   #ach-customizer .ach-sidebar button[aria-selected="true"] {
-    background:var(--ach-surface); border-left-color:var(--ach-green); color:#1f2937; font-weight:600;
+    background:var(--ach-surface); color:#333; font-weight:500;
   }
   #ach-customizer .ach-main {
     overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
-    padding:18px 22px 30px; min-width:0; min-height:0; scrollbar-gutter:stable;
+    padding:16px 20px 28px; min-width:0; min-height:0; scrollbar-gutter:stable;
   }
   #ach-customizer .ach-main h4 {
-    margin:0 0 14px; font-size:15px; line-height:21px; color:#263544; font-weight:600;
+    margin:0 0 12px; font-size:14px; line-height:21px; color:#263544; font-weight:600;
   }
-  #ach-customizer .ach-view > :not(h4) { margin-top:14px; margin-bottom:0; }
+  #ach-customizer .ach-view > :not(h4) { margin-top:12px; margin-bottom:0; }
   #ach-customizer .ach-view > h4 + :not(h4) { margin-top:0; }
+  #ach-customizer .ach-view > p.ach-note { padding:0; border:0; background:transparent; }
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
   #ach-customizer .ach-note {
     padding:11px 13px; background:var(--ach-soft); border:1px solid #e8ecef;
@@ -72,7 +75,7 @@
     gap:14px 16px; margin:14px 0;
   }
   #ach-customizer .ach-fields label, #ach-customizer .ach-status-fields label {
-    display:block; font-size:12px; font-weight:600; color:#4b5964;
+    display:block; font-size:12px; font-weight:500; color:#4b5964;
   }
   #ach-customizer .ach-fields input:not([type="checkbox"]),
   #ach-customizer .ach-fields select,
@@ -82,8 +85,8 @@
   #ach-customizer .ach-main input:not([type="checkbox"]),
   #ach-customizer .ach-main select,
   #ach-customizer .ach-main textarea {
-    appearance:auto; min-width:0; max-width:100%; min-height:34px; height:34px;
-    padding:6px 10px; border:1px solid #d4dade; border-radius:3px;
+    appearance:auto; min-width:0; max-width:100%; min-height:32px; height:32px;
+    padding:5px 10px; border:1px solid #d4dade; border-radius:10px;
     background:#fff; color:var(--ach-text); font:inherit; line-height:20px;
     transition:border-color .12s ease, box-shadow .12s ease;
   }
@@ -102,8 +105,8 @@
   #ach-customizer .ach-switches input { margin:0; }
   #ach-customizer .ach-main button {
     appearance:none; display:inline-flex; align-items:center; justify-content:center;
-    min-height:34px; max-width:100%; padding:6px 13px; border:1px solid #cbd3d8;
-    border-radius:3px; background:#fff; color:#374151; font:inherit; line-height:20px;
+    min-height:32px; max-width:100%; padding:5px 12px; border:1px solid #cbd3d8;
+    border-radius:6px; background:#fff; color:#374151; font:inherit; line-height:20px;
     white-space:normal; text-align:center; cursor:pointer;
     transition:background-color .12s ease, border-color .12s ease;
   }
@@ -131,7 +134,7 @@
   }
   #ach-customizer table { width:100%; border-collapse:collapse; font-size:12px; }
   #ach-customizer td, #ach-customizer th {
-    padding:10px 11px; text-align:start; border-bottom:1px solid #e8edf0;
+    padding:9px 10px; text-align:start; border-bottom:1px solid #e8edf0;
     overflow-wrap:anywhere; vertical-align:top;
   }
   #ach-customizer th { background:#f7f9fa; color:#586775; font-weight:600; white-space:nowrap; }
@@ -139,7 +142,10 @@
   #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:3px; }
   #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0 0; }
   #ach-customizer .ach-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
-  #ach-customizer .ach-toolbar [role="status"] { color:var(--ach-muted); }
+  #ach-customizer .ach-toolbar [role="status"] {
+    color:var(--ach-muted); flex:1 1 220px; min-width:0; margin:0; overflow-wrap:anywhere;
+  }
+  #ach-customizer .ach-toolbar > button { flex:0 0 auto; }
   #ach-customizer #ach-message {
     margin:0 0 14px; padding:9px 12px; border:1px solid #e1e7ed;
     border-radius:3px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
@@ -172,8 +178,7 @@
       display:flex; align-items:stretch; gap:2px; overflow-x:auto; overflow-y:hidden;
       border-right:0; border-bottom:1px solid var(--ach-line); padding:0 6px;
     }
-    #ach-customizer .ach-sidebar-label { display:none; }
-    #ach-customizer .ach-sidebar button { white-space:nowrap; width:auto; flex:none; border-left:0; border-bottom:3px solid transparent; padding:10px 12px; }
+    #ach-customizer .ach-sidebar button { white-space:nowrap; width:auto; flex:none; border-bottom:3px solid transparent; padding:10px 12px; }
     #ach-customizer .ach-sidebar button[aria-selected="true"] { border-bottom-color:var(--ach-green); }
     #ach-customizer .ach-main { padding:14px 14px 26px; }
     #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr)); }
@@ -191,26 +196,24 @@
     <h2 class="ach-sr-only">ACh aaPanel Customizer</h2>
     <div class="ach-workspace">
       <nav class="ach-sidebar" role="tablist" aria-label="Plugin sections" aria-orientation="vertical">
-        <span class="ach-sidebar-label">OPERATIONS</span>
         <button type="button" data-tab="overview" role="tab" id="ach-tab-overview" aria-controls="ach-panel-overview" aria-selected="true" tabindex="0">Overview</button>
         <button type="button" data-tab="websites" role="tab" id="ach-tab-websites" aria-controls="ach-panel-websites" aria-selected="false" tabindex="-1">Websites</button>
         <button type="button" data-tab="php" role="tab" id="ach-tab-php" aria-controls="ach-panel-php" aria-selected="false" tabindex="-1">PHP-FPM</button>
         <button type="button" data-tab="status" role="tab" id="ach-tab-status" aria-controls="ach-panel-status" aria-selected="false" tabindex="-1">Status Pages</button>
-        <span class="ach-sidebar-label">SUPPORT</span>
         <button type="button" data-tab="activity" role="tab" id="ach-tab-activity" aria-controls="ach-panel-activity" aria-selected="false" tabindex="-1">Activity / Diagnostics</button>
       </nav>
       <main class="ach-main" id="ach-content" tabindex="-1">
         <p id="ach-message" role="status" aria-live="polite"></p>
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
-      <h4>Overview</h4>
-      <p class="ach-note">This unreleased development candidate includes read-only monitoring and a separately confirmed, guarded PHP 8.5 shared-service Apply/Restore for verified aaPanel 8.0.7 + Nginx. No automatic enforcement.</p>
+      <h4 class="ach-sr-only">Overview</h4>
+      <p class="ach-note">Unreleased development build. Monitoring is read-only; guarded PHP 8.5 shared-service changes require explicit confirmation. No automatic enforcement.</p>
       <div class="ach-toolbar">
         <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
         <button type="button" id="ach-overview-refresh">Refresh state</button>
       </div>
       <div class="ach-note">
         <strong>Monitor controls</strong>
-        <p>These switches control read-only monitoring only. They do not stop sites, reload services, or approve manual changes. Preferences survive a normal plugin uninstall/reinstall.</p>
+        <p>These switches enable read-only monitoring. They never stop sites, reload services or approve PHP changes. Preferences survive an ordinary plugin reinstall.</p>
         <div class="ach-switches">
           <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /> Overall Monitor</label>
           <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /> Website inventory</label>
@@ -218,10 +221,10 @@
         </div>
         <p id="ach-state-revision" role="status">Monitor state unavailable</p>
       </div>
-      <p>Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.</p>
+      <p>PHP-FPM monitoring is shared-service scope, never per-website tuning.</p>
     </section>
     <section class="ach-view" id="ach-panel-websites" aria-labelledby="ach-tab-websites" data-view="websites" role="tabpanel" hidden>
-      <h4>Websites</h4>
+      <h4 class="ach-sr-only">Websites</h4>
       <p class="ach-note">The ID identifies the site in aaPanel. The site key is aaPanel's recorded site name, which may remain after its domain binding is removed. Bound domains are aaPanel database records, not independently verified DNS or live Nginx routes.</p>
       <div class="ach-toolbar">
         <p id="ach-sites-status" role="status" aria-live="polite">Open this section to load native website inventory.</p>
@@ -232,7 +235,7 @@
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
-      <p class="ach-note">Read-only PHP-FPM file/default comparison. Conventional aaPanel Nginx site-to-pool file assignments are listed separately; neither file mapping nor this preview verifies effective routing/runtime state or authorizes Apply.</p>
+      <p class="ach-note">Read-only file/default comparison. Site-to-pool mapping uses configuration files; it does not prove effective routing or authorize Apply.</p>
       <form id="ach-php-form">
         <div class="ach-fields">
           <div><label for="ach-php-version">PHP version (e.g. 85)</label><input id="ach-php-version" name="php_version" autocomplete="off" inputmode="numeric" pattern="[0-9]{2,3}" placeholder="85" required /></div>
@@ -250,7 +253,7 @@
       <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-impact-rows"></tbody></table></div>
       <div class="ach-note" aria-label="Guarded manual PHP-FPM change">
         <strong>Manual shared PHP-FPM change — PHP 8.5 only</strong>
-        <p>Only on aaPanel 8.0.7 with Nginx and an unambiguous conventional site-file mapping. This edits the single shared <code>[www]</code> pool, validates PHP-FPM syntax, reloads PHP-FPM and checks service health. Other consumers may be affected; file attribution does not prove full traffic health. No automatic reapply after aaPanel overwrites the policy.</p>
+        <p>PHP 8.5 only on aaPanel 8.0.7 + Nginx with unambiguous site-file mapping. Changes the shared <code>[www]</code> pool, checks syntax, reloads PHP-FPM and verifies service health. Other consumers may be affected; file mapping does not prove traffic health. No automatic reapply after external changes.</p>
         <button id="ach-fpm-prepare" type="button" disabled>Prepare guarded change</button>
         <p id="ach-fpm-plan" role="status" aria-live="polite">Run a PHP 85 file preview before preparing a change.</p>
         <p id="ach-fpm-operation-notice" class="ach-fpm-operation-notice" role="status" aria-live="polite" hidden></p>
@@ -272,7 +275,7 @@
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
       <h4>Status Pages · Offline Preview</h4>
-      <p class="ach-note"><strong>Offline Status Pages — Preview only.</strong> Eleven templates in English and Persian. This module saves branding preferences only; it does not install pages, configure Nginx, alter site files, or change HTTP status codes. Apply and Restore need a separately verified native adapter.</p>
+      <p class="ach-note"><strong>Offline preview only.</strong> Eleven templates in English and Persian. Only branding preferences are saved; no pages are installed, and Nginx/site files or HTTP status codes are not changed. Live Apply/Restore is unavailable.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -325,7 +328,7 @@
       <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
     </section>
     <section class="ach-view" id="ach-panel-activity" aria-labelledby="ach-tab-activity" data-view="activity" role="tabpanel" hidden>
-      <h4>Activity / Diagnostics</h4>
+      <h4 class="ach-sr-only">Activity / Diagnostics</h4>
       <p class="ach-note">Plugin-owned, bounded operation history. Read access requires a full primary aaPanel administrator session. No tokens, cookies or request payloads are recorded.</p>
       <div class="ach-controls">
         <label for="ach-activity-level">Severity</label>
@@ -373,8 +376,8 @@
     if (tablist) tablist.setAttribute('aria-orientation', window.innerWidth <= 720 ? 'horizontal' : 'vertical');
     var layer = root[0].closest('.layui-layer');
     if (!layer) return; // Static tests/embedded pages keep intrinsic dimensions.
-    var width = Math.min(1100, Math.max(240, window.innerWidth - 32));
-    var height = Math.min(820, Math.max(280, window.innerHeight - 48));
+    var width = Math.min(980, Math.max(240, window.innerWidth - 32));
+    var height = Math.min(760, Math.max(280, window.innerHeight - 48));
     layer.style.width = width + 'px';
     layer.style.height = height + 'px';
     layer.style.left = Math.max(8, Math.floor((window.innerWidth - width) / 2)) + 'px';

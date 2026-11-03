@@ -23,8 +23,7 @@ It is **not WordPress-only** and does not imply every aaPanel subsystem will be 
 
 A proposed native-dialog UI refinement standardizes control sizes,
 colors, spacing and in-panel loading behavior around aaPanel's documented
-Nginx management style. Switching tabs preserves loaded data and unsaved
-Status Pages text; explicit Refresh remains available when aaPanel data changes.
+Nginx management style. The [authenticated official-Demo study](docs/evidence/aaPanel-demo-8.0.7-nginx-1.24.0-2026-11-04-study.md) documents the measured reference, while [QEMU native browser QA](docs/evidence/aaPanel-8.0.7-2026-11-04-native-ui-pr16-qa.md) verifies the refined Customizer tabs and records the still-open guest Nginx inspection gate. Switching tabs preserves loaded data and unsaved Status Pages text; explicit Refresh remains available when aaPanel data changes.
 See [the native UI source/evidence contract](docs/aapanel-integration.md#native-aapanel-dialog-ui-unreleased-ui-refinement).
 This is an unreleased development change and does not authorize Production use.
 
