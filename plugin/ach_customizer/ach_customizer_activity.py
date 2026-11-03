@@ -141,6 +141,8 @@ def append_activity(directory, event):
                     os.fsync(fd_dir)
                 _append_bytes(fd, body)
                 os.fsync(fd)
+                # Persist a newly created directory entry as well as log bytes.
+                os.fsync(fd_dir)
             finally:
                 if fd is not None:
                     os.close(fd)

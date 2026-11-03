@@ -143,7 +143,10 @@
         </select></div>
         <div><label for="ach-status-site-id">Website (native aaPanel inventory)</label>
           <select id="ach-status-site-id" disabled><option value="">Select website scope first</option></select>
-          <div class="ach-controls"><button id="ach-status-sites-more" type="button" hidden>Load more websites</button></div>
+          <div class="ach-controls">
+            <button id="ach-status-sites-retry" type="button" hidden>Refresh website list</button>
+            <button id="ach-status-sites-more" type="button" hidden>Load more websites</button>
+          </div>
           <small id="ach-status-sites-state" role="status">Available websites load when selecting website scope.</small></div>
       </div>
       <p id="ach-status-source" role="status">Branding not loaded.</p>
@@ -177,7 +180,7 @@
       <p class="ach-note">Plugin-owned, bounded operation history. Read access requires a full primary aaPanel administrator session. No tokens, cookies or request payloads are recorded.</p>
       <div class="ach-controls">
         <label for="ach-activity-level">Severity</label>
-        <select id="ach-activity-level"><option value="">All</option><option value="ERROR">Errors</option><option value="WARNING">Warnings</option><option value="INFO">Information</option></select>
+        <select id="ach-activity-level"><option value="">All</option><option value="ERROR">Errors</option><option value="WARNING">Warnings</option><option value="INFO">Information</option><option value="DEBUG">Debug</option></select>
         <label for="ach-activity-module">Module</label>
         <select id="ach-activity-module"><option value="">All</option><option value="monitor">Monitor</option><option value="websites">Websites</option><option value="php_fpm">PHP-FPM</option><option value="status_pages">Status Pages</option><option value="diagnostics">Diagnostics</option></select>
         <button id="ach-activity-refresh" type="button" class="btn btn-default">Refresh</button>
@@ -211,6 +214,8 @@
   function fitNativeLayer() {
     // Only resize the aaPanel layer that actually owns this plugin instance.
     if (!root[0] || typeof window === 'undefined') return;
+    var tablist = root[0].querySelector('.ach-sidebar');
+    if (tablist) tablist.setAttribute('aria-orientation', window.innerWidth <= 720 ? 'horizontal' : 'vertical');
     var layer = root[0].closest('.layui-layer');
     if (!layer) return; // Static tests/embedded pages keep intrinsic dimensions.
     var width = Math.min(1100, Math.max(320, window.innerWidth - 32));
@@ -459,11 +464,13 @@
     if (reset) { statusSites = []; statusSitePage = 1; statusSitesMore = true; }
     if (!statusSitesMore) return;
     statusSitesBusy = true;
-    root.find('#ach-status-sites-more').prop('disabled', true);
+    root.find('#ach-status-sites-more, #ach-status-sites-retry').prop('disabled', true);
     root.find('#ach-status-sites-state').text('Loading website inventory...');
     var expectedPage = statusSitePage;
     request('get_sites', {page:expectedPage, page_size:sitePageSize}, function (r) {
       statusSitesBusy = false;
+      root.find('#ach-status-sites-retry').prop('disabled', false);
+      if (root.find('#ach-status-scope').val() !== 'site') return;
       if (!r || r.inventory_schema !== 2 || !validInventoryPage(r, expectedPage)) {
         root.find('#ach-status-sites-state').text('Website inventory unavailable or changed. Enable the Website monitor and retry.');
         root.find('#ach-status-sites-more').prop('hidden', true);
@@ -471,6 +478,7 @@
         return;
       }
       var seen = new Set(statusSites.map(function (item) { return item.id; }));
+      var newSites = [];
       for (var i = 0; i < r.sites.length; i++) {
         if (seen.has(r.sites[i].id)) {
           root.find('#ach-status-sites-state').text('Duplicate website ID across pages; refresh inventory.');
@@ -478,8 +486,9 @@
           return;
         }
         seen.add(r.sites[i].id);
-        statusSites.push(r.sites[i]);
+        newSites.push(r.sites[i]);
       }
+      statusSites = statusSites.concat(newSites);
       var select = root.find('#ach-status-site-id'), selected = select.val();
       select.empty();
       $('<option>').val('').text('Choose a website...').appendTo(select);
@@ -495,10 +504,13 @@
     });
   }
   root.find('#ach-status-sites-more').on('click', function () { loadStatusSites(false); });
+  root.find('#ach-status-sites-retry').on('click', function () { loadStatusSites(true); });
   root.find('#ach-status-load').on('click', statusLoad);
   root.find('#ach-status-scope').on('change', function () {
     var siteMode = $(this).val() === 'site';
     root.find('#ach-status-site-id').prop('disabled', !siteMode || !statusSites.length);
+    root.find('#ach-status-sites-retry').prop('hidden', !siteMode);
+    root.find('#ach-status-sites-more').prop('hidden', !siteMode || !statusSitesMore);
     statusLoad();
     if (siteMode && !statusSites.length) loadStatusSites(true);
   });

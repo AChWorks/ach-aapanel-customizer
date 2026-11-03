@@ -48,7 +48,7 @@ function loadUi() {
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
-    '#ach-status-sites-more', '#ach-status-sites-state',
+    '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
     '#ach-activity-result', '#ach-activity-rows'
   ]) elements.set(name, fakeNode('div'));
@@ -1166,4 +1166,30 @@ test('Invalid website inventory prevents selecting a site to mutate branding', (
   assert.equal(ui.statusSiteDisabled(),true);
   assert.match(ui.statusSiteInfo(), /inventory unavailable or changed/);
   assert.equal(ui.state().statusSaveDisabled,true);
+});
+
+
+test('Stale website inventory response cannot enable site selector in global branding mode', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const stale=ui.requests.at(-1);
+  ui.statusSetValue('#ach-status-scope','global','change');
+  stale.respond(page([site()]));
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.deepEqual(ui.statusSiteChoices(),[]);
+});
+
+test('Website inventory failure supports an explicit refresh and no inferred site', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.requests.at(-1).respond({status:true,inventory_schema:999});
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(),/inventory unavailable/);
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  assert.match(refresh.options.url,/s=get_sites$/);
+  refresh.respond(page([site()]));
+  assert.equal(ui.statusSiteDisabled(),false);
+  assert.equal(ui.statusSiteChoices()[1].id,'3');
 });
