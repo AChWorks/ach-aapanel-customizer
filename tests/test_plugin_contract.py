@@ -32,12 +32,14 @@ class PackageContractTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), first)
             with ZipFile(target) as archive:
                 names = archive.namelist()
-                self.assertEqual(len(names), 8)
+                self.assertEqual(len(names), 10)
                 self.assertTrue(all(n.startswith('ach_customizer/') and '..' not in n for n in names))
                 self.assertIn('ach_customizer/info.json', names)
                 self.assertIn('ach_customizer/install.sh', names)
                 self.assertIn('ach_customizer/ach_customizer_cleanup.py', names)
                 self.assertIn('ach_customizer/ach_customizer_state.py', names)
+                self.assertIn('ach_customizer/ach_customizer_fpm_apply.py', names)
+                self.assertIn('ach_customizer/ach_customizer_fpm_workflow.py', names)
                 self.assertIn('ach_customizer/icon.png', names)
                 self.assertTrue(archive.read('ach_customizer/icon.png').startswith(b'\x89PNG'))
 
@@ -49,7 +51,7 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn('data-i18n', html)
         self.assertNotIn('navigator.language', html)
 
-    def test_installer_guards_cleanup_and_remains_monitor_only(self):
+    def test_installer_guards_cleanup_and_does_not_mutate_services(self):
         shell = (PACKAGE / 'install.sh').read_text(encoding='utf-8')
         helper = (PACKAGE / 'ach_customizer_cleanup.py').read_text(encoding='utf-8')
         self.assertIn('panel_python=/www/server/panel/pyenv/bin/python3', shell)
@@ -80,6 +82,11 @@ class PackageContractTests(unittest.TestCase):
         for action in ('install', 'uninstall'):
             result = subprocess.run(['/bin/sh', str(PACKAGE / 'install.sh'), action], check=True, capture_output=True, text=True)
             self.assertIn('ACh aaPanel Customizer', result.stdout)
+            if action == 'uninstall':
+                self.assertIn('PHP-FPM settings may include previously applied changes', result.stdout)
+                self.assertIn('recovery records are preserved', result.stdout)
+                self.assertIn('reinstall the plugin', result.stdout)
+                self.assertNotIn('no services, jobs or host configurations to revert', result.stdout)
 
 
 if __name__ == '__main__':

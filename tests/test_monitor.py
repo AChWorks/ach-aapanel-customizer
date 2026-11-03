@@ -562,5 +562,539 @@ class PHPMonitorTests(unittest.TestCase):
         self.assertEqual(self.preview()['state'], 'Needs Review')
 
 
+class SharedPHPFileImpactTests(unittest.TestCase):
+    """Conventional native Nginx site file links, not effective runtime."""
+
+    class SitesQuery:
+        def __init__(self, rows):
+            self.rows = rows
+            self.calls = []
+
+        def order(self, key):
+            assert key == 'id asc'
+            return self
+
+        def limit(self, limit):
+            assert limit == '0,101'
+            return self
+
+        def field(self, fields):
+            assert fields == 'id,name'
+            return self
+
+        def select(self):
+            return self.rows[:101]
+
+    class Panel:
+        def __init__(self, rows):
+            self.query = SharedPHPFileImpactTests.SitesQuery(rows)
+
+        def M(self, table):
+            assert table == 'sites'
+            return self.query
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="ach-fpm-impact-")
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        self.nginx = self.base / 'nginx-conf'
+        self.vhosts = self.base / 'vhosts'
+        self.nginx.mkdir()
+        self.vhosts.mkdir()
+        self.rewrites = self.base / 'rewrites'
+        self.rewrites.mkdir()
+        self.pool = self.base / 'php-fpm.conf'
+        self.pool.write_text(
+            '[global]\n[www]\npm = dynamic\n'
+            'pm.max_children = 50\npm.start_servers = 5\n'
+            'pm.min_spare_servers = 5\npm.max_spare_servers = 20\n'
+            'listen = /tmp/php-cgi-85.sock\n', encoding='utf-8'
+        )
+        (self.nginx / 'enable-php-85.conf').write_text(
+            'location ~ \\.php$ {\n'
+            'fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n',
+            encoding='utf-8'
+        )
+        self.rows = [
+            {'id': 3, 'name': 'site-a.example.test'},
+            {'id': 6, 'name': 'site-b.example.test'},
+            {'id': 7, 'name': 'static.example.test'},
+        ]
+        for site in self.rows:
+            self.vhost(site['name']).write_text(
+                'server {\n  server_name ' + site['name'] + ';\n'
+                '  include enable-php-' +
+                ('00' if site['id'] == 7 else '85') + '.conf;\n}\n',
+                encoding='utf-8'
+            )
+
+    def vhost(self, name):
+        return self.vhosts / (name + '.conf')
+
+    def inspect(self, rows=None):
+        return monitor.inspect_php_fpm_site_impact(
+            self.Panel(self.rows if rows is None else rows),
+            '85', self.pool,
+            vhost_root=self.vhosts, nginx_conf_root=self.nginx,
+            rewrite_root=self.rewrites,
+        )
+
+    def test_all_native_website_ids_are_scoped_by_shared_file_and_socket(self):
+        files = [self.pool, self.nginx / 'enable-php-85.conf'] + [
+            self.vhost(row['name']) for row in self.rows
+        ]
+        before = {str(p): p.read_bytes() for p in files}
+        got = self.inspect()
+        self.assertEqual(got['schema'], 1)
+        self.assertEqual(got['state'], 'File Mapping')
+        self.assertEqual(got['site_count'], 3)
+        self.assertEqual(got['other_php_sites_count'], 1)
+        self.assertEqual(got['matched_sites'], [
+            {'id': 3, 'site_key': 'site-a.example.test'},
+            {'id': 6, 'site_key': 'site-b.example.test'},
+        ])
+        self.assertEqual(got['unresolved_sites'], [])
+        self.assertRegex(got['dependency_sha256'], r'^[0-9a-f]{64}$')
+        self.assertIn('not proof of effective routing', got['note'])
+        self.assertEqual({str(p): p.read_bytes() for p in files}, before)
+
+    def test_missing_or_indirect_site_link_is_review_not_per_site_false_ownership(self):
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include /tmp/operator-php.conf;\n}\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['matched_sites'], [{'id': 3, 'site_key': 'site-a.example.test'}])
+        self.assertEqual(got['unresolved_sites'][0]['id'], 6)
+        self.assertEqual(got['site_count'], 3)
+
+    def test_wp_fastcgi_variant_and_direct_fastcgi_override_are_ambiguous(self):
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include enable-php-85-wpfastcgi.conf;\n}\n')
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include enable-php-85.conf;\n'
+            ' fastcgi_pass unix:/tmp/other.sock;\n}\n')
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+
+    def test_additional_or_indirect_includes_fail_closed_even_with_php_include(self):
+        vhost = self.vhost('site-b.example.test')
+        before = vhost.read_bytes()
+        for added in (
+            ' include /tmp/operator.conf;\n',
+            ' include /tmp/fastcgi-override.conf;\n',
+            ' include /tmp/cycle.conf;\n',
+            ' location /x { include /tmp/nested.conf; }\n',
+            ' include /tmp/symlinked.conf;\n',
+        ):
+            with self.subTest(added=added):
+                vhost.write_text('server {\n include enable-php-85.conf;\n' + added + '}\n')
+                raw = vhost.read_bytes()
+                got = self.inspect()
+                self.assertEqual(got['state'], 'Needs Review')
+                self.assertEqual([site['id'] for site in got['unresolved_sites']], [6])
+                self.assertNotIn('dependency_sha256', got)
+                self.assertEqual(vhost.read_bytes(), raw, 'Monitor must not edit VHost')
+        vhost.write_bytes(before)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_accepted_dependency_contents_and_identity_bind_impact(self):
+        baseline = self.inspect()
+        vhost = self.vhost('site-a.example.test')
+        vhost.write_text(vhost.read_text() + '# operator comment\n')
+        updated = self.inspect()
+        self.assertEqual(updated['state'], 'File Mapping')
+        self.assertNotEqual(baseline['dependency_sha256'], updated['dependency_sha256'])
+        include = self.nginx / 'enable-php-85.conf'
+        include.write_text(include.read_text() + '# in-place include change\n')
+        self.assertNotEqual(updated['dependency_sha256'], self.inspect()['dependency_sha256'])
+
+    def test_native_fastcgi_parameter_dependency_is_bounded_and_fingerprinted(self):
+        include = self.nginx / 'enable-php-85.conf'
+        include.write_text(
+            'location ~ \\.php$ {\n include fastcgi.conf;\n'
+            ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n')
+        params = self.nginx / 'fastcgi.conf'
+        params.write_text('fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n')
+        initial = self.inspect()
+        self.assertEqual(initial['state'], 'File Mapping')
+        params.write_text(params.read_text() + '# changed safe parameter file\n')
+        self.assertNotEqual(initial['dependency_sha256'], self.inspect()['dependency_sha256'])
+        params.write_text('include dangerous.conf;\n')
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+        self.assertEqual(self.inspect()['site_count'], 0)
+        params.unlink()
+        params.symlink_to(include)
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+    def test_both_native_fastcgi_and_pathinfo_dependencies_are_fingerprinted(self):
+        include = self.nginx / 'enable-php-85.conf'
+        include.write_text(
+            'location ~ [^/]\\.php(/|$) {\n'
+            ' include fastcgi.conf;\n include pathinfo.conf;\n'
+            ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n')
+        (self.nginx / 'fastcgi.conf').write_text(
+            'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n')
+        pathinfo = self.nginx / 'pathinfo.conf'
+        pathinfo.write_text('set $path_info "";\nfastcgi_param PATH_INFO $path_info;\n')
+        first = self.inspect()
+        self.assertEqual(first['state'], 'File Mapping')
+        pathinfo.write_text(pathinfo.read_text() + '# benign modification\n')
+        self.assertNotEqual(first['dependency_sha256'], self.inspect()['dependency_sha256'])
+        pathinfo.write_text('include unexpected.conf;\n')
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+        pathinfo.write_text('fastcgi_pass unix:/tmp/other.sock;\n')
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+    def test_exact_native_rewrite_include_is_safe_bounded_and_bound_to_approval(self):
+        vhost = self.vhost('site-a.example.test')
+        rewrite = self.rewrites / 'site-a.example.test.conf'
+        vhost.write_text(
+            'server {\n include enable-php-85.conf;\n include ' + str(rewrite) + ';\n}\n')
+        rewrite.write_text('location / {\n rewrite ^(.*)$ /index.php?s=$1 last;\n}\n')
+        initial = self.inspect()
+        self.assertEqual(initial['state'], 'File Mapping')
+        self.assertEqual(len(initial['matched_sites']), 2)
+        rewrite.write_text(rewrite.read_text() + '# unrelated reload-safe note\n')
+        updated = self.inspect()
+        self.assertEqual(updated['state'], 'File Mapping')
+        self.assertNotEqual(initial['dependency_sha256'], updated['dependency_sha256'])
+        for unsafe in ('include /tmp/hidden.conf;\n',
+                       'fastcgi_pass unix:/tmp/hidden.sock;\n',
+                       'proxy_pass http://127.0.0.1:7777;\n'):
+            with self.subTest(unsafe=unsafe):
+                rewrite.write_text(unsafe)
+                rejected = self.inspect()
+                self.assertEqual(rejected['state'], 'Needs Review')
+                self.assertEqual([s['id'] for s in rejected['unresolved_sites']], [3])
+                self.assertNotIn('dependency_sha256', rejected)
+        rewrite.unlink()
+        rewrite.symlink_to(self.pool)
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+    def test_consistent_upstream_policy_for_native_parameter_dependencies(self):
+        include = self.nginx / 'enable-php-85.conf'
+        include.write_text(
+            'location ~ \\.php$ {\n include fastcgi.conf;\n'
+            ' include pathinfo.conf;\n'
+            ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n'
+        )
+        params = {
+            name: self.nginx / name
+            for name in ('fastcgi.conf', 'pathinfo.conf')
+        }
+        defaults = {
+            'fastcgi.conf': 'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n',
+            'pathinfo.conf': 'fastcgi_param PATH_INFO $path_info;\n',
+        }
+        for name, path in params.items():
+            path.write_text(defaults[name])
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+        routes = (
+            'fastcgi_pass unix:/tmp/other.sock;',
+            'proxy_pass http://backend;',
+            'uwsgi_pass backend;',
+            'scgi_pass backend;',
+            'grpc_pass grpc://backend;',
+            'memcached_pass backend;',
+        )
+        for name, path in params.items():
+            for route in routes:
+                with self.subTest(dependency=name, route=route):
+                    invalid = defaults[name] + route + '\n'
+                    path.write_text(invalid)
+                    rejected = self.inspect()
+                    self.assertEqual(rejected['state'], 'Needs Review')
+                    self.assertEqual(rejected['site_count'], 0)
+                    self.assertEqual(rejected['matched_sites'], [])
+                    self.assertNotIn('dependency_sha256', rejected)
+                    self.assertEqual(path.read_text(), invalid)
+            path.write_text(defaults[name] + '# grpc_pass grpc://ignored;\n')
+            accepted = self.inspect()
+            self.assertEqual(accepted['state'], 'File Mapping')
+            self.assertNotEqual(accepted['dependency_sha256'], good['dependency_sha256'])
+            path.write_text(defaults[name])
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_consistent_upstream_policy_for_vhost_and_native_rewrite(self):
+        vhost = self.vhost('site-a.example.test')
+        original = vhost.read_text()
+        rewrite = self.rewrites / 'site-a.example.test.conf'
+        valid_rewrite = 'location / {\n rewrite ^(.*)$ /index.php?s=$1 last;\n}\n'
+        rewrite.write_text(valid_rewrite)
+        routed_vhost = original.replace(
+            'include enable-php-85.conf;',
+            'include enable-php-85.conf;\n include ' + str(rewrite) + ';'
+        )
+        vhost.write_text(routed_vhost)
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+        routes = (
+            'fastcgi_pass unix:/tmp/other.sock;',
+            'proxy_pass http://backend;',
+            'uwsgi_pass backend;',
+            'scgi_pass backend;',
+            'grpc_pass grpc://backend;',
+            'memcached_pass backend;',
+        )
+        for route in routes:
+            for surface, file, base in (
+                ('vhost', vhost, routed_vhost),
+                ('rewrite', rewrite, valid_rewrite),
+            ):
+                with self.subTest(surface=surface, route=route):
+                    if surface == 'vhost':
+                        invalid = base.replace(
+                            '\n}\n', '\n location /unsupported {\n  ' + route + '\n }\n}\n', 1
+                        )
+                    else:
+                        invalid = base + '\nlocation /unsupported {\n ' + route + '\n}\n'
+                    file.write_text(invalid)
+                    rejected = self.inspect()
+                    self.assertEqual(rejected['state'], 'Needs Review')
+                    self.assertEqual([s['id'] for s in rejected['unresolved_sites']], [3])
+                    self.assertNotIn('dependency_sha256', rejected)
+                    self.assertEqual(file.read_text(), invalid)
+                    file.write_text(base)
+        rewrite.write_text(valid_rewrite + '# memcached_pass disabled;\n')
+        accepted = self.inspect()
+        self.assertEqual(accepted['state'], 'File Mapping')
+        self.assertNotEqual(accepted['dependency_sha256'], good['dependency_sha256'])
+        rewrite.write_text(valid_rewrite)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_changed_nest_dir_or_hardlinked_vhost_is_not_trusted(self):
+        ordinary = self.vhost('site-a.example.test')
+        hardlink = self.vhosts / 'duplicate.conf'
+        hardlink.hardlink_to(ordinary)
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+        hardlink.unlink()
+        safe = self.inspect()
+        self.assertEqual(safe['state'], 'File Mapping')
+        alias = self.base / 'vhost-parent-link'
+        alias.symlink_to(self.vhosts, target_is_directory=True)
+        linked = monitor.inspect_php_fpm_site_impact(
+            self.Panel(self.rows), '85', self.pool,
+            vhost_root=alias, nginx_conf_root=self.nginx, rewrite_root=self.rewrites,
+        )
+        self.assertEqual(linked['state'], 'Needs Review')
+
+    def test_unknown_filename_is_review_without_escaping_vhost_root(self):
+        self.rows.append({'id': 8, 'name': '../other'})
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['unresolved_sites'], [
+            {'id': 8, 'site_key': '../other', 'reason': 'Unsupported VHost filename'}
+        ])
+
+    def test_symlinked_and_oversized_site_vhosts_are_reviewed_not_followed(self):
+        site = self.vhost('site-b.example.test')
+        site.unlink()
+        site.symlink_to(self.pool)
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+        site.unlink()
+        site.write_text('x' * (monitor.MAX_NGINX_SITE_BYTES + 1))
+        self.assertEqual([s['id'] for s in self.inspect()['unresolved_sites']], [6])
+
+    def test_php_snippet_counts_every_active_fastcgi_destination_fail_closed(self):
+        include = self.nginx / 'enable-php-85.conf'
+        baseline = include.read_bytes()
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+
+        routes = {
+            'named-upstream': 'location /legacy-php/ {\n fastcgi_pass php_alt_backend;\n}\n',
+            'variable-upstream': 'location /dynamic/ {\n fastcgi_pass $backend;\n}\n',
+            'other-unix-socket': 'location /other/ {\n fastcgi_pass unix:/tmp/other.sock;\n}\n',
+            'tcp-backend': 'location /legacy/ {\n fastcgi_pass 127.0.0.1:9000;\n}\n',
+            'unknown-fastcgi-shape': 'location /other/ {\n fastcgi_pass unix:/tmp/other.sock extra;\n}\n',
+            'proxy-upstream': 'location /proxy/ {\n proxy_pass http://127.0.0.1:8000;\n}\n',
+            'uwsgi-upstream': 'location /uwsgi/ {\n uwsgi_pass backend;\n}\n',
+            'grpc-upstream': 'location /grpc/ {\n grpc_pass grpc://backend;\n}\n',
+        }
+        for name, appended in routes.items():
+            with self.subTest(route=name):
+                modified = baseline + appended.encode('utf-8')
+                include.write_bytes(modified)
+                got = self.inspect()
+                self.assertEqual(got['state'], 'Needs Review')
+                self.assertEqual(got['site_count'], 0)
+                self.assertEqual(got['matched_sites'], [])
+                self.assertNotIn('dependency_sha256', got)
+                self.assertEqual(include.read_bytes(), modified, 'Inspection is read only')
+
+        include.write_text('location ~ \\.php$ {\n fastcgi_pass php_alt_backend;\n}\n')
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+        include.write_bytes(baseline + b'# fastcgi_pass php_alt_backend;\n')
+        ignored_comment = self.inspect()
+        self.assertEqual(ignored_comment['state'], 'File Mapping')
+        self.assertNotEqual(ignored_comment['dependency_sha256'], good['dependency_sha256'])
+        include.write_bytes(baseline)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_nginx_hash_tokenization_preserves_active_same_line_routing(self):
+        # Nginx recognizes '#' as a comment only at an argument boundary.
+        # Do not discard active directives after a quoted/unquoted/escaped hash.
+        safe = (
+            'set $marker "tag#1"; # grpc_pass grpc://commented;\n'
+            "set $single 'tag#2'; # proxy_pass http://commented;\n"
+            'set $plain tag#3; # memcached_pass commented;\n'
+            r'set $escaped tag\#4; # fastcgi_pass backend;' + '\n'
+            '# fastcgi_pass another_backend;\n'
+        )
+        active = monitor._active_nginx_text(safe)
+        self.assertIn('"tag#1"', active)
+        self.assertIn("'tag#2'", active)
+        self.assertIn("tag#3", active)
+        self.assertIn(r'tag\#4', active)
+        self.assertNotIn('grpc_pass', active)
+        self.assertNotIn('proxy_pass', active)
+        self.assertNotIn('memcached_pass', active)
+        self.assertNotIn('fastcgi_pass', active)
+
+        variants = {
+            'double-quoted': 'set $marker "tag#1"; fastcgi_pass unix:/tmp/other.sock;',
+            'single-quoted': "set $marker 'tag#1'; grpc_pass grpc://backend;",
+            'unquoted-token': 'set $marker tag#1; proxy_pass http://backend;',
+            'escaped-hash': r'set $marker tag\#1; memcached_pass backend;',
+            'escaped-double-quote': 'set $marker "tag\\"#1"; grpc_pass grpc://backend;',
+            'multiple-directives': 'set $marker "tag#1"; set $next "ok"; fastcgi_pass php_alt_backend;',
+            'quoted-multiline': 'set $marker "line\n#literal"; grpc_pass grpc://backend;',
+        }
+        include = self.nginx / 'enable-php-85.conf'
+        baseline = include.read_text()
+        expected = self.inspect()
+        self.assertEqual(expected['state'], 'File Mapping')
+        for label, statement in variants.items():
+            with self.subTest(variant=label):
+                self.assertTrue(
+                    any(name in monitor._active_nginx_text(statement) for name in
+                        ('fastcgi_pass', 'proxy_pass', 'grpc_pass', 'memcached_pass'))
+                )
+                include.write_text(baseline + 'location /legacy {\n ' + statement + '\n}\n')
+                rejected = self.inspect()
+                self.assertEqual(rejected['state'], 'Needs Review')
+                self.assertEqual(rejected['matched_sites'], [])
+                self.assertEqual(rejected['site_count'], 0)
+                self.assertNotIn('dependency_sha256', rejected)
+        for ambiguous in ('set $marker "unclosed;\n',
+                          "set $marker 'unclosed;\n",
+                          'set $marker "ok"bad;\n',
+                          'set $marker ' + '\\'):
+            with self.subTest(ambiguous=ambiguous):
+                include.write_text(baseline + ambiguous)
+                self.assertEqual(self.inspect()['state'], 'Needs Review')
+        include.write_text(baseline + '\n# fastcgi_pass another_backend;\n')
+        allowed_comment = self.inspect()
+        self.assertEqual(allowed_comment['state'], 'File Mapping')
+        self.assertNotEqual(allowed_comment['dependency_sha256'], expected['dependency_sha256'])
+        include.write_text(baseline + 'location /safe {\n set $marker "tag#1";\n}\n')
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_native_dependencies_keep_active_routes_after_literal_hash(self):
+        php = self.nginx / 'enable-php-85.conf'
+        php.write_text('location ~ \\.php$ {\n include fastcgi.conf;\n'
+                       ' include pathinfo.conf;\n'
+                       ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n')
+        params = {
+            self.nginx / 'fastcgi.conf':
+                'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n',
+            self.nginx / 'pathinfo.conf': 'fastcgi_param PATH_INFO $path_info;\n',
+        }
+        for file, data in params.items():
+            file.write_text(data)
+        rewrite = self.rewrites / 'site-a.example.test.conf'
+        rewrite.write_text('location / {\n rewrite ^(.*)$ /index.php?s=$1 last;\n}\n')
+        vhost = self.vhost('site-a.example.test')
+        original_vhost = vhost.read_text()
+        vhost.write_text(original_vhost.replace(
+            'include enable-php-85.conf;',
+            'include enable-php-85.conf;\n include ' + str(rewrite) + ';'
+        ))
+        files = {
+            **params,
+            rewrite: rewrite.read_text(),
+            vhost: vhost.read_text(),
+        }
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping')
+        for file, data in files.items():
+            with self.subTest(file=file.name):
+                statement = 'set $marker "tag#1"; grpc_pass grpc://backend;'
+                if file == vhost:
+                    invalid = data.replace(
+                        '\n}\n',
+                        '\n location /hidden {\n ' + statement + '\n }\n}\n',
+                        1,
+                    )
+                elif file == rewrite:
+                    invalid = data + '\nlocation /hidden {\n ' + statement + '\n}\n'
+                else:
+                    invalid = data + statement + '\n'
+                file.write_text(invalid)
+                rejected = self.inspect()
+                self.assertEqual(rejected['state'], 'Needs Review')
+                self.assertNotIn('dependency_sha256', rejected)
+                self.assertEqual(file.read_text(), invalid)
+                file.write_text(data)
+                self.assertEqual(self.inspect()['state'], 'File Mapping')
+        for file, data in files.items():
+            with self.subTest(commented_file=file.name):
+                file.write_text(data + '\n# grpc_pass grpc://commented;\n')
+                allowed = self.inspect()
+                self.assertEqual(allowed['state'], 'File Mapping')
+                self.assertNotEqual(allowed['dependency_sha256'], good['dependency_sha256'])
+                file.write_text(data)
+
+    def test_socket_mismatch_invalidates_global_mapping_before_site_scan(self):
+        include = self.nginx / 'enable-php-85.conf'
+        include.write_text('fastcgi_pass unix:/tmp/unrelated.sock;\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertIn('not mapped', got['reason'])
+        self.assertEqual(got['matched_sites'], [])
+        self.assertEqual(got['site_count'], 0)
+
+    def test_missing_ambiguous_pool_socket_is_not_fabricated(self):
+        self.pool.write_text(self.pool.read_text() + 'listen = /tmp/second.sock\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertIn('single literal Unix socket', got['reason'])
+        self.assertEqual(got['matched_sites'], [])
+
+    def test_too_many_sites_fail_closed_instead_of_partial_shared_pool_claim(self):
+        rows = [{'id': i, 'name': 's{}.example.test'.format(i)} for i in range(1, 102)]
+        got = self.inspect(rows)
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['site_count'], 0)
+        self.assertEqual(got['matched_sites'], [])
+        self.assertIn('exceeds bounded', got['reason'])
+
+    def test_duplicate_identity_never_returns_partial_success(self):
+        duplicate = [self.rows[0], dict(self.rows[0])]
+        got = self.inspect(duplicate)
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual(got['matched_sites'], [])
+        self.assertEqual(got['site_count'], 0)
+        self.assertIn('Duplicate', got['reason'])
+
+    def test_missing_site_does_not_claim_complete_mapping(self):
+        self.vhost('site-b.example.test').unlink()
+        got = self.inspect()
+        self.assertEqual(got['state'], 'Needs Review')
+        self.assertEqual([s['id'] for s in got['unresolved_sites']], [6])
+
+    def test_alt_php_version_or_noncanonical_socket_does_not_overclaim(self):
+        self.vhost('site-b.example.test').write_text(
+            'server {\n include enable-php-84.conf;\n}\n')
+        got = self.inspect()
+        self.assertEqual(got['state'], 'File Mapping')
+        self.assertEqual([s['id'] for s in got['matched_sites']], [3])
+        self.assertEqual(got['other_php_sites_count'], 2)
+        self.pool.write_text(self.pool.read_text().replace(
+            '/tmp/php-cgi-85.sock', '127.0.0.1:10851'))
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+
 if __name__ == '__main__':
     unittest.main()

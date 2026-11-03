@@ -71,6 +71,78 @@ class EntrypointTests(unittest.TestCase):
         state_path.start()
         self.addCleanup(state_path.stop)
 
+    def test_manual_fpm_methods_dispatch_once_and_preserve_durable_recovery_id(self):
+        class Controller:
+            calls = []
+            def prepare(self, args):
+                self.calls.append(("prepare", args))
+                return {"plan":{"before_sha256":"a"*64}, "monitor_revision":4}
+            def apply(self, args):
+                self.calls.append(("apply", args))
+                return {"state":"Applied", "operation_id":"b"*32}
+            def recovery(self, args):
+                self.calls.append(("recovery", args))
+                return {"state":"Applied", "operation_id":"b"*32}
+            def rollback(self, args):
+                self.calls.append(("rollback", args))
+                return {"state":"Rolled Back", "operation_id":"b"*32}
+        controller = Controller()
+        with patch.object(MODULE, "ManualFpmWorkflow", return_value=controller):
+            for route, kind in (("fpm_prepare","prepare"), ("fpm_apply","apply"),
+                                ("fpm_recovery","recovery"), ("fpm_rollback","rollback")):
+                args = {"php_version":"85", "token":kind}
+                result = getattr(self.plugin, route)(args)
+                self.assertTrue(result["status"], result)
+                self.assertRegex(result["request_id"], r"^[0-9a-f]{32}$")
+                self.assertEqual(controller.calls[-1], (kind, args))
+                if kind != "prepare":
+                    self.assertEqual(result["operation_id"], "b"*32)
+            self.assertEqual(len(controller.calls), 4)
+
+    def test_native_audit_uses_bounded_structured_log_and_reports_outcome(self):
+        from unittest.mock import Mock
+        fake_public=types.ModuleType("public")
+        fake_public.WriteLog=Mock(return_value=19)
+        with patch.dict(sys.modules,{"public":fake_public}), patch.object(
+                MODULE,"ManualFpmWorkflow") as factory:
+            factory.return_value.apply.return_value={
+                "state":"Applied","operation_id":"e"*32}
+            applied=self.plugin.fpm_apply({"php_version":"85","secret":"do not log"})
+            self.assertTrue(applied["status"])
+            self.assertTrue(applied["audit_logged"])
+            self.assertNotIn("audit_warning",applied)
+            fake_public.WriteLog.assert_called_once()
+            args,kwargs=fake_public.WriteLog.call_args
+            self.assertEqual(args[0],"ACh Customizer")
+            self.assertTrue(kwargs["not_web"])
+            import json
+            record=json.loads(args[1])
+            self.assertEqual(record["action"],"fpm_apply")
+            self.assertEqual(record["recovery_operation_id"],"e"*32)
+            self.assertEqual(record["request_id"],applied["request_id"])
+            self.assertNotIn("do not log",args[1])
+            self.assertIn("timestamp_utc",record)
+            fake_public.WriteLog.return_value=None
+            failed_log=self.plugin.fpm_apply({})
+            self.assertTrue(failed_log["status"],"Log failure must not hide an already applied operation")
+            self.assertFalse(failed_log["audit_logged"])
+            self.assertIn("audit_warning",failed_log)
+
+    def test_manual_fpm_errors_fail_closed_and_report_stage(self):
+        from ach_customizer_fpm_apply import FpmApplyError
+        with patch.object(MODULE, "ManualFpmWorkflow") as factory:
+            factory.return_value.apply.side_effect = FpmApplyError(
+                "fpm_authorization", "Full primary aaPanel administrator POST is required")
+            refused = self.plugin.fpm_apply({"approved_scope":"PHP85-www-shared-service"})
+            self.assertFalse(refused["status"])
+            self.assertEqual(refused["stage"], "fpm_authorization")
+            self.assertIn("administrator", refused["msg"])
+            factory.return_value.rollback.side_effect = RuntimeError("confidential internal stack")
+            unknown = self.plugin.fpm_rollback({})
+            self.assertFalse(unknown["status"])
+            self.assertEqual(unknown["stage"], "fpm_rollback")
+            self.assertNotIn("confidential", str(unknown))
+
     def test_no_auth_bypassing_dynamic_check_or_mutation_entrypoint(self):
         self.assertNotIn('_check', vars(MODULE.ach_customizer_main))
         for name in vars(MODULE.ach_customizer_main):
@@ -288,6 +360,46 @@ class EntrypointTests(unittest.TestCase):
             query.rows.pop(0)
             removed = self.plugin.get_sites({})
             self.assertEqual([row['id'] for row in removed['sites']], [20])
+
+    def test_php_fpm_file_drift_remains_visible_with_read_only_shared_site_mapping(self):
+        payload = dict(php_version='85', max_children='50', start_servers='5',
+                       min_spare_servers='5', max_spare_servers='20', max_requests='0')
+        preview = {
+            'state': 'File Drift', 'scope': 'shared_service', 'version': '85',
+            'source': '/www/server/php/85/etc/php-fpm.conf',
+            'changes': [{'setting': 'pm.max_children', 'actual': 80, 'desired': 50}],
+        }
+        impact = {
+            'schema': 1, 'scope': 'shared_service', 'state': 'File Mapping', 'version': '85',
+            'matched_sites': [{'id': 3, 'site_key': 'site-a.test'},
+                              {'id': 6, 'site_key': 'site-b.test'}],
+            'unresolved_sites': [], 'site_count': 2, 'other_php_sites_count': 0,
+            'reason': '', 'note': 'File-only evidence.',
+        }
+        fake_public = types.ModuleType('public')
+        with patch.object(MODULE, 'preview_php_fpm', return_value=preview), \
+                patch.object(MODULE, 'inspect_php_fpm_site_impact', return_value=impact) as mapping, \
+                patch.dict(sys.modules, {'public': fake_public}):
+            result = self.plugin.preview_php_fpm(payload)
+        self.assertTrue(result['status'], result)
+        self.assertEqual(result['state'], 'File Drift')
+        self.assertEqual(result['changes'], preview['changes'])
+        self.assertEqual(result['shared_impact'], impact)
+        mapping.assert_called_once_with(fake_public, '85', preview['source'])
+
+    def test_unsupported_php_file_layout_never_guesses_shared_site_scope(self):
+        payload = dict(php_version='85', max_children='20', start_servers='5',
+                       min_spare_servers='5', max_spare_servers='10', max_requests='300')
+        with patch.object(MODULE, 'preview_php_fpm', return_value={
+            'state': 'Needs Review', 'scope': 'shared_service', 'reason': 'Unknown layout',
+        }), patch.object(MODULE, 'inspect_php_fpm_site_impact',
+                         side_effect=AssertionError("unsafe inference")) as mapping:
+            result = self.plugin.preview_php_fpm(payload)
+        self.assertTrue(result['status'])
+        self.assertEqual(result['state'], 'Needs Review')
+        self.assertEqual(result['shared_impact']['state'], 'Needs Review')
+        self.assertEqual(result['shared_impact']['matched_sites'], [])
+        mapping.assert_not_called()
 
     def test_fpm_preview_is_read_only_and_reports_unsupported_layout(self):
         payload = dict(php_version='85', max_children='20', start_servers='5',

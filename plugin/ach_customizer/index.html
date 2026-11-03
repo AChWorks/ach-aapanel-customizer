@@ -22,7 +22,7 @@
 <div class="bt-form" id="ach-customizer" dir="ltr" lang="en">
   <div class="bt-w-con pd15">
     <h3>ACh aaPanel Customizer</h3>
-    <p class="ach-note">Development candidate: Monitor only. This plugin cannot apply, reload, or modify host configuration.</p>
+    <p class="ach-note">Development candidate: read-only Monitor plus an explicitly confirmed PHP 8.5 shared-service Manual Apply/rollback for verified aaPanel 8.0.7 + Nginx. No automatic enforcement.</p>
     <div class="ach-tabs" role="tablist" aria-label="Plugin sections">
       <button type="button" data-tab="overview" role="tab" aria-selected="true">Overview</button>
       <button type="button" data-tab="websites" role="tab" aria-selected="false">Websites</button>
@@ -33,7 +33,7 @@
       <p id="ach-overview-status">Loading...</p>
       <div class="ach-note">
         <strong>Monitor controls</strong>
-        <p>These switches enable or disable read-only plugin monitoring only. They never stop websites, reload services, or authorize Apply. Preferences survive a normal plugin uninstall/reinstall.</p>
+        <p>These switches control read-only monitoring only. They do not stop sites, reload services, or approve manual changes. Preferences survive a normal plugin uninstall/reinstall.</p>
         <div class="ach-switches">
           <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /> Overall Monitor</label>
           <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /> Website inventory</label>
@@ -49,7 +49,7 @@
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
     </section>
     <section class="ach-view" data-view="php" role="tabpanel" hidden>
-      <p class="ach-note">File-only preview. Runtime values and websites sharing this pool are not yet verified. This is not an Apply action.</p>
+      <p class="ach-note">Read-only PHP-FPM file/default comparison. Conventional aaPanel Nginx site-to-pool file assignments are listed separately; neither file mapping nor this preview verifies effective routing/runtime state or authorizes Apply.</p>
       <form id="ach-php-form">
         <div class="ach-fields">
           <div><label for="ach-php-version">PHP version (e.g. 85)</label><input id="ach-php-version" name="php_version" autocomplete="off" inputmode="numeric" pattern="[0-9]{2,3}" placeholder="85" required /></div>
@@ -63,6 +63,28 @@
       </form>
       <p id="ach-fpm-result" role="status" aria-live="polite"></p>
       <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Configured / PHP default</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
+      <p id="ach-impact-summary" role="status" aria-live="polite">Shared PHP-FPM site attribution not loaded.</p>
+      <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-impact-rows"></tbody></table></div>
+      <div class="ach-note" aria-label="Guarded manual PHP-FPM change">
+        <strong>Manual shared PHP-FPM change — PHP 8.5 only</strong>
+        <p>Only on aaPanel 8.0.7 with Nginx and an unambiguous conventional site-file mapping. This edits the single shared <code>[www]</code> pool, validates PHP-FPM syntax, reloads PHP-FPM and checks service health. Other consumers may be affected; file attribution does not prove full traffic health. No automatic reapply after aaPanel overwrites the policy.</p>
+        <button id="ach-fpm-prepare" type="button" disabled>Prepare guarded change</button>
+        <p id="ach-fpm-plan" role="status" aria-live="polite">Run a PHP 85 file preview before preparing a change.</p>
+        <div id="ach-fpm-review" hidden>
+          <p id="ach-fpm-details"></p>
+          <label><input id="ach-fpm-approval" type="checkbox" /> I approve changing the PHP 8.5 shared [www] pool for all affected consumers.</label>
+          <div class="ach-controls"><button id="ach-fpm-commit" type="button" class="btn btn-danger" disabled>Apply shared PHP-FPM change</button></div>
+        </div>
+        <hr />
+        <button id="ach-fpm-check-recovery" type="button">Inspect saved PHP 8.5 recovery</button>
+        <p id="ach-fpm-recovery-status" role="status" aria-live="polite">Recovery status not loaded.</p>
+        <p id="ach-fpm-recovery-impact" role="status" aria-live="polite">Current affected sites not inspected.</p>
+        <div class="ach-scroll"><table><thead><tr><th>PHP-FPM setting</th><th>Current</th><th>Restore baseline</th></tr></thead><tbody id="ach-fpm-restore-rows"></tbody></table></div>
+        <div id="ach-fpm-rollback-controls" hidden>
+          <label><input id="ach-fpm-rollback-approval" type="checkbox" /> I reviewed the current shared-site impact and configuration values above, and approve restoring this exact saved PHP 8.5 baseline and reloading the shared service.</label>
+          <div class="ach-controls"><button id="ach-fpm-rollback" type="button" class="btn btn-warning" disabled>Restore saved configuration</button></div>
+        </div>
+      </div>
     </section>
   </div>
 </div>
@@ -81,6 +103,7 @@
   };
   var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false;
   var controlBusy = false, lastOverview = null;
+  var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
   function msg(value, failed) { root.find('#ach-message').text(value || '').toggleClass('ach-error', Boolean(failed)); }
   function invalidateInventory(message) {
     hasMore = false;
@@ -123,14 +146,20 @@
   }
   function request(method, data, done) {
     msg(t.loading, false);
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : 20000, dataType:'json' })
       .done(function (response) {
         if (!response || response.status !== true) {
-          msg((response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '')) || t.error, true);
+          msg((response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
+            (response.audit_warning ? ' Audit: ' + response.audit_warning : '')) || t.error, true);
           done(null);
-        } else { msg('', false); done(response); }
+        } else {
+          if (/^fpm_(apply|rollback)$/.test(method) && response.audit_logged !== true) {
+            msg(response.audit_warning || 'aaPanel activity-log persistence was not confirmed.', true);
+          } else { msg('', false); }
+          done(response);
+        }
       })
-      .fail(function (_xhr, status) { msg(t.error + ': ' + status, true); done(null); });
+      .fail(function (_xhr, status) { msg(t.error + ': ' + status + (/^fpm_(apply|rollback)$/.test(method) ? '. Outcome unknown: inspect saved recovery before any retry.' : ''), true); done(null); });
   }
   function displayControls(r) {
     if (!r || r.state_schema !== 1 || !Number.isSafeInteger(r.state_revision) ||
@@ -222,14 +251,239 @@
   });
   root.find('#ach-prev').on('click', function () { if (page > 1 && !siteBusy) { page -= 1; sites(); } });
   root.find('#ach-next').on('click', function () { if (hasMore && !siteBusy) { page += 1; sites(); } });
+  function validImpact(impact, phpVersion) {
+    if (!impact || impact.schema !== 1 ||
+        impact.scope !== 'shared_service' || impact.version !== phpVersion ||
+        (impact.state !== 'File Mapping' && impact.state !== 'Needs Review') ||
+        !Number.isSafeInteger(impact.site_count) || impact.site_count < 0 ||
+        !Number.isSafeInteger(impact.other_php_sites_count) || impact.other_php_sites_count < 0 ||
+        !Array.isArray(impact.matched_sites) || !Array.isArray(impact.unresolved_sites) ||
+        impact.matched_sites.length + impact.unresolved_sites.length + impact.other_php_sites_count > impact.site_count ||
+        typeof impact.note !== 'string' || typeof impact.reason !== 'string') return false;
+    var seen = new Set();
+    function validSite(site, isUnresolved) {
+      if (!site || !Number.isSafeInteger(site.id) || site.id <= 0 ||
+          seen.has(site.id) || typeof site.site_key !== 'string' || !site.site_key.trim() ||
+          (isUnresolved && (typeof site.reason !== 'string' || !site.reason.trim()))) return false;
+      seen.add(site.id);
+      return true;
+    }
+    if (!impact.matched_sites.every(function (s) { return validSite(s, false); })) return false;
+    if (!impact.unresolved_sites.every(function (s) { return validSite(s, true); })) return false;
+    return impact.state !== 'File Mapping' ||
+      (impact.unresolved_sites.length === 0 &&
+       typeof impact.dependency_sha256 === 'string' &&
+       /^[0-9a-f]{64}$/.test(impact.dependency_sha256) &&
+       impact.matched_sites.length + impact.other_php_sites_count === impact.site_count);
+  }
+  function phpFields() {
+    var data = {};
+    root.find('#ach-php-form').serializeArray().forEach(function (field) { data[field.name] = field.value; });
+    return data;
+  }
+  function resetFpmPlan() {
+    fpmPlan = null; fpmFields = null;
+    root.find('#ach-fpm-review').prop('hidden', true);
+    root.find('#ach-fpm-approval').prop('checked', false);
+    root.find('#ach-fpm-commit').prop('disabled', true);
+    root.find('#ach-fpm-prepare').prop('disabled', fpmBusy || !phpPreviewEligible);
+  }
+  function resetRecovery() {
+    fpmRecovery = null;
+    root.find('#ach-fpm-rollback-controls').prop('hidden', true);
+    root.find('#ach-fpm-rollback-approval').prop('checked', false);
+    root.find('#ach-fpm-rollback').prop('disabled', true);
+    root.find('#ach-fpm-restore-rows').empty();
+    root.find('#ach-fpm-recovery-impact').text('Current affected sites not inspected.');
+  }
+  function fpmLock(value) {
+    fpmBusy = value;
+    root.find('#ach-fpm-prepare').prop('disabled', value || !phpPreviewEligible);
+    root.find('#ach-fpm-commit').prop('disabled', value || !fpmPlan || root.find('#ach-fpm-approval').prop('checked') !== true);
+    root.find('#ach-fpm-check-recovery').prop('disabled', value);
+    root.find('#ach-fpm-rollback').prop('disabled', value || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true);
+  }
+  function validFpmPlan(r) {
+    if (!r || !r.plan || !validImpact(r.shared_impact, '85') ||
+        r.shared_impact.state !== 'File Mapping' || !r.shared_impact.matched_sites.length ||
+        r.plan.scope !== 'shared_service' || r.plan.pool !== 'www' || r.plan.version !== '85' ||
+        r.plan.source !== '/www/server/php/85/etc/php-fpm.conf' ||
+        !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
+        r.approval_scope !== 'PHP85-www-shared-service' || typeof r.warning !== 'string') return false;
+    return ['before_sha256', 'after_sha256'].every(function (key) {
+      return typeof r.plan[key] === 'string' && /^[0-9a-f]{64}$/.test(r.plan[key]);
+    }) && typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256);
+  }
+  root.find('#ach-php-form').on('input change', function () {
+    phpPreviewEligible = false;
+    resetFpmPlan();
+    root.find('#ach-fpm-plan').text('Settings changed: run a fresh read-only preview.');
+  });
+  root.find('#ach-fpm-prepare').on('click', function () {
+    if (fpmBusy || !phpPreviewEligible) return;
+    resetFpmPlan();
+    var fields = phpFields();
+    fpmLock(true);
+    request('fpm_prepare', fields, function (r) {
+      fpmLock(false);
+      if (!r || !validFpmPlan(r)) {
+        phpPreviewEligible = false; resetFpmPlan();
+        root.find('#ach-fpm-plan').text('Preparation failed or API incompatible. No change approved.');
+        if (r) msg('Manual PHP-FPM preparation API mismatch.', true);
+        return;
+      }
+      if (r.plan.before_sha256 === r.plan.after_sha256) {
+        phpPreviewEligible = false; resetFpmPlan();
+        root.find('#ach-fpm-plan').text('No file change required. No Apply offered.');
+        return;
+      }
+      fpmPlan = r; fpmFields = fields;
+      root.find('#ach-fpm-review').prop('hidden', false);
+      root.find('#ach-fpm-plan').text('Prepared; configuration is unchanged. Explicit approval is required.');
+      root.find('#ach-fpm-details').text(
+        'Scope: PHP 85 [www] shared; conventionally linked aaPanel sites: ' +
+        r.shared_impact.matched_sites.map(function (site) { return site.id + ': ' + site.site_key; }).join(', ') +
+        '. Original SHA-256: ' + r.plan.before_sha256 + '. Proposed SHA-256: ' +
+        r.plan.after_sha256 + '. ' + r.warning
+      );
+      fpmLock(false);
+    });
+  });
+  root.find('#ach-fpm-approval').on('change', function () { fpmLock(fpmBusy); });
+  root.find('#ach-fpm-commit').on('click', function () {
+    if (fpmBusy || !fpmPlan || root.find('#ach-fpm-approval').prop('checked') !== true) return;
+    var fieldsNow = phpFields();
+    if (JSON.stringify(fieldsNow) !== JSON.stringify(fpmFields)) {
+      phpPreviewEligible = false; resetFpmPlan();
+      msg('PHP-FPM settings changed since preparation. Repeat Preview and Prepare.', true);
+      return;
+    }
+    var approval = {
+      approved_scope: fpmPlan.approval_scope,
+      expected_revision: fpmPlan.monitor_revision,
+      expected_before: fpmPlan.plan.before_sha256,
+      expected_after: fpmPlan.plan.after_sha256,
+      expected_impact: fpmPlan.impact_sha256
+    };
+    phpPreviewEligible = false;
+    resetFpmPlan();
+    resetRecovery();
+    fpmLock(true);
+    request('fpm_apply', Object.assign({}, fieldsNow, approval), function (r) {
+      fpmLock(false);
+      root.find('#ach-fpm-plan').text(r ?
+        'Apply result: ' + r.state + '; recovery operation: ' + (r.operation_id || 'none') +
+        '. Inspect saved recovery before any subsequent change.' :
+        'Apply did not return confirmed success. Inspect saved recovery before retrying.');
+    });
+  });
+  root.find('#ach-fpm-check-recovery').on('click', function () {
+    if (fpmBusy) return;
+    resetRecovery(); fpmLock(true);
+    request('fpm_recovery', {php_version:'85'}, function (r) {
+      fpmLock(false);
+      if (!r) {
+        root.find('#ach-fpm-recovery-status').text('Recovery unavailable; investigate the error before any further Apply.');
+        return;
+      }
+      var policyKeys = ['pm.max_children', 'pm.start_servers', 'pm.min_spare_servers',
+        'pm.max_spare_servers', 'pm.max_requests'];
+      var validValues = r.baseline_values && r.observed_values && policyKeys.every(function (key) {
+        return Number.isSafeInteger(r.baseline_values[key]) && r.baseline_values[key] >= 0 &&
+          Number.isSafeInteger(r.observed_values[key]) && r.observed_values[key] >= 0;
+      });
+      var safe = typeof r.operation_id === 'string' && /^[0-9a-f]{32}$/.test(r.operation_id) &&
+        r.version === '85' && r.safe_rollback_file_match === true &&
+        (r.state === 'Applied' || r.state === 'Already Baseline') &&
+        validValues && validImpact(r.shared_impact, '85') &&
+        r.shared_impact.state === 'File Mapping' && r.shared_impact.matched_sites.length > 0 &&
+        typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256) &&
+        typeof r.recovery_decision_sha256 === 'string' &&
+        /^[0-9a-f]{64}$/.test(r.recovery_decision_sha256) &&
+        typeof r.warning === 'string';
+      root.find('#ach-fpm-recovery-status').text('Recovery state: ' + r.state +
+        (r.operation_id ? '; operation: ' + r.operation_id : '') +
+        (r.phase ? '; phase: ' + r.phase : '') +
+        (safe ? '; fresh impact approval required.' : '; automatic restoration unavailable.'));
+      if (r.shared_impact && validImpact(r.shared_impact, '85')) {
+        root.find('#ach-fpm-recovery-impact').text(
+          'Current PHP 85 shared-site file mapping: ' +
+          r.shared_impact.matched_sites.map(function (site) { return site.id + ': ' + site.site_key; }).join(', ') +
+          '; other-PHP sites: ' + r.shared_impact.other_php_sites_count +
+          '; unresolved sites: ' + r.shared_impact.unresolved_sites.length +
+          '. ' + (r.impact_reason || r.warning || r.shared_impact.reason || '') +
+          (r.manual_recovery ? ' ' + r.manual_recovery : '')
+        );
+      } else {
+        root.find('#ach-fpm-recovery-impact').text(
+          r.impact_reason || r.manual_recovery || 'Current site mapping not verified.'
+        );
+      }
+      if (safe) {
+        policyKeys.forEach(function (key) {
+          var tr = $('<tr>');
+          $('<td>').text(key).appendTo(tr);
+          $('<td>').text(r.observed_values[key]).appendTo(tr);
+          $('<td>').text(r.baseline_values[key]).appendTo(tr);
+          root.find('#ach-fpm-restore-rows').append(tr);
+        });
+        fpmRecovery = r;
+        root.find('#ach-fpm-rollback-controls').prop('hidden', false);
+      }
+      fpmLock(false);
+    });
+  });
+  root.find('#ach-fpm-rollback-approval').on('change', function () { fpmLock(fpmBusy); });
+  root.find('#ach-fpm-rollback').on('click', function () {
+    if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
+    var op = fpmRecovery.operation_id, current = fpmRecovery;
+    resetRecovery(); fpmLock(true);
+    request('fpm_rollback', {php_version:'85', approved_scope:'PHP85-www-shared-service',
+      operation_id:op, expected_impact:current.impact_sha256,
+      expected_recovery:current.recovery_decision_sha256}, function (r) {
+      fpmLock(false);
+      root.find('#ach-fpm-recovery-status').text(r ?
+        'Recovery result: ' + r.state + '; original SHA-256: ' + r.restored_sha256 +
+        '. Verify websites and repeat read-only preview.' :
+        'Recovery not confirmed. Inspect saved recovery before retrying.');
+    });
+  });
   root.find('#ach-php-form').on('submit', function (event) {
     event.preventDefault();
-    var data = {};
-    $(this).serializeArray().forEach(function (field) { data[field.name] = field.value; });
+    phpPreviewEligible = false; resetFpmPlan();
+    var data = phpFields();
     request('preview_php_fpm', data, function (r) {
       var tbody = root.find('#ach-diff-rows').empty();
+      var impactBody = root.find('#ach-impact-rows').empty();
+      root.find('#ach-impact-summary').text('Shared site attribution unavailable.');
       root.find('#ach-fpm-result').text(r ? r.state + ': ' + (r.reason || r.note || r.source || '') : t.error);
       if (!r) return;
+      var impact = r.shared_impact;
+      if (!validImpact(impact, data.php_version)) {
+        msg('Shared impact API mismatch: no affected sites inferred. Reopen the panel after any plugin update.', true);
+      } else {
+        var label = impact.state === 'File Mapping' ? 'File mapping' : 'Needs Review';
+        root.find('#ach-impact-summary').text(
+          label + ': ' + impact.matched_sites.length + ' site(s) with a conventional PHP ' +
+          data.php_version + ' file assignment; ' + impact.unresolved_sites.length +
+          ' unresolved, ' + impact.other_php_sites_count + ' assigned other PHP. ' +
+          (impact.reason || '') + ' ' + impact.note
+        );
+        impact.matched_sites.forEach(function (site) {
+          var tr = $('<tr>');
+          $('<td>').text(site.id).appendTo(tr);
+          $('<td>').text(site.site_key).appendTo(tr);
+          $('<td>').text('PHP ' + data.php_version + ' (file only)').appendTo(tr);
+          impactBody.append(tr);
+        });
+        impact.unresolved_sites.forEach(function (site) {
+          var tr = $('<tr>');
+          $('<td>').text(site.id).appendTo(tr);
+          $('<td>').text(site.site_key).appendTo(tr);
+          $('<td>').text('Needs Review: ' + site.reason).appendTo(tr);
+          impactBody.append(tr);
+        });
+      }
       (r.changes || []).forEach(function (diff) {
         var tr = $('<tr>');
         $('<td>').text(diff.setting).appendTo(tr);
@@ -238,6 +492,10 @@
         tbody.append(tr);
       });
       if (r.state === 'File Match') root.find('#ach-fpm-result').text(r.state + ': ' + t.noDrift + '. ' + r.note);
+      phpPreviewEligible = data.php_version === '85' && (r.state === 'File Drift' || r.state === 'File Match') &&
+        validImpact(impact, data.php_version) && impact.state === 'File Mapping' && impact.matched_sites.length > 0;
+      root.find('#ach-fpm-prepare').prop('disabled', fpmBusy || !phpPreviewEligible);
+      root.find('#ach-fpm-plan').text(phpPreviewEligible ? 'File mapping available; prepare a guarded manual change if needed.' : 'Unsupported or unresolved: manual Apply unavailable.');
     });
   });
   overview();

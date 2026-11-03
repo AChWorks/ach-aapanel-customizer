@@ -1,4 +1,4 @@
-"""Native authenticated aaPanel plugin endpoints for safe Monitor controls.
+"""Native aaPanel plugin endpoints for Monitor and guarded manual PHP-FPM change.
 
 Do NOT add a `_check` endpoint: aaPanel's dynamic plugin route bypasses the
 ordinary inherited panel authentication boundary.
@@ -6,6 +6,9 @@ ordinary inherited panel authentication boundary.
 
 import os
 import sys
+import json
+import logging
+from datetime import datetime, timezone
 from uuid import uuid4
 
 _PLUGIN_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -15,7 +18,11 @@ _PANEL_CLASS_DIR = "/www/server/panel/class"
 if os.path.isdir(_PANEL_CLASS_DIR) and _PANEL_CLASS_DIR not in sys.path:
     sys.path.append(_PANEL_CLASS_DIR)
 
-from ach_customizer_monitor import MonitorInputError, get_site_page, preview_php_fpm
+from ach_customizer_monitor import (
+    MonitorInputError, get_site_page, inspect_php_fpm_site_impact, preview_php_fpm,
+)
+from ach_customizer_fpm_apply import FpmApplyError
+from ach_customizer_fpm_workflow import ManualFpmWorkflow
 from ach_customizer_state import DATA_DIR, StateError, read_state, set_enabled
 
 _STATE_DIR = DATA_DIR
@@ -50,9 +57,9 @@ class ach_customizer_main:
             },
             "overall_enable_control": "Plugin-owned Monitor switch only",
             "notice": (
-                "Read-only Monitor controls; no host configuration changes or background jobs."
+                "Monitor controls are read-only; PHP 8.5 Manual Apply requires separate admin approval. No background enforcement."
                 if active else
-                "Monitoring is disabled. Websites and services keep running unchanged."
+                "Monitor disabled; existing services stay running. Previously applied manual FPM changes require explicit recovery."
             ),
         }
 
@@ -134,6 +141,98 @@ class ach_customizer_main:
                 "pm.max_requests": self._argument(args, "max_requests"),
             }
             result = preview_php_fpm("/www/server/php", version, desired)
-            return {"status": True, "operation_id": operation_id, **result}
+            # Keep file/default drift available even when site ownership cannot
+            # be attributed. This second bounded read never authorizes Apply.
+            if result.get("state") in ("File Match", "File Drift") and result.get("source"):
+                try:
+                    import public
+
+                    impact = inspect_php_fpm_site_impact(public, version, result["source"])
+                except Exception as exc:
+                    impact = {
+                        "schema": 1, "state": "Needs Review", "scope": "shared_service",
+                        "version": version, "matched_sites": [], "unresolved_sites": [],
+                        "site_count": 0, "other_php_sites_count": 0,
+                        "reason": ("Shared site attribution unavailable: " + str(exc))[:250],
+                        "note": "Read-only file attribution failed; no affected sites were inferred.",
+                    }
+            else:
+                impact = {
+                    "schema": 1, "state": "Needs Review", "scope": "shared_service",
+                    "version": version, "matched_sites": [], "unresolved_sites": [],
+                    "site_count": 0, "other_php_sites_count": 0,
+                    "reason": "PHP-FPM file layout needs review before mapping websites",
+                    "note": "No site-to-pool inference was attempted.",
+                }
+            return {"status": True, "operation_id": operation_id,
+                    **result, "shared_impact": impact}
         except Exception as exc:
             return self._fail("php_fpm_file_preview", exc, operation_id)
+
+    @staticmethod
+    def _fpm_native_audit(action, response, request_id):
+        """Best-effort native aaPanel activity log with explicit delivery status.
+
+        aaPanel 8.0.7 `public.WriteLog` returns the SQLite log row ID or None.
+        Logging MUST NOT turn a successfully applied host change into a
+        reported failure, or hide an uncertain mutating outcome. Avoid
+        request payloads, passwords, sessions and exception tracebacks.
+        """
+        record = {
+            "schema": 1,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "actor": "primary_admin_action_or_rejected_attempt",
+            "action": "fpm_" + action,
+            "target": "PHP85-www-shared-service",
+            "request_id": request_id,
+            "success": response["status"] is True,
+            "result": response.get("state") if response["status"] else response.get("stage"),
+            "recovery_operation_id": response.get("operation_id") if response["status"] else None,
+        }
+        try:
+            import public
+            outcome = public.WriteLog("ACh Customizer", json.dumps(record, sort_keys=True), not_web=True)
+            if outcome is not None and outcome is not False:
+                return True
+            logging.getLogger("ach_customizer").warning(
+                "Native PHP-FPM audit persistence returned no row: %s %s",
+                record["action"], request_id)
+        except (ImportError, AttributeError) as exc:
+            logging.getLogger("ach_customizer").warning(
+                "Native PHP-FPM audit unavailable: %s %s (%s)",
+                record["action"], request_id, type(exc).__name__)
+        except Exception:
+            logging.getLogger("ach_customizer").exception(
+                "Native PHP-FPM audit failed: %s %s", record["action"], request_id)
+        return False
+
+    def _fpm_action(self, action, args):
+        """Regular native plugin POST action; the workflow rechecks full-admin auth."""
+        request_id = uuid4().hex
+        try:
+            result = getattr(ManualFpmWorkflow(), action)(args)
+            # A successful Apply's operation_id is the durable recovery ID;
+            # request_id is a separate one-request diagnostic identifier.
+            response = {"status": True, "request_id": request_id, **result}
+        except FpmApplyError as exc:
+            response = self._fail(exc.stage, exc, request_id)
+        except Exception:
+            # Do not send arbitrary privileged exception details to a browser.
+            response = self._fail("fpm_" + action, "Unexpected manual PHP-FPM error; no automatic retry", request_id)
+        if action in ("apply", "rollback"):
+            response["audit_logged"] = self._fpm_native_audit(action, response, request_id)
+            if not response["audit_logged"]:
+                response["audit_warning"] = "aaPanel activity-log persistence was not confirmed"
+        return response
+
+    def fpm_prepare(self, args):
+        return self._fpm_action("prepare", args)
+
+    def fpm_apply(self, args):
+        return self._fpm_action("apply", args)
+
+    def fpm_recovery(self, args):
+        return self._fpm_action("recovery", args)
+
+    def fpm_rollback(self, args):
+        return self._fpm_action("rollback", args)
