@@ -220,6 +220,11 @@ class NativeEndpointTests(unittest.TestCase):
         self.assertEqual(result["site_key"], "site.test")
         self.assertEqual(spy.call_args.args[0], ["site.test", "*.site.test"])
         self.assertEqual(self.reads, 3)
+        self.assertTrue(result["activity_logged"])
+        from ach_customizer_activity import read_activity
+        activity = read_activity(self.state.name, module="websites", limit=10)
+        self.assertTrue(any(entry["action"] == "inspect_local_hosts" and
+                            entry["outcome"] == "Needs Review" for entry in activity))
         self.assertFalse(Path(self.state.name, "ach_customizer.state.json").exists())
 
     def test_secondary_temporary_and_get_rejected_before_filesystem_inspection(self):
@@ -239,6 +244,11 @@ class NativeEndpointTests(unittest.TestCase):
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
         self.assertIn("changed", response["msg"])
+        self.assertTrue(response["activity_logged"])
+        from ach_customizer_activity import read_activity
+        activity = read_activity(self.state.name, module="websites", limit=10)
+        self.assertTrue(any(entry["action"] == "hosts_inspection" and
+                            entry["error_class"] == "HostsInspectionError" for entry in activity))
         self.assertEqual(spy.call_count, 1)
 
     def test_invalid_site_id_never_reads_hosts(self):

@@ -1,43 +1,95 @@
 <style>
-  #ach-customizer { font-size: 13px; line-height: 1.55; }
-  #ach-customizer .ach-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
-  #ach-customizer .ach-tabs button[aria-selected="true"] { font-weight:700; border-bottom:2px solid currentColor; }
+  /* Instance-scoped, aaPanel-native operations layout. Never change unrelated layers. */
+  /*
+   * aaPanel 8.0.7's native launcher uses a fixed layer at top:20%.
+   * The plugin script can execute before the layer is attached, so its
+   * fitNativeLayer() startup call cannot always find the host wrapper.
+   * :has() reapplies safe geometry when aaPanel attaches the plugin DOM,
+   * even without any resize event. The JS fit helper remains a fallback
+   * for browsers that do not support :has().
+   */
+  @supports selector(.layui-layer:has(#ach-customizer)) {
+    .layui-layer:has(#ach-customizer) {
+      width:min(1100px,calc(100vw - 32px)) !important;
+      height:min(820px,calc(100dvh - 48px)) !important;
+      max-height:calc(100dvh - 48px) !important;
+      left:max(16px,calc((100vw - min(1100px,calc(100vw - 32px)))/2)) !important;
+      top:max(8px,calc((100dvh - min(820px,calc(100dvh - 48px)))/2)) !important;
+    }
+    .layui-layer:has(#ach-customizer) > .layui-layer-content {
+      height:calc(100% - 42px) !important;
+      overflow:hidden !important;
+    }
+    .layui-layer:has(#ach-customizer) #ach-customizer { height:100% !important; }
+  }
+  #ach-customizer, #ach-customizer * { box-sizing:border-box; }
+  #ach-customizer { color:#444; background:#fff; width:100%; height:min(740px,calc(100dvh - 104px)); min-height:280px; font-size:13px; line-height:1.55; overflow:hidden; }
+  #ach-customizer .ach-shell { display:flex; flex-direction:column; height:100%; min-width:0; }
+  #ach-customizer .ach-head { padding:12px 20px; border-bottom:1px solid #e3e6e8; background:#fff; flex:none; }
+  #ach-customizer .ach-head h3 { margin:0; font-size:16px; font-weight:600; }
+  #ach-customizer .ach-head p { margin:2px 0 0; font-size:12px; color:#737b82; }
+  #ach-customizer .ach-workspace { display:grid; grid-template-columns:190px minmax(0,1fr); flex:1; min-height:0; }
+  #ach-customizer .ach-sidebar { min-width:0; overflow-y:auto; background:#f3f3f3; border-right:1px solid #e6e6e6; padding:12px 0; }
+  #ach-customizer .ach-sidebar-label { padding:6px 16px; font-size:11px; color:#888; font-weight:600; letter-spacing:.035em; }
+  #ach-customizer .ach-sidebar button { appearance:none; border:0; border-left:3px solid transparent; border-radius:0; background:transparent; display:block; width:100%; padding:10px 14px; text-align:left; color:#555; line-height:1.35; cursor:pointer; }
+  #ach-customizer .ach-sidebar button:hover { background:#e9e9e9; }
+  #ach-customizer .ach-sidebar button[aria-selected="true"] { background:#fff; border-left-color:#20a53a; color:#222; font-weight:600; }
+  #ach-customizer .ach-main { overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:18px 22px 38px; min-width:0; min-height:0; scrollbar-gutter:stable; }
+  #ach-customizer .ach-main h4 { font-size:15px; font-weight:600; margin:0 0 12px; }
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
-  #ach-customizer .ach-note { padding:10px 12px; border:1px solid #d4d9e0; border-radius:5px; margin-bottom:12px; }
-  #ach-customizer .ach-note:focus { outline:2px solid #555; }
-  #ach-customizer .ach-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:12px 0; }
-  #ach-customizer .ach-fields label { display:block; font-weight:600; }
-  #ach-customizer .ach-fields input { width:100%; max-width:210px; margin-top:3px; }
-  #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:14px; margin:10px 0; }
+  #ach-customizer .ach-note { padding:10px 12px; border:1px solid #dee2e6; background:#fafafa; border-radius:3px; margin:0 0 14px; overflow-wrap:anywhere; }
+  #ach-customizer .ach-note p:last-child { margin-bottom:0; }
+  #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr)); gap:12px 14px; margin:12px 0; }
+  #ach-customizer .ach-fields label, #ach-customizer .ach-status-fields label { display:block; font-weight:600; }
+  #ach-customizer .ach-fields input, #ach-customizer .ach-fields select, #ach-customizer .ach-status-fields input { width:100%; min-width:0; max-width:none; margin-top:4px; }
+  #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:12px; margin:10px 0; }
   #ach-customizer .ach-switches label { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
   #ach-customizer .ach-switches input { margin:0; }
   #ach-customizer table { width:100%; border-collapse:collapse; }
-  #ach-customizer td, #ach-customizer th { padding:7px 9px; text-align:start; border-bottom:1px solid #e1e5ec; overflow-wrap:anywhere; }
-  #ach-customizer .ach-scroll { overflow-x:auto; }
-  #ach-customizer .ach-controls { display:flex; align-items:center; gap:8px; margin-top:12px; }
-  #ach-customizer button:focus-visible, #ach-customizer input:focus-visible { outline:2px solid #2486d1; outline-offset:2px; }
-  #ach-customizer .ach-error { color:#ad2525; }
-  #ach-customizer .ach-status-preview { width:100%; min-height:480px; border:1px solid #d4d9e0; border-radius:6px; background:#fff; }
-  #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
-  #ach-customizer select { max-width:240px; margin-top:3px; }
-  #ach-customizer .ach-status-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:12px 0; }
-  #ach-customizer .ach-status-fields label { display:block; font-weight:600; }
-  #ach-customizer .ach-status-fields input { width:100%; }
+  #ach-customizer td, #ach-customizer th { padding:8px; text-align:start; border-bottom:1px solid #e1e5ec; overflow-wrap:anywhere; vertical-align:top; }
+  #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; }
+  #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  #ach-customizer button:focus-visible, #ach-customizer input:focus-visible, #ach-customizer select:focus-visible, #ach-customizer .ach-main:focus-visible { outline:2px solid #267fc6; outline-offset:2px; }
+  #ach-customizer .ach-error { color:#b22424; }
+  #ach-customizer .ach-fpm-operation-notice { position:sticky; top:0; z-index:2; padding:9px 10px; background:#f2f8f3; border:1px solid #d4e4d6; font-weight:600; overflow-wrap:anywhere; }
+  #ach-customizer .ach-fpm-operation-notice.ach-error { background:#fff5f4; border-color:#e4c8c7; }
 
-  @media(max-width:600px) { #ach-customizer .ach-fields { grid-template-columns:1fr; } }
+  #ach-customizer .ach-status-preview { width:100%; min-height:440px; border:1px solid #d4d9e0; border-radius:3px; background:#fff; }
+  #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #ach-customizer .ach-badge { display:inline-block; font-size:11px; padding:2px 7px; border-radius:3px; background:#e9f2ec; color:#21642d; }
+  #ach-customizer .ach-activity-error { color:#b22424; font-weight:600; }
+  #ach-customizer .ach-activity-warning { color:#91630b; font-weight:600; }
+  #ach-customizer .ach-activity-info { color:#3b6474; }
+  #ach-customizer .ach-activity-table { font-size:12px; }
+  #ach-customizer .ach-activity-table td { overflow-wrap:anywhere; }
+  @media (max-width:720px) {
+    #ach-customizer .ach-workspace { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
+    #ach-customizer .ach-sidebar { display:flex; align-items:stretch; gap:2px; overflow-x:auto; overflow-y:hidden; border-right:0; border-bottom:1px solid #e1e1e1; padding:0 6px; }
+    #ach-customizer .ach-sidebar-label { display:none; }
+    #ach-customizer .ach-sidebar button { white-space:nowrap; width:auto; flex:none; border-left:0; border-bottom:3px solid transparent; padding:10px 12px; }
+    #ach-customizer .ach-sidebar button[aria-selected="true"] { border-bottom-color:#20a53a; }
+    #ach-customizer .ach-main { padding:14px 14px 28px; }
+  }
+  @media (max-height:550px) { #ach-customizer { height:calc(100dvh - 64px); min-height:200px; } }
 </style>
 <div class="bt-form" id="ach-customizer" dir="ltr" lang="en">
-  <div class="bt-w-con pd15">
-    <h3>ACh aaPanel Customizer</h3>
-    <p class="ach-note">Development candidate: read-only Monitor plus an explicitly confirmed PHP 8.5 shared-service Manual Apply/rollback for verified aaPanel 8.0.7 + Nginx. No automatic enforcement.</p>
-    <div class="ach-tabs" role="tablist" aria-label="Plugin sections">
-      <button type="button" data-tab="overview" role="tab" aria-selected="true">Overview</button>
-      <button type="button" data-tab="websites" role="tab" aria-selected="false">Websites</button>
-      <button type="button" data-tab="php" role="tab" aria-selected="false">PHP-FPM Preview</button>
-      <button type="button" data-tab="status" role="tab" aria-selected="false">Status Pages</button>
-    </div>
-    <p id="ach-message" role="status" aria-live="polite"></p>
-    <section class="ach-view" data-view="overview" role="tabpanel">
+  <div class="ach-shell">
+    <header class="ach-head"><h3>ACh aaPanel Customizer</h3><p>Native aaPanel plugin · Monitor by default · No automatic enforcement</p></header>
+    <div class="ach-workspace">
+      <nav class="ach-sidebar" role="tablist" aria-label="Plugin sections" aria-orientation="vertical">
+        <span class="ach-sidebar-label">OPERATIONS</span>
+        <button type="button" data-tab="overview" role="tab" id="ach-tab-overview" aria-controls="ach-panel-overview" aria-selected="true" tabindex="0">Overview</button>
+        <button type="button" data-tab="websites" role="tab" id="ach-tab-websites" aria-controls="ach-panel-websites" aria-selected="false" tabindex="-1">Websites</button>
+        <button type="button" data-tab="php" role="tab" id="ach-tab-php" aria-controls="ach-panel-php" aria-selected="false" tabindex="-1">PHP-FPM</button>
+        <button type="button" data-tab="status" role="tab" id="ach-tab-status" aria-controls="ach-panel-status" aria-selected="false" tabindex="-1">Status Pages</button>
+        <span class="ach-sidebar-label">SUPPORT</span>
+        <button type="button" data-tab="activity" role="tab" id="ach-tab-activity" aria-controls="ach-panel-activity" aria-selected="false" tabindex="-1">Activity / Diagnostics</button>
+      </nav>
+      <main class="ach-main" id="ach-content" tabindex="-1">
+        <p id="ach-message" role="status" aria-live="polite"></p>
+        <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
+      <h4>Overview</h4>
+      <p class="ach-note">This unreleased development candidate includes read-only monitoring and a separately confirmed, guarded PHP 8.5 shared-service Apply/Restore for verified aaPanel 8.0.7 + Nginx. No automatic enforcement.</p>
       <p id="ach-overview-status">Loading...</p>
       <div class="ach-note">
         <strong>Monitor controls</strong>
@@ -51,15 +103,18 @@
       </div>
       <p>Website inventory is read-only. PHP-FPM monitoring is shared-service scope, not per-website tuning.</p>
     </section>
-    <section class="ach-view" data-view="websites" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-websites" aria-labelledby="ach-tab-websites" data-view="websites" role="tabpanel" hidden>
+      <h4>Websites</h4>
       <p class="ach-note">The ID identifies the site in aaPanel. The site key is aaPanel's recorded site name, which may remain after its domain binding is removed. Bound domains are aaPanel database records, not independently verified DNS or live Nginx routes.</p>
       <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"></tbody></table></div>
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
       <p class="ach-note"><strong>Local hosts override check (read-only):</strong> inspect exact site-bound names in origin-local /etc/hosts. Loopback does not prove DNS or Gateway failure; no correction is offered.</p>
-      <div class="ach-controls"><label for="ach-hosts-site-id">Site ID</label><input id="ach-hosts-site-id" type="number" min="1" max="2147483647" autocomplete="off" placeholder="Native site ID" /><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts</button></div>
-      <p id="ach-hosts-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native site ID for read-only inspection.</p>
+      <div class="ach-controls"><label for="ach-hosts-site-id">Website (current inventory page)</label><select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts</button></div>
+      <p class="ach-note">Select a discovered website above, or use Previous / Next to inspect another page. This is an origin-local file check, not a remote DNS or Gateway test.</p>
+      <p id="ach-hosts-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website from the inventory for read-only inspection.</p>
     </section>
-    <section class="ach-view" data-view="php" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
+      <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
       <p class="ach-note">Read-only PHP-FPM file/default comparison. Conventional aaPanel Nginx site-to-pool file assignments are listed separately; neither file mapping nor this preview verifies effective routing/runtime state or authorizes Apply.</p>
       <form id="ach-php-form">
         <div class="ach-fields">
@@ -81,6 +136,7 @@
         <p>Only on aaPanel 8.0.7 with Nginx and an unambiguous conventional site-file mapping. This edits the single shared <code>[www]</code> pool, validates PHP-FPM syntax, reloads PHP-FPM and checks service health. Other consumers may be affected; file attribution does not prove full traffic health. No automatic reapply after aaPanel overwrites the policy.</p>
         <button id="ach-fpm-prepare" type="button" disabled>Prepare guarded change</button>
         <p id="ach-fpm-plan" role="status" aria-live="polite">Run a PHP 85 file preview before preparing a change.</p>
+        <p id="ach-fpm-operation-notice" class="ach-fpm-operation-notice" role="status" aria-live="polite" hidden></p>
         <div id="ach-fpm-review" hidden>
           <p id="ach-fpm-details"></p>
           <label><input id="ach-fpm-approval" type="checkbox" /> I approve changing the PHP 8.5 shared [www] pool for all affected consumers.</label>
@@ -97,7 +153,8 @@
         </div>
       </div>
     </section>
-    <section class="ach-view" data-view="status" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
+      <h4>Status Pages · Offline Preview</h4>
       <p class="ach-note"><strong>Offline Status Pages — Preview only.</strong> Eleven templates in English and Persian. This module saves branding preferences only; it does not install pages, configure Nginx, alter site files, or change HTTP status codes. Apply and Restore need a separately verified native adapter.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
@@ -114,8 +171,13 @@
         <div><label for="ach-status-scope">Branding scope</label><select id="ach-status-scope">
           <option value="global">Global defaults</option><option value="site">Website override</option>
         </select></div>
-        <div><label for="ach-status-site-id">aaPanel site ID (website scope)</label>
-          <input id="ach-status-site-id" type="number" min="1" max="2147483647" placeholder="See Websites tab" disabled /></div>
+        <div><label for="ach-status-site-id">Website (native aaPanel inventory)</label>
+          <select id="ach-status-site-id" disabled><option value="">Select website scope first</option></select>
+          <div class="ach-controls">
+            <button id="ach-status-sites-retry" type="button" hidden>Refresh website list</button>
+            <button id="ach-status-sites-more" type="button" hidden>Load more websites</button>
+          </div>
+          <small id="ach-status-sites-state" role="status">Available websites load when selecting website scope.</small></div>
       </div>
       <p id="ach-status-source" role="status">Branding not loaded.</p>
       <div class="ach-status-fields">
@@ -143,6 +205,21 @@
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
       <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
     </section>
+    <section class="ach-view" id="ach-panel-activity" aria-labelledby="ach-tab-activity" data-view="activity" role="tabpanel" hidden>
+      <h4>Activity / Diagnostics</h4>
+      <p class="ach-note">Plugin-owned, bounded operation history. Read access requires a full primary aaPanel administrator session. No tokens, cookies or request payloads are recorded.</p>
+      <div class="ach-controls">
+        <label for="ach-activity-level">Severity</label>
+        <select id="ach-activity-level"><option value="">All</option><option value="ERROR">Errors</option><option value="WARNING">Warnings</option><option value="INFO">Information</option><option value="DEBUG">Debug</option></select>
+        <label for="ach-activity-module">Module</label>
+        <select id="ach-activity-module"><option value="">All</option><option value="monitor">Monitor</option><option value="websites">Websites</option><option value="php_fpm">PHP-FPM</option><option value="status_pages">Status Pages</option><option value="diagnostics">Diagnostics</option><option value="lifecycle">Lifecycle</option></select>
+        <button id="ach-activity-refresh" type="button" class="btn btn-default">Refresh</button>
+      </div>
+      <p id="ach-activity-result" role="status" aria-live="polite">Open this section to load recent activity.</p>
+      <div class="ach-scroll"><table class="ach-activity-table"><thead><tr><th>Time (UTC)</th><th>Level</th><th>Module / action</th><th>Outcome / stage</th><th>Operation / recovery</th></tr></thead><tbody id="ach-activity-rows"></tbody></table></div>
+    </section>
+      </main>
+    </div>
   </div>
 </div>
 <script>
@@ -161,12 +238,40 @@
   var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false;
   var controlBusy = false, lastOverview = null;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
+  var fpmFormGeneration = 0, fpmPreviewTicket = 0, fpmPrepareTicket = 0;
+  var fpmActivePrepareTicket = 0;
   var statusBusy = false, statusRevision = null, statusLoadedScope = null, statusTicket = 0;
+  var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
+  var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
+  function fitNativeLayer() {
+    // Only resize the aaPanel layer that actually owns this plugin instance.
+    if (!root[0] || typeof window === 'undefined') return;
+    var tablist = root[0].querySelector('.ach-sidebar');
+    if (tablist) tablist.setAttribute('aria-orientation', window.innerWidth <= 720 ? 'horizontal' : 'vertical');
+    var layer = root[0].closest('.layui-layer');
+    if (!layer) return; // Static tests/embedded pages keep intrinsic dimensions.
+    var width = Math.min(1100, Math.max(240, window.innerWidth - 32));
+    var height = Math.min(820, Math.max(280, window.innerHeight - 48));
+    layer.style.width = width + 'px';
+    layer.style.height = height + 'px';
+    layer.style.left = Math.max(8, Math.floor((window.innerWidth - width) / 2)) + 'px';
+    layer.style.top = Math.max(8, Math.floor((window.innerHeight - height) / 2)) + 'px';
+    var title = layer.querySelector('.layui-layer-title');
+    var body = layer.querySelector('.layui-layer-content');
+    if (body) { body.style.height = Math.max(160, height - (title ? title.offsetHeight : 0)) + 'px'; body.style.overflow = 'hidden'; }
+    root[0].style.height = '100%';
+  }
+  if (typeof window !== 'undefined' && window.addEventListener && root[0]) {
+    // Namespace prevents stale callbacks when the native plugin dialog reopens.
+    $(window).off('resize.achCustomizer').on('resize.achCustomizer', fitNativeLayer);
+    fitNativeLayer();
+  }
   function msg(value, failed) { root.find('#ach-message').text(value || '').toggleClass('ach-error', Boolean(failed)); }
   function invalidateInventory(message) {
     hasMore = false;
     root.find('#ach-page').text('Unavailable');
     root.find('#ach-prev, #ach-next').prop('disabled', true);
+    root.find('#ach-hosts-result').text('Website inventory unavailable; local hosts inspection is disabled until a valid inventory is loaded.');
     if (message) msg(message, true);
   }
   function validInventoryPage(r, expectedPage) {
@@ -202,22 +307,114 @@
     }
     return true;
   }
-  function request(method, data, done) {
+  function request(method, data, done, shouldReport, expectedRestoreSha) {
+    // Multiple independent panels may load in parallel. Preserve the global
+    // status of the latest initiated request; stale callbacks still complete
+    // their own view, subject to each view's selection/version checks.
+    var messageTicket = ++requestMessageTicket;
     msg(t.loading, false);
     $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : 20000, dataType:'json' })
       .done(function (response) {
-        if (!response || response.status !== true) {
-          msg((response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
-            (response.audit_warning ? ' Audit: ' + response.audit_warning : '')) || t.error, true);
+        var mutating = /^fpm_(apply|rollback)$/.test(method);
+        var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
+        if (mutating) showFpmOperationResult(method, response, outcome);
+        var incompatible = mutating && response && response.status === true && outcome === 'unconfirmed';
+        if (!response || response.status !== true || incompatible) {
+          if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
+            msg(incompatible ? 'PHP-FPM operation response incompatible or incomplete. Inspect saved recovery before retrying.' :
+              (response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
+              (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
+              (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
+          }
           done(null);
         } else {
-          if (/^fpm_(apply|rollback)$/.test(method) && response.audit_logged !== true) {
-            msg(response.audit_warning || 'aaPanel activity-log persistence was not confirmed.', true);
-          } else { msg('', false); }
+          if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
+            var warnings = [];
+            if (/^fpm_(apply|rollback)$/.test(method) && response.audit_logged !== true) {
+              warnings.push(response.audit_warning || 'aaPanel activity-log persistence was not confirmed.');
+            }
+            if (response.activity_logged === false) {
+              warnings.push(response.activity_warning || 'Plugin activity-log persistence was not confirmed.');
+            }
+            msg(warnings.join(' '), warnings.length > 0);
+          }
           done(response);
         }
       })
-      .fail(function (_xhr, status) { msg(t.error + ': ' + status + (/^fpm_(apply|rollback)$/.test(method) ? '. Outcome unknown: inspect saved recovery before any retry.' : ''), true); done(null); });
+      .fail(function (_xhr, status) {
+        if (/^fpm_(apply|rollback)$/.test(method)) showFpmOperationResult(method, null, 'unconfirmed');
+        if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
+          msg(t.error + ': ' + status + (/^fpm_(apply|rollback)$/.test(method) ?
+            '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
+        }
+        done(null);
+      });
+  }
+  function fpmOutcome(method, response, requestData, expectedRestoreSha) {
+    // Match the real PHP 8.5 workflow's result fields, not just status=true.
+    // This is display-only evidence: backend authorization/recovery gates stand.
+    if (!response || response.status !== true || Array.isArray(response)) return 'unconfirmed';
+    var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
+    var operation = function (value) { return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value); };
+    if (method === 'fpm_apply') {
+      var sourceMatches = response.version === '85' &&
+        response.scope === 'shared_service' && response.pool === 'www' &&
+        response.source === '/www/server/php/85/etc/php-fpm.conf';
+      if (!sourceMatches || !hash(response.before_sha256) || !hash(response.after_sha256)) {
+        return 'unconfirmed';
+      }
+      if (response.state === 'Applied' &&
+          operation(response.operation_id) &&
+          response.before_sha256 !== response.after_sha256 &&
+          response.before_sha256 === requestData.expected_before &&
+          response.after_sha256 === requestData.expected_after) return 'applied';
+      if (response.state === 'No Change' && response.operation_id === null &&
+          response.before_sha256 === response.after_sha256) return 'no-change';
+      return 'unconfirmed';
+    }
+    if (method === 'fpm_rollback' && response.state === 'Rolled Back' &&
+        operation(response.operation_id) &&
+        response.operation_id === requestData.operation_id &&
+        hash(response.restored_sha256) &&
+        hash(expectedRestoreSha) &&
+        response.restored_sha256 === expectedRestoreSha) return 'restored';
+    return 'unconfirmed';
+  }
+  function showFpmOperationResult(method, response, outcome) {
+    var label = method === 'fpm_rollback' ? 'Restore' : 'Apply';
+    var confirmed = outcome === 'applied' || outcome === 'restored';
+    var noChange = outcome === 'no-change';
+    var warnings = [];
+    if (response && response.audit_logged !== true) {
+      warnings.push(response.audit_warning || 'Native aaPanel audit persistence unconfirmed.');
+    }
+    if (response && response.activity_logged === false) {
+      warnings.push(response.activity_warning || 'Plugin Activity persistence unconfirmed.');
+    }
+    if (response && response.activity_logged === null) {
+      warnings.push('Plugin Activity event excluded by configured verbosity.');
+    }
+    if (response && response.status === true && response.activity_logged === undefined) {
+      warnings.push('Plugin Activity persistence unconfirmed.');
+    }
+    var result = confirmed ?
+      label + ' confirmed: ' + response.state +
+        '; recovery ID: ' + response.operation_id +
+        (outcome === 'restored' ? '; restored SHA-256: ' + response.restored_sha256 : '') :
+      noChange ? 'No host change performed: PHP-FPM already matches the requested values; no recovery operation created.' :
+      label + ' NOT confirmed. Inspect saved recovery before retrying.';
+    var needsAttention = !confirmed && !noChange || warnings.length > 0;
+    var notice = root.find('#ach-fpm-operation-notice');
+    notice.text(result + (warnings.length ? ' Diagnostics: ' + warnings.join(' ') : ''))
+      .prop('hidden', false).toggleClass('ach-error', needsAttention)
+      .attr('role', needsAttention ? 'alert' : 'status')
+      .attr('aria-live', needsAttention ? 'assertive' : 'polite');
+  }
+  function markFpmOperationPending(action) {
+    root.find('#ach-fpm-operation-notice')
+      .text(action + ' is pending. Outcome unknown until confirmed; do not retry.')
+      .prop('hidden', false).toggleClass('ach-error', false)
+      .attr('role', 'status').attr('aria-live', 'polite');
   }
   function displayControls(r) {
     if (!r || r.state_schema !== 1 || !Number.isSafeInteger(r.state_revision) ||
@@ -264,6 +461,7 @@
   function sites() {
     if (siteBusy) return;
     siteBusy = true;
+    resetHostsSelection('Loading website inventory...');
     request('get_sites', {page:page, page_size:sitePageSize}, function (r) {
       siteBusy = false;
       var body = root.find('#ach-sites-rows').empty();
@@ -278,6 +476,7 @@
         invalidateInventory('Invalid inventory response: website or domain data is incomplete or inconsistent. No bindings were inferred.');
         return;
       }
+      updateHostsSiteChoices(r.sites);
       r.sites.forEach(function (site) {
         var tr = $('<tr>');
         $('<td>').text(site.id).appendTo(tr);
@@ -297,15 +496,38 @@
       root.find('#ach-next').prop('disabled', !hasMore);
     });
   }
-  var hostsBusy = false, hostsTicket = 0;
+  var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
   function hostsSiteId() {
     var raw = String(root.find('#ach-hosts-site-id').val() || '');
-    return /^[1-9][0-9]{0,9}$/.test(raw) && Number(raw) <= 2147483647 ? raw : null;
+    return /^[1-9][0-9]{0,9}$/.test(raw) && Number(raw) <= 2147483647 &&
+      hostsPageSites.has(raw) ? raw : null;
   }
   function hostsLock(busy) {
     hostsBusy = busy;
-    root.find('#ach-hosts-site-id').prop('disabled', busy);
-    root.find('#ach-hosts-inspect-button').prop('disabled', busy || !hostsSiteId());
+    root.find('#ach-hosts-site-id').prop('disabled', busy || siteBusy || !hostsPageSites.size);
+    root.find('#ach-hosts-inspect-button').prop('disabled', busy || siteBusy || !hostsSiteId());
+  }
+  function resetHostsSelection(message) {
+    ++hostsTicket; // Supersede an in-flight inspection on page/navigation changes.
+    hostsBusy = false;
+    hostsPageSites = new Map();
+    var select = root.find('#ach-hosts-site-id').empty().val('');
+    $('<option>').val('').text('Select a website on this page').appendTo(select);
+    root.find('#ach-hosts-result').text(message || 'Select a discovered website to inspect.');
+    hostsLock(false);
+  }
+  function updateHostsSiteChoices(sites) {
+    var select = root.find('#ach-hosts-site-id').empty().val('');
+    $('<option>').val('').text(sites.length ? 'Select a website on this page' : 'No websites on this page').appendTo(select);
+    hostsPageSites = new Map();
+    sites.forEach(function (site) {
+      var id = String(site.id);
+      hostsPageSites.set(id, site.name);
+      $('<option>').val(id).text(site.name + ' (#' + id + ')').appendTo(select);
+    });
+    root.find('#ach-hosts-result').text(
+      sites.length ? 'Select a website to inspect its origin-local /etc/hosts entries.' : 'No websites on this page.');
+    hostsLock(false);
   }
   function validHostsResult(r, siteId) {
     if (!r || r.status !== true || r.schema !== 1 || r.read_only !== true ||
@@ -313,6 +535,7 @@
         r.remote_dns_verified !== false || r.gateway_verified !== false ||
         !Number.isSafeInteger(r.site_id) || r.site_id !== Number(siteId) ||
         typeof r.site_key !== 'string' || !r.site_key || r.site_key.length > 255 ||
+        r.site_key !== hostsPageSites.get(siteId) ||
         !/^[0-9a-f]{64}$/.test(r.hosts_sha256 || '') ||
         typeof r.reason !== 'string' || r.reason.length > 300 ||
         typeof r.note !== 'string' || r.note.length > 600 ||
@@ -349,7 +572,7 @@
     root.find('#ach-hosts-result').text('Inspecting origin-local file only...');
     hostsLock(true);
     request('inspect_local_hosts', {site_id:id}, function (r) {
-      if (ticket !== hostsTicket) { hostsLock(false); return; }
+      if (ticket !== hostsTicket) return;
       if (id !== hostsSiteId() || !validHostsResult(r, id)) {
         root.find('#ach-hosts-result').text('Inspection unconfirmed; no DNS or Gateway inference.');
       } else {
@@ -454,10 +677,76 @@
       statusLock(false);
     });
   }
+  function loadStatusSites(reset) {
+    if (root.find('#ach-status-scope').val() !== 'site') return;
+    if (reset) {
+      // Invalidate every older response, even after site -> global -> site.
+      statusSitesTicket += 1;
+      statusSites = []; statusSitePage = 1; statusSitesMore = true;
+      statusSitesBusy = false;
+      root.find('#ach-status-site-id').empty().prop('disabled', true);
+      $('<option>').val('').text('Loading websites...').appendTo(root.find('#ach-status-site-id'));
+    }
+    if (statusSitesBusy || !statusSitesMore) return;
+    statusSitesBusy = true;
+    root.find('#ach-status-sites-more, #ach-status-sites-retry').prop('disabled', true);
+    root.find('#ach-status-sites-state').text('Loading website inventory...');
+    var expectedPage = statusSitePage, ticket = statusSitesTicket;
+    request('status_sites', {page:expectedPage, page_size:sitePageSize}, function (r) {
+      if (ticket !== statusSitesTicket || root.find('#ach-status-scope').val() !== 'site') return;
+      statusSitesBusy = false;
+      root.find('#ach-status-sites-retry').prop('disabled', false);
+      if (!r || r.purpose !== 'status_site_selection' ||
+          r.inventory_schema !== 2 || !validInventoryPage(r, expectedPage)) {
+        root.find('#ach-status-sites-state').text('Website inventory unavailable or changed. Check administrator access and retry.');
+        root.find('#ach-status-sites-more').prop('hidden', true);
+        if (!statusSites.length) root.find('#ach-status-site-id').prop('disabled', true);
+        return;
+      }
+      var seen = new Set(statusSites.map(function (item) { return item.id; }));
+      var newSites = [];
+      for (var i = 0; i < r.sites.length; i++) {
+        if (seen.has(r.sites[i].id)) {
+          root.find('#ach-status-sites-state').text('Duplicate website ID across pages; refresh inventory.');
+          root.find('#ach-status-sites-more').prop('hidden', true);
+          return;
+        }
+        seen.add(r.sites[i].id);
+        newSites.push(r.sites[i]);
+      }
+      statusSites = statusSites.concat(newSites);
+      var select = root.find('#ach-status-site-id'), selected = select.val();
+      select.empty();
+      $('<option>').val('').text('Choose a website...').appendTo(select);
+      statusSites.forEach(function (site) {
+        $('<option>').val(String(site.id)).text(site.name + ' (ID ' + site.id + ')').appendTo(select);
+      });
+      select.val(statusSites.some(function (site) { return String(site.id) === selected; }) ? selected : '');
+      select.prop('disabled', false);
+      statusSitePage += 1;
+      statusSitesMore = r.has_more;
+      root.find('#ach-status-sites-more').prop('hidden', !statusSitesMore).prop('disabled', !statusSitesMore);
+      root.find('#ach-status-sites-state').text(statusSites.length + ' website(s) loaded' + (statusSitesMore ? '; more available.' : '.'));
+    });
+  }
+  root.find('#ach-status-sites-more').on('click', function () { loadStatusSites(false); });
+  root.find('#ach-status-sites-retry').on('click', function () { loadStatusSites(true); });
   root.find('#ach-status-load').on('click', statusLoad);
   root.find('#ach-status-scope').on('change', function () {
-    root.find('#ach-status-site-id').prop('disabled', $(this).val() !== 'site');
+    var siteMode = $(this).val() === 'site';
+    if (!siteMode) {
+      statusSitesTicket += 1;
+      statusSitesBusy = false; statusSitesMore = false;
+      statusSites = []; statusSitePage = 1;
+      root.find('#ach-status-site-id').empty();
+      $('<option>').val('').text('Select website scope first').appendTo(root.find('#ach-status-site-id'));
+      root.find('#ach-status-sites-state').text('Choose website scope to load current site options.');
+    }
+    root.find('#ach-status-site-id').prop('disabled', !siteMode || !statusSites.length);
+    root.find('#ach-status-sites-retry').prop('hidden', !siteMode);
+    root.find('#ach-status-sites-more').prop('hidden', !siteMode || !statusSitesMore);
     statusLoad();
+    if (siteMode && !statusSites.length) loadStatusSites(true);
   });
   root.find('#ach-status-site-id').on('change', statusLoad);
   root.find('#ach-status-reset-approve').on('change', function () { statusLock(statusBusy); });
@@ -618,16 +907,81 @@
     statusClearPreview();
     statusLock(statusBusy);
   });
+  function loadActivity() {
+    // Filters and refresh may change while a request is pending. Accept only
+    // the latest selection, not the fastest outdated network reply.
+    var ticket = ++activityTicket;
+    activityBusy = true;
+    root.find('#ach-activity-refresh').prop('disabled', true);
+    root.find('#ach-activity-result').text('Loading recent activity...');
+    request('get_activity', {
+      level:root.find('#ach-activity-level').val() || '',
+      module:root.find('#ach-activity-module').val() || '', limit:50
+    }, function (r) {
+      if (ticket !== activityTicket) return;
+      activityBusy = false;
+      root.find('#ach-activity-refresh').prop('disabled', false);
+      var rows = root.find('#ach-activity-rows').empty();
+      var valid = r && r.schema === 1 && r.read_only === true &&
+        ['DEBUG','INFO','WARNING','ERROR'].indexOf(r.configured_level) >= 0 &&
+        Array.isArray(r.entries) && r.entries.length <= 50 &&
+        r.entries.every(function (item) {
+          return item && item.schema === 1 &&
+            typeof item.time_utc === 'string' && item.time_utc.length <= 40 &&
+            typeof item.module === 'string' && ['monitor','websites','php_fpm','status_pages','diagnostics','lifecycle'].indexOf(item.module) >= 0 &&
+            typeof item.action === 'string' && item.action.length <= 48 &&
+            typeof item.stage === 'string' && item.stage.length <= 72 &&
+            typeof item.level === 'string' && ['DEBUG','INFO','WARNING','ERROR'].indexOf(item.level) >= 0 &&
+            typeof item.operation_id === 'string' && /^[0-9a-f]{32}$/.test(item.operation_id) &&
+            typeof item.outcome === 'string' && item.outcome.length <= 40 &&
+            typeof item.target === 'string' && item.target.length <= 120 &&
+            typeof item.detail === 'string' && item.detail.length <= 240 &&
+            typeof item.recovery_id === 'string' &&
+              (item.recovery_id === '' || /^[0-9a-f]{32}$/.test(item.recovery_id)) &&
+            typeof item.error_class === 'string' && item.error_class.length <= 64;
+        });
+      if (!valid) {
+        root.find('#ach-activity-result').text('Activity unavailable or incompatible API. Retry after checking administrator access.');
+        return;
+      }
+      r.entries.forEach(function (entry) {
+        var tr = $('<tr>');
+        $('<td>').text(entry.time_utc).appendTo(tr);
+        $('<td>').text(entry.level).addClass('ach-activity-' + entry.level.toLowerCase()).appendTo(tr);
+        $('<td>').text(entry.module + ' / ' + entry.action + (entry.target ? ' · ' + entry.target : '')).appendTo(tr);
+        $('<td>').text(entry.outcome + ' · ' + entry.stage + (entry.error_class ? ' (' + entry.error_class + ')' : '') + (entry.detail ? ': ' + entry.detail : '')).appendTo(tr);
+        $('<td>').text(entry.operation_id + (entry.recovery_id ? ' / recovery ' + entry.recovery_id : '')).appendTo(tr);
+        rows.append(tr);
+      });
+      if (!r.entries.length) rows.append($('<tr>').append($('<td colspan="5">').text('No matching activity records.')));
+      root.find('#ach-activity-result').text(r.entries.length + ' record(s). Logging threshold: ' + r.configured_level + '; maximum retention: 512 KiB.');
+    });
+  }
+  root.find('#ach-activity-refresh').on('click', loadActivity);
+  root.find('#ach-activity-level').on('change', loadActivity);
+  root.find('#ach-activity-module').on('change', loadActivity);
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
-    root.find('[data-tab]').attr('aria-selected', 'false');
-    $(this).attr('aria-selected', 'true');
+    root.find('[data-tab]').attr('aria-selected', 'false').attr('tabindex', '-1');
+    $(this).attr('aria-selected', 'true').attr('tabindex', '0');
     root.find('[data-view]').prop('hidden', true);
     root.find('[data-view="' + tab + '"]').prop('hidden', false);
+    if (root[0]) { var body = root[0].querySelector('#ach-content'); if (body) body.scrollTop = 0; }
     msg('', false);
     if (tab === 'overview') overview();
     if (tab === 'websites') { hostsLock(false); sites(); }
-    if (tab === 'status') statusLoad();
+    if (tab === 'status') { statusLoad(); if (root.find('#ach-status-scope').val() === 'site' && !statusSites.length) loadStatusSites(true); }
+    if (tab === 'activity') loadActivity();
+  });
+  root.find('[data-tab]').on('keydown', function (event) {
+    if (!root[0] || !event) return;
+    var list = Array.from(root[0].querySelectorAll('[data-tab]'));
+    var index = list.indexOf(this), direction = 0;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') direction = 1;
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') direction = -1;
+    var next = event.key === 'Home' ? 0 : event.key === 'End' ? list.length - 1 :
+      direction && index >= 0 ? (index + direction + list.length) % list.length : -1;
+    if (next >= 0) { event.preventDefault(); list[next].focus(); list[next].click(); }
   });
   root.find('#ach-prev').on('click', function () { if (page > 1 && !siteBusy) { page -= 1; sites(); } });
   root.find('#ach-next').on('click', function () { if (hasMore && !siteBusy) { page += 1; sites(); } });
@@ -694,18 +1048,37 @@
       return typeof r.plan[key] === 'string' && /^[0-9a-f]{64}$/.test(r.plan[key]);
     }) && typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256);
   }
-  root.find('#ach-php-form').on('input change', function () {
+  function invalidatePhpPreview(reason) {
     phpPreviewEligible = false;
     resetFpmPlan();
-    root.find('#ach-fpm-plan').text('Settings changed: run a fresh read-only preview.');
+    root.find('#ach-diff-rows').empty();
+    root.find('#ach-impact-rows').empty();
+    root.find('#ach-impact-summary').text('Shared site attribution unavailable until a fresh preview.');
+    root.find('#ach-fpm-result').text('');
+    root.find('#ach-fpm-plan').text(reason);
+  }
+  root.find('#ach-php-form').on('input change', function () {
+    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    invalidatePhpPreview('Settings changed: run a fresh read-only preview.');
   });
   root.find('#ach-fpm-prepare').on('click', function () {
     if (fpmBusy || !phpPreviewEligible) return;
     resetFpmPlan();
-    var fields = phpFields();
+    var fields = phpFields(), snapshot = JSON.stringify(fields);
+    var generation = fpmFormGeneration, ticket = ++fpmPrepareTicket;
+    fpmActivePrepareTicket = ticket;
+    var fresh = function () {
+      return ticket === fpmPrepareTicket && generation === fpmFormGeneration &&
+        JSON.stringify(phpFields()) === snapshot;
+    };
     fpmLock(true);
     request('fpm_prepare', fields, function (r) {
+      // Only this request may release its Prepare lock. Even if a newer
+      // Preview invalidated it, the callback must not restore approval.
+      if (fpmActivePrepareTicket !== ticket) return;
+      fpmActivePrepareTicket = 0;
       fpmLock(false);
+      if (!fresh()) return;
       if (!r || !validFpmPlan(r)) {
         phpPreviewEligible = false; resetFpmPlan();
         root.find('#ach-fpm-plan').text('Preparation failed or API incompatible. No change approved.');
@@ -727,7 +1100,7 @@
         r.plan.after_sha256 + '. ' + r.warning
       );
       fpmLock(false);
-    });
+    }, fresh);
   });
   root.find('#ach-fpm-approval').on('change', function () { fpmLock(fpmBusy); });
   root.find('#ach-fpm-commit').on('click', function () {
@@ -749,12 +1122,15 @@
     resetFpmPlan();
     resetRecovery();
     fpmLock(true);
+    markFpmOperationPending('Apply');
     request('fpm_apply', Object.assign({}, fieldsNow, approval), function (r) {
       fpmLock(false);
-      root.find('#ach-fpm-plan').text(r ?
-        'Apply result: ' + r.state + '; recovery operation: ' + (r.operation_id || 'none') +
-        '. Inspect saved recovery before any subsequent change.' :
-        'Apply did not return confirmed success. Inspect saved recovery before retrying.');
+      root.find('#ach-fpm-plan').text(!r ?
+        'Apply did not return confirmed success. Inspect saved recovery before retrying.' :
+        r.state === 'No Change' ?
+        'No Change: no host mutation or recovery record created. Repeat a read-only preview before further action.' :
+        'Apply result: Applied; recovery operation: ' + r.operation_id +
+        '. Inspect saved recovery before any subsequent change.');
     });
   });
   root.find('#ach-fpm-check-recovery').on('click', function () {
@@ -775,6 +1151,8 @@
       var safe = typeof r.operation_id === 'string' && /^[0-9a-f]{32}$/.test(r.operation_id) &&
         r.version === '85' && r.safe_rollback_file_match === true &&
         (r.state === 'Applied' || r.state === 'Already Baseline') &&
+        typeof r.baseline_sha256 === 'string' &&
+        /^[0-9a-f]{64}$/.test(r.baseline_sha256) &&
         validValues && validImpact(r.shared_impact, '85') &&
         r.shared_impact.state === 'File Mapping' && r.shared_impact.matched_sites.length > 0 &&
         typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256) &&
@@ -818,21 +1196,31 @@
     if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
     var op = fpmRecovery.operation_id, current = fpmRecovery;
     resetRecovery(); fpmLock(true);
+    markFpmOperationPending('Restore');
     request('fpm_rollback', {php_version:'85', approved_scope:'PHP85-www-shared-service',
       operation_id:op, expected_impact:current.impact_sha256,
       expected_recovery:current.recovery_decision_sha256}, function (r) {
       fpmLock(false);
       root.find('#ach-fpm-recovery-status').text(r ?
-        'Recovery result: ' + r.state + '; original SHA-256: ' + r.restored_sha256 +
+        'Recovery result: Rolled Back; original SHA-256: ' + r.restored_sha256 +
         '. Verify websites and repeat read-only preview.' :
         'Recovery not confirmed. Inspect saved recovery before retrying.');
-    });
+    }, null, current.baseline_sha256);
   });
   root.find('#ach-php-form').on('submit', function (event) {
     event.preventDefault();
-    phpPreviewEligible = false; resetFpmPlan();
-    var data = phpFields();
+    // A newer Preview invalidates ALL prior Prepare results and approvals,
+    // even if inputs are byte-for-byte identical.
+    fpmPrepareTicket++;
+    invalidatePhpPreview('Checking current PHP-FPM settings and site impact...');
+    var data = phpFields(), snapshot = JSON.stringify(data);
+    var generation = fpmFormGeneration, ticket = ++fpmPreviewTicket;
+    var fresh = function () {
+      return ticket === fpmPreviewTicket && generation === fpmFormGeneration &&
+        JSON.stringify(phpFields()) === snapshot;
+    };
     request('preview_php_fpm', data, function (r) {
+      if (!fresh()) return;
       var tbody = root.find('#ach-diff-rows').empty();
       var impactBody = root.find('#ach-impact-rows').empty();
       root.find('#ach-impact-summary').text('Shared site attribution unavailable.');
@@ -876,7 +1264,7 @@
         validImpact(impact, data.php_version) && impact.state === 'File Mapping' && impact.matched_sites.length > 0;
       root.find('#ach-fpm-prepare').prop('disabled', fpmBusy || !phpPreviewEligible);
       root.find('#ach-fpm-plan').text(phpPreviewEligible ? 'File mapping available; prepare a guarded manual change if needed.' : 'Unsupported or unresolved: manual Apply unavailable.');
-    });
+    }, fresh);
   });
   overview();
 })();

@@ -25,10 +25,10 @@ function fakeNode(tag, attributes = {}) {
 function loadUi() {
   const root = fakeNode('div');
   const elements = new Map();
-  const tabs = ['overview', 'websites', 'php', 'status'].map(name => fakeNode('button', {
+  const tabs = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('button', {
     'data-tab': name, 'aria-selected': name === 'overview' ? 'true' : 'false'
   }));
-  const views = ['overview', 'websites', 'php', 'status'].map(name => fakeNode('section', {
+  const views = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
   for (const name of [
@@ -37,7 +37,7 @@ function loadUi() {
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
-    '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-review',
+    '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-operation-notice', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
     '#ach-fpm-recovery-impact', '#ach-fpm-restore-rows',
@@ -48,11 +48,15 @@ function loadUi() {
     '#ach-status-footer', '#ach-status-load', '#ach-status-preview-button',
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
-    '#ach-status-inspect-button', '#ach-status-inspect-result'
+    '#ach-status-inspect-button', '#ach-status-inspect-result',
+    '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
+    '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
+    '#ach-activity-result', '#ach-activity-rows'
   ]) elements.set(name, fakeNode('div'));
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
-    ['#ach-status-scope','global'], ['#ach-status-site-id','']
+    ['#ach-status-scope','global'], ['#ach-status-site-id',''],
+    ['#ach-activity-level',''], ['#ach-activity-module','']
   ]) elements.get(selector).props.value = val;
   const controls = [
     ['#ach-monitor-enabled', 'overall'],
@@ -117,6 +121,10 @@ function loadUi() {
         }
         return this;
       },
+      addClass(name) {
+        for (const node of nodes) node.classes.add(name);
+        return this;
+      },
       attr(name, value) {
         if (arguments.length === 1) return nodes[0]?.attributes[name];
         for (const node of nodes) node.attributes[name] = value;
@@ -141,8 +149,8 @@ function loadUi() {
   function $(value) {
     if (value === '#ach-customizer') return selection([root]);
     if (value && typeof value === 'object' && value.handlers) return selection([value]);
-    if (typeof value === 'string' && /^<(tr|td)\b/.test(value)) {
-      return selection([fakeNode(value.startsWith('<tr') ? 'tr' : 'td')]);
+    if (typeof value === 'string' && /^<(tr|td|option)\b/.test(value)) {
+      return selection([fakeNode(value.slice(1).split(/\W/)[0])]);
     }
     throw new Error('Unexpected unscoped jQuery target: ' + String(value));
   }
@@ -204,6 +212,10 @@ function loadUi() {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
       hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
+      hostsSelectorDisabled: elements.get('#ach-hosts-site-id').props.disabled,
+      hostsChoices: elements.get('#ach-hosts-site-id').children.map(option => ({
+        id:option.props.value, text:option.textContent
+      })),
       error: elements.get('#ach-message').textContent,
       errorClass: elements.get('#ach-message').classes.has('ach-error'),
       prevDisabled: elements.get('#ach-prev').props.disabled,
@@ -221,6 +233,7 @@ function loadUi() {
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       impactSummary: elements.get('#ach-impact-summary').textContent,
       fpmPlan: elements.get('#ach-fpm-plan').textContent,
+      fpmOperationNotice: elements.get('#ach-fpm-operation-notice').textContent,
       fpmDetails: elements.get('#ach-fpm-details').textContent,
       fpmReviewHidden: elements.get('#ach-fpm-review').props.hidden,
       fpmPrepareDisabled: elements.get('#ach-fpm-prepare').props.disabled,
@@ -273,6 +286,10 @@ function loadUi() {
     trigger(tabs.find(node => node.attributes['data-tab'] === 'status'), 'click');
     return requests.at(-1);
   }
+  function openActivity() {
+    trigger(tabs.find(node => node.attributes['data-tab'] === 'activity'), 'click');
+    return requests.at(-1);
+  }
   function statusSetValue(selector, value, event = null) {
     assert.ok(elements.has(selector));
     elements.get(selector).props.value = value;
@@ -283,7 +300,7 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, openOverview, openStatus, statusSetValue, statusSetChecked,
-    statusClick, respond, respondOverview, toggleMonitor, submitPhp,
+    statusClick, openActivity, respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -293,7 +310,24 @@ function loadUi() {
     changePhp,
     respondControl, state, requests,
     clickNext: () => trigger(elements.get('#ach-next'), 'click'),
-    clickPrevious: () => trigger(elements.get('#ach-prev'), 'click') };
+    clickPrevious: () => trigger(elements.get('#ach-prev'), 'click'),
+    activityRows: () => elements.get('#ach-activity-rows').children.map(tr => tr.children.map(td => td.textContent)),
+    activityMessage: () => elements.get('#ach-activity-result').textContent,
+    activityFilter: (selector, value) => {
+      elements.get(selector).props.value = value;
+      trigger(elements.get(selector), 'change');
+      return requests.at(-1);
+    },
+    statusSiteChoices: () => elements.get('#ach-status-site-id').children.map(option => ({
+      id: option.props.value, text: option.textContent
+    })),
+    statusSiteInfo: () => elements.get('#ach-status-sites-state').textContent,
+    statusSiteDisabled: () => elements.get('#ach-status-site-id').props.disabled,
+    loadMoreSites: () => {
+      trigger(elements.get('#ach-status-sites-more'), 'click');
+      return requests.at(-1);
+    }
+  };
 }
 
 const site = () => ({
@@ -331,6 +365,9 @@ function invalidCase(title, mutate, expectedError = /Invalid inventory response/
     assert.equal(output.prevDisabled, true);
     assert.equal(output.nextDisabled, true);
     assert.equal(output.page, 'Unavailable');
+    assert.equal(output.hostsInspectDisabled,true);
+    assert.equal(output.hostsSelectorDisabled,true);
+    assert.match(output.hostsResult,/inventory unavailable/);
     assert.doesNotMatch(output.error, /No sites in this page|None \(review required\)/);
   });
 }
@@ -708,6 +745,25 @@ const recoveryPreview = (overrides = {}) => ({
   ...overrides
 });
 
+const appliedResult = (overrides = {}) => ({
+  status:true,state:'Applied',operation_id:'d'.repeat(32),
+  version:'85',scope:'shared_service',pool:'www',
+  source:'/www/server/php/85/etc/php-fpm.conf',
+  before_sha256:'a'.repeat(64),after_sha256:'b'.repeat(64),
+  audit_logged:true,activity_logged:true,...overrides
+});
+const rolledBackResult = (overrides = {}) => ({
+  status:true,state:'Rolled Back',operation_id:'d'.repeat(32),
+  restored_sha256:'a'.repeat(64),audit_logged:true,activity_logged:true,...overrides
+});
+const noChangeResult = (overrides = {}) => ({
+  status:true,state:'No Change',operation_id:null,
+  version:'85',scope:'shared_service',pool:'www',
+  source:'/www/server/php/85/etc/php-fpm.conf',
+  before_sha256:'a'.repeat(64),after_sha256:'a'.repeat(64),
+  audit_logged:true,activity_logged:true,...overrides
+});
+
 test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit approval', () => {
   const ui = loadUi();
   assert.notEqual(ui.state().fpmPrepareDisabled, false);
@@ -730,7 +786,7 @@ test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit
   assert.equal(changed.options.data.expected_impact, 'c'.repeat(64));
   assert.equal(changed.options.data.expected_before, 'a'.repeat(64));
   assert.equal(changed.options.data.approved_scope, 'PHP85-www-shared-service');
-  changed.respond({status:true, state:'Applied', operation_id:'d'.repeat(32), audit_logged:true});
+  changed.respond(appliedResult());
   assert.match(ui.state().fpmPlan, /Applied/);
   assert.equal(ui.state().fpmPrepareDisabled, true);
   assert.notEqual(ui.state().fpmReviewHidden, false);
@@ -756,7 +812,7 @@ test('A valid manual PHP-FPM action requires preview, fresh prepare and explicit
   assert.equal(rollback.options.data.operation_id, 'd'.repeat(32));
   assert.equal(rollback.options.data.expected_impact, 'c'.repeat(64));
   assert.equal(rollback.options.data.expected_recovery, 'f'.repeat(64));
-  rollback.respond({status:true, state:'Rolled Back', restored_sha256:'a'.repeat(64), audit_logged:true});
+  rollback.respond(rolledBackResult());
   assert.match(ui.state().fpmRecovery, /Rolled Back/);
   assert.equal(ui.state().fpmRollbackDisabled, true);
 });
@@ -808,6 +864,7 @@ test('Unknown or stale recovery data cannot enable shared-service rollback', () 
     recoveryPreview({recovery_decision_sha256:'bad'}),
     recoveryPreview({impact_sha256:'bad'}),
     recoveryPreview({baseline_values:null}),
+    recoveryPreview({baseline_sha256:'bad'}),
     recoveryPreview({safe_rollback_file_match:false,
       manual_recovery:'Preserved; supervised manual restoration required.'})
   ]) {
@@ -858,12 +915,25 @@ test('Manual host change success never hides missing aaPanel audit persistence',
   ui.submitPhp().respond(phpPreview());
   ui.prepareFpm().respond(guardedPlan());
   ui.approveFpm(true);
-  ui.commitFpm().respond({status:true,state:'Applied',operation_id:'f'.repeat(32),
-    audit_logged:false,audit_warning:'aaPanel activity-log persistence was not confirmed'});
+  ui.commitFpm().respond(appliedResult({operation_id:'f'.repeat(32),
+    audit_logged:false,audit_warning:'aaPanel activity-log persistence was not confirmed'}));
   const state=ui.state();
   assert.match(state.fpmPlan,/Applied/);
   assert.equal(state.errorClass,true);
   assert.match(state.error,/activity-log persistence/);
+});
+
+test('Completed PHP Apply reports both missing audit and plugin Activity writes', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  ui.commitFpm().respond(appliedResult({operation_id:'a'.repeat(32),
+    audit_logged:false,audit_warning:'Native audit persistence failed',
+    activity_logged:false,activity_warning:'Plugin Activity persistence failed'}));
+  assert.match(ui.state().fpmPlan,/Applied/);
+  assert.match(ui.state().error,/Native audit persistence failed/);
+  assert.match(ui.state().error,/Plugin Activity persistence failed/);
 });
 
 const brand = () => ({
@@ -892,10 +962,21 @@ const hostsInspection = (overrides={}) => ({
   note:'Origin local only; Gateway unverified.',...overrides
 });
 
+const hostsInventory = (name = 'site.test') => page([
+  {...site(), id:7, name, document_root:'/www/site.test',
+   bound_domains:[{name:'site.test',port:80}], canonical_domain_bound:name === 'site.test'},
+  {...site(), id:8, name:'other.test', document_root:'/www/other.test',
+   bound_domains:[{name:'other.test',port:80}], canonical_domain_bound:true}
+]);
+function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
+  ui.openSites();
+  ui.respond(inventory);
+  ui.statusSetValue('#ach-hosts-site-id',id,'input change');
+}
+
 test('Native-site local hosts inspection reports loopback without claiming Gateway failure', () => {
   const ui=loadUi();
-  ui.openSites();
-  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  selectHostsSite(ui);
   const query=ui.statusClick('#ach-hosts-inspect-button');
   assert.match(query.options.url,/s=inspect_local_hosts$/);
   assert.equal(query.options.data.site_id,'7');
@@ -924,26 +1005,51 @@ test('Invalid or cross-site hosts responses cannot masquerade as confirmed resul
     hostsInspection({entries:[{domain:'wrong.test',address:'127.0.0.1',line:1,loopback:true}]})
   ]) {
     const ui=loadUi();
-    ui.openSites();
-    ui.statusSetValue('#ach-hosts-site-id','7','input change');
+    selectHostsSite(ui);
     ui.statusClick('#ach-hosts-inspect-button').respond(bad);
     assert.match(ui.state().hostsResult,/unconfirmed/);
     assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
   }
 });
 
-test('Unrelated site keys are treated as text, failed inspection clears stale evidence', () => {
+test('Inventory identity mismatch rejects unrelated site keys; failed inspection clears stale evidence', () => {
   const ui=loadUi();
-  ui.openSites();
-  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  selectHostsSite(ui);
   ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection({
     site_key:'<img src=x onerror=alert(1)>'
   }));
-  assert.match(ui.state().hostsResult,/<img src=x onerror=alert\(1\)>/);
+  assert.match(ui.state().hostsResult,/unconfirmed/);
   const request=ui.statusClick('#ach-hosts-inspect-button');
   request.respond({status:false,stage:'hosts_inspection',msg:'Hosts source changed'});
   assert.match(ui.state().hostsResult,/unconfirmed/);
   assert.match(ui.state().error,/Hosts source changed/);
+});
+
+test('Discovered site selection is bounded to current inventory and text-rendered safely', () => {
+  const ui=loadUi();
+  const malicious='<img src=x onerror=alert(1)>';
+  selectHostsSite(ui,'7',hostsInventory(malicious));
+  assert.deepEqual(ui.state().hostsChoices.map(x => x.id),['','7','8']);
+  assert.match(ui.state().hostsChoices[1].text,/<img src=x onerror=alert\(1\)>/);
+  const r=hostsInspection({site_key:malicious});
+  ui.statusClick('#ach-hosts-inspect-button').respond(r);
+  assert.match(ui.state().hostsResult,/<img src=x onerror=alert\(1\)>/);
+  ui.statusSetValue('#ach-hosts-site-id','9','input change');
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('Inventory reload invalidates pending hosts inspection and stale site selection', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const older=ui.statusClick('#ach-hosts-inspect-button');
+  ui.openSites(); // New inventory snapshot; revoke old site confirmation.
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  older.respond(hostsInspection());
+  assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  ui.respond(page([]));
+  assert.equal(ui.state().hostsSelectorDisabled,true);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['']);
 });
 
 test('Status Pages tab loads saved branding and safely renders sandbox-only preview', () => {
@@ -1125,4 +1231,481 @@ test('Backend inspection failure does not display previous disk-match evidence',
   });
   assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
   assert.match(ui.state().error,/Native VHost changed/);
+});
+
+test('Native sidebar sections are linked to panels and scrollable content', () => {
+  for (const name of ['overview','websites','php','status','activity']) {
+    assert.match(html, new RegExp('id="ach-tab-' + name + '"[^>]*aria-controls="ach-panel-' + name + '"'));
+    assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*aria-labelledby="ach-tab-' + name + '"'));
+  }
+  assert.match(html, /\.ach-main \{[^}]*overflow-y:auto/);
+  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:190px/);
+  assert.match(html, /@media \(max-width:720px\)/);
+  assert.doesNotMatch(html, /class="ach-tabs"/);
+  assert.match(html, /function fitNativeLayer/);
+});
+
+test('Activity panel filters read-only structured events and uses text rendering', () => {
+  const ui = loadUi();
+  const req = ui.openActivity();
+  assert.match(req.options.url, /s=get_activity$/);
+  assert.equal(req.options.data.limit, 50);
+  req.respond({
+    status:true, schema:1, read_only:true, configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03T00:00:00+00:00',
+      level:'ERROR',module:'php_fpm',action:'fpm_apply',
+      stage:'reload',outcome:'failed',error_class:'FpmApplyError',
+      detail:'<img src=x onerror=alert(1)>',operation_id:'a'.repeat(32),
+      recovery_id:'b'.repeat(32),target:'PHP85-www-shared-service'}]
+  });
+  assert.equal(ui.activityRows().length, 1);
+  assert.equal(ui.activityRows()[0][3], 'failed · reload (FpmApplyError): <img src=x onerror=alert(1)>');
+  assert.match(ui.activityMessage(), /1 record\(s\)/);
+  const filtered = ui.activityFilter('#ach-activity-level', 'ERROR');
+  assert.equal(filtered.options.data.level, 'ERROR');
+  filtered.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.deepEqual(ui.activityRows(), [['No matching activity records.']]);
+});
+
+test('Activity errors clear stale records and do not invent successful logs', () => {
+  const ui=loadUi();
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03',level:'INFO',module:'websites',
+      action:'inventory',stage:'complete',outcome:'success',error_class:'',
+      detail:'',operation_id:'c'.repeat(32),recovery_id:'',target:''}]});
+  assert.equal(ui.activityRows().length, 1);
+  ui.activityFilter('#ach-activity-module','websites').respond({
+    status:true,schema:1,read_only:true,configured_level:'INFO',entries:[
+      {schema:1,level:'WARNING',time_utc:'x',operation_id:'malformed',detail:'',module:'websites',
+       action:'inventory',stage:'complete',outcome:'success',error_class:'',recovery_id:''}]
+  });
+  assert.deepEqual(ui.activityRows(), []);
+  assert.match(ui.activityMessage(), /unavailable or incompatible/);
+});
+
+test('Website-scope branding selects only native inventory IDs, not manually typed IDs', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const inventory = ui.requests.at(-1);
+  assert.match(inventory.options.url, /s=status_sites$/);
+  const seven = {...site(), id:7, name:'site-seven.test',
+    bound_domains:[{name:'site-seven.test',port:80}],canonical_domain_bound:true};
+  inventory.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSiteChoices(), [
+    {id:'',text:'Choose a website...'},
+    {id:'7',text:'site-seven.test (ID 7)'}
+  ]);
+  assert.equal(ui.statusSiteDisabled(),false);
+  assert.match(ui.statusSiteInfo(),/1 website\(s\) loaded/);
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  const load=ui.requests.at(-1);
+  assert.match(load.options.url,/s=status_preferences$/);
+  assert.equal(load.options.data.site_id,'7');
+});
+
+test('Invalid website inventory prevents selecting a site to mutate branding', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.requests.at(-1).respond({status:true,inventory_schema:3,sites:[]});
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(), /inventory unavailable or changed/);
+  assert.equal(ui.state().statusSaveDisabled,true);
+});
+
+
+test('Stale website inventory response cannot enable site selector in global branding mode', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const stale=ui.requests.at(-1);
+  ui.statusSetValue('#ach-status-scope','global','change');
+  stale.respond({...page([site()]),purpose:'status_site_selection'});
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.deepEqual(ui.statusSiteChoices(),
+    [{id:'',text:'Select website scope first'}]);
+});
+
+test('Website inventory failure supports an explicit refresh and no inferred site', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.requests.at(-1).respond({status:true,inventory_schema:999});
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(),/inventory unavailable/);
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  assert.match(refresh.options.url,/s=status_sites$/);
+  refresh.respond({...page([site()]),purpose:'status_site_selection'});
+  assert.equal(ui.statusSiteDisabled(),false);
+  assert.equal(ui.statusSiteChoices()[1].id,'3');
+});
+
+test('Legacy Monitor-only endpoint reply cannot be trusted for Status Pages selector', () => {
+  const ui = loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const req=ui.requests.at(-1);
+  assert.match(req.options.url,/s=status_sites$/);
+  req.respond(page([site()])); // Old/mismatched backend without purpose marker.
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(), /inventory unavailable or changed/);
+});
+
+
+test('Returning to website scope cannot consume a prior in-flight site list', () => {
+  const ui = loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const older = ui.requests.at(-1);
+  ui.statusSetValue('#ach-status-scope','global','change');
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const newer = ui.requests.at(-1);
+  assert.notEqual(older, newer);
+  const oldSite = {...site(),id:3,name:'old.example.test'};
+  older.respond({...page([oldSite]),purpose:'status_site_selection'});
+  assert.equal(ui.statusSiteDisabled(),true);
+  const newSite = {...site(),id:7,name:'new.example.test',
+    bound_domains:[{name:'new.example.test',port:80}]};
+  newer.respond({...page([newSite]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSiteChoices(),[
+    {id:'',text:'Choose a website...'},
+    {id:'7',text:'new.example.test (ID 7)'}
+  ]);
+});
+
+test('Newest Activity filter wins when responses arrive out of order', () => {
+  const ui=loadUi();
+  const earlier=ui.openActivity();
+  const later=ui.activityFilter('#ach-activity-level','ERROR');
+  assert.equal(later.options.data.level,'ERROR');
+  const row = (level,id)=>({schema:1,time_utc:'2026-11-03T04:00:00+00:00',
+    level,module:'php_fpm',action:'fpm_apply',stage:'complete',
+    outcome:level==='ERROR'?'failed':'success',
+    error_class:'',detail:'',operation_id:id.repeat(32),
+    recovery_id:'',target:'PHP85-www-shared-service'});
+  later.respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[row('ERROR','e')]});
+  earlier.respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[row('INFO','a')]});
+  assert.equal(ui.activityRows().length,1);
+  assert.match(ui.activityRows()[0][1],/ERROR/);
+  assert.match(ui.activityRows()[0][4],/^e{32}/);
+  assert.match(ui.activityMessage(),/1 record/);
+});
+
+
+test('A stale Activity request error cannot replace the newest filter message', () => {
+  const ui=loadUi();
+  const earlier=ui.openActivity();
+  const later=ui.activityFilter('#ach-activity-module','php_fpm');
+  later.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  earlier.respond({status:false,stage:'activity_read',msg:'stale background error',
+    operation_id:'a'.repeat(32)});
+  assert.equal(ui.state().error,'');
+  assert.match(ui.activityMessage(),/0 record/);
+});
+
+test('Oversized Activity record is rejected before it reaches a table row', () => {
+  const ui=loadUi();
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03',level:'ERROR',
+      module:'status_pages',action:'status_preview',stage:'complete',
+      outcome:'failed',error_class:'StatusPageError',detail:'x'.repeat(4096),
+      operation_id:'d'.repeat(32),recovery_id:'',target:''}]});
+  assert.deepEqual(ui.activityRows(),[]);
+  assert.match(ui.activityMessage(),/unavailable or incompatible/);
+});
+
+
+test('FPM preview arriving after input edit never enables Prepare for a changed form', () => {
+  const ui=loadUi();
+  const previous=ui.submitPhp();
+  ui.changePhp('max_children','101');
+  previous.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.deepEqual(ui.state().impactRows,[]);
+  assert.match(ui.state().fpmPlan,/fresh read-only preview/);
+});
+
+test('Newer FPM preview wins and a duplicate older response cannot revive approvals', () => {
+  const ui=loadUi();
+  const older=ui.submitPhp();
+  const newer=ui.submitPhp();
+  newer.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  older.respond({status:false,stage:'php_fpm_file_preview',msg:'OLD failure'});
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  assert.doesNotMatch(ui.state().error,/OLD failure/);
+});
+
+test('Edited PHP form invalidates an in-flight Prepare and never revives approval', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const pending=ui.prepareFpm();
+  assert.match(pending.options.url,/s=fpm_prepare$/);
+  ui.changePhp('max_children','177');
+  pending.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.match(ui.state().fpmPlan,/fresh read-only preview/);
+});
+
+test('An obsolete failed Prepare response cannot overwrite fresh-form feedback', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const pending=ui.prepareFpm();
+  ui.changePhp('max_children','151');
+  pending.respond({status:false,stage:'fpm_prepare',msg:'OBSOLETE ERROR'});
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.doesNotMatch(ui.state().error,/OBSOLETE ERROR/);
+});
+
+test('Confirmed Apply warnings stay in PHP panel despite unrelated Activity traffic', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  const apply=ui.commitFpm();
+  const activity=ui.openActivity();
+  apply.respond(appliedResult({
+    audit_logged:false,audit_warning:'Native audit unavailable',
+    activity_logged:false,activity_warning:'Plugin log unavailable'}));
+  activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmPlan,/Apply result: Applied/);
+  assert.match(ui.state().fpmOperationNotice,/Native audit unavailable/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin log unavailable/);
+});
+
+test('Confirmed Restore warning persists after unrelated read and response', () => {
+  const ui=loadUi();
+  ui.inspectFpmRecovery().respond(recoveryPreview());
+  ui.approveFpmRollback(true);
+  const restore=ui.rollbackFpm();
+  const activity=ui.openActivity();
+  restore.respond(rolledBackResult({
+    activity_logged:false,activity_warning:'Plugin Restore log unavailable'}));
+  activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin Restore log unavailable/);
+});
+
+test('Old successful PHP preview cannot override newer failed preview', () => {
+  const ui=loadUi();
+  const old=ui.submitPhp();
+  const recent=ui.submitPhp();
+  recent.respond({status:false,stage:'php_fpm_file_preview',msg:'Current source unavailable'});
+  old.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.deepEqual(ui.state().impactRows,[]);
+  assert.doesNotMatch(ui.state().error,/Old response/);
+});
+
+test('A second Prepare click while pending sends no duplicate approval request', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const first=ui.prepareFpm();
+  const before=ui.requests.length;
+  ui.prepareFpm();
+  assert.equal(ui.requests.length,before);
+  first.respond(guardedPlan());
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  ui.approveFpm(true);
+  assert.equal(ui.state().fpmCommitDisabled,false);
+  ui.changePhp('max_children','211');
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.equal(ui.state().fpmReviewHidden,true);
+});
+
+test('Restore warning retains both audit and Activity failures across unrelated refresh', () => {
+  const ui=loadUi();
+  ui.inspectFpmRecovery().respond(recoveryPreview());
+  ui.approveFpmRollback(true);
+  const restore=ui.rollbackFpm();
+  const activity=ui.openActivity();
+  restore.respond(rolledBackResult({
+    audit_logged:false,audit_warning:'Native restore audit missing',
+    activity_logged:false,activity_warning:'Plugin restore Activity missing'}));
+  activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
+  assert.match(ui.state().fpmOperationNotice,/Native restore audit missing/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin restore Activity missing/);
+});
+
+test('Lifecycle Activity can be filtered and displayed with canonical fields', () => {
+  const ui=loadUi();
+  const first=ui.openActivity();
+  first.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  const req=ui.activityFilter('#ach-activity-module','lifecycle');
+  assert.equal(req.options.data.module,'lifecycle');
+  req.respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03T09:00:00+00:00',
+      module:'lifecycle',level:'WARNING',action:'uninstall',
+      stage:'icon_cleanup',outcome:'preserved',error_class:'IconCleanupFailed',
+      operation_id:'a'.repeat(32),target:'ach_customizer',detail:'Icon retained',
+      recovery_id:''}]});
+  assert.equal(ui.activityRows().length,1);
+  assert.match(ui.activityRows()[0][2],/lifecycle \/ uninstall/);
+  assert.match(ui.activityRows()[0][3],/IconCleanupFailed/);
+});
+
+test('Reviewer: pending Prepare A cannot revive approval after a newer identical Preview B fails', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const oldPrepare=ui.prepareFpm();
+  const newPreview=ui.submitPhp(); // Same fields; a newer user intent.
+  oldPrepare.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,true);
+  newPreview.respond({status:false,stage:'php_fpm_file_preview',msg:'Latest preview failed'});
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  ui.approveFpm(true);
+  const before=ui.requests.length;
+  ui.commitFpm();
+  assert.equal(ui.requests.length,before,'No Apply can follow stale Prepare and failed preview');
+});
+
+test('Reviewer: newer identical Preview B succeeds before Prepare A, which must stay stale', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const oldPrepare=ui.prepareFpm();
+  const newerPreview=ui.submitPhp();
+  newerPreview.respond(phpPreview());
+  oldPrepare.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  const fresh=ui.prepareFpm();
+  assert.notEqual(fresh,oldPrepare);
+  fresh.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,false);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+});
+
+test('Reviewer: stale Prepare failure after newer identical Preview does not replace current feedback', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const oldPrepare=ui.prepareFpm();
+  const newerPreview=ui.submitPhp();
+  oldPrepare.respond({status:false,stage:'fpm_prepare',msg:'STALE PREPARE ERROR'});
+  newerPreview.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.doesNotMatch(ui.state().error,/STALE PREPARE ERROR/);
+});
+
+test('Reviewer: malformed successful Apply replies never imply a completed host change', () => {
+  const replies=[
+    {status:true,audit_logged:true,activity_logged:true},
+    {status:true,state:'Applied',operation_id:'bad',audit_logged:true,activity_logged:true},
+    {status:true,state:'Applied',operation_id:'c'.repeat(32),audit_logged:true,activity_logged:true},
+    {status:true,state:'Rolled Back',operation_id:'c'.repeat(32),audit_logged:true,activity_logged:true},
+    {status:true,state:'No Change',operation_id:'c'.repeat(32),audit_logged:true,activity_logged:true},
+  ];
+  for(const reply of replies) {
+    const ui=loadUi();
+    ui.submitPhp().respond(phpPreview());
+    ui.prepareFpm().respond(guardedPlan());
+    ui.approveFpm(true);
+    ui.commitFpm().respond(reply);
+    assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(reply));
+    assert.doesNotMatch(ui.state().fpmOperationNotice,/Apply confirmed/);
+    assert.match(ui.state().fpmPlan,/Inspect saved recovery/);
+    assert.equal(ui.state().fpmCommitDisabled,true);
+  }
+});
+
+test('Reviewer: malformed successful Restore replies never imply completed rollback', () => {
+  const valid=rolledBackResult();
+  for (const reply of [
+    {status:true,audit_logged:true,activity_logged:true},
+    {...valid,operation_id:'bad'},
+    {...valid,operation_id:'e'.repeat(32)},
+    {...valid,restored_sha256:'bad'},
+    {...valid,restored_sha256:'b'.repeat(64)},
+    {...valid,state:'Applied'}
+  ]) {
+    const ui=loadUi();
+    ui.inspectFpmRecovery().respond(recoveryPreview());
+    ui.approveFpmRollback(true);
+    ui.rollbackFpm().respond(reply);
+    assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(reply));
+    assert.match(ui.state().fpmRecovery,/Inspect saved recovery/);
+    assert.doesNotMatch(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
+  }
+});
+
+test('Reviewer: valid No Change is explicitly non-mutating and never invents recovery', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  ui.commitFpm().respond(noChangeResult());
+  assert.match(ui.state().fpmOperationNotice,/No host change performed/);
+  assert.doesNotMatch(ui.state().fpmOperationNotice,/Apply confirmed/);
+  assert.doesNotMatch(ui.state().fpmPlan,/recovery operation: none/);
+});
+
+test('Reviewer: incomplete successful Apply preserves independent persistence warnings', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  const write=ui.commitFpm();
+  const background=ui.openActivity();
+  write.respond({status:true,audit_logged:false,audit_warning:'Native audit missing',
+    activity_logged:false,activity_warning:'Plugin Activity missing'});
+  background.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmOperationNotice,/NOT confirmed/);
+  assert.match(ui.state().fpmOperationNotice,/Native audit missing/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin Activity missing/);
+});
+
+
+test('Reviewer: failed Apply and Restore never fabricate confirmation', () => {
+  const apply=loadUi();
+  apply.submitPhp().respond(phpPreview());
+  apply.prepareFpm().respond(guardedPlan());
+  apply.approveFpm(true);
+  apply.commitFpm().respond({status:false,stage:'fpm_apply',msg:'Reload uncertain',
+    operation_id:'f'.repeat(32),audit_logged:false,
+    audit_warning:'Native audit failed',activity_logged:false,
+    activity_warning:'Plugin Activity failed'});
+  assert.match(apply.state().fpmOperationNotice,/Apply NOT confirmed/);
+  assert.match(apply.state().fpmOperationNotice,/Native audit failed/);
+  assert.match(apply.state().fpmOperationNotice,/Plugin Activity failed/);
+  assert.match(apply.state().fpmPlan,/Inspect saved recovery/);
+
+  const restore=loadUi();
+  restore.inspectFpmRecovery().respond(recoveryPreview());
+  restore.approveFpmRollback(true);
+  restore.rollbackFpm().reject(null,'timeout');
+  assert.match(restore.state().fpmOperationNotice,/Restore NOT confirmed/);
+  assert.match(restore.state().fpmRecovery,/Inspect saved recovery/);
+});
+
+test('Reviewer: mismatched native Apply identities, config digests and source are never confirmed', () => {
+  const tampered=[
+    appliedResult({operation_id:'not-an-operation'}),
+    appliedResult({before_sha256:'e'.repeat(64)}),
+    appliedResult({after_sha256:'f'.repeat(64)}),
+    appliedResult({source:'/www/server/php/84/etc/php-fpm.conf'}),
+    appliedResult({version:'84'}),
+    appliedResult({state:'No Change',operation_id:null}),
+    noChangeResult({operation_id:'d'.repeat(32)}),
+    noChangeResult({after_sha256:'b'.repeat(64)})
+  ];
+  for(const response of tampered) {
+    const ui=loadUi();
+    ui.submitPhp().respond(phpPreview());
+    ui.prepareFpm().respond(guardedPlan());
+    ui.approveFpm(true);
+    ui.commitFpm().respond(response);
+    assert.match(ui.state().fpmOperationNotice,/NOT confirmed/,JSON.stringify(response));
+    assert.equal(ui.state().fpmCommitDisabled,true);
+  }
 });

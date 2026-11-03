@@ -128,6 +128,62 @@ class EntrypointTests(unittest.TestCase):
             self.assertFalse(failed_log["audit_logged"])
             self.assertIn("audit_warning",failed_log)
 
+    def test_status_site_choices_are_monitor_independent_but_primary_admin_only(self):
+        """Branding selector works with monitoring OFF without relaxing get_sites."""
+        import ach_customizer_state as state
+        from unittest.mock import Mock
+        state.set_enabled("overall", False, directory=self.state_dir.name,
+                          expected_revision=0)
+        native_state = (Path(self.state_dir.name) / state.STATE_FILE).read_bytes()
+        fake_public = types.ModuleType("public")
+        fake_flask = types.ModuleType("flask")
+        fake_flask.session = {"login": True, "uid": 1}
+        fake_flask.request = types.SimpleNamespace(method="POST")
+        fake_flask.has_request_context = lambda: True
+        payload = {"inventory_schema": 2, "page": 1, "page_size": 25,
+                   "has_more": False, "sites": []}
+        with patch.dict(sys.modules, {"public": fake_public, "flask": fake_flask}), patch.object(
+                MODULE, "get_site_page", return_value=payload) as discovery:
+            response = self.plugin.status_sites({"page": "1", "page_size": "25"})
+            self.assertTrue(response["status"], response)
+            self.assertEqual(response["purpose"], "status_site_selection")
+            self.assertEqual(response["inventory_schema"], 2)
+            discovery.assert_called_once_with(fake_public, "1", "25")
+            self.assertFalse(self.plugin.get_sites({})["status"],
+                             "Monitor website inventory should remain disabled")
+            for session, method, context in (
+                ({"login": True, "uid": 2}, "POST", True),
+                ({"login": True, "uid": 1, "tmp_login_id": ""}, "POST", True),
+                ({"login": True, "uid": 1, "tmp_login": True}, "POST", True),
+                ({"login": True, "uid": 1}, "GET", True),
+                ({"login": True, "uid": 1}, "POST", False),
+            ):
+                with self.subTest(session=session, method=method, context=context):
+                    fake_flask.session = session
+                    fake_flask.request.method = method
+                    fake_flask.has_request_context = lambda: context
+                    denied = self.plugin.status_sites({"page": "1"})
+                    self.assertFalse(denied["status"])
+                    self.assertEqual(denied["stage"], "status_sites_authorization")
+            discovery.assert_called_once()
+        self.assertEqual((Path(self.state_dir.name) / state.STATE_FILE).read_bytes(),
+                         native_state, "Selection must not mutate Monitor settings")
+
+    def test_status_site_choices_reject_invalid_native_page_instead_of_fabricating_sites(self):
+        from ach_customizer_monitor import MonitorInputError
+        fake_public = types.ModuleType("public")
+        fake_flask = types.ModuleType("flask")
+        fake_flask.session = {"login": True, "uid": 1}
+        fake_flask.request = types.SimpleNamespace(method="POST")
+        fake_flask.has_request_context = lambda: True
+        with patch.dict(sys.modules, {"public": fake_public, "flask": fake_flask}), patch.object(
+                MODULE, "get_site_page",
+                side_effect=MonitorInputError("Invalid inventory page")):
+            denied = self.plugin.status_sites({"page": "-4"})
+        self.assertFalse(denied["status"])
+        self.assertEqual(denied["stage"], "status_sites_read")
+        self.assertNotIn("sites", denied)
+
     def test_manual_fpm_errors_fail_closed_and_report_stage(self):
         from ach_customizer_fpm_apply import FpmApplyError
         with patch.object(MODULE, "ManualFpmWorkflow") as factory:
@@ -248,7 +304,10 @@ class EntrypointTests(unittest.TestCase):
                             self.assertEqual(file.read_bytes(), original)
                             self.assertEqual(state.read_state(self.state_dir.name)["revision"], revision)
                         else:
-                            self.assertEqual(list(Path(self.state_dir.name).iterdir()), [])
+                            self.assertFalse(file.exists(), "Denied operation must not create Monitor state")
+                            self.assertTrue(all(
+                                child.name.startswith("ach_customizer.activity.")
+                                for child in Path(self.state_dir.name).iterdir()))
 
     def test_optimistic_revision_rejection_through_authenticated_endpoint(self):
         flask_stub = types.ModuleType("flask")

@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -18,6 +19,7 @@ _PANEL_CLASS_DIR = "/www/server/panel/class"
 if os.path.isdir(_PANEL_CLASS_DIR) and _PANEL_CLASS_DIR not in sys.path:
     sys.path.append(_PANEL_CLASS_DIR)
 
+from ach_customizer_activity import ActivityError, append_activity, configured_level, read_activity, record
 from ach_customizer_monitor import (
     MonitorInputError, _bound_domains_for_sites, get_site_page,
     inspect_php_fpm_site_impact, preview_php_fpm,
@@ -43,8 +45,87 @@ class ach_customizer_main:
         return getattr(args, key, default)
 
     @staticmethod
-    def _fail(stage, error, operation_id):
-        return {"status": False, "stage": stage, "msg": str(error)[:300], "operation_id": operation_id}
+    def _activity_result(response, module, action, *, target="", error=None,
+                         level="INFO", allow_error_detail=True):
+        """Best-effort plugin diagnostics, independent of operation success."""
+        correlation = response.get("request_id", response.get("operation_id"))
+        try:
+            failed = response.get("status") is not True
+            # Log a useful controlled error, but never dump arbitrary exception
+            # representations, request objects or authentication material.
+            controlled = (PermissionError, StateError, StatusPageError,
+                          MonitorInputError, FpmApplyError, HostsInspectionError, ActivityError)
+            detail = str(error) if allow_error_detail and isinstance(error, controlled) else ""
+            impact = response.get("shared_impact")
+            needs_review = (not failed and
+                            (response.get("state") == "Needs Review" or
+                             isinstance(impact, dict) and impact.get("state") == "Needs Review"))
+            severity = "ERROR" if failed else "WARNING" if needs_review else level
+            outcome = ("failed" if failed else "Needs Review" if needs_review else
+                       response.get("state", "success"))
+            recovery = response.get("operation_id")
+            if (not response.get("request_id") or not isinstance(recovery, str)
+                    or re.fullmatch(r"[0-9a-f]{32}", recovery) is None):
+                recovery = ""
+            entry = record(
+                level=severity, module=module,
+                action=action, operation_id=correlation,
+                stage=response.get("stage", "complete"),
+                outcome=outcome,
+                target=target, error_class=type(error).__name__ if error else "",
+                detail=detail,
+                recovery_id=recovery if not failed else "",
+            )
+            persisted = append_activity(_STATE_DIR, entry)
+            # None means below verbosity threshold, NOT a persistence failure.
+            response["activity_logged"] = True if persisted else None
+        except Exception:
+            response["activity_logged"] = False
+            response["activity_warning"] = "Plugin activity-log persistence was not confirmed"
+            logging.getLogger("ach_customizer").exception(
+                "Plugin activity-log write failed: %s %s %s", module, action, correlation)
+        return response
+
+    @staticmethod
+    def _fail(stage, error, operation_id, *, diagnostic_error=None):
+        # Ordinary controlled validation/auth failures remain actionable.
+        # Do not expose arbitrary DB/filesystem/internal exception text to
+        # browsers: retain the precise exception class in private Activity.
+        controlled = (PermissionError, StateError, StatusPageError,
+                      MonitorInputError, FpmApplyError, HostsInspectionError, ActivityError)
+        if isinstance(error, controlled) or (
+                isinstance(error, str) and diagnostic_error is not None):
+            message = str(error)[:300]
+        else:
+            message = "Unexpected plugin error; inspect Activity using Operation ID"
+        response = {"status": False, "stage": stage,
+                    "msg": message, "operation_id": operation_id}
+        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_")) else
+                  "status_pages" if stage.startswith("status_") else
+                  "websites" if stage.startswith(("website_", "hosts_")) else
+                  "diagnostics" if stage.startswith("activity_") else "monitor")
+        return ach_customizer_main._activity_result(
+            response, module, stage, error=diagnostic_error or error)
+
+    def get_activity(self, args):
+        """Native full-primary-admin-only diagnostics. No arbitrary paths."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            level = self._argument(args, "level", "")
+            module = self._argument(args, "module", "")
+            try:
+                limit = int(self._argument(args, "limit", 50))
+            except (TypeError, ValueError) as exc:
+                raise ActivityError("Invalid activity page size") from exc
+            entries = read_activity(_STATE_DIR, level=level, module=module, limit=limit)
+            return {"status": True, "request_id": request_id, "schema": 1,
+                    "entries": entries, "configured_level": configured_level(),
+                    "retention_max_bytes": 524288, "read_only": True}
+        except PermissionError as exc:
+            return self._fail("activity_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("activity_read", exc, request_id)
 
     @staticmethod
     def _overview(state, operation_id):
@@ -73,7 +154,8 @@ class ach_customizer_main:
     def get_overview(self, args):
         operation_id = uuid4().hex
         try:
-            return self._overview(read_state(_STATE_DIR), operation_id)
+            response = self._overview(read_state(_STATE_DIR), operation_id)
+            return self._activity_result(response, "monitor", "get_overview", level="DEBUG")
         except Exception as exc:
             return self._fail("monitor_state_read", exc, operation_id)
 
@@ -106,7 +188,8 @@ class ach_customizer_main:
                 expected_revision=self._argument(args, "expected_revision"),
                 directory=_STATE_DIR,
             )
-            return {**self._overview(state, operation_id), "changed": changed}
+            response = {**self._overview(state, operation_id), "changed": changed}
+            return self._activity_result(response, "monitor", "set_control", target=str(control))
         except PermissionError as exc:
             return self._fail("monitor_authorization", exc, operation_id)
         except Exception as exc:
@@ -131,7 +214,9 @@ class ach_customizer_main:
                 self._argument(args, "page", 1),
                 self._argument(args, "page_size", 25),
             )
-            return {"status": True, "operation_id": operation_id, **result}
+            response = {"status": True, "operation_id": operation_id, **result}
+            return self._activity_result(response, "websites", "get_sites",
+                                         target="page:" + str(result["page"]), level="DEBUG")
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
 
@@ -166,10 +251,10 @@ class ach_customizer_main:
             result = inspect_hosts_file(names)
             if current_site() != before:
                 raise HostsInspectionError("Native site or bound domains changed; recheck")
-            return {
-                "status": True, "request_id": request_id,
-                "site_id": site_id, "site_key": before["name"], **result,
-            }
+            return self._activity_result(
+                {"status": True, "request_id": request_id,
+                 "site_id": site_id, "site_key": before["name"], **result},
+                "websites", "inspect_local_hosts", target=str(site_id))
         except PermissionError as exc:
             return self._fail("hosts_authorization", exc, request_id)
         except Exception as exc:
@@ -190,17 +275,19 @@ class ach_customizer_main:
             result = preview_php_fpm("/www/server/php", version, desired)
             # Keep file/default drift available even when site ownership cannot
             # be attributed. This second bounded read never authorizes Apply.
+            impact_error = None
             if result.get("state") in ("File Match", "File Drift") and result.get("source"):
                 try:
                     import public
 
                     impact = inspect_php_fpm_site_impact(public, version, result["source"])
                 except Exception as exc:
+                    impact_error = exc
                     impact = {
                         "schema": 1, "state": "Needs Review", "scope": "shared_service",
                         "version": version, "matched_sites": [], "unresolved_sites": [],
                         "site_count": 0, "other_php_sites_count": 0,
-                        "reason": ("Shared site attribution unavailable: " + str(exc))[:250],
+                        "reason": "Shared site attribution failed; review Activity for operation " + operation_id,
                         "note": "Read-only file attribution failed; no affected sites were inferred.",
                     }
             else:
@@ -211,8 +298,13 @@ class ach_customizer_main:
                     "reason": "PHP-FPM file layout needs review before mapping websites",
                     "note": "No site-to-pool inference was attempted.",
                 }
-            return {"status": True, "operation_id": operation_id,
-                    **result, "shared_impact": impact}
+            response = {"status": True, "operation_id": operation_id,
+                        **result, "shared_impact": impact}
+            if impact_error is not None:
+                response["stage"] = "php_fpm_site_impact"
+            return self._activity_result(
+                response, "php_fpm", "preview_php_fpm", target=str(version),
+                error=impact_error, allow_error_detail=False)
         except Exception as exc:
             return self._fail("php_fpm_file_preview", exc, operation_id)
 
@@ -254,6 +346,33 @@ class ach_customizer_main:
                 or "tmp_login_id" in session or "tmp_login_expire" in session):
             raise PermissionError("Full primary aaPanel administrator POST is required")
 
+    def status_sites(self, args):
+        """Admin-only bounded native site choices, independent of Monitor.
+
+        Monitor disabling must not prevent choosing a real site for separately
+        authorized Status Pages previews, inspections or branding preferences.
+        Uses the same validated native discovery contract as get_sites, but
+        never changes the Monitor state or host configuration.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            import public
+            result = get_site_page(
+                public,
+                self._argument(args, "page", 1),
+                self._argument(args, "page_size", 25),
+            )
+            response = {"status": True, "request_id": request_id,
+                        "purpose": "status_site_selection", **result}
+            return self._activity_result(
+                response, "status_pages", "status_sites",
+                target="page:" + str(result["page"]), level="DEBUG")
+        except PermissionError as exc:
+            return self._fail("status_sites_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("status_sites_read", exc, request_id)
+
     def status_preferences(self, args):
         """Read-only global and requested native-site branding; no file creation."""
         request_id = uuid4().hex
@@ -261,13 +380,16 @@ class ach_customizer_main:
             site_id = self._status_site_id(args)
             state = read_preferences(_STATE_DIR)
             effective, source = select_brand(state, site_id)
-            return {
+            response = {
                 "status": True, "request_id": request_id, "schema": 1,
                 "revision": state["revision"], "global": state["global"],
                 "effective": effective, "source": source, "site_id": site_id,
                 "templates": list(PAGES), "locales": list(LOCALES),
                 "mode": "Preview only", "apply_supported": False,
             }
+            return self._activity_result(
+                response, "status_pages", "status_preferences",
+                target="site:" + str(site_id) if site_id else "global", level="DEBUG")
         except Exception as exc:
             return self._fail("status_preferences", exc, request_id)
 
@@ -284,13 +406,16 @@ class ach_customizer_main:
                 effective = self._status_values(args)
                 source = "Unsaved preview"
             rendered = render_page(locale, template, effective)
-            return {
+            response = {
                 "status": True, "request_id": request_id, "schema": 1,
                 "revision": state["revision"], "site_id": site_id,
                 "template": template, "locale": locale, "source": source,
                 "mode": "Preview only", "apply_supported": False,
                 **rendered,
             }
+            return self._activity_result(
+                response, "status_pages", "status_preview",
+                target="site:" + str(site_id) if site_id else "global", level="DEBUG")
         except Exception as exc:
             return self._fail("status_preview", exc, request_id)
 
@@ -330,10 +455,11 @@ class ach_customizer_main:
             )
             if native_record() != before:
                 raise StatusPageError("Native site changed during inspection; recheck")
-            return {
+            response = {
                 "status": True, "request_id": request_id, "revision": state["revision"],
                 "selection_source": source, **inspected,
             }
+            return self._activity_result(response, "status_pages", "status_inspect", target="site:" + str(site_id))
         except PermissionError as exc:
             return self._fail("status_authorization", exc, request_id)
         except Exception as exc:
@@ -357,13 +483,14 @@ class ach_customizer_main:
                 expected_revision=revision, values=values, directory=_STATE_DIR,
             )
             effective, source = select_brand(state, site_id)
-            return {
+            response = {
                 "status": True, "request_id": request_id,
                 "schema": 1, "revision": state["revision"],
                 "changed": changed, "scope": scope, "site_id": site_id,
                 "source": source, "effective": effective,
                 "message": "Branding preferences saved; no site files or services changed",
             }
+            return self._activity_result(response, "status_pages", "status_save", target=("site:" + str(site_id)) if site_id else "global")
         except PermissionError as exc:
             return self._fail("status_authorization", exc, request_id)
         except Exception as exc:
@@ -416,13 +543,18 @@ class ach_customizer_main:
             response = {"status": True, "request_id": request_id, **result}
         except FpmApplyError as exc:
             response = self._fail(exc.stage, exc, request_id)
-        except Exception:
-            # Do not send arbitrary privileged exception details to a browser.
-            response = self._fail("fpm_" + action, "Unexpected manual PHP-FPM error; no automatic retry", request_id)
+        except Exception as exc:
+            # Keep the real type for authorized troubleshooting without exposing
+            # privileged exception content to the browser or activity history.
+            response = self._fail(
+                "fpm_" + action, "Unexpected manual PHP-FPM error; no automatic retry",
+                request_id, diagnostic_error=exc)
         if action in ("apply", "rollback"):
             response["audit_logged"] = self._fpm_native_audit(action, response, request_id)
             if not response["audit_logged"]:
                 response["audit_warning"] = "aaPanel activity-log persistence was not confirmed"
+        if response["status"] is True:
+            self._activity_result(response, "php_fpm", "fpm_" + action, target="PHP85-www-shared-service")
         return response
 
     def fpm_prepare(self, args):
