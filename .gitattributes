@@ -1,0 +1,4 @@
+# Owner-provided Status Pages v1 HTML must remain byte-for-byte identical.
+# Six originals intentionally contain blank lines with spaces; keep all other
+# whitespace checks active, including new/modified source and markup.
+plugin/ach_customizer/status_pages/*/*.html whitespace=-blank-at-eol

@@ -1,0 +1,138 @@
+{
+  "exact_final_test_zip_sha256": "a79a0d468c09645e6a1a1260d9e14d325454972a0e33cd986598b259e63e4b22",
+  "integration_base": "aeea252f5c5d03bd8c2600291249cdab584894c0",
+  "native_final_package": {
+    "external_branding_revision_preserved": 3,
+    "global_brand_name_preserved": "Test Lab Brand",
+    "graceful_poweroff_verified": true,
+    "http_site_c_status": 200,
+    "http_site_d_status": 200,
+    "installed_files_identical_to_zip": 34,
+    "nginx_syntax_valid": true,
+    "php_fpm_config_sha256_unchanged": "232d0c85d59e187ed0da59514f31d5f02462fd98d6964de11216542bd7074bbb",
+    "prior_monitor_state_unchanged": true,
+    "qemu_image_check": "no errors",
+    "same_version_0_1_4_update": "PASS",
+    "site_vhosts_unchanged": true,
+    "three_to_one_accent_contrast_guard_executed": "PASS"
+  },
+  "native_initial_intermediate_package": {
+    "installed_default_templates_rendered": 22,
+    "installed_files_identical_to_zip": 34,
+    "native_import_from_0_1_3": "PASS",
+    "nonprimary_and_temporary_context_denied": "PASS",
+    "site_and_fpm_file_hashes_unchanged": true,
+    "stale_revision_denied": "PASS",
+    "synthetic_flask_full_admin_status_save_and_reset": "PASS",
+    "zip_sha256": "c01a13450ee9c9f9e1a4afed3c9c7360893032d3d9f27c089e10302f5f8462c3"
+  },
+  "project": "ACh aaPanel Customizer",
+  "recovery_locators": {
+    "candidate_development_worktree": "/srv/ai-workspace/ach-aapanel-status-pages-20261103",
+    "guest_image": "native-status-pages-014.qcow2",
+    "native_qa_entrypoints": [
+      "native_status_pages_014.py",
+      "native_update_verify_014.py"
+    ],
+    "task_lab": "/srv/ai-workspace/ach-aapanel-lab-20261101/qa-status-pages-20261103"
+  },
+  "reference_source_commit": "6c9412f3b220a563b64b82ce3d8ee65ff324fbbe",
+  "required_01_remediation": {
+    "corrected_development_zip_sha256": "7cf00cd1f71c770873cd30233fd9eee148e436fca53a07b335478ebc7ad0cc1c",
+    "correction": "Contrast checked semantic CSS override for customized output only; fixed backgrounds and button text/hover, links, descriptions, visual labels, border and keyboard focus",
+    "finding": "REQUIRED-01: custom dark page palette rendered white-on-white primary button and low-contrast muted labels/links",
+    "minimum_focus_and_panel_border_contrast": 3.0,
+    "minimum_normal_text_and_button_contrast": 4.5,
+    "native_exact_zip_update": {
+      "authenticated_browser_csrf": "NOT TESTED",
+      "guest": "Debian 12 / aaPanel 8.0.7 / Nginx 1.28.3 / PHP-FPM 8.5.12",
+      "guest_shutdown": "graceful",
+      "installed_file_hash_matches": 34,
+      "invalid_palette_rejected": true,
+      "live_status_page_apply": "NOT IMPLEMENTED",
+      "native_unsaved_dark_previews": 22,
+      "nginx_syntax": "PASS",
+      "prior_monitor_fpm_vhosts_unchanged": true,
+      "qcow2_integrity": "no errors",
+      "real_site_http_codes": [
+        200,
+        200
+      ],
+      "saved_preferences_revision_preserved": 3
+    },
+    "original_assets_changed": false,
+    "prior_review_verdict": "COMPLETE / CHANGES_REQUIRED",
+    "prior_reviewed_head": "ccd9f23ed4cdd33f4e5de1e0b88fbe519997f96f",
+    "representative_browser": {
+      "computed_style_contrast_failures": 0,
+      "engine": "Chromium; isolated task-owned local-only HTML server",
+      "horizontal_overflow_failures": 0,
+      "limitation": "Static custom-output computed styles, not native aaPanel authenticated browser",
+      "locales": [
+        "en",
+        "fa"
+      ],
+      "palettes": [
+        "reviewer_dark",
+        "light",
+        "navy_dark",
+        "fallback_link"
+      ],
+      "real_reduced_motion_hover_and_keyboard_focus": true,
+      "rendered_checks": 48,
+      "reviewer_dark": {
+        "focus_outline_contrast": 19.556,
+        "hover_button_contrast": 15.908,
+        "muted_description_contrast": 4.558,
+        "primary_button_contrast": 21.0,
+        "secondary_link_contrast": 19.556
+      },
+      "templates": [
+        "404",
+        "502",
+        "stopped"
+      ],
+      "viewports_px": [
+        375,
+        1280
+      ]
+    },
+    "source_manifest_changed": false,
+    "test_lab_locator": "/srv/ai-workspace/ach-aapanel-lab-20261101/qa-status-pages-20261103"
+  },
+  "root_cause_and_correction": {
+    "failure": "ZIP constant 1980 source timestamps, same-size edited Python source, valid-looking stale .pyc; new process continued old 2.7 contrast behavior",
+    "separate_caveat": "already running aaPanel Python worker may retain imported old modules until controlled restart; this was not tested for this new candidate",
+    "verification": "fresh guest Python process showed old numeric constant despite installed 3.0 source; content-derived ZIP timestamp then executed corrected 3.0 in native same-version update without manual pycache removal"
+  },
+  "runtime_environment": {
+    "guest_hostname": "ach-aapanel-lab",
+    "lab_isolated": true,
+    "nginx": "1.28.3",
+    "operation": "native panelPlugin.update_zip/input_zip; isolated task-owned QEMU copy-on-write overlay",
+    "os": "Debian 12",
+    "panel_version": "8.0.7",
+    "php_fpm": "8.5.12",
+    "real_native_site_ids": [
+      7,
+      8
+    ]
+  },
+  "schema": 1,
+  "scope": "Issue #10 first native Status Pages Preview/Branding vertical slice; unreleased 0.1.4",
+  "security_and_scope": {
+    "brand_preferences": "native plugin-owned persistent JSON, revision-checked, no website/service writes",
+    "csrf_and_restricted_role_browser": "UNVERIFIED; isolated synthetic Flask tests are not real auth-browser proof",
+    "html_preview": "offline, sandboxed, no-referrer iframe in plugin UI source; browser session acceptance not performed",
+    "production_deployment": "NOT AUTHORIZED",
+    "public_release": "NOT AUTHORIZED",
+    "website_status_page_apply_or_restore": "NOT IMPLEMENTED"
+  },
+  "source_tests": {
+    "node_pass": 59,
+    "python_pass": 138,
+    "source_asset_digest_exact_count": 22
+  },
+  "zip_builder_deterministic": true,
+  "zip_members": 34
+}
