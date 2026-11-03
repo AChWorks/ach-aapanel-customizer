@@ -383,3 +383,49 @@ falsifies an already completed operation.
 These are source-level contracts for unreleased development. Native aaPanel
 installation of the exact candidate, authenticated browser/CSRF and real
 service/site impact require independent verification before release.
+
+
+### Independent-review remediation: native UI sequencing and lifecycle evidence
+
+The read-only PHP-FPM shared-impact secondary inspector must never emit raw
+unexpected exception text to the browser. It returns a bounded Needs Review
+reason with the request operation ID; a WARNING Activity record retains
+the actual exception class and stage, never its untrusted message. This
+prevents a successful file-only preview from becoming a covert exception
+detail transport.
+
+The native PHP-FPM form uses a generation and immutable field snapshot for
+each Preview/Prepare request. Editing fields or starting another preview
+invalidates older replies, including errors. A stale Prepare cannot restore
+an approval panel, and duplicate pending Prepare clicks do not start another
+request. The server-side revalidation/hash/authorization gates remain
+independent and mandatory.
+
+Confirmed shared-service Apply/Restore results and missing native-audit or
+plugin-Activity persistence are displayed in a dedicated PHP-FPM panel notice.
+Concurrent Website/Activity/other panel requests must not hide or clear
+these consequential warnings. Transport-uncertain outcomes explicitly
+require recovery inspection before any retry.
+
+The native install/uninstall shell hook uses fixed plugin-local paths and a
+strict allowlisted Python lifecycle logger. Repeated install invocations
+are recorded as install-hook registrations: the hook cannot reliably claim
+whether aaPanel called it for first install or update/reinstall. Uninstall
+records verified icon-copy removal, preserved icon-copy on cleanup failure,
+or unavailable cleanup as distinct outcomes. The cleanup helper's exit
+status reflects actual verification rather than a false success. Activity
+logging errors produce an explicit installer warning but cannot corrupt
+plugin install/uninstall behavior. Retained Monitor state, site branding,
+existing manually applied PHP-FPM configuration and durable recovery files
+remain outside the replaceable plugin source and are never purged by
+these hooks. Lifecycle records use the same bounded private JSONL
+rotation and no-follow, descriptor-anchored directory ancestry, with action,
+stage, severity, UTC time, error classification
+and a generated operation ID. Verbosity filtering is reported as filtering,
+not a persistence failure.
+
+**Evidence boundary:** isolated source/unit and simulated native-layer
+browser checks verify these contracts but do not by themselves establish
+aaPanel authenticated-browser, upgrade/uninstall hook timing, CSRF,
+actual PHP-FPM service reload or on-host lifecycle retention. Native QA
+requires the exact built ZIP and an explicitly isolated aaPanel guest.

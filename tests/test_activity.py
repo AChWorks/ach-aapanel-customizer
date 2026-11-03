@@ -73,6 +73,18 @@ class ActivityTests(unittest.TestCase):
         for name in (activity.LOG_NAME, activity.LOG_NAME + ".1"):
             self.assertLessEqual((Path(self.directory) / name).stat().st_size, 4096)
 
+    def test_intermediate_symlink_directory_is_rejected_on_read_and_write(self):
+        real = Path(self.directory) / "real" / "activity"
+        real.mkdir(parents=True)
+        redirected = Path(self.directory) / "redirect"
+        redirected.symlink_to(real.parent, target_is_directory=True)
+        other = redirected / "activity"
+        with self.assertRaises(activity.ActivityError):
+            activity.append_activity(str(other), self.event())
+        with self.assertRaises(activity.ActivityError):
+            activity.read_activity(str(other))
+        self.assertEqual(list(real.iterdir()), [])
+
     def test_symlink_and_corrupted_record_fail_closed(self):
         outside = Path(self.directory) / "outside"
         outside.write_text("unchanged")
@@ -198,6 +210,27 @@ class ActivityTests(unittest.TestCase):
         entries = activity.read_activity(self.directory, limit=100)
         self.assertEqual(len(entries), 60)
         self.assertEqual(len({entry["operation_id"] for entry in entries}), 60)
+
+    def test_php_preview_site_mapping_exception_does_not_disclose_private_text(self):
+        secret = "SYNTHETIC-PASSWORD-DO-NOT-EXPOSE"
+        data = {"state": "File Drift", "source": "/www/server/php/85/etc/php-fpm.conf",
+                "version": "85", "changes": []}
+        with patch.object(main, "_STATE_DIR", self.directory), patch.object(
+                main, "preview_php_fpm", return_value=data), patch.object(
+                main, "inspect_php_fpm_site_impact",
+                side_effect=RuntimeError(secret)), patch.dict(
+                sys.modules, {"public": types.ModuleType("public")}):
+            response = main.ach_customizer_main().preview_php_fpm(
+                {"php_version": "85"})
+        self.assertTrue(response["status"])
+        self.assertEqual(response["shared_impact"]["state"], "Needs Review")
+        self.assertNotIn(secret, json.dumps(response))
+        self.assertEqual(response["shared_impact"]["matched_sites"], [])
+        history = activity.read_activity(self.directory)
+        self.assertEqual(history[0]["level"], "WARNING")
+        self.assertEqual(history[0]["error_class"], "RuntimeError")
+        self.assertEqual(history[0]["operation_id"], response["operation_id"])
+        self.assertNotIn(secret, json.dumps(history))
 
     def test_unexpected_exceptions_do_not_persist_details(self):
         with patch.object(main, "_STATE_DIR", self.directory):

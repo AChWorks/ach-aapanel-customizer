@@ -12,6 +12,7 @@ import os
 import re
 import stat
 from datetime import datetime, timezone
+from pathlib import Path
 
 LOG_NAME = "ach_customizer.activity.jsonl"
 LOCK_NAME = "ach_customizer.activity.lock"
@@ -19,7 +20,7 @@ MAX_LOG_BYTES = 262144
 MAX_RECORD_BYTES = 2048
 MAX_RESULTS = 100
 LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
-MODULES = {"monitor", "websites", "php_fpm", "status_pages", "diagnostics"}
+MODULES = {"monitor", "websites", "php_fpm", "status_pages", "diagnostics", "lifecycle"}
 _FIELDS = {"schema", "time_utc", "level", "module", "action", "stage",
            "outcome", "operation_id", "target", "error_class", "detail", "recovery_id"}
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -64,14 +65,30 @@ def record(*, level, module, action, operation_id, stage, outcome,
 
 
 def _directory(directory):
+    # Pin every ancestor as a no-follow descriptor, matching the existing
+    # Monitor state trust boundary; checking only the final component would
+    # silently traverse a redirected intermediate directory.
+    path = Path(directory)
+    if not path.is_absolute() or any(item in (".", "..") for item in path.parts):
+        raise ActivityError("Activity directory path must be absolute and normal")
     try:
-        fd = os.open(directory, _DIR_FLAGS)
+        fd = os.open("/", _DIR_FLAGS)
+    except OSError as exc:
+        raise ActivityError("Cannot access activity directory") from exc
+    try:
+        for segment in path.parts[1:]:
+            next_fd = os.open(segment, _DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
         info = os.fstat(fd)
         if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
                 or info.st_mode & 0o022):
             raise ActivityError("Unsafe activity directory ownership/permissions")
         return fd
-    except OSError as exc:
+    except (OSError, ActivityError) as exc:
+        os.close(fd)
+        if isinstance(exc, ActivityError):
+            raise
         raise ActivityError("Cannot access activity directory") from exc
 
 

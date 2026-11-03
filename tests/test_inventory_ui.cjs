@@ -36,7 +36,7 @@ function loadUi() {
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
-    '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-review',
+    '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-operation-notice', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
     '#ach-fpm-recovery-impact', '#ach-fpm-restore-rows',
@@ -226,6 +226,7 @@ function loadUi() {
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       impactSummary: elements.get('#ach-impact-summary').textContent,
       fpmPlan: elements.get('#ach-fpm-plan').textContent,
+      fpmOperationNotice: elements.get('#ach-fpm-operation-notice').textContent,
       fpmDetails: elements.get('#ach-fpm-details').textContent,
       fpmReviewHidden: elements.get('#ach-fpm-review').props.hidden,
       fpmPrepareDisabled: elements.get('#ach-fpm-prepare').props.disabled,
@@ -1282,4 +1283,141 @@ test('Oversized Activity record is rejected before it reaches a table row', () =
       operation_id:'d'.repeat(32),recovery_id:'',target:''}]});
   assert.deepEqual(ui.activityRows(),[]);
   assert.match(ui.activityMessage(),/unavailable or incompatible/);
+});
+
+
+test('FPM preview arriving after input edit never enables Prepare for a changed form', () => {
+  const ui=loadUi();
+  const previous=ui.submitPhp();
+  ui.changePhp('max_children','101');
+  previous.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.deepEqual(ui.state().impactRows,[]);
+  assert.match(ui.state().fpmPlan,/fresh read-only preview/);
+});
+
+test('Newer FPM preview wins and a duplicate older response cannot revive approvals', () => {
+  const ui=loadUi();
+  const older=ui.submitPhp();
+  const newer=ui.submitPhp();
+  newer.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  older.respond({status:false,stage:'php_fpm_file_preview',msg:'OLD failure'});
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  assert.doesNotMatch(ui.state().error,/OLD failure/);
+});
+
+test('Edited PHP form invalidates an in-flight Prepare and never revives approval', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const pending=ui.prepareFpm();
+  assert.match(pending.options.url,/s=fpm_prepare$/);
+  ui.changePhp('max_children','177');
+  pending.respond(guardedPlan());
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.match(ui.state().fpmPlan,/fresh read-only preview/);
+});
+
+test('An obsolete failed Prepare response cannot overwrite fresh-form feedback', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const pending=ui.prepareFpm();
+  ui.changePhp('max_children','151');
+  pending.respond({status:false,stage:'fpm_prepare',msg:'OBSOLETE ERROR'});
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.doesNotMatch(ui.state().error,/OBSOLETE ERROR/);
+});
+
+test('Confirmed Apply warnings stay in PHP panel despite unrelated Activity traffic', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  const apply=ui.commitFpm();
+  const activity=ui.openActivity();
+  apply.respond({status:true,state:'Applied',operation_id:'d'.repeat(32),
+    audit_logged:false,audit_warning:'Native audit unavailable',
+    activity_logged:false,activity_warning:'Plugin log unavailable'});
+  activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmPlan,/Apply result: Applied/);
+  assert.match(ui.state().fpmOperationNotice,/Native audit unavailable/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin log unavailable/);
+});
+
+test('Confirmed Restore warning persists after unrelated read and response', () => {
+  const ui=loadUi();
+  ui.inspectFpmRecovery().respond(recoveryPreview());
+  ui.approveFpmRollback(true);
+  const restore=ui.rollbackFpm();
+  const activity=ui.openActivity();
+  restore.respond({status:true,state:'Rolled Back',restored_sha256:'a'.repeat(64),
+    operation_id:'d'.repeat(32),audit_logged:true,
+    activity_logged:false,activity_warning:'Plugin Restore log unavailable'});
+  activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin Restore log unavailable/);
+});
+
+test('Old successful PHP preview cannot override newer failed preview', () => {
+  const ui=loadUi();
+  const old=ui.submitPhp();
+  const recent=ui.submitPhp();
+  recent.respond({status:false,stage:'php_fpm_file_preview',msg:'Current source unavailable'});
+  old.respond(phpPreview());
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.deepEqual(ui.state().impactRows,[]);
+  assert.doesNotMatch(ui.state().error,/Old response/);
+});
+
+test('A second Prepare click while pending sends no duplicate approval request', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(phpPreview());
+  const first=ui.prepareFpm();
+  const before=ui.requests.length;
+  ui.prepareFpm();
+  assert.equal(ui.requests.length,before);
+  first.respond(guardedPlan());
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  ui.approveFpm(true);
+  assert.equal(ui.state().fpmCommitDisabled,false);
+  ui.changePhp('max_children','211');
+  assert.equal(ui.state().fpmCommitDisabled,true);
+  assert.equal(ui.state().fpmReviewHidden,true);
+});
+
+test('Restore warning retains both audit and Activity failures across unrelated refresh', () => {
+  const ui=loadUi();
+  ui.inspectFpmRecovery().respond(recoveryPreview());
+  ui.approveFpmRollback(true);
+  const restore=ui.rollbackFpm();
+  const activity=ui.openActivity();
+  restore.respond({status:true,state:'Rolled Back',restored_sha256:'a'.repeat(64),
+    operation_id:'d'.repeat(32),audit_logged:false,audit_warning:'Native restore audit missing',
+    activity_logged:false,activity_warning:'Plugin restore Activity missing'});
+  activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.match(ui.state().fpmRecovery,/Recovery result: Rolled Back/);
+  assert.match(ui.state().fpmOperationNotice,/Native restore audit missing/);
+  assert.match(ui.state().fpmOperationNotice,/Plugin restore Activity missing/);
+});
+
+test('Lifecycle Activity can be filtered and displayed with canonical fields', () => {
+  const ui=loadUi();
+  const first=ui.openActivity();
+  first.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  const req=ui.activityFilter('#ach-activity-module','lifecycle');
+  assert.equal(req.options.data.module,'lifecycle');
+  req.respond({status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-03T09:00:00+00:00',
+      module:'lifecycle',level:'WARNING',action:'uninstall',
+      stage:'icon_cleanup',outcome:'preserved',error_class:'IconCleanupFailed',
+      operation_id:'a'.repeat(32),target:'ach_customizer',detail:'Icon retained',
+      recovery_id:''}]});
+  assert.equal(ui.activityRows().length,1);
+  assert.match(ui.activityRows()[0][2],/lifecycle \/ uninstall/);
+  assert.match(ui.activityRows()[0][3],/IconCleanupFailed/);
 });

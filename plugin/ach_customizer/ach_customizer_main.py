@@ -43,7 +43,8 @@ class ach_customizer_main:
         return getattr(args, key, default)
 
     @staticmethod
-    def _activity_result(response, module, action, *, target="", error=None, level="INFO"):
+    def _activity_result(response, module, action, *, target="", error=None,
+                         level="INFO", allow_error_detail=True):
         """Best-effort plugin diagnostics, independent of operation success."""
         correlation = response.get("request_id", response.get("operation_id"))
         try:
@@ -52,7 +53,7 @@ class ach_customizer_main:
             # representations, request objects or authentication material.
             controlled = (PermissionError, StateError, StatusPageError,
                           MonitorInputError, FpmApplyError, ActivityError)
-            detail = str(error) if isinstance(error, controlled) else ""
+            detail = str(error) if allow_error_detail and isinstance(error, controlled) else ""
             impact = response.get("shared_impact")
             needs_review = (not failed and
                             (response.get("state") == "Needs Review" or
@@ -232,17 +233,19 @@ class ach_customizer_main:
             result = preview_php_fpm("/www/server/php", version, desired)
             # Keep file/default drift available even when site ownership cannot
             # be attributed. This second bounded read never authorizes Apply.
+            impact_error = None
             if result.get("state") in ("File Match", "File Drift") and result.get("source"):
                 try:
                     import public
 
                     impact = inspect_php_fpm_site_impact(public, version, result["source"])
                 except Exception as exc:
+                    impact_error = exc
                     impact = {
                         "schema": 1, "state": "Needs Review", "scope": "shared_service",
                         "version": version, "matched_sites": [], "unresolved_sites": [],
                         "site_count": 0, "other_php_sites_count": 0,
-                        "reason": ("Shared site attribution unavailable: " + str(exc))[:250],
+                        "reason": "Shared site attribution failed; review Activity for operation " + operation_id,
                         "note": "Read-only file attribution failed; no affected sites were inferred.",
                     }
             else:
@@ -255,7 +258,11 @@ class ach_customizer_main:
                 }
             response = {"status": True, "operation_id": operation_id,
                         **result, "shared_impact": impact}
-            return self._activity_result(response, "php_fpm", "preview_php_fpm", target=str(version))
+            if impact_error is not None:
+                response["stage"] = "php_fpm_site_impact"
+            return self._activity_result(
+                response, "php_fpm", "preview_php_fpm", target=str(version),
+                error=impact_error, allow_error_detail=False)
         except Exception as exc:
             return self._fail("php_fpm_file_preview", exc, operation_id)
 
