@@ -571,7 +571,7 @@
     var ticket = ++hostsTicket;
     root.find('#ach-hosts-result').text('Inspecting origin-local file only...');
     hostsLock(true);
-    request('inspect_local_hosts', {site_id:id}, function (r) {
+    request('inspect_local_hosts', {site_id:id, expected_site_key:hostsPageSites.get(id)}, function (r) {
       if (ticket !== hostsTicket) return;
       if (id !== hostsSiteId() || !validHostsResult(r, id)) {
         root.find('#ach-hosts-result').text('Inspection unconfirmed; no DNS or Gateway inference.');

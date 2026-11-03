@@ -163,7 +163,7 @@ class NativeEndpointTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.reads = 0
 
-    def panel(self, changed=False):
+    def panel(self, changed=False, domains_changed=False, site_name="site.test"):
         module = types.ModuleType("public")
         outer = self
 
@@ -176,7 +176,7 @@ class NativeEndpointTests(unittest.TestCase):
                 return self
             def find(self):
                 outer.reads += 1
-                return {"id": 7, "name": "site.test",
+                return {"id": 7, "name": site_name,
                         "path": "/changed" if changed and outer.reads == 3 else "/www/site.test",
                         "status": "1"}
 
@@ -195,7 +195,9 @@ class NativeEndpointTests(unittest.TestCase):
                 return self
             def select(self):
                 return [{"id": 41, "pid": 7, "name": "site.test", "port": 80},
-                        {"id": 42, "pid": 7, "name": "*.site.test", "port": 443}]
+                        {"id": 42, "pid": 7,
+                         "name": "changed.test" if domains_changed and outer.reads == 3
+                         else "*.site.test", "port": 443}]
         module.M = lambda name: SiteQuery() if name == "sites" else DomainQuery()
         return module
 
@@ -214,7 +216,8 @@ class NativeEndpointTests(unittest.TestCase):
         with patch.dict(sys.modules, {"public":self.panel(), "flask":self.flask()}):
             with patch.object(endpoint, "inspect_hosts_file", return_value=response) as spy:
                 result = self.plugin.inspect_local_hosts(
-                    {"site_id":"7", "domains":["attacker.test"], "path":"/etc/shadow"})
+                    {"site_id":"7", "expected_site_key":"site.test",
+                     "domains":["attacker.test"], "path":"/etc/shadow"})
         self.assertTrue(result["status"], result)
         self.assertEqual(result["site_id"], 7)
         self.assertEqual(result["site_key"], "site.test")
@@ -232,7 +235,7 @@ class NativeEndpointTests(unittest.TestCase):
                        self.flask(method="GET")):
             with patch.dict(sys.modules, {"flask":access, "public":self.panel()}):
                 with patch.object(endpoint, "inspect_hosts_file", side_effect=AssertionError("Must not read")):
-                    response = self.plugin.inspect_local_hosts({"site_id":"7"})
+                    response = self.plugin.inspect_local_hosts({"site_id":"7", "expected_site_key":"site.test"})
             self.assertFalse(response["status"])
             self.assertEqual(response["stage"], "hosts_authorization")
         self.assertEqual(self.reads, 0)
@@ -240,7 +243,7 @@ class NativeEndpointTests(unittest.TestCase):
     def test_site_change_during_inspection_fails_closed(self):
         with patch.dict(sys.modules, {"flask":self.flask(), "public":self.panel(changed=True)}):
             with patch.object(endpoint, "inspect_hosts_file", return_value={"schema":1}) as spy:
-                response = self.plugin.inspect_local_hosts({"site_id":"7"})
+                response = self.plugin.inspect_local_hosts({"site_id":"7", "expected_site_key":"site.test"})
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
         self.assertIn("changed", response["msg"])
@@ -251,10 +254,108 @@ class NativeEndpointTests(unittest.TestCase):
                             entry["error_class"] == "HostsInspectionError" for entry in activity))
         self.assertEqual(spy.call_count, 1)
 
+    def test_native_endpoint_reads_real_bounded_file_and_persists_success_activity(self):
+        """Join native-site selection, the actual hosts parser and Activity.
+
+        The read fixture is isolated. Neither the endpoint nor its parser may
+        modify it, infer remote DNS, or expose unrelated local aliases.
+        """
+        with tempfile.TemporaryDirectory(prefix="ach-hosts-integration-") as temp:
+            source = Path(temp) / "hosts"
+            content = ("127.0.0.2 site.test another-internal.test\n"
+                       "203.0.113.4 unrelated-local.test\n")
+            source.write_text(content, encoding="utf-8")
+            source.chmod(0o644)
+            before = source.read_bytes()
+            with patch.dict(sys.modules, {"public": self.panel(), "flask": self.flask()}):
+                with patch.object(endpoint, "inspect_hosts_file",
+                                  side_effect=lambda names: inspect_local_hosts(
+                                      names, source_path=str(source))) as inspected:
+                    response = self.plugin.inspect_local_hosts(
+                        {"site_id": "7", "expected_site_key": "site.test",
+                         "domains": ["attacker.example"], "source_path": "/etc/shadow"})
+                    activity = self.plugin.get_activity({"module": "websites"})
+            self.assertTrue(response["status"], response)
+            self.assertEqual(response["site_id"], 7)
+            self.assertEqual(response["site_key"], "site.test")
+            self.assertEqual(response["state"], "Local Loopback Entry")
+            self.assertEqual(response["hosts_sha256"], hashlib.sha256(before).hexdigest())
+            self.assertEqual(response["domains"], ["site.test"])
+            self.assertEqual(response["uninspected_wildcards"], ["*.site.test"])
+            self.assertEqual(len(response["entries"]), 1)
+            self.assertEqual(response["entries"][0]["address"], "127.0.0.2")
+            self.assertFalse(response["resolver_verified"])
+            self.assertFalse(response["gateway_verified"])
+            self.assertFalse(response["fix_supported"])
+            self.assertTrue(response["activity_logged"])
+            self.assertTrue(activity["status"], activity)
+            self.assertTrue(any(e["action"] == "inspect_local_hosts" and
+                                e["outcome"] == "Local Loopback Entry" for e in activity["entries"]))
+            self.assertNotIn("another-internal.test", str(response))
+            self.assertNotIn("unrelated-local.test", str(response))
+            self.assertNotIn("attacker.example", str(response))
+            self.assertEqual(source.read_bytes(), before)
+            inspected.assert_called_once_with(["site.test", "*.site.test"])
+            self.assertEqual(self.reads, 3)
+
+    def test_bound_domain_change_during_inspection_requires_recheck(self):
+        """A site with an unchanged ID/name may still change its bound domains."""
+        with patch.dict(sys.modules, {"flask": self.flask(),
+                                      "public": self.panel(domains_changed=True)}):
+            with patch.object(endpoint, "inspect_hosts_file", return_value={"schema": 1}) as inspected:
+                response = self.plugin.inspect_local_hosts({"site_id": "7", "expected_site_key": "site.test"})
+        self.assertFalse(response["status"])
+        self.assertEqual(response["stage"], "hosts_inspection")
+        self.assertIn("bound domains changed", response["msg"])
+        self.assertNotIn("domains", response)
+        self.assertEqual(self.reads, 3)
+        inspected.assert_called_once()
+
+    def test_unexpected_file_io_error_has_no_internal_details_in_browser_reply(self):
+        with patch.dict(sys.modules, {"public": self.panel(), "flask": self.flask()}):
+            with patch.object(endpoint, "inspect_hosts_file",
+                              side_effect=OSError("private filesystem failure detail")):
+                response = self.plugin.inspect_local_hosts({"site_id": "7", "expected_site_key": "site.test"})
+        self.assertFalse(response["status"])
+        self.assertEqual(response["stage"], "hosts_inspection")
+        self.assertNotIn("private filesystem", str(response))
+        self.assertIn("Operation ID", response["msg"])
+        self.assertTrue(response["activity_logged"])
+        from ach_customizer_activity import read_activity
+        entries = read_activity(self.state.name, module="websites", limit=10)
+        self.assertTrue(any(e["action"] == "hosts_inspection" and
+                            e["error_class"] == "OSError" and
+                            "private filesystem" not in e["detail"] for e in entries))
+
+    def test_reassigned_site_id_is_denied_before_file_read(self):
+        """An inventory site key is a stale-selection precondition, not authority."""
+        with patch.dict(sys.modules, {"flask": self.flask(),
+                                      "public": self.panel(site_name="reassigned.test")}):
+            with patch.object(endpoint, "inspect_hosts_file",
+                              side_effect=AssertionError("must not inspect")) as inspected:
+                response = self.plugin.inspect_local_hosts(
+                    {"site_id": "7", "expected_site_key": "site.test"})
+        self.assertFalse(response["status"])
+        self.assertEqual(response["stage"], "hosts_inspection")
+        self.assertIn("identity changed", response["msg"])
+        self.assertNotIn("reassigned.test", str(response))
+        inspected.assert_not_called()
+        self.assertEqual(self.reads, 2)
+
+    def test_missing_site_identity_precondition_is_rejected(self):
+        with patch.dict(sys.modules, {"flask": self.flask(), "public": self.panel()}):
+            with patch.object(endpoint, "inspect_hosts_file",
+                              side_effect=AssertionError("must not inspect")) as inspected:
+                response = self.plugin.inspect_local_hosts({"site_id": "7"})
+        self.assertFalse(response["status"])
+        self.assertIn("Refresh the native website inventory", response["msg"])
+        self.assertEqual(self.reads, 0)
+        inspected.assert_not_called()
+
     def test_invalid_site_id_never_reads_hosts(self):
         with patch.dict(sys.modules, {"flask":self.flask(), "public":self.panel()}):
             with patch.object(endpoint, "inspect_hosts_file", side_effect=AssertionError("not reached")):
-                response = self.plugin.inspect_local_hosts({"site_id":"../../etc"})
+                response = self.plugin.inspect_local_hosts({"site_id":"../../etc", "expected_site_key":"site.test"})
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "hosts_inspection")
 

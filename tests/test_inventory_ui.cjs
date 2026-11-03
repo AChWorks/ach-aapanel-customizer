@@ -980,6 +980,7 @@ test('Native-site local hosts inspection reports loopback without claiming Gatew
   const query=ui.statusClick('#ach-hosts-inspect-button');
   assert.match(query.options.url,/s=inspect_local_hosts$/);
   assert.equal(query.options.data.site_id,'7');
+  assert.equal(query.options.data.expected_site_key,'site.test');
   assert.equal(ui.state().hostsInspectDisabled,true);
   query.respond(hostsInspection());
   assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
@@ -1032,7 +1033,9 @@ test('Discovered site selection is bounded to current inventory and text-rendere
   assert.deepEqual(ui.state().hostsChoices.map(x => x.id),['','7','8']);
   assert.match(ui.state().hostsChoices[1].text,/<img src=x onerror=alert\(1\)>/);
   const r=hostsInspection({site_key:malicious});
-  ui.statusClick('#ach-hosts-inspect-button').respond(r);
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  assert.equal(request.options.data.expected_site_key,malicious);
+  request.respond(r);
   assert.match(ui.state().hostsResult,/<img src=x onerror=alert\(1\)>/);
   ui.statusSetValue('#ach-hosts-site-id','9','input change');
   assert.equal(ui.state().hostsInspectDisabled,true);

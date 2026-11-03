@@ -230,6 +230,12 @@ class ach_customizer_main:
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
+            # The browser-selected site key is a precondition, never a lookup
+            # source. Refuse stale/reassigned aaPanel IDs before reading hosts.
+            expected_site_key = self._argument(args, "expected_site_key")
+            if (not isinstance(expected_site_key, str) or not expected_site_key
+                    or len(expected_site_key) > 255):
+                raise HostsInspectionError("Refresh the native website inventory before inspection")
             site_id = self._status_site_id(args)
             if site_id is None:
                 raise HostsInspectionError("Choose an existing native aaPanel site ID")
@@ -247,6 +253,8 @@ class ach_customizer_main:
                 _bound_domains_for_sites(public, [site])
                 return site
             before = current_site()
+            if before["name"] != expected_site_key:
+                raise HostsInspectionError("Selected website identity changed; refresh native inventory")
             names = [item["name"] for item in before["bound_domains"]]
             result = inspect_hosts_file(names)
             if current_site() != before:
