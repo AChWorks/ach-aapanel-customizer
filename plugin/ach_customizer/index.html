@@ -1021,6 +1021,10 @@
   }
   function statusLock(busy) {
     statusBusy = busy;
+    // Website inventory loads independently; their completion must not
+    // release a pending branding, inspection or HTTP-probe operation.
+    root.find('#ach-status-sites-more, #ach-status-sites-retry').prop(
+      'disabled', busy || statusSitesBusy);
     root.find('#ach-status-load').prop('disabled', busy);
     root.find('#ach-status-scope, #ach-status-template, #ach-status-locale').prop('disabled', busy);
     root.find('#ach-status-site-id').prop('disabled', busy ||
@@ -1095,7 +1099,7 @@
       statusSites = []; statusSitePage = 1; statusSitesMore = true;
       statusSitesBusy = false; statusSitesTrusted = false;
       statusClearPreview();
-      statusLock(false);
+      statusLock(statusBusy);
       root.find('#ach-status-site-id').empty().prop('disabled', true);
       $('<option>').val('').text('Loading websites...').appendTo(root.find('#ach-status-site-id'));
     }
@@ -1112,7 +1116,7 @@
           r.inventory_schema !== 2 || !validInventoryPage(r, expectedPage)) {
         statusSitesTrusted = false;
         statusClearPreview();
-        statusLock(false);
+        statusLock(statusBusy);
         root.find('#ach-status-sites-state').text('Website inventory unavailable or changed. Check administrator access and retry.');
         root.find('#ach-status-sites-more').prop('hidden', true);
         if (!statusSites.length) root.find('#ach-status-site-id').prop('disabled', true);
@@ -1124,7 +1128,7 @@
         if (seen.has(r.sites[i].id)) {
           statusSitesTrusted = false;
           statusClearPreview();
-          statusLock(false);
+          statusLock(statusBusy);
           root.find('#ach-status-sites-state').text('Duplicate website ID across pages; refresh inventory.');
           root.find('#ach-status-sites-more').prop('hidden', true);
           return;
@@ -1146,7 +1150,7 @@
       statusSitesMore = r.has_more;
       root.find('#ach-status-sites-more').prop('hidden', !statusSitesMore).prop('disabled', !statusSitesMore);
       root.find('#ach-status-sites-state').text(statusSites.length + ' website(s) loaded' + (statusSitesMore ? '; more available.' : '.'));
-      statusLock(false);
+      statusLock(statusBusy);
     });
   }
   root.find('#ach-status-sites-more').on('click', function () { loadStatusSites(false); });

@@ -1349,15 +1349,21 @@ function statusProbe(overrides={}) {
     ...overrides
   };
 }
-function statusProbeUi() {
+function statusProbeUi(hasMore=false) {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
   const inventory = ui.requests.at(-1);
   assert.match(inventory.options.url,/s=status_sites$/);
-  inventory.respond({...page([{...site(),id:7,name:'demo.test',
+  const selected={...site(),id:7,name:'demo.test',
     document_root:'/www/demo.test',bound_domains:[{name:'demo.test',port:80}],
-    canonical_domain_bound:true}]),purpose:'status_site_selection'});
+    canonical_domain_bound:true};
+  const remaining=hasMore ? Array.from({length:24},(_,i) => ({
+    ...site(),id:100+i,name:'other'+i+'.test',
+    document_root:'/www/other'+i+'.test',
+    bound_domains:[{name:'other'+i+'.test',port:80}],canonical_domain_bound:true
+  })) : [];
+  inventory.respond({...page([selected,...remaining]),has_more:hasMore,purpose:'status_site_selection'});
   ui.statusSetValue('#ach-status-site-id','7','change');
   ui.requests.at(-1).respond(statusPrefs());
   return ui;
@@ -1437,6 +1443,27 @@ test('Untrusted, stale, cross-site, overclaiming HTTP probe responses fail close
   pending.respond(statusProbe());
   assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
   assert.doesNotMatch(ui.state().statusProbe,/HTTP Match/);
+});
+
+test('A late site-inventory response cannot unlock an active HTTP probe', () => {
+  const ui=statusProbeUi(true);
+  const laterInventory=ui.loadMoreSites();
+  assert.match(laterInventory.options.url,/s=status_sites$/);
+  const probe=ui.statusClick('#ach-status-probe-button');
+  assert.match(probe.options.url,/s=status_probe$/);
+  assert.equal(ui.state().statusProbeDisabled,true);
+  laterInventory.respond({...page([{
+    ...site(),id:8,name:'another.test',document_root:'/www/another.test',
+    bound_domains:[{name:'another.test',port:80}],canonical_domain_bound:true
+  }]),page:2,has_more:false,purpose:'status_site_selection'});
+  assert.equal(ui.state().statusProbeDisabled,true,
+    'Concurrent inventory reply cannot release the probe form lock');
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,before,'A probe remains single-flight');
+  probe.respond(statusProbe());
+  assert.match(ui.state().statusProbe,/HTTP Match/);
+  assert.equal(ui.state().statusProbeDisabled,false);
 });
 
 test('Native site inventory errors revoke previously selected HTTP probe capability', () => {
