@@ -38,7 +38,11 @@ Keep the bounded native modal sizing fallback and small-viewport
 horizontal navigation.
 
 First-time read-only requests use stable **per-panel** pending/empty/error text
-rather than a dialog-wide loading flash. A tab retains its DOM and already
+rather than a dialog-wide loading flash. Websites and Activity now display
+lightweight, non-interactive table-row skeletons only during their own pending
+reads, with accessible status text; a completed validated zero-row response is
+distinct from pending and from an unavailable/failed response. Older canceled
+requests cannot hide a newer pending skeleton. A tab retains its DOM and already
 validated data on return **unless an acknowledged or uncertain related mutation
 invalidates that snapshot**. A successful Monitor overall/website switch drops
 pending and cached Websites results; potential Activity-producing Monitor,
@@ -58,10 +62,15 @@ Nginx management dialog** was inspected end-to-end on aaPanel's **official
 public Demo** (8.0.7 / Nginx 1.24.0): all seven tabs, modal/nav/form
 measurements, selected state, scrolling, network requests, narrow viewports,
 and a dialog-cropped screenshot. See the [measured native Nginx UI study](evidence/aaPanel-demo-8.0.7-nginx-1.24.0-2026-11-04-study.md).
-The separately authenticated **QEMU guest** (aaPanel 8.0.7 / Nginx 1.28.3)
-did not expose Nginx in Official Installed App Store (Total 0), so its own
-**Nginx dialog inspection remains unverified**. The public Demo is a real,
-different environment, **not a substitute for this guest-specific gap**.
+**Later direct inspection in the actual authenticated QEMU guest** (aaPanel
+8.0.7 / Nginx 1.28.3) superseded an earlier `Official Installed Total 0`
+observation: the native `get_soft_list` request was still loading. On its
+completion the genuine Nginx `Setting` action was available. All seven tabs,
+state/loading behavior, the nested alarm modal and a read-only unsaved-input
+round trip were exercised **in the QEMU guest**. Exact 800×702 modal,
+170px sidebar, 40px tabs and 150×32 setting wrappers are recorded in
+[Issue #17 real-guest inspection](https://github.com/AChWorks/ach-aapanel-customizer/issues/17#issuecomment-6622156377).
+The independent PR16 review and all remaining project gates are separate.
 The refined PR16 UI **was** installed through the guest's native browser
 file-picker and inspected across tabs, viewport sizes, cached data, retained
 branding and synthetic network failure/retry; see the [native QEMU UI QA](evidence/aaPanel-8.0.7-2026-11-04-native-ui-pr16-qa.md).
@@ -70,6 +79,16 @@ supported release status or production readiness. The focused independent
 review's three required accessibility/Monitor-order/cache-coherence repairs
 are documented in [PR16 remediation evidence](evidence/aaPanel-8.0.7-2026-11-04-pr16-review-remediation.md), including a separately controlled
 QEMU browser-only synthetic response-order test.
+
+**Native Nginx follow-up:** The Customizer retains a 980px dialog for long
+PHP-FPM/Status evidence, but puts compact text fields in a consistent
+label-left / 150px-input-right rhythm, normally two groups per row. At
+880px viewport width groups reflow to one column, and under 460px each label
+stacks above its input. The special website-scope selector keeps its helper
+and paginated controls together. The form controls remain native-sized,
+keyboard-visible and CSS-scoped; no undocumented aaPanel Vue component is
+imported. Material shared-service warnings and safe Status Pages draft
+preservation remain intact. [Read-only guest UI reference](https://github.com/AChWorks/ach-aapanel-customizer/issues/17#issuecomment-6622156377).
 
 ## First non-production implementation slice
 
