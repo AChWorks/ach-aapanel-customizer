@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import os
 import re
 import stat
@@ -37,7 +38,7 @@ class StatusInspectError(ValueError):
     pass
 
 
-def _directory(path):
+def _directory(path, *, trace=None):
     """Anchor the entire path at root, rejecting symlinked ancestors."""
     if (not isinstance(path, str) or not 1 < len(path) <= 1024
             or not path.startswith("/") or "//" in path
@@ -49,10 +50,17 @@ def _directory(path):
         raise StatusInspectError("Noncanonical directory path")
     fd = os.open("/", DIR_FLAGS)
     try:
+        if trace is not None:
+            root = os.fstat(fd)
+            trace.append(("/", root.st_dev, root.st_ino, root.st_mode))
         for component in components:
             next_fd = os.open(component, DIR_FLAGS, dir_fd=fd)
             os.close(fd)
             fd = next_fd
+            if trace is not None:
+                current = os.fstat(fd)
+                trace.append((component, current.st_dev, current.st_ino,
+                              current.st_mode))
         return fd
     except BaseException:
         os.close(fd)
@@ -71,19 +79,22 @@ def _remember_source(bindings, path, directory_fd, name, snapshot, names=None):
         "directory": (directory.st_dev, directory.st_ino),
         "name": name,
         "file": None if snapshot is None else snapshot["identity"],
+        "sha256": None if snapshot is None else snapshot["sha256"],
         "names": names,
     }
     bindings.append(entry)
 
 
-def _verify_source_bindings(bindings, missing_directories):
+def _verify_source_bindings(bindings, missing_directories, *, fingerprint=False):
     """Re-resolve each original absolute path and reject detached source trees.
 
     This is a final best-effort *snapshot* check; no read-only inspection can
     guarantee a file remains unchanged after the check finishes.
     """
+    full_binding_trace = []
     for entry in bindings:
-        descriptor = _directory(entry["path"])
+        chain = [] if fingerprint else None
+        descriptor = _directory(entry["path"], trace=chain)
         try:
             current = os.fstat(descriptor)
             if (current.st_dev, current.st_ino) != entry["directory"]:
@@ -103,6 +114,8 @@ def _verify_source_bindings(bindings, missing_directories):
                                         if name.endswith(".conf"))
                 if observed_names != entry["names"]:
                     raise StatusInspectError("Site extension config list changed")
+            if fingerprint:
+                full_binding_trace.append({"anchor": chain, "binding": entry})
         finally:
             os.close(descriptor)
     for path in missing_directories:
@@ -113,6 +126,18 @@ def _verify_source_bindings(bindings, missing_directories):
         else:
             os.close(descriptor)
             raise StatusInspectError("Previously missing extension directory appeared")
+    if fingerprint:
+        # This value is for private cross-probe comparison only. It includes
+        # original path bindings, all anchored directory identities, each
+        # read file's metadata+SHA, fragment lists and missing directories.
+        # No source contents/paths are returned by the public HTTP probe.
+        payload = json.dumps(
+            {"bindings": full_binding_trace,
+             "missing": sorted(missing_directories)},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+    return None
 
 
 def _file_snapshot(directory_fd, name):
@@ -253,7 +278,8 @@ def _content_comparison(current, rendered_html, rendered_sha256, page_file):
 
 
 def inspect_site_files(site, *, locale, template, rendered_sha256,
-                       rendered_html=None, vhost_root=VHOST_ROOT):
+                       rendered_html=None, vhost_root=VHOST_ROOT,
+                       source_fingerprint=False):
     """Compare a rendered 404/502 with native site files; never change them.
 
     Result is only a source/disk snapshot. Even when every file hash matches,
@@ -375,7 +401,10 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
             )
         # Do not present an old descriptor's bytes after aaPanel has renamed
         # any original site/VHost path or modified the corresponding file.
-        _verify_source_bindings(bindings, missing_directories)
+        identity = _verify_source_bindings(
+            bindings, missing_directories, fingerprint=source_fingerprint)
+        if source_fingerprint:
+            result["_source_fingerprint"] = identity
     except (OSError, StatusInspectError) as exc:
         result["state"] = "Needs Review"
         result["reason"] = ("Read-only inspection incomplete: " + str(exc))[:240]

@@ -26,6 +26,7 @@ from ach_customizer_monitor import (
 )
 from ach_customizer_hosts import (
     HostsInspectionError, inspect_local_hosts as inspect_hosts_file,
+    native_site_snapshot,
 )
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
@@ -511,6 +512,36 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("status_inspect", exc, request_id)
 
+    @staticmethod
+    def _status_probe_selection(args, site_id):
+        """Strict client-snapshot precondition; never a destination authority."""
+        expected_key = ach_customizer_main._argument(args, "expected_site_key")
+        serialized = ach_customizer_main._argument(args, "expected_site_snapshot")
+        refresh = "Selected website may have changed; refresh native website inventory"
+        if (not isinstance(expected_key, str) or not expected_key
+                or len(expected_key) > 255 or
+                not isinstance(serialized, str) or
+                not 1 <= len(serialized) <= 110000):
+            raise StatusPageError(refresh)
+        try:
+            identity = json.loads(serialized)
+        except (ValueError, TypeError):
+            raise StatusPageError(refresh) from None
+        if (not isinstance(identity, list) or len(identity) != 5 or
+                type(identity[0]) is not int or identity[0] != site_id or
+                not isinstance(identity[1], str) or identity[1] != expected_key or
+                not isinstance(identity[2], str) or
+                not isinstance(identity[3], str) or
+                not isinstance(identity[4], list) or
+                len(identity[4]) > 100 or
+                any(not isinstance(pair, list) or len(pair) != 2 or
+                    not isinstance(pair[0], str) or
+                    type(pair[1]) is not int or
+                    not 1 <= pair[1] <= 65535
+                    for pair in identity[4])):
+            raise StatusPageError(refresh)
+        return expected_key, identity, serialized
+
     def status_probe(self, args):
         """Primary-admin-triggered localhost HTTP/80 404 probe for a bound site.
 
@@ -529,9 +560,15 @@ class ach_customizer_main:
                     "Status probe helper is outdated after plugin update. Restart "
                     "aaPanel panel service, reopen the plugin, and recheck."
                 ) from exc
-            site_id = self._status_site_id(args)
+            try:
+                site_id = self._status_site_id(args)
+            except StatusPageError as exc:
+                raise StatusPageError(
+                    "Selected website is unavailable; refresh native website inventory"
+                ) from exc
             if site_id is None:
                 raise StatusPageError("Select an existing native website for an HTTP 404 probe")
+            expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
             if (self._argument(args, "template") != "404" or
                     self._argument(args, "locale") not in LOCALES):
                 raise StatusPageError("HTTP probe supports only English/Persian site 404")
@@ -550,6 +587,10 @@ class ach_customizer_main:
                 return site
 
             before = native_record()
+            if (before["name"] != expected_key or
+                    native_site_snapshot(before) != expected_identity):
+                raise StatusPageError(
+                    "Selected website identity or domains changed; refresh native website inventory")
             preferences = read_preferences(_STATE_DIR)
             effective, source = select_brand(preferences, site_id)
             if self._argument(args, "brand_name") is not None:
@@ -569,6 +610,7 @@ class ach_customizer_main:
             response = {
                 "status": True, "request_id": request_id,
                 "revision": preferences["revision"], "selection_source": source,
+                "verified_site_snapshot": serialized,
                 **observed,
             }
             return self._activity_result(

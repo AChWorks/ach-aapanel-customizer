@@ -425,6 +425,7 @@
   var statusBusy = false, statusReadBusy = false;
   var statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
+  var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
   // Keep the native dialog mounted. Switching panels does not discard unsaved
   // edits or re-fetch previously accepted read-only data without Refresh.
@@ -988,6 +989,12 @@
     if (scope === 'site' && !/^[1-9][0-9]{0,9}$/.test(String(id || ''))) return null;
     return {scope:scope, site_id:scope === 'site' ? String(id) : ''};
   }
+  function selectedProbeSite(scope) {
+    if (!scope || scope.scope !== 'site' || !statusSitesTrusted) return null;
+    return statusSites.find(function (item) {
+      return String(item.id) === scope.site_id;
+    }) || null;
+  }
   function statusFields() {
     return {
       brand_name:root.find('#ach-status-name').val(),
@@ -1032,7 +1039,7 @@
     root.find('#ach-status-probe-button').prop('disabled', busy || statusRevision === null ||
       !scope || scope.scope !== 'site' ||
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
-      template !== '404');
+      !selectedProbeSite(scope) || template !== '404');
   }
   function statusClearPreview() {
     root.find('#ach-status-iframe').prop('srcdoc', '');
@@ -1086,7 +1093,9 @@
       // Invalidate every older response, even after site -> global -> site.
       statusSitesTicket += 1;
       statusSites = []; statusSitePage = 1; statusSitesMore = true;
-      statusSitesBusy = false;
+      statusSitesBusy = false; statusSitesTrusted = false;
+      statusClearPreview();
+      statusLock(false);
       root.find('#ach-status-site-id').empty().prop('disabled', true);
       $('<option>').val('').text('Loading websites...').appendTo(root.find('#ach-status-site-id'));
     }
@@ -1101,6 +1110,9 @@
       root.find('#ach-status-sites-retry').prop('disabled', false);
       if (!r || r.purpose !== 'status_site_selection' ||
           r.inventory_schema !== 2 || !validInventoryPage(r, expectedPage)) {
+        statusSitesTrusted = false;
+        statusClearPreview();
+        statusLock(false);
         root.find('#ach-status-sites-state').text('Website inventory unavailable or changed. Check administrator access and retry.');
         root.find('#ach-status-sites-more').prop('hidden', true);
         if (!statusSites.length) root.find('#ach-status-site-id').prop('disabled', true);
@@ -1110,6 +1122,9 @@
       var newSites = [];
       for (var i = 0; i < r.sites.length; i++) {
         if (seen.has(r.sites[i].id)) {
+          statusSitesTrusted = false;
+          statusClearPreview();
+          statusLock(false);
           root.find('#ach-status-sites-state').text('Duplicate website ID across pages; refresh inventory.');
           root.find('#ach-status-sites-more').prop('hidden', true);
           return;
@@ -1118,6 +1133,7 @@
         newSites.push(r.sites[i]);
       }
       statusSites = statusSites.concat(newSites);
+      statusSitesTrusted = true;
       var select = root.find('#ach-status-site-id'), selected = select.val();
       select.empty();
       $('<option>').val('').text('Choose a website...').appendTo(select);
@@ -1130,6 +1146,7 @@
       statusSitesMore = r.has_more;
       root.find('#ach-status-sites-more').prop('hidden', !statusSitesMore).prop('disabled', !statusSitesMore);
       root.find('#ach-status-sites-state').text(statusSites.length + ' website(s) loaded' + (statusSitesMore ? '; more available.' : '.'));
+      statusLock(false);
     });
   }
   root.find('#ach-status-sites-more').on('click', function () { loadStatusSites(false); });
@@ -1140,7 +1157,7 @@
     if (!siteMode) {
       statusSitesTicket += 1;
       statusSitesBusy = false; statusSitesMore = false;
-      statusSites = []; statusSitePage = 1;
+      statusSites = []; statusSitePage = 1; statusSitesTrusted = false;
       root.find('#ach-status-site-id').empty();
       $('<option>').val('').text('Select website scope first').appendTo(root.find('#ach-status-site-id'));
       root.find('#ach-status-sites-state').text('Choose website scope to load current site options.');
@@ -1326,13 +1343,15 @@
       statusLock(false);
     });
   });
-  function validStatusProbe(r, scope, locale) {
+  function validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot) {
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
     return r && r.schema === 1 && r.status === true &&
       r.read_only === true && r.apply_supported === false &&
       r.nginx_runtime_verified === false && r.scope === 'loopback_http_80' &&
       r.site_id === Number(scope.site_id) && Number.isSafeInteger(r.site_id) &&
+      selectedSite && r.site_key === selectedSite.name &&
+      r.verified_site_snapshot === selectedSnapshot &&
       r.template === '404' && r.locale === locale &&
       ['HTTP Match','HTTP Mismatch','Needs Review'].includes(r.state) &&
       typeof r.site_key === 'string' && /^[A-Za-z0-9.-]{3,253}$/.test(r.site_key) &&
@@ -1354,22 +1373,24 @@
         r.http_status !== null && hash(r.body_sha256) && r.body_bytes !== null &&
         r.page_file_sha256 !== null &&
         (r.http_404_observed === (r.http_status === 404)) &&
-        (r.state === 'HTTP Match' ? r.http_404_observed && r.body_matches_file &&
-          r.body_sha256 === r.page_file_sha256 :
-          !r.body_matches_file)) &&
-      (!r.body_matches_render ||
-        (r.body_matches_file && r.body_sha256 === r.rendered_sha256));
+        r.body_matches_file === (r.http_404_observed && r.body_sha256 === r.page_file_sha256) &&
+        (r.state === 'HTTP Match' ? r.body_matches_file : !r.body_matches_file)) &&
+      r.body_matches_render === (r.body_matches_file && r.body_sha256 === r.rendered_sha256);
   }
   root.find('#ach-status-probe-button').on('click', function () {
     var scope = statusScope(), locale = root.find('#ach-status-locale').val();
-    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'site' ||
+    var selectedSite = selectedProbeSite(scope);
+    if (statusBusy || statusRevision === null || !scope || !selectedSite ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
         root.find('#ach-status-template').val() !== '404') return;
+    var selectedSnapshot = nativeHostsSnapshot(selectedSite);
     var ticket = statusTicket, submittedBrand = statusFields();
     root.find('#ach-status-probe-result').text('Checking local HTTP/80 404; website/config files are not changed...');
     statusLock(true);
     request('status_probe', Object.assign({}, scope, submittedBrand, {
-      template:'404', locale:locale
+      template:'404', locale:locale,
+      expected_site_key:selectedSite.name,
+      expected_site_snapshot:selectedSnapshot
     }), function (r) {
       if (ticket !== statusTicket) return;
       var currentBrand = statusFields();
@@ -1377,9 +1398,11 @@
         return submittedBrand[key] === currentBrand[key];
       }) && statusScope()?.site_id === scope.site_id &&
         statusLoadedScope === scope.scope + ':' + scope.site_id &&
+        selectedProbeSite(scope) === selectedSite &&
+        nativeHostsSnapshot(selectedSite) === selectedSnapshot &&
         root.find('#ach-status-template').val() === '404' &&
         root.find('#ach-status-locale').val() === locale;
-      if (!sameSelection || !validStatusProbe(r, scope, locale)) {
+      if (!sameSelection || !validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot)) {
         root.find('#ach-status-probe-result').text(
           'HTTP response evidence unconfirmed or incompatible. No Apply readiness inferred.');
       } else {

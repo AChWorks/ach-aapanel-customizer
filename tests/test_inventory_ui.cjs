@@ -1333,10 +1333,12 @@ test('Site inspection is scoped, read-only, renders a bounded disk/source diagno
   assert.equal(ui.state().statusCompareExcerpt,'');
 });
 
+const probeSnapshot=JSON.stringify([7,'demo.test','/www/demo.test','1',[['demo.test',80]]]);
 function statusProbe(overrides={}) {
   const sha='a'.repeat(64);
   return {
     status:true,schema:1,site_id:7,site_key:'demo.test',
+    verified_site_snapshot:probeSnapshot,
     template:'404',locale:'en',scope:'loopback_http_80',
     state:'HTTP Match',reason:'Observed HTTP 404 with byte-identical site page',
     read_only:true,apply_supported:false,nginx_runtime_verified:false,
@@ -1351,6 +1353,11 @@ function statusProbeUi() {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
+  const inventory = ui.requests.at(-1);
+  assert.match(inventory.options.url,/s=status_sites$/);
+  inventory.respond({...page([{...site(),id:7,name:'demo.test',
+    document_root:'/www/demo.test',bound_domains:[{name:'demo.test',port:80}],
+    canonical_domain_bound:true}]),purpose:'status_site_selection'});
   ui.statusSetValue('#ach-status-site-id','7','change');
   ui.requests.at(-1).respond(statusPrefs());
   return ui;
@@ -1364,6 +1371,8 @@ test('Explicit live 404 probe reports HTTP/body evidence without granting Apply'
   assert.equal(request.options.data.site_id,'7');
   assert.equal(request.options.data.locale,'en');
   assert.equal(request.options.data.template,'404');
+  assert.equal(request.options.data.expected_site_key,'demo.test');
+  assert.equal(request.options.data.expected_site_snapshot,probeSnapshot);
   assert.equal(ui.state().statusProbeDisabled,true);
   request.respond(statusProbe());
   assert.match(ui.state().statusProbe,/HTTP Match/);
@@ -1401,11 +1410,17 @@ test('Untrusted, stale, cross-site, overclaiming HTTP probe responses fail close
   const sha='a'.repeat(64);
   const invalid=[
     statusProbe({site_id:8}),statusProbe({status:false}),
+    statusProbe({site_key:'moved.test'}),
+    statusProbe({verified_site_snapshot:JSON.stringify([
+      7,'demo.test','/www/reassigned','1',[['demo.test',80]]
+    ])}),
     statusProbe({schema:2}),statusProbe({revision:3}),statusProbe({read_only:false}),
     statusProbe({apply_supported:true}),statusProbe({nginx_runtime_verified:true}),
     statusProbe({scope:'remote_http'}),statusProbe({body_sha256:'wrong'}),
     statusProbe({body_bytes:65537}),statusProbe({http_status:200,http_404_observed:true}),
     statusProbe({state:'HTTP Match',body_matches_file:false}),
+    statusProbe({state:'HTTP Mismatch',http_status:404,
+      http_404_observed:true,body_matches_file:false}),
     statusProbe({body_matches_render:true,body_sha256:'b'.repeat(64)}),
     statusProbe({state:'Needs Review',body_sha256:sha,http_status:null}),
     statusProbe({site_key:'<img onerror=alert(1)>'}),
@@ -1422,6 +1437,21 @@ test('Untrusted, stale, cross-site, overclaiming HTTP probe responses fail close
   pending.respond(statusProbe());
   assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
   assert.doesNotMatch(ui.state().statusProbe,/HTTP Match/);
+});
+
+test('Native site inventory errors revoke previously selected HTTP probe capability', () => {
+  const ui=statusProbeUi();
+  assert.equal(ui.state().statusProbeDisabled,false);
+  ui.statusClick('#ach-status-sites-retry');
+  assert.equal(ui.state().statusProbeDisabled,true);
+  const invalid=ui.requests.at(-1);
+  assert.match(invalid.options.url,/s=status_sites$/);
+  invalid.respond({status:true, inventory_schema:1});
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.match(ui.state().statusProbe,/not checked/);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,count);
 });
 
 test('Invalid, cross-site and routing-overclaim inspection replies fail closed', () => {

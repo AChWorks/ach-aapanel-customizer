@@ -3,6 +3,7 @@ import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
+import time
 from pathlib import Path
 import sys
 import tempfile
@@ -48,6 +49,12 @@ class HTTPProofTests(unittest.TestCase):
                 owner.seen.append((self.path, self.headers.get("Host"),
                                    self.headers.get("Cookie"),
                                    self.headers.get("Authorization")))
+                if getattr(owner, "on_request", None):
+                    owner.on_request()
+                slow = getattr(owner, "slow_response", None)
+                if slow:
+                    owner.emit_slow_response(self, slow)
+                    return
                 self.send_response(owner.status)
                 for name, value in owner.headers.items():
                     self.send_header(name, value)
@@ -63,6 +70,35 @@ class HTTPProofTests(unittest.TestCase):
         self.addCleanup(self.http.shutdown)
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
+
+    def emit_slow_response(self, handler, mode):
+        """Send bytes frequently enough to dodge ordinary socket timeouts."""
+        try:
+            if mode == "headers":
+                handler.wfile.write(b"HTTP/1.1 404 Not Found\r\nX-Padding: ")
+                handler.wfile.flush()
+                for _ in range(12):
+                    handler.wfile.write(b"x")
+                    handler.wfile.flush()
+                    time.sleep(.12)
+            else:
+                handler.send_response(404)
+                if mode == "body_length":
+                    handler.send_header("Content-Length", str(len(self.payload)))
+                elif mode == "body_chunked":
+                    handler.send_header("Transfer-Encoding", "chunked")
+                handler.end_headers()
+                for _ in range(12):
+                    if mode == "body_chunked":
+                        handler.wfile.write(b"1\r\nx\r\n")
+                    else:
+                        handler.wfile.write(b"x")
+                    handler.wfile.flush()
+                    time.sleep(.12)
+                if mode == "body_chunked":
+                    handler.wfile.write(b"0\r\n\r\n")
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def scan(self, **kwargs):
         return probe.probe_site_404(
@@ -153,50 +189,89 @@ class HTTPProofTests(unittest.TestCase):
         self.assertEqual(result["state"], "Needs Review")
         self.assertEqual(self.seen, [])
 
-    def test_source_rewritten_while_http_response_is_read_discards_proof(self):
-        original = self.payload
-        original_factory = lambda host, port, timeout: http.client.HTTPConnection(
-            host, self.http.server_port, timeout=timeout)
-        class MutatingConnection:
-            def __init__(self, *args, **kwargs):
-                self.conn = original_factory(*args, **kwargs)
-            def putrequest(self, *args, **kwargs): return self.conn.putrequest(*args, **kwargs)
-            def putheader(self, *args, **kwargs): return self.conn.putheader(*args, **kwargs)
-            def endheaders(self): return self.conn.endheaders()
-            def getresponse(self):
-                response = self.conn.getresponse()
-                self_page.write_bytes(b"replaced mid-request")
-                return response
-            def close(self): self.conn.close()
+    def test_total_deadline_covers_slow_headers_and_all_body_framing(self):
+        for mode in ("headers", "body_length", "body_chunked", "body_no_length"):
+            with self.subTest(mode=mode):
+                self.slow_response = mode
+                start = time.monotonic()
+                result = self.scan(total_timeout=.55)
+                elapsed = time.monotonic() - start
+                self.assertLess(elapsed, 1.15, mode)
+                self.assertEqual(result["state"], "Needs Review")
+                self.assertIsNone(result["http_status"])
+                self.assertFalse(result["body_matches_file"])
+                self.assertIn("deadline", result["reason"])
+        self.slow_response = None
+        self.assertEqual(self.scan()["state"], "HTTP Match")
 
-        self_page = self.page
-        result = probe.probe_site_404(
-            self.site, locale="en", rendered_sha256=self.render["rendered_sha256"],
-            rendered_html=self.render["html"], vhost_root=str(self.vhost_root),
-            connection_factory=MutatingConnection,
-            token_factory=lambda: "a" * 32)
+    def test_same_filename_extension_rewrites_cannot_keep_http_match(self):
+        extension = self.vhost_root / "extension" / "demo.test"
+        extension.mkdir(parents=True)
+        fragment = extension / "operator.conf"
+        fragment.write_text("error_page 404 /404.html;\n")
+        for replacement in ("error_page 404 /different.html;\n",
+                            "error_page 404 /404.html; # changed\n"):
+            with self.subTest(replacement=replacement):
+                original = fragment.read_text()
+                self.on_request = lambda: fragment.write_text(replacement)
+                result = self.scan()
+                self.assertEqual(result["state"], "Needs Review")
+                self.assertIsNone(result["http_status"])
+                self.on_request = None
+                fragment.write_text(original)
+
+    def test_atomic_fragment_replacement_with_identical_bytes_changes_inode(self):
+        extension = self.vhost_root / "extension" / "demo.test"
+        extension.mkdir(parents=True)
+        fragment = extension / "operator.conf"
+        fragment.write_bytes(b"error_page 404 /404.html;\n")
+        def replace():
+            new = extension / "replacement.tmp"
+            new.write_bytes(fragment.read_bytes())
+            os.replace(new, fragment)
+        self.on_request = replace
+        result = self.scan()
         self.assertEqual(result["state"], "Needs Review")
         self.assertIsNone(result["http_status"])
-        self.assertEqual(original, self.payload)
+
+    def test_same_byte_page_and_vhost_atomic_replacement_discard_positive(self):
+        for original in (self.page, self.vhost):
+            with self.subTest(file=original.name):
+                def replace():
+                    replacement = original.with_suffix(".replacement")
+                    replacement.write_bytes(original.read_bytes())
+                    os.replace(replacement, original)
+                self.on_request = replace
+                result = self.scan()
+                self.assertEqual(result["state"], "Needs Review")
+                self.assertIsNone(result["http_status"])
+                self.on_request = None
+
+    def test_rebound_extension_directory_cannot_keep_positive(self):
+        extension = self.vhost_root / "extension" / "demo.test"
+        extension.mkdir(parents=True)
+        fragment = extension / "operator.conf"
+        fragment.write_bytes(b"error_page 404 /404.html;\n")
+        def swap():
+            extension.rename(extension.with_name("demo.previous"))
+            extension.mkdir()
+            (extension / "operator.conf").write_bytes(
+                b"error_page 404 /404.html;\n")
+        self.on_request = swap
+        result = self.scan()
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertIsNone(result["http_status"])
+
+    def test_source_rewritten_while_http_response_is_read_discards_proof(self):
+        self.on_request = lambda: self.page.write_bytes(b"replaced mid-request")
+        result = self.scan()
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertIsNone(result["http_status"])
 
     def test_vhost_changed_while_http_response_is_read_discards_proof(self):
-        original_factory = lambda host, port, timeout: http.client.HTTPConnection(
-            host, self.http.server_port, timeout=timeout)
-        changed = self.vhost
-        class MutatingConnection:
-            def __init__(self, *args, **kwargs): self.conn = original_factory(*args, **kwargs)
-            def putrequest(self, *args, **kwargs): return self.conn.putrequest(*args, **kwargs)
-            def putheader(self, *args, **kwargs): return self.conn.putheader(*args, **kwargs)
-            def endheaders(self): return self.conn.endheaders()
-            def getresponse(self):
-                response = self.conn.getresponse()
-                changed.write_bytes(changed.read_bytes() + b"\n#changed")
-                return response
-            def close(self): self.conn.close()
-        result = probe.probe_site_404(
-            self.site, locale="en", rendered_sha256=self.render["rendered_sha256"],
-            rendered_html=self.render["html"], vhost_root=str(self.vhost_root),
-            connection_factory=MutatingConnection, token_factory=lambda: "a" * 32)
+        self.on_request = lambda: self.vhost.write_bytes(
+            self.vhost.read_bytes() + b"\n#changed")
+        result = self.scan()
         self.assertEqual(result["state"], "Needs Review")
         self.assertIsNone(result["http_status"])
 
@@ -232,6 +307,18 @@ class NativeProbeEndpointTests(unittest.TestCase):
         result.get_webserver = lambda: engine
         return result
 
+    def probe_args(self, **kwargs):
+        import json
+        data = {
+            "site_id": "7", "template": "404", "locale": "en",
+            "expected_site_key": "demo.test",
+            "expected_site_snapshot": json.dumps([
+                7, "demo.test", "/www/demo.test", "1", [["demo.test", 80]]
+            ], separators=(",", ":"))
+        }
+        data.update(kwargs)
+        return data
+
     @staticmethod
     def flask(uid=1, method="POST", temporary=False):
         module = types.ModuleType("flask")
@@ -262,9 +349,7 @@ class NativeProbeEndpointTests(unittest.TestCase):
         with patch.dict(sys.modules, {
             "ach_customizer_status_probe": None, "flask": self.flask()
         }):
-            response = self.plugin.status_probe({
-                "site_id": "7", "template": "404", "locale": "en"
-            })
+            response = self.plugin.status_probe(self.probe_args())
             preview = self.plugin.status_preview({
                 "site_id": "", "template": "404", "locale": "en"
             })
@@ -283,9 +368,7 @@ class NativeProbeEndpointTests(unittest.TestCase):
              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bound), \
              patch.object(backend, "read_preferences", side_effect=[state, changed]), \
              patch.object(probe, "probe_site_404", return_value=self.observed(state="HTTP Match")):
-            response = self.plugin.status_probe({
-                "site_id": "7", "template": "404", "locale": "en"
-            })
+            response = self.plugin.status_probe(self.probe_args())
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "status_probe")
         self.assertIn("branding", response["msg"])
@@ -297,9 +380,7 @@ class NativeProbeEndpointTests(unittest.TestCase):
         }), patch.object(backend, "_bound_domains_for_sites", side_effect=self.bound), \
              patch.object(probe, "probe_site_404",
                           return_value=self.observed(state="HTTP Match")):
-            response = self.plugin.status_probe({
-                "site_id": "7", "template": "404", "locale": "en"
-            })
+            response = self.plugin.status_probe(self.probe_args())
         self.assertTrue(response["status"])
         self.assertTrue(response["activity_logged"])
         entries = read_activity(self.tmp.name, module="status_pages", limit=10)
@@ -311,10 +392,59 @@ class NativeProbeEndpointTests(unittest.TestCase):
         ))
         self.assertFalse(any("evil.example" in str(e) for e in entries))
 
+    def test_stale_operator_site_selection_never_runs_network_probe(self):
+        import copy
+        base = copy.deepcopy(self.site)
+        for description, changes, port in (
+            ("rename", {"name": "new-site.test"}, 80),
+            ("document root", {"path": "/www/reassigned-root"}, 80),
+            ("stopped", {"status": "0"}, 80),
+            ("site ID reassigned", {"id": 8}, 80),
+            ("same-site domain rebinding", {}, 443),
+        ):
+            with self.subTest(change=description):
+                self.seen = 0
+                self.site = dict(base, **changes)
+                def changed_domains(_panel, items):
+                    for item in items:
+                        item["bound_domains"] = [
+                            {"name": item["name"], "port": port}]
+                with patch.dict(sys.modules, {
+                    "public": self.public(), "flask": self.flask()
+                }), patch.object(backend, "_bound_domains_for_sites",
+                                 side_effect=changed_domains), patch.object(
+                    probe, "probe_site_404",
+                    side_effect=AssertionError("HTTP request must not happen")
+                ) as network:
+                    response = self.plugin.status_probe(self.probe_args())
+                self.assertFalse(response["status"])
+                self.assertEqual(response["stage"], "status_probe")
+                self.assertIn("refresh native website inventory", response["msg"])
+                network.assert_not_called()
+        self.site = base
+
+    def test_missing_or_wrong_client_snapshot_never_runs_network_probe(self):
+        for override in (
+            {"expected_site_key": "different.test"},
+            {"expected_site_snapshot": ""},
+            {"expected_site_snapshot": "{}"},
+            {"expected_site_snapshot": '[7,"demo.test","/www/other","1",[]]'},
+        ):
+            with self.subTest(override=override), patch.dict(sys.modules, {
+                "public": self.public(), "flask": self.flask()
+            }), patch.object(backend, "_bound_domains_for_sites",
+                              side_effect=self.bound), patch.object(
+                    probe, "probe_site_404",
+                    side_effect=AssertionError("HTTP request must not happen")) as network:
+                response = self.plugin.status_probe(self.probe_args(**override))
+                self.assertFalse(response["status"])
+                self.assertIn("refresh native website inventory", response["msg"])
+                network.assert_not_called()
+
     def test_native_full_admin_post_uses_only_authoritative_site_and_domain(self):
-        request = {"site_id": "7", "template": "404", "locale": "en",
-                   "host": "evil.example", "url": "http://evil.example/private",
-                   "port": "54321", "path": "/etc/passwd"}
+        request = self.probe_args(
+            host="evil.example", url="http://evil.example/private",
+            port="54321", path="/etc/passwd")
         with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}),              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bound),              patch.object(probe, "probe_site_404", return_value=self.observed()) as spy:
             response = self.plugin.status_probe(request)
         self.assertTrue(response["status"], response)
@@ -336,9 +466,7 @@ class NativeProbeEndpointTests(unittest.TestCase):
                 sys.modules, {"public": self.public(), "flask": flask}
             ), patch.object(probe, "probe_site_404",
                             side_effect=AssertionError("must not probe")) as spy:
-                response = self.plugin.status_probe({
-                    "site_id": "7", "template": "404", "locale": "en"
-                })
+                response = self.plugin.status_probe(self.probe_args())
                 self.assertFalse(response["status"])
                 self.assertEqual(response["stage"], "status_authorization")
                 spy.assert_not_called()
@@ -362,9 +490,7 @@ class NativeProbeEndpointTests(unittest.TestCase):
             "public": self.public(engine="apache"), "flask": self.flask()
         }), patch.object(probe, "probe_site_404",
                          side_effect=AssertionError("must not probe")) as spy:
-            response = self.plugin.status_probe({
-                "site_id": "7", "template": "404", "locale": "en"
-            })
+            response = self.plugin.status_probe(self.probe_args())
             self.assertFalse(response["status"])
             self.assertEqual(response["stage"], "status_probe")
             self.assertIn("Nginx", response["msg"])
@@ -375,9 +501,7 @@ class NativeProbeEndpointTests(unittest.TestCase):
             "public": self.public(mutate_at=3), "flask": self.flask()
         }), patch.object(backend, "_bound_domains_for_sites", side_effect=self.bound),              patch.object(probe, "probe_site_404",
                           return_value=self.observed(state="HTTP Match")):
-            response = self.plugin.status_probe({
-                "site_id": "7", "template": "404", "locale": "en"
-            })
+            response = self.plugin.status_probe(self.probe_args())
             self.assertFalse(response["status"])
             self.assertIn("changed", response["msg"])
             self.assertEqual(response["stage"], "status_probe")
