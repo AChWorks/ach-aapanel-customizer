@@ -31,15 +31,24 @@ surfaces, typography, borders, inputs, selects, buttons, focus, and dangerous
 actions. Normal text inputs, selects and action buttons have consistent 32px
 visual height, with 10px form-field and 6px action-button corner radii;
 form labels, notes, wrapping and responsive layout share one rhythm.
+The native green `#20a53a` remains a reference accent, but filled
+primary controls use darker `#167a2f` / hover `#146f2b` with white text:
+Chromium-computed text contrast is 5.44:1 and 6.29:1, respectively.
 Keep the bounded native modal sizing fallback and small-viewport
 horizontal navigation.
 
 First-time read-only requests use stable **per-panel** pending/empty/error text
 rather than a dialog-wide loading flash. A tab retains its DOM and already
-validated data on return instead of re-fetching blindly. Operators can
-explicitly **Refresh state**, **Refresh websites**, use existing Activity
-**Refresh**, and **Recheck saved branding** in Status Pages when external
-state changes. Re-entering Status Pages never erases unsaved branding text;
+validated data on return **unless an acknowledged or uncertain related mutation
+invalidates that snapshot**. A successful Monitor overall/website switch drops
+pending and cached Websites results; potential Activity-producing Monitor,
+branding, and PHP-FPM Apply/Restore writes (success, failure or uncertain outcome)
+invalidate Activity and trigger one refresh when Activity is open. In-flight
+older Activity and inventory replies are ignored. Monitor Refresh and
+set_control share ticket/revision ordering so stale Overview responses cannot
+replace newer acknowledged state. Operators can explicitly **Refresh state**,
+**Refresh websites**, use existing Activity **Refresh**, and **Recheck saved
+branding** in Status Pages when external state changes. Re-entering Status Pages never erases unsaved branding text;
 explicit recheck or a deliberate scope change may reload. PHP-FPM
 Apply/Restore safety, recovery and audit outcomes are unchanged.
 
@@ -57,7 +66,10 @@ The refined PR16 UI **was** installed through the guest's native browser
 file-picker and inspected across tabs, viewport sizes, cached data, retained
 branding and synthetic network failure/retry; see the [native QEMU UI QA](evidence/aaPanel-8.0.7-2026-11-04-native-ui-pr16-qa.md).
 Source tests and these focused browser probes do not establish
-supported release status or production readiness.
+supported release status or production readiness. The focused independent
+review's three required accessibility/Monitor-order/cache-coherence repairs
+are documented in [PR16 remediation evidence](evidence/aaPanel-8.0.7-2026-11-04-pr16-review-remediation.md), including a separately controlled
+QEMU browser-only synthetic response-order test.
 
 ## First non-production implementation slice
 

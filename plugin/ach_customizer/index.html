@@ -31,6 +31,7 @@
     --ach-surface:#fff; --ach-sidebar-bg:#f0f0f1; --ach-soft:#f8f9fa;
     --ach-text:#333; --ach-muted:#666; --ach-line:#e1e1e1;
     --ach-green:#20a53a; --ach-green-hover:#1d9534;
+    --ach-primary-fill:#167a2f; --ach-primary-fill-hover:#146f2b;
     --ach-danger:#bd3935; --ach-warn:#986615; --ach-focus:#20a53a;
     color:var(--ach-text); background:var(--ach-surface); width:100%;
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
@@ -112,9 +113,11 @@
   }
   #ach-customizer .ach-main button:hover:not(:disabled) { background:#f4f6f7; border-color:#b8c3ca; }
   #ach-customizer .ach-main button.btn-success {
-    color:#fff; background:var(--ach-green); border-color:var(--ach-green);
+    color:#fff; background:var(--ach-primary-fill); border-color:var(--ach-primary-fill);
   }
-  #ach-customizer .ach-main button.btn-success:hover:not(:disabled) { background:var(--ach-green-hover); border-color:var(--ach-green-hover); }
+  #ach-customizer .ach-main button.btn-success:hover:not(:disabled) {
+    background:var(--ach-primary-fill-hover); border-color:var(--ach-primary-fill-hover);
+  }
   #ach-customizer .ach-main button.btn-danger {
     color:#fff; background:var(--ach-danger); border-color:var(--ach-danger);
   }
@@ -357,18 +360,19 @@
     noDrift: 'No differences in the inspected configuration/defaults',
     id: 'Operation ID'
   };
-  var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false;
+  var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false, siteTicket = 0;
   var controlBusy = false, lastOverview = null;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
   var fpmFormGeneration = 0, fpmPreviewTicket = 0, fpmPrepareTicket = 0;
   var fpmActivePrepareTicket = 0;
-  var statusBusy = false, statusRevision = null, statusLoadedScope = null, statusTicket = 0;
+  var statusBusy = false, statusReadBusy = false;
+  var statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
   // Keep the native dialog mounted. Switching panels does not discard unsaved
   // edits or re-fetch previously accepted read-only data without Refresh.
   var sectionsLoaded = {overview:false, websites:false, status:false, activity:false};
-  var overviewBusy = false;
+  var overviewBusy = false, overviewTicket = 0;
   function fitNativeLayer() {
     // Only resize the aaPanel layer that actually owns this plugin instance.
     if (!root[0] || typeof window === 'undefined') return;
@@ -398,6 +402,34 @@
     root.find('#ach-page').text('Unavailable');
     root.find('#ach-prev, #ach-next').prop('disabled', true);
     if (message) msg(message, true);
+  }
+  function invalidateWebsitesSnapshot() {
+    // Reject an inventory request started under an earlier Monitor policy.
+    siteTicket++;
+    siteBusy = false;
+    sectionsLoaded.websites = false;
+    hasMore = false;
+    page = 1;
+    root.find('#ach-sites-rows').empty();
+    root.find('#ach-page').text('Refresh required');
+    root.find('#ach-prev, #ach-next').prop('disabled', true);
+    root.find('#ach-sites-refresh').prop('disabled', false);
+    root.find('#ach-sites-status').text('Monitor settings changed. Reload website inventory to verify current access.');
+    if (root.find('#ach-tab-websites').attr('aria-selected') === 'true') sites();
+  }
+  function invalidateActivitySnapshot() {
+    // Failed or unconfirmed writes can still emit an Activity record.
+    activityTicket++;
+    activityBusy = false;
+    sectionsLoaded.activity = false;
+    root.find('#ach-activity-rows').empty();
+    root.find('#ach-activity-refresh').prop('disabled', false);
+    root.find('#ach-activity-result').text('An operation may have changed Activity. Refresh to check current records.');
+    if (root.find('#ach-tab-activity').attr('aria-selected') === 'true') loadActivity();
+  }
+  function hasPotentialActivity(method) {
+    return method === 'set_control' || method === 'status_save' ||
+      method === 'fpm_apply' || method === 'fpm_rollback';
   }
   function validInventoryPage(r, expectedPage) {
     if (!r || typeof r !== 'object' || Array.isArray(r) ||
@@ -455,6 +487,7 @@
               (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
           }
           done(null);
+          if (hasPotentialActivity(method)) invalidateActivitySnapshot();
         } else {
           if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
             var warnings = [];
@@ -467,6 +500,7 @@
             msg(warnings.join(' '), warnings.length > 0);
           }
           done(response);
+          if (hasPotentialActivity(method)) invalidateActivitySnapshot();
         }
       })
       .fail(function (_xhr, status) {
@@ -476,6 +510,7 @@
             '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
         }
         done(null);
+        if (hasPotentialActivity(method)) invalidateActivitySnapshot();
       });
   }
   function fpmOutcome(method, response, requestData, expectedRestoreSha) {
@@ -555,7 +590,11 @@
       root.find('[data-monitor-control]').prop('disabled', true);
       root.find('#ach-state-revision').text('Monitor state unavailable');
       if (r) msg('Monitor state API mismatch: no preferences were inferred.', true);
-      return;
+      return false;
+    }
+    if (lastOverview && r.state_revision < lastOverview.state_revision) {
+      // A delayed read must never replace a newer acknowledged backend revision.
+      return false;
     }
     lastOverview = r;
     root.find('#ach-monitor-enabled').prop('checked', r.overall_enabled);
@@ -563,20 +602,25 @@
     root.find('#ach-fpm-enabled').prop('checked', r.modules_enabled.php_fpm_file_preview);
     root.find('#ach-state-revision').text('State revision: ' + r.state_revision);
     root.find('[data-monitor-control]').prop('disabled', controlBusy);
+    return true;
   }
   function overview() {
-    if (overviewBusy) return;
+    if (overviewBusy || controlBusy) return;
+    var ticket = ++overviewTicket;
     overviewBusy = true;
     root.find('#ach-overview-refresh').prop('disabled', true);
     root.find('#ach-overview-status').text(
       sectionsLoaded.overview ? 'Refreshing monitor state...' : 'Loading monitor state...');
     request('get_overview', {}, function (r) {
+      if (ticket !== overviewTicket) return;
       overviewBusy = false;
       root.find('#ach-overview-refresh').prop('disabled', false);
-      root.find('#ach-overview-status').text(r ? r.mode + ' — ' + r.notice :
+      var accepted = displayControls(r);
+      root.find('#ach-overview-status').text(!accepted && lastOverview ?
+        'Older Monitor state ignored; latest acknowledged revision retained.' :
+        r ? r.mode + ' — ' + r.notice :
         'Monitor state unavailable. Use Refresh state to retry.');
-      displayControls(r);
-      sectionsLoaded.overview = Boolean(lastOverview);
+      sectionsLoaded.overview = Boolean(accepted);
     });
   }
   root.find('#ach-overview-refresh').on('click', overview);
@@ -584,24 +628,47 @@
     if (controlBusy || !lastOverview) return;
     var control = $(this).attr('data-monitor-control');
     var enabled = $(this).prop('checked') === true;
+    var previousSnapshot = lastOverview;
     controlBusy = true;
+    // An already pending Overview read may have been issued under an older state.
+    overviewTicket++;
+    overviewBusy = false;
+    root.find('#ach-overview-refresh').prop('disabled', true);
     root.find('[data-monitor-control]').prop('disabled', true);
     request('set_control', {
       control:control, enabled:enabled ? 'true' : 'false',
       expected_revision:lastOverview.state_revision
     }, function (r) {
       controlBusy = false;
-      if (!r) { sectionsLoaded.overview = false; displayControls(lastOverview); return; }
+      root.find('#ach-overview-refresh').prop('disabled', false);
+      if (!r) {
+        sectionsLoaded.overview = false;
+        displayControls(lastOverview);
+        root.find('#ach-overview-status').text('Monitor update not confirmed. Last known controls shown; Refresh state before retrying.');
+        return;
+      }
+      if (!displayControls(r)) {
+        // Restore only the previously observed revision, never treat the
+        // incompatible acknowledgement as an accepted state transition.
+        displayControls(previousSnapshot);
+        root.find('[data-monitor-control]').prop('disabled', true);
+        sectionsLoaded.overview = false;
+        root.find('#ach-overview-status').text('Monitor response stale or incompatible. Last known state shown; Refresh before any new change.');
+        return;
+      }
+      sectionsLoaded.overview = true;
       root.find('#ach-overview-status').text(r.mode + ' — ' + r.notice);
-      displayControls(r);
+      if (control === 'overall' || control === 'site_inventory') invalidateWebsitesSnapshot();
     });
   });
   function sites() {
     if (siteBusy) return;
+    var ticket = ++siteTicket, requestedPage = page;
     siteBusy = true;
     root.find('#ach-sites-refresh').prop('disabled', true);
     root.find('#ach-sites-status').text('Loading website inventory...');
-    request('get_sites', {page:page, page_size:sitePageSize}, function (r) {
+    request('get_sites', {page:requestedPage, page_size:sitePageSize}, function (r) {
+      if (ticket !== siteTicket) return;
       siteBusy = false;
       root.find('#ach-sites-refresh').prop('disabled', false);
       var body = root.find('#ach-sites-rows').empty();
@@ -618,7 +685,7 @@
         invalidateInventory('Inventory API mismatch: aaPanel may still be serving an older plugin backend after an update. Reload the panel backend during a maintenance window and reopen this view. No bindings were inferred.');
         return;
       }
-      if (!validInventoryPage(r, page)) {
+      if (!validInventoryPage(r, requestedPage)) {
         sectionsLoaded.websites = false;
         root.find('#ach-sites-status').text('Website inventory inconsistent. Refresh to retry.');
         invalidateInventory('Invalid inventory response: website or domain data is incomplete or inconsistent. No bindings were inferred.');
@@ -640,11 +707,11 @@
       sectionsLoaded.websites = true;
       hasMore = r.has_more;
       root.find('#ach-sites-status').text(
-        'Page ' + page + ' · ' + r.sites.length + ' website(s) · ' +
+        'Page ' + requestedPage + ' · ' + r.sites.length + ' website(s) · ' +
         (hasMore ? 'More pages available' : 'Last page') +
         '. Use Refresh to check recent aaPanel changes.');
-      root.find('#ach-page').text(page);
-      root.find('#ach-prev').prop('disabled', page <= 1);
+      root.find('#ach-page').text(requestedPage);
+      root.find('#ach-prev').prop('disabled', requestedPage <= 1);
       root.find('#ach-next').prop('disabled', !hasMore);
     });
   }
@@ -710,6 +777,7 @@
   }
   function statusLoad() {
     sectionsLoaded.status = false;
+    statusReadBusy = true;
     var scope = statusScope();
     var ticket = ++statusTicket;
     statusRevision = null;
@@ -718,12 +786,14 @@
     root.find('#ach-status-source').text('Branding preferences not loaded.');
     statusLock(false);
     if (!scope) {
+      statusReadBusy = false;
       root.find('#ach-status-result').text('Select a valid native aaPanel site ID first.');
       return;
     }
     statusLock(true);
     request('status_preferences', {site_id:scope.site_id}, function (r) {
       if (ticket !== statusTicket) return;
+      statusReadBusy = false;
       if (!r || r.schema !== 1 || r.apply_supported !== false ||
           !Number.isSafeInteger(r.revision) || r.revision < 0 ||
           !r.effective || !r.global ||
@@ -1040,10 +1110,10 @@
     if (tab === 'websites' && !sectionsLoaded.websites) sites();
     if (tab === 'status') {
       // Preserve unsaved branding and its preview across native tab switches.
-      if (!sectionsLoaded.status) statusLoad();
-      if (root.find('#ach-status-scope').val() === 'site' && !statusSites.length) loadStatusSites(true);
+      if (!sectionsLoaded.status && !statusReadBusy) statusLoad();
+      if (root.find('#ach-status-scope').val() === 'site' && !statusSites.length && !statusSitesBusy) loadStatusSites(true);
     }
-    if (tab === 'activity' && !sectionsLoaded.activity) loadActivity();
+    if (tab === 'activity' && !sectionsLoaded.activity && !activityBusy) loadActivity();
   });
   root.find('[data-tab]').on('keydown', function (event) {
     if (!root[0] || !event) return;

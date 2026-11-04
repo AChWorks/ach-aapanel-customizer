@@ -31,6 +31,7 @@ function loadUi() {
   const views = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
+  for (const tab of tabs) elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-status', '#ach-sites-refresh',
@@ -1662,4 +1663,261 @@ test('Native lazy navigation uses per-view loading state, not a global flash', (
   assert.equal(ui.state().error,'');
   inventory.respond(page());
   assert.equal(ui.state().error,'');
+});
+
+test('Review R1: primary action white text meets AA against normal and hover fills', () => {
+  const match = html.match(/--ach-primary-fill:(#[0-9a-f]{6}); --ach-primary-fill-hover:(#[0-9a-f]{6});/i);
+  assert.ok(match, 'Primary action must have distinct readable fill tokens');
+  function lum(hex) {
+    const parts = hex.slice(1).match(/.{2}/g).map(v => parseInt(v, 16) / 255)
+      .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    return parts[0] * 0.2126 + parts[1] * 0.7152 + parts[2] * 0.0722;
+  }
+  for (const fill of match.slice(1)) {
+    const contrast = 1.05 / (lum(fill) + 0.05);
+    assert.ok(contrast >= 4.5, fill + ' white-on-green contrast ' + contrast.toFixed(3));
+  }
+  assert.match(html, /button\.btn-success \{\s*color:#fff; background:var\(--ach-primary-fill\)/);
+  assert.match(html, /button\.btn-success:hover:not\(:disabled\) \{[\s\S]*?background:var\(--ach-primary-fill-hover\)/);
+});
+
+test('Review R2: an older Overview read completing BEFORE Monitor acknowledgement cannot replace it', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  const oldRead = ui.refreshOverview();
+  const update = ui.toggleMonitor('overall', false);
+  assert.match(update.options.url, /s=set_control$/);
+  const pendingCount = ui.requests.length;
+  ui.refreshOverview();
+  ui.toggleMonitor('site_inventory', false);
+  assert.equal(ui.requests.length, pendingCount, 'No duplicate read or control mutation while writing');
+  oldRead.respond(monitorOverview({state_revision:10, overall_enabled:true}));
+  assert.equal(ui.state().controls.overall.disabled, true);
+  update.respond(monitorOverview({state_revision:11, overall_enabled:false, mode:'Disabled'}));
+  assert.equal(ui.state().stateRevision, 'State revision: 11');
+  assert.equal(ui.state().controls.overall.checked, false);
+  assert.equal(ui.state().controls.overall.disabled, false);
+});
+
+test('Review R2: an older Overview read completing AFTER Monitor acknowledgement is discarded', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  const oldRead = ui.refreshOverview();
+  const update = ui.toggleMonitor('overall', false);
+  update.respond(monitorOverview({state_revision:11, overall_enabled:false, mode:'Disabled'}));
+  oldRead.respond(monitorOverview({state_revision:10, overall_enabled:true}));
+  assert.equal(ui.state().stateRevision, 'State revision: 11');
+  assert.equal(ui.state().controls.overall.checked, false);
+  const lateServerRead = ui.refreshOverview();
+  lateServerRead.respond(monitorOverview({state_revision:9, overall_enabled:true}));
+  assert.equal(ui.state().stateRevision, 'State revision: 11');
+  assert.match(ui.state().overview, /Older Monitor state ignored/);
+});
+
+test('Review R2: failed or conflicted Monitor write retains known controls and explicit recovery', () => {
+  for (const outcome of ['timeout','conflict']) {
+    const ui = loadUi();
+    ui.respondOverview(monitorOverview({state_revision:4}));
+    const oldRead = ui.refreshOverview();
+    const mutation = ui.toggleMonitor('overall', false);
+    if (outcome === 'timeout') mutation.reject(null, 'timeout');
+    else mutation.respond({status:false, stage:'monitor_state_write', msg:'Revision conflict'});
+    oldRead.respond(monitorOverview({state_revision:4, overall_enabled:false}));
+    assert.equal(ui.state().stateRevision, 'State revision: 4');
+    assert.equal(ui.state().controls.overall.checked, true);
+    assert.match(ui.state().overview, /not confirmed/);
+    const newest = ui.refreshOverview();
+    assert.match(newest.options.url, /s=get_overview$/);
+    newest.respond(monitorOverview({state_revision:5, overall_enabled:false}));
+    assert.equal(ui.state().stateRevision, 'State revision: 5');
+    assert.equal(ui.state().controls.overall.checked, false);
+  }
+});
+
+test('Review R3: changing Website Monitor invalidates cached and in-flight inventory only', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:5}));
+  const old = ui.openSites();
+  ui.openOverview();
+  const mutation = ui.toggleMonitor('site_inventory',false);
+  mutation.respond(monitorOverview({
+    state_revision:6, modules_enabled:{site_inventory:false,php_fpm_file_preview:true}
+  }));
+  old.respond(page());
+  assert.deepEqual(ui.state().rows, [], 'Old pending inventory must not be displayed');
+  assert.equal(ui.state().nextDisabled, true);
+  assert.match(ui.state().siteStatus, /Monitor settings changed/);
+  const fresh = ui.openSites();
+  assert.match(fresh.options.url, /s=get_sites$/);
+  fresh.respond({status:false, stage:'monitor_disabled', msg:'Website inventory disabled'});
+  assert.deepEqual(ui.state().rows, []);
+  assert.equal(ui.state().nextDisabled, true);
+});
+
+test('Review R3: a loaded Website snapshot reloads once after Overall Monitor change', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:1}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  ui.toggleMonitor('overall', false).respond(monitorOverview({
+    state_revision:2,overall_enabled:false,mode:'Disabled'
+  }));
+  assert.deepEqual(ui.state().rows, []);
+  const count = ui.requests.length;
+  const fresh = ui.openSites();
+  assert.equal(ui.requests.length, count + 1);
+  fresh.respond(page([]));
+  const rereadCount = ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length, rereadCount, 'Clean tab return must remain cached');
+});
+
+const reviewActivity = (entries = []) => ({
+  status:true,schema:1,read_only:true,configured_level:'INFO',entries
+});
+const reviewActivityEntry = () => ({
+  schema:1,time_utc:'2026-11-04T00:00:00Z',level:'INFO',module:'monitor',
+  action:'set_control',stage:'complete',outcome:'success',
+  operation_id:'f'.repeat(32),target:'overall',detail:'Changed',
+  recovery_id:'',error_class:''
+});
+
+test('Review R3: operation completion invalidates Activity and reveals new evidence once', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  ui.openActivity().respond(reviewActivity());
+  ui.openOverview();
+  ui.toggleMonitor('overall',false).respond(monitorOverview({state_revision:1,overall_enabled:false}));
+  assert.deepEqual(ui.activityRows(), [], 'Old Activity rows must not masquerade as current');
+  assert.match(ui.activityMessage(), /may have changed/);
+  const next = ui.openActivity();
+  assert.match(next.options.url, /s=get_activity$/);
+  next.respond(reviewActivity([reviewActivityEntry()]));
+  assert.equal(ui.activityRows().length,1);
+  const count=ui.requests.length;
+  ui.openOverview(); ui.openActivity();
+  assert.equal(ui.requests.length,count,'Unrelated navigation does not refetch a clean snapshot');
+});
+
+test('Review R3: completion while Activity is already open invalidates in-flight results', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  const write=ui.toggleMonitor('overall',false);
+  const pending=ui.openActivity();
+  write.respond(monitorOverview({state_revision:1,overall_enabled:false}));
+  const fresh=ui.requests.at(-1);
+  assert.notEqual(fresh,pending);
+  assert.match(fresh.options.url,/s=get_activity$/);
+  pending.respond(reviewActivity());
+  fresh.respond(reviewActivity([reviewActivityEntry()]));
+  assert.equal(ui.activityRows().length,1);
+});
+
+test('Review R3: successful and failed PHP-FPM Apply mark Activity stale, including warnings', () => {
+  for (const result of ['success','failure']) {
+    const ui=loadUi();
+    ui.openActivity().respond(reviewActivity([reviewActivityEntry()]));
+    ui.openOverview();
+    ui.submitPhp().respond(phpPreview());
+    ui.prepareFpm().respond(guardedPlan());
+    ui.approveFpm(true);
+    const operation=ui.commitFpm();
+    if (result==='success') operation.respond(appliedResult({
+      activity_logged:false, activity_warning:'Plugin Activity persistence uncertain'
+    }));
+    else operation.reject(null,'timeout');
+    assert.deepEqual(ui.activityRows(), []);
+    assert.match(ui.activityMessage(),/may have changed/);
+    const read=ui.openActivity();
+    assert.match(read.options.url,/s=get_activity$/);
+    read.respond(reviewActivity());
+    assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
+  }
+});
+
+test('Review R3: Status Pages writes invalidate Activity without clearing unrelated unsaved fields', () => {
+  const ui=loadUi();
+  ui.openActivity().respond(reviewActivity());
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-name','Unsaved ACh');
+  const save=ui.statusClick('#ach-status-save');
+  save.respond({status:true,schema:1,revision:3,effective:brand(),changed:true,source:'Global'});
+  assert.match(ui.activityMessage(),/may have changed/);
+  const read=ui.openActivity();
+  assert.match(read.options.url,/s=get_activity$/);
+  read.respond(reviewActivity());
+  ui.openStatus();
+  assert.equal(ui.requests.at(-1),read,'Cached status panel was not reloaded');
+});
+
+
+test('Review R2: a malformed or older acknowledged Monitor revision is not shown as success', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:7}));
+  const mutation=ui.toggleMonitor('overall',false);
+  mutation.respond(monitorOverview({state_revision:6,overall_enabled:false}));
+  assert.equal(ui.state().stateRevision,'State revision: 7');
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.match(ui.state().overview,/stale or incompatible/);
+  ui.refreshOverview().respond(monitorOverview({state_revision:8,overall_enabled:false}));
+  assert.equal(ui.state().controls.overall.checked,false);
+  assert.equal(ui.state().controls.overall.disabled,false);
+});
+
+test('Review R3: Status Pages reset and failed save each invalidate prior Activity snapshot', () => {
+  for (const action of ['reset','failed-save']) {
+    const ui=loadUi();
+    ui.openActivity().respond(reviewActivity([reviewActivityEntry()]));
+    ui.openStatus().respond(statusPrefs());
+    let operation;
+    if (action==='reset') {
+      ui.statusSetChecked('#ach-status-reset-approve',true);
+      operation=ui.statusClick('#ach-status-reset');
+      operation.respond({status:true,schema:1,revision:3,effective:brand(),source:'Global'});
+    } else {
+      operation=ui.statusClick('#ach-status-save');
+      operation.reject(null,'timeout');
+    }
+    assert.deepEqual(ui.activityRows(),[]);
+    assert.match(ui.activityMessage(),/may have changed/);
+    ui.openActivity().respond(reviewActivity());
+    assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
+  }
+});
+
+test('Review R3: PHP-FPM Restore confirmation and uncertain result both invalidate Activity', () => {
+  for (const action of ['success','timeout']) {
+    const ui=loadUi();
+    ui.openActivity().respond(reviewActivity([reviewActivityEntry()]));
+    ui.openOverview();
+    ui.inspectFpmRecovery().respond(recoveryPreview());
+    ui.approveFpmRollback(true);
+    const operation=ui.rollbackFpm();
+    if (action==='success') operation.respond(rolledBackResult({
+      activity_logged:false,activity_warning:'Plugin Activity log not persisted'
+    }));
+    else operation.reject(null,'timeout');
+    assert.deepEqual(ui.activityRows(),[]);
+    assert.match(ui.activityMessage(),/may have changed/);
+    const next=ui.openActivity();
+    assert.match(next.options.url,/s=get_activity$/);
+    next.respond(reviewActivity());
+  }
+});
+
+test('Review optional: rapid reentry does not duplicate same pending Status or Activity reads', () => {
+  const ui=loadUi();
+  const status=ui.openStatus();
+  ui.openSites();
+  const afterSites=ui.requests.length;
+  ui.openStatus();
+  assert.equal(ui.requests.length,afterSites);
+  status.respond(statusPrefs());
+  const pendingActivity=ui.openActivity();
+  const activityCount=ui.requests.length;
+  ui.openStatus(); ui.openActivity();
+  assert.equal(ui.requests.length,activityCount);
+  pendingActivity.reject(null,'timeout');
+  ui.openSites(); ui.openActivity();
+  assert.equal(ui.requests.length,activityCount+1,'Retry after failure remains possible');
 });

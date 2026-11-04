@@ -67,6 +67,48 @@ const {chromium} = require('playwright');
         if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
       }
     }
+    // Inspect computed primary button colors in Chromium, including real hover.
+    // This complements source token calculations; white-on-green text is 13px.
+    await page.setViewportSize({width:1280,height:720});
+    await page.setContent(html, {waitUntil:'domcontentloaded'});
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-view]').forEach(view => {
+        view.hidden = view.getAttribute('data-view') !== 'php';
+      });
+    });
+    const primary = page.locator('#ach-php-form button.btn-success');
+    const getPrimary = () => primary.evaluate(element => {
+      const css = getComputedStyle(element);
+      return {background:css.backgroundColor, foreground:css.color, disabled:element.disabled};
+    });
+    const normal = await getPrimary();
+    await primary.hover();
+    await page.waitForTimeout(220);
+    const hover = await getPrimary();
+    function luminance(value) {
+      const channels = value.match(/[0-9]+/g)?.slice(0,3).map(Number);
+      if (!channels || channels.length !== 3) throw Error('Invalid computed color ' + value);
+      const [r,g,b] = channels.map(v => {
+        const c = v / 255;
+        return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126*r + 0.7152*g + 0.0722*b;
+    }
+    function contrast(a,b) {
+      const x = luminance(a), y = luminance(b);
+      return (Math.max(x,y) + .05) / (Math.min(x,y) + .05);
+    }
+    for (const [state,colors] of [['normal',normal],['hover',hover]]) {
+      const ratio = contrast(colors.background,colors.foreground);
+      if (colors.disabled || ratio < 4.5) {
+        throw Error('Primary action contrast below AA ' + JSON.stringify({state,colors,ratio}));
+      }
+    }
+    console.log('PRIMARY_CONTRAST_PASS '+JSON.stringify({
+      normal:contrast(normal.background,normal.foreground).toFixed(3),
+      hover:contrast(hover.background,hover.foreground).toFixed(3),
+      normalFill:normal.background,hoverFill:hover.background
+    }));
     // Exercise the shipped resize helper inside a simulated aaPanel layer.
     // This is NOT an authenticated aaPanel guest/browser acceptance test.
     const complete = fs.readFileSync(filename, 'utf8');
