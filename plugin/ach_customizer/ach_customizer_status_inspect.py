@@ -6,6 +6,7 @@ mutates aaPanel. An include in a VHost may be regenerated or overridden.
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import os
 import re
@@ -17,6 +18,11 @@ VHOST_ROOT = "/www/server/panel/vhost/nginx"
 SUPPORTED_PAGES = ("404", "502")
 MAX_FILE_BYTES = 64 * 1024
 MAX_EXTENSIONS = 32
+# Diff is display-only, never an Apply patch. Bound both CPU and response size.
+MAX_COMPARE_BYTES = 24 * 1024
+MAX_COMPARE_LINES = 240
+MAX_COMPARE_EXCERPT = 6144
+MAX_COMPARE_DISPLAY_LINE = 360
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -70,8 +76,17 @@ def _file_snapshot(directory_fd, name):
         after = os.fstat(fd)
         fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns",
                   "st_ctime_ns", "st_uid", "st_gid", "st_mode", "st_nlink")
+        # fstat alone cannot prove that the pathname still names this inode:
+        # aaPanel or an operator may atomically replace a site page/VHost
+        # while the descriptor remains open. Recheck the exact basename
+        # without following links; do not report the old bytes as current.
+        try:
+            pathname = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise StatusInspectError("File path changed during read-only inspection") from exc
         if (len(data) != before.st_size or
-                any(getattr(before, k) != getattr(after, k) for k in fields)):
+                any(getattr(before, k) != getattr(after, k) or
+                    getattr(before, k) != getattr(pathname, k) for k in fields)):
             raise StatusInspectError("File changed during read-only inspection")
         return {"data": bytes(data), "sha256": hashlib.sha256(data).hexdigest(),
                 "bytes": len(data)}
@@ -102,8 +117,81 @@ def _textual_extension_include(text, key):
     ))
 
 
+def _content_comparison(current, rendered_html, rendered_sha256, page_file):
+    """Bounded site-file snapshot vs already rendered offline HTML.
+
+    No operation writes a file, parses the existing HTML as executable markup
+    or assumes the HTML is served by Nginx. Only a primary-admin endpoint may
+    return the excerpt; callers must render it as plain text.
+    """
+    result = {
+        "schema": 1, "state": "Unavailable", "excerpt": "",
+        "truncated": False, "reason": "Content comparison was not requested",
+        "old_lines": None, "new_lines": None,
+    }
+    if rendered_html is None:
+        return result
+    if not isinstance(rendered_html, str):
+        raise StatusInspectError("Invalid rendered page content")
+    proposed = rendered_html.encode("utf-8")
+    if len(proposed) > 32768:
+        raise StatusInspectError("Rendered page exceeds the offline preview limit")
+    if hashlib.sha256(proposed).hexdigest() != rendered_sha256:
+        raise StatusInspectError("Rendered page fingerprint does not match the content")
+    if current is None:
+        return {**result, "state": "New File",
+                "reason": "No existing document-root page; the offline preview shows proposed content",
+                "old_lines": 0, "new_lines": len(rendered_html.splitlines())}
+    if current["sha256"] == rendered_sha256:
+        return {**result, "state": "Identical",
+                "reason": "The file snapshot and proposed preview are byte-identical",
+                "old_lines": len(current["data"].splitlines()),
+                "new_lines": len(rendered_html.splitlines())}
+    if len(current["data"]) > MAX_COMPARE_BYTES or len(proposed) > MAX_COMPARE_BYTES:
+        return {**result, "reason": "Content differs but exceeds the bounded text-diff limit"}
+    try:
+        old = current["data"].decode("utf-8")
+    except UnicodeError:
+        return {**result, "reason": "Existing site page is not valid UTF-8 text"}
+    # Refuse binary/control characters and misleading bidi controls in excerpts.
+    for text in (old, rendered_html):
+        if any((ord(ch) < 32 and ch not in "\t\n\r") or
+               ord(ch) == 127 or
+               ch in "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+               for ch in text):
+            return {**result, "reason": "Control or directional formatting bytes prevent a safe text diff"}
+    old_lines = old.splitlines(keepends=True)
+    new_lines = rendered_html.splitlines(keepends=True)
+    if len(old_lines) > MAX_COMPARE_LINES or len(new_lines) > MAX_COMPARE_LINES:
+        return {**result, "reason": "Content differs but exceeds the bounded line-diff limit"}
+    excerpt = []
+    count = 0
+    truncated = False
+    for raw in difflib.unified_diff(
+            old_lines, new_lines, fromfile="current " + page_file,
+            tofile="proposed " + page_file, n=2, lineterm="\n"):
+        line = raw.rstrip("\n").replace("\r", "\\r").replace("\t", "\\t")
+        if len(line) > MAX_COMPARE_DISPLAY_LINE:
+            line = line[:MAX_COMPARE_DISPLAY_LINE] + " [long line clipped]"
+            truncated = True
+        # Enforce an actual UTF-8 response *byte* cap, not only a character
+        # count: a page may contain multibyte Persian/Unicode characters.
+        encoded_bytes = len(line.encode("utf-8")) + (1 if excerpt else 0)
+        if count + encoded_bytes > MAX_COMPARE_EXCERPT:
+            truncated = True
+            break
+        excerpt.append(line)
+        count += encoded_bytes
+    return {
+        **result, "state": "Different", "excerpt": "\n".join(excerpt),
+        "truncated": truncated,
+        "reason": ("Bounded, display-only excerpt; it is not an Apply patch or proof of live routing"),
+        "old_lines": len(old_lines), "new_lines": len(new_lines),
+    }
+
+
 def inspect_site_files(site, *, locale, template, rendered_sha256,
-                       vhost_root=VHOST_ROOT):
+                       rendered_html=None, vhost_root=VHOST_ROOT):
     """Compare a rendered 404/502 with native site files; never change them.
 
     Result is only a source/disk snapshot. Even when every file hash matches,
@@ -133,6 +221,11 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         "nginx_runtime_verified": False, "rendered_sha256": rendered_sha256,
         "page_file": template + ".html", "page_file_state": "Uninspected",
         "page_file_sha256": None, "page_file_bytes": None,
+        "comparison": {
+            "schema": 1, "state": "Unavailable", "excerpt": "",
+            "truncated": False, "reason": "Source inspection not completed",
+            "old_lines": None, "new_lines": None,
+        },
         "vhost_sha256": None, "extension_include_textual": False,
         "extensions_scanned": [], "error_page_sources": [],
         "note": ("Disk and textual VHost/extension snapshot only. An include may disappear "
@@ -145,6 +238,10 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
             site_page = _file_snapshot(directory_fd, template + ".html")
         finally:
             os.close(directory_fd)
+        # A content diff is independent of whether Nginx actually routes to
+        # this site file. Read-only and tied to the exact rendered SHA.
+        result["comparison"] = _content_comparison(
+            site_page, rendered_html, rendered_sha256, template + ".html")
         if site_page is None:
             result["page_file_state"] = "Absent"
         else:
@@ -209,7 +306,12 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
     except (OSError, StatusInspectError) as exc:
         result["state"] = "Needs Review"
         result["reason"] = ("Read-only inspection incomplete: " + str(exc))[:240]
-        # Suppress partial positive matches on an uncertain filesystem read.
+        # Suppress any proposed content diff on an uncertain filesystem read.
+        result["comparison"] = {
+            "schema": 1, "state": "Unavailable", "excerpt": "",
+            "truncated": False, "reason": "Inspection incomplete; recheck before comparison",
+            "old_lines": None, "new_lines": None,
+        }
         result["vhost_sha256"] = None
         result["extensions_scanned"] = []
         result["error_page_sources"] = []

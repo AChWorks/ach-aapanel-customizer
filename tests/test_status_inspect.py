@@ -40,10 +40,11 @@ class SiteSourceTests(unittest.TestCase):
             "  include " + str(self.vhosts) + "/extension/demo.test/*.conf;\n" +
             extra + "\n}\n", encoding="utf-8")
 
-    def scan(self, page="404", locale="en", digest=SHA):
+    def scan(self, page="404", locale="en", digest=SHA, rendered_html=None):
         return inspection.inspect_site_files(
             self.site, locale=locale, template=page,
-            rendered_sha256=digest, vhost_root=str(self.vhosts))
+            rendered_sha256=digest, rendered_html=rendered_html,
+            vhost_root=str(self.vhosts))
 
     def test_missing_document_page_and_textual_include_never_claim_runtime(self):
         before = self.vhost.read_bytes()
@@ -177,6 +178,156 @@ class SiteSourceTests(unittest.TestCase):
         self.assertFalse(r["nginx_runtime_verified"])
 
 
+    def test_new_file_readonly_comparison_preserves_document_root(self):
+        preview = render_page("en", "404")
+        result = self.scan(digest=preview["rendered_sha256"],
+                           rendered_html=preview["html"])
+        comparison = result["comparison"]
+        self.assertEqual(comparison["state"], "New File")
+        self.assertEqual(comparison["old_lines"], 0)
+        self.assertGreater(comparison["new_lines"], 40)
+        self.assertEqual(comparison["excerpt"], "")
+        self.assertFalse(comparison["truncated"])
+        self.assertEqual(result["page_file_state"], "Absent")
+        self.assertFalse((self.document_root / "404.html").exists())
+        self.assertFalse(result["apply_supported"])
+
+    def test_identical_preview_bytes_have_no_false_change(self):
+        preview = render_page("fa", "502")
+        target = self.document_root / "502.html"
+        target.write_bytes(preview["html"].encode("utf-8"))
+        before = target.read_bytes()
+        result = self.scan(page="502", locale="fa",
+                           digest=preview["rendered_sha256"],
+                           rendered_html=preview["html"])
+        self.assertEqual(result["comparison"]["state"], "Identical")
+        self.assertEqual(result["comparison"]["excerpt"], "")
+        self.assertEqual(result["comparison"]["old_lines"],
+                         result["comparison"]["new_lines"])
+        self.assertEqual(target.read_bytes(), before)
+
+    def test_different_html_yields_bounded_plain_text_excerpt(self):
+        current = (b"<!doctype html>\n<html><body>\n"
+                   b"<script>alert('existing')</script>\n</body></html>\n")
+        target = self.document_root / "404.html"
+        target.write_bytes(current)
+        proposed = '<!doctype html>\n<html><body>\n<p>Safe preview</p>\n</body></html>\n'
+        digest = hashlib.sha256(proposed.encode("utf-8")).hexdigest()
+        result = self.scan(digest=digest, rendered_html=proposed)
+        comp = result["comparison"]
+        self.assertEqual(comp["state"], "Different")
+        self.assertFalse(comp["truncated"])
+        self.assertIn("--- current 404.html", comp["excerpt"])
+        self.assertIn("+++ proposed 404.html", comp["excerpt"])
+        self.assertIn("<script>alert('existing')</script>", comp["excerpt"])
+        self.assertIn("<p>Safe preview</p>", comp["excerpt"])
+        self.assertLessEqual(len(comp["excerpt"]), inspection.MAX_COMPARE_EXCERPT)
+        self.assertEqual(target.read_bytes(), current)
+        self.assertTrue(result["read_only"])
+        self.assertFalse(result["nginx_runtime_verified"])
+
+    def test_untrusted_or_huge_current_content_does_not_produce_diff(self):
+        proposed = "<html>candidate</html>\n"
+        digest = hashlib.sha256(proposed.encode()).hexdigest()
+        target = self.document_root / "404.html"
+        for contents, expected in [
+            (b"\x00MALFORMED", "Control"),
+            (b"\xff\xfe", "UTF-8"),
+            (b"q" * (inspection.MAX_COMPARE_BYTES + 1), "text-diff limit"),
+            (b"row\n" * (inspection.MAX_COMPARE_LINES + 1), "line-diff limit"),
+            ("\u202epretend safe".encode("utf-8"), "Control"),
+        ]:
+            with self.subTest(contents=contents[:20]):
+                target.write_bytes(contents)
+                result = self.scan(digest=digest, rendered_html=proposed)
+                self.assertEqual(result["comparison"]["state"], "Unavailable")
+                self.assertEqual(result["comparison"]["excerpt"], "")
+                self.assertIn(expected, result["comparison"]["reason"])
+                self.assertEqual(target.read_bytes(), contents)
+                self.assertFalse(result["apply_supported"])
+
+    def test_large_changed_html_diff_is_clipped_and_marked_display_only(self):
+        current = "<html>\n" + "".join(f"<p>{i} OLD</p>\n" for i in range(220)) + "</html>\n"
+        proposed = "<html>\n" + "".join(f"<p>{i} NEW</p>\n" for i in range(220)) + "</html>\n"
+        self.assertLess(len(current.encode()), inspection.MAX_COMPARE_BYTES)
+        (self.document_root / "404.html").write_text(current, encoding="utf-8")
+        digest = hashlib.sha256(proposed.encode()).hexdigest()
+        compared = self.scan(digest=digest, rendered_html=proposed)["comparison"]
+        self.assertEqual(compared["state"], "Different")
+        self.assertTrue(compared["truncated"])
+        self.assertLessEqual(len(compared["excerpt"]), inspection.MAX_COMPARE_EXCERPT)
+        self.assertIn("display-only", compared["reason"])
+        self.assertEqual(compared["old_lines"], 222)
+        self.assertEqual(compared["new_lines"], 222)
+
+    def test_multibyte_persian_text_cannot_exceed_the_actual_response_byte_cap(self):
+        old = "<html>\n" + "".join("<p>" + "قدیمی" * 8 + "</p>\n" for _ in range(140)) + "</html>\n"
+        new = "<html>\n" + "".join("<p>" + "جدید" * 10 + "</p>\n" for _ in range(140)) + "</html>\n"
+        self.assertLess(len(old.encode()), inspection.MAX_COMPARE_BYTES)
+        self.assertLess(len(new.encode()), inspection.MAX_COMPARE_BYTES)
+        (self.document_root / "404.html").write_bytes(old.encode("utf-8"))
+        result = self.scan(digest=hashlib.sha256(new.encode()).hexdigest(),
+                           rendered_html=new)
+        comparison = result["comparison"]
+        self.assertEqual(comparison["state"], "Different")
+        self.assertTrue(comparison["truncated"])
+        self.assertLessEqual(len(comparison["excerpt"].encode("utf-8")),
+                             inspection.MAX_COMPARE_EXCERPT)
+        self.assertIn("--- current 404.html", comparison["excerpt"])
+
+    def test_changed_filename_binding_refuses_stale_file_excerpt(self):
+        # Independent proof of the pathname check, even when a valid open FD
+        # and both fstat reads appear unchanged.
+        current = self.document_root / "404.html"
+        different = self.document_root / "replacement.html"
+        current.write_text("<html>old site markup</html>")
+        different.write_text("<html>replacement</html>")
+        proposed = "<html>proposed</html>\n"
+        real_stat = os.stat
+
+        def changed_path(path, *args, **kwargs):
+            if path == "404.html" and kwargs.get("dir_fd") is not None:
+                self.assertFalse(kwargs.get("follow_symlinks", True))
+                return real_stat(different)
+            return real_stat(path, *args, **kwargs)
+
+        with patch.object(inspection.os, "stat", side_effect=changed_path):
+            result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),
+                               rendered_html=proposed)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertEqual(result["comparison"]["excerpt"], "")
+        self.assertIsNone(result["page_file_sha256"])
+        self.assertIn("changed", result["reason"])
+        self.assertEqual(current.read_text(), "<html>old site markup</html>")
+
+    def test_oversized_internal_render_never_bypasses_preview_size_contract(self):
+        proposed = "<html>" + ("x" * 32768) + "</html>"
+        result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),
+                           rendered_html=proposed)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertIn("offline preview limit", result["reason"])
+
+    def test_mismatched_rendered_digest_never_produces_successful_comparison(self):
+        (self.document_root / "404.html").write_text("an owner page")
+        result = self.scan(digest=SHA, rendered_html="<html>not this sha</html>")
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertIn("fingerprint", result["reason"])
+
+    def test_symlinked_site_page_never_exposes_an_excerpt(self):
+        target = self.root / "elsewhere"
+        target.write_text("<html>private content</html>")
+        (self.document_root / "404.html").symlink_to(target)
+        html = "<html>proposed</html>"
+        result = self.scan(digest=hashlib.sha256(html.encode()).hexdigest(),
+                           rendered_html=html)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertNotIn("private content", str(result))
+
+
 class NativeEndpointTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -239,6 +390,9 @@ class NativeEndpointTests(unittest.TestCase):
         self.assertEqual(r["site_id"], 7)
         self.assertEqual(spy.call_args.kwargs["template"], "502")
         self.assertEqual(spy.call_args.kwargs["locale"], "fa")
+        rendered = render_page("fa", "502")
+        self.assertEqual(spy.call_args.kwargs["rendered_html"], rendered["html"])
+        self.assertEqual(spy.call_args.kwargs["rendered_sha256"], rendered["rendered_sha256"])
         self.assertEqual(spy.call_args.args[0], before)
         self.assertEqual(self.calls, 3, "Site rechecked after source inspection")
         self.assertFalse((self.data / "ach_customizer.status_pages.json").exists())
