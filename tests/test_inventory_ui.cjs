@@ -31,8 +31,11 @@ function loadUi() {
   const views = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
+  for (const tab of tabs) elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
   for (const name of [
-    '#ach-message', '#ach-overview-status', '#ach-sites-rows',
+    '#ach-message', '#ach-overview-status', '#ach-overview-refresh',
+    '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
+    '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -51,7 +54,7 @@ function loadUi() {
     '#ach-status-inspect-button', '#ach-status-inspect-result',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
-    '#ach-activity-result', '#ach-activity-rows'
+    '#ach-activity-result', '#ach-activity-rows', '#ach-activity-loading'
   ]) elements.set(name, fakeNode('div'));
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
@@ -187,6 +190,14 @@ function loadUi() {
     trigger(tabs.find(node => node.attributes['data-tab'] === 'overview'), 'click');
     return requests.at(-1);
   }
+  function refreshSites() {
+    trigger(elements.get('#ach-sites-refresh'), 'click');
+    return requests.at(-1);
+  }
+  function refreshOverview() {
+    trigger(elements.get('#ach-overview-refresh'), 'click');
+    return requests.at(-1);
+  }
   function respondOverview(value) {
     const request = requests.at(-1);
     assert.match(request.options.url, /s=get_overview$/);
@@ -212,6 +223,12 @@ function loadUi() {
   function state() {
     return {
       rows: rows(),
+      hostsResult: elements.get('#ach-hosts-result').textContent,
+      hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
+      hostsSelectorDisabled: elements.get('#ach-hosts-site-id').props.disabled,
+      hostsChoices: elements.get('#ach-hosts-site-id').children.map(option => ({
+        id:option.props.value, text:option.textContent
+      })),
       error: elements.get('#ach-message').textContent,
       errorClass: elements.get('#ach-message').classes.has('ach-error'),
       prevDisabled: elements.get('#ach-prev').props.disabled,
@@ -221,6 +238,12 @@ function loadUi() {
       stateRevision: elements.get('#ach-state-revision').textContent,
       statusResult: elements.get('#ach-status-result').textContent,
       statusSource: elements.get('#ach-status-source').textContent,
+      statusName: elements.get('#ach-status-name').props.value,
+      siteStatus: elements.get('#ach-sites-status').textContent,
+      sitesSkeletonHidden: elements.get('#ach-sites-loading').props.hidden,
+      sitesTableRowsHidden: elements.get('#ach-sites-rows').props.hidden,
+      activitySkeletonHidden: elements.get('#ach-activity-loading').props.hidden,
+      activityTableRowsHidden: elements.get('#ach-activity-rows').props.hidden,
       statusHtml: elements.get('#ach-status-iframe').props.srcdoc,
       statusHash: elements.get('#ach-status-sha').textContent,
       statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
@@ -325,8 +348,10 @@ function loadUi() {
     elements.get(selector).props.checked = value;
     trigger(elements.get(selector), 'change');
   }
-  return { openSites, openOverview, openStatus, statusSetValue, statusSetChecked,
-    statusClick, openActivity, openPhp, phpVersions,
+  return { openSites, refreshSites, openOverview, refreshOverview,
+    openStatus, statusSetValue, statusSetChecked, statusClick, openActivity,
+    openPhp, refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
+    activityRefresh: () => { trigger(elements.get('#ach-activity-refresh'), 'click'); return requests.at(-1); },
     respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
@@ -361,6 +386,7 @@ const site = () => ({
   id: 3,
   name: 'site.example.test',
   document_root: '/www/site.example.test',
+  panel_status: '1',
   classification: 'Needs Review',
   bound_domains: [
     { name: 'site.example.test', port: 80 },
@@ -392,6 +418,9 @@ function invalidCase(title, mutate, expectedError = /Invalid inventory response/
     assert.equal(output.prevDisabled, true);
     assert.equal(output.nextDisabled, true);
     assert.equal(output.page, 'Unavailable');
+    assert.equal(output.hostsInspectDisabled,true);
+    assert.equal(output.hostsSelectorDisabled,true);
+    assert.match(output.hostsResult,/inventory unavailable/);
     assert.doesNotMatch(output.error, /No sites in this page|None \(review required\)/);
   });
 }
@@ -404,6 +433,8 @@ invalidCase('Missing sites array is rejected',
   r => { delete r.sites; });
 invalidCase('Null sites array is rejected',
   r => { r.sites = null; });
+invalidCase('Missing panel status is rejected before any hosts selector is populated',
+  r => { delete r.sites[0].panel_status; });
 invalidCase('Missing bound_domains is rejected',
   r => { delete r.sites[0].bound_domains; });
 invalidCase('Null binding is rejected without a TypeError',
@@ -533,7 +564,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
   ui.respond(page());
   ui.clickNext(); // With has_more=false this must not dispatch another request.
   assert.equal(ui.requests.length, 2); // overview plus one inventory request
-  ui.openSites();
+  ui.refreshSites();
   ui.respond({status:false, stage:'website_discovery',msg:'backend unavailable',operation_id:'abc'});
   assert.deepEqual(ui.state().rows, []);
   assert.equal(ui.state().page, 'Unavailable');
@@ -553,6 +584,9 @@ const monitorOverview = (overrides = {}) => ({
   modules_enabled: {site_inventory: true, php_fpm_file_preview: true},
   ...overrides
 });
+// Successful set_control acknowledgements include the backend CAS changed bit.
+// Read-only get_overview responses do not carry this mutation field.
+const monitorAck = (overrides = {}) => monitorOverview({changed:true, ...overrides});
 
 test('Native overview shows all three safe Monitor switches and revision', () => {
   const ui = loadUi();
@@ -578,7 +612,7 @@ test('Overall Monitor disable updates only the intended switch and preserves mod
   assert.equal(pending.options.data.enabled, 'false');
   assert.equal(pending.options.data.expected_revision, 0);
   assert.equal(ui.state().controls.overall.disabled, true);
-  ui.respondControl(monitorOverview({
+  ui.respondControl(monitorAck({
     mode: 'Disabled',
     notice: 'Monitoring is disabled',
     overall_enabled: false,
@@ -600,7 +634,7 @@ test('Module-level disable does not enable enforcement or disable unrelated modu
   assert.equal(ui.requests.at(-1).options.data.control, 'site_inventory');
   assert.equal(ui.requests.at(-1).options.data.enabled, 'false');
   assert.equal(ui.requests.at(-1).options.data.expected_revision, 0);
-  ui.respondControl(monitorOverview({
+  ui.respondControl(monitorAck({
     state_revision: 1,
     modules_enabled: {site_inventory: false, php_fpm_file_preview: true}
   }));
@@ -619,8 +653,9 @@ test('Failed Monitor state update restores previous switches and exposes backend
     msg: 'Primary administrator required', operation_id: 'op123'});
   const current = ui.state();
   assert.equal(current.controls.overall.checked, true);
-  assert.equal(current.controls.overall.disabled, false);
+  assert.equal(current.controls.overall.disabled, true);
   assert.equal(current.stateRevision, 'State revision: 0');
+  assert.match(current.overview, /Refresh state before retrying/);
   assert.match(current.error, /monitor_authorization: Primary administrator required/);
   assert.match(current.error, /op123/);
   assert.equal(current.errorClass, true);
@@ -651,7 +686,7 @@ test('Stale control revision fails visibly without repeating the conflicting mut
   });
   const current = ui.state();
   assert.equal(current.controls.overall.checked, true);
-  assert.equal(current.controls.overall.disabled, false);
+  assert.equal(current.controls.overall.disabled, true);
   assert.match(current.error, /revision changed/);
   assert.equal(ui.requests.length, 2);
   ui.openOverview();
@@ -974,6 +1009,216 @@ function statusPrefs(revision = 2, source = 'Global default', effective = brand(
   };
 }
 
+
+const hostsInspection = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  read_only:true,fix_supported:false,resolver_verified:false,
+  remote_dns_verified:false,gateway_verified:false,
+  state:'Local Loopback Entry',reason:'Exact hosts entry observed',
+  hosts_sha256:'a'.repeat(64),domains:['site.test'],
+  uninspected_wildcards:[],
+  entries:[{domain:'site.test',address:'127.0.0.2',line:3,loopback:true}],
+  note:'Origin local only; Gateway unverified.',...overrides
+});
+
+const hostsInventory = (name = 'site.test') => page([
+  {...site(), id:7, name, document_root:'/www/site.test',
+   bound_domains:[{name:'site.test',port:80}], canonical_domain_bound:name === 'site.test'},
+  {...site(), id:8, name:'other.test', document_root:'/www/other.test',
+   bound_domains:[{name:'other.test',port:80}], canonical_domain_bound:true}
+]);
+function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
+  ui.openSites();
+  ui.respond(inventory);
+  ui.statusSetValue('#ach-hosts-site-id',id,'input change');
+}
+
+test('Native-site local hosts inspection reports loopback without claiming Gateway failure', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const query=ui.statusClick('#ach-hosts-inspect-button');
+  assert.match(query.options.url,/s=inspect_local_hosts$/);
+  assert.equal(query.options.data.site_id,'7');
+  assert.equal(query.options.data.expected_site_key,'site.test');
+  assert.deepEqual(JSON.parse(query.options.data.expected_site_snapshot), [
+    7, 'site.test', '/www/site.test', '1', [['site.test', 80]]
+  ]);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  query.respond(hostsInspection());
+  assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+  assert.match(ui.state().hostsResult,/127.0.0.2 \(loopback\)/);
+  assert.match(ui.state().hostsResult,/Gateway unverified/);
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.match(ui.state().hostsResult,/Site selection changed/);
+});
+
+test('Invalid or cross-site hosts responses cannot masquerade as confirmed result', () => {
+  for (const bad of [
+    hostsInspection({site_id:8}),
+    hostsInspection({fix_supported:true}),
+    hostsInspection({gateway_verified:true}),
+    hostsInspection({resolver_verified:true}),
+    hostsInspection({hosts_sha256:'bad'}),
+    hostsInspection({entries:null}),
+    hostsInspection({state:'Installed'}),
+    hostsInspection({state:'Local Loopback Entry', entries:[]}),
+    hostsInspection({state:'No Local Loopback Entry'}),
+    hostsInspection({uninspected_wildcards:null}),
+    hostsInspection({entries:[{domain:'wrong.test',address:'127.0.0.1',line:1,loopback:true}]})
+  ]) {
+    const ui=loadUi();
+    selectHostsSite(ui);
+    ui.statusClick('#ach-hosts-inspect-button').respond(bad);
+    assert.match(ui.state().hostsResult,/unconfirmed/);
+    assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  }
+});
+
+test('Inventory identity mismatch rejects unrelated site keys; failed inspection clears stale evidence', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection({
+    site_key:'<img src=x onerror=alert(1)>'
+  }));
+  assert.match(ui.state().hostsResult,/unconfirmed/);
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  request.respond({status:false,stage:'hosts_inspection',msg:'Hosts source changed'});
+  assert.match(ui.state().hostsResult,/unconfirmed/);
+  assert.match(ui.state().error,/Hosts source changed/);
+});
+
+test('Discovered site selection is bounded to current inventory and text-rendered safely', () => {
+  const ui=loadUi();
+  const malicious='<img src=x onerror=alert(1)>';
+  selectHostsSite(ui,'7',hostsInventory(malicious));
+  assert.deepEqual(ui.state().hostsChoices.map(x => x.id),['','7','8']);
+  assert.match(ui.state().hostsChoices[1].text,/<img src=x onerror=alert\(1\)>/);
+  const r=hostsInspection({site_key:malicious});
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  assert.equal(request.options.data.expected_site_key,malicious);
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot), [
+    7, malicious, '/www/site.test', '1', [['site.test', 80]]
+  ]);
+  request.respond(r);
+  assert.match(ui.state().hostsResult,/<img src=x onerror=alert\(1\)>/);
+  ui.statusSetValue('#ach-hosts-site-id','9','input change');
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('Hosts optimistic snapshot binds domains, ports, root and native status', () => {
+  const ui=loadUi();
+  const chosen=hostsInventory();
+  const record=chosen.sites[0];
+  record.panel_status='0';
+  record.document_root='/www/relocated';
+  record.bound_domains=[
+    {name:'sub.site.test',port:8443},
+    {name:'site.test',port:80},
+    {name:'sub.site.test',port:443}
+  ];
+  record.canonical_domain_bound=true;
+  selectHostsSite(ui,'7',chosen);
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot), [
+    7,'site.test','/www/relocated','0',
+    [['site.test',80],['sub.site.test',443],['sub.site.test',8443]]
+  ]);
+  request.respond(hostsInspection());
+  assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+  // Native tab reentry preserves the accepted page and selection, unlike a
+  // deliberate Refresh, which revokes the snapshot before a new read.
+  const requestCount=ui.requests.length;
+  ui.openOverview();
+  ui.openSites();
+  assert.equal(ui.requests.length,requestCount,'No redundant inventory read on tab reentry');
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  const reload=ui.refreshSites();
+  assert.match(reload.options.url,/s=get_sites$/);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  reload.respond(hostsInventory());
+});
+
+test('Oversized website binding snapshots never create an inspectable option', () => {
+  const ui=loadUi();
+  const inventory=hostsInventory();
+  inventory.sites[0].bound_domains=Array.from({length:101},(_,n)=>({
+    name:'site'+n+'.test',port:80
+  }));
+  inventory.sites[0].canonical_domain_bound=false;
+  ui.openSites();ui.respond(inventory);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['','8']);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('Inventory reload invalidates pending hosts inspection and stale site selection', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const older=ui.statusClick('#ach-hosts-inspect-button');
+  const reload=ui.refreshSites(); // Explicit fresh snapshot revokes old confirmation.
+  assert.match(reload.options.url,/s=get_sites$/);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  older.respond(hostsInspection());
+  assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  reload.respond(page([]));
+  assert.equal(ui.state().hostsSelectorDisabled,true);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['']);
+});
+
+test('Hosts selection and pending inspection are invalidated by Monitor policy uncertainty', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:9}));
+  selectHostsSite(ui);
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  const old=ui.statusClick('#ach-hosts-inspect-button');
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',false);
+  assert.match(write.options.url,/s=set_control$/);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.equal(ui.state().hostsSelectorDisabled,true);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['']);
+  const count=ui.requests.length;
+  ui.openSites(); // No inventory read is permitted while policy is pending.
+  ui.refreshSites(); // Even artificially dispatched disabled control must not bypass.
+  assert.equal(ui.requests.length,count);
+  old.respond(hostsInspection());
+  assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  write.reject(null,'timeout');
+  ui.openSites();
+  assert.equal(ui.requests.length,count);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  ui.openOverview();
+  const refresh=ui.refreshOverview();
+  assert.match(refresh.options.url,/s=get_overview$/);
+  refresh.respond(monitorOverview({state_revision:9}));
+  const current=ui.openSites();
+  assert.match(current.options.url,/s=get_sites$/);
+  assert.equal(ui.state().hostsInspectDisabled,true,'No stale selection before verified inventory read');
+  current.respond(hostsInventory());
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['','7','8']);
+  assert.equal(ui.state().hostsInspectDisabled,true,'Explicit new selection is still required');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  assert.equal(ui.state().hostsInspectDisabled,false);
+});
+
+test('Failed or stale Website inventory cannot retain a Hosts inspection target', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const old=ui.statusClick('#ach-hosts-inspect-button');
+  const refresh=ui.refreshSites();
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  refresh.reject(null,'timeout');
+  old.respond(hostsInspection());
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['']);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  const retry=ui.refreshSites();
+  retry.respond({status:true,inventory_schema:1});
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.equal(ui.state().hostsSelectorDisabled,true);
+});
+
 test('Status Pages tab loads saved branding and safely renders sandbox-only preview', () => {
   const ui=loadUi();
   const initial=ui.openStatus();
@@ -1161,10 +1406,16 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
     assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*aria-labelledby="ach-tab-' + name + '"'));
   }
   assert.match(html, /\.ach-main \{[^}]*overflow-y:auto/);
-  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:190px/);
+  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:170px/);
   assert.match(html, /@media \(max-width:720px\)/);
   assert.doesNotMatch(html, /class="ach-tabs"/);
   assert.match(html, /function fitNativeLayer/);
+  assert.match(html, /--ach-green:#20a53a/);
+  assert.match(html, /--ach-sidebar-bg:#f0f0f1/);
+  assert.doesNotMatch(html, /class="ach-sidebar-label"/);
+  assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
+  assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
+  assert.match(html, /<h4 class="ach-sr-only">Overview<\/h4>/);
 });
 
 test('Activity panel filters read-only structured events and uses text rendering', () => {
@@ -1705,7 +1956,10 @@ test('Missing, malformed and privilege-escalating PHP inventory never enables a 
 test('Stale PHP discovery response after a refresh cannot restore old version choices', () => {
   const ui=loadUi();
   const prior=ui.openPhp();
-  const current=ui.openPhp();
+  const pendingCount=ui.requests.length;
+  ui.openOverview(); ui.openPhp();
+  assert.equal(ui.requests.length,pendingCount,'Pending PHP discovery is not duplicated on tab reentry');
+  const current=ui.refreshPhp();
   current.respond({...ui.phpVersions([]),state:'Needs Review',reason:'Not installed'});
   prior.respond(ui.phpVersions());
   assert.equal(ui.state().phpVersionDisabled,true);
@@ -1714,4 +1968,744 @@ test('Stale PHP discovery response after a refresh cannot restore old version ch
   const previous=ui.requests.length;
   ui.submitPhp('85', false);
   assert.equal(ui.requests.length,previous);
+});
+
+
+test('PHP tab return reuses valid discovery and selected preview until explicit Refresh', () => {
+  const ui=loadUi();
+  ui.requests[0].respond(monitorOverview());
+  const discovery=ui.openPhp();
+  discovery.respond(ui.phpVersions());
+  const preview=ui.submitPhp('85', false);
+  preview.respond(phpPreview());
+  assert.equal(ui.state().phpVersion,'85');
+  const before=ui.requests.length;
+  ui.openOverview(); ui.openPhp();
+  assert.equal(ui.requests.length,before,'Tab revisit must preserve verified native PHP discovery');
+  assert.equal(ui.state().phpVersion,'85','Do not silently erase operator choice');
+  const refresh=ui.refreshPhp();
+  assert.equal(ui.requests.length,before+1);
+  assert.match(refresh.options.url,/s=get_php_versions$/);
+  assert.equal(ui.state().phpVersionDisabled,true,'Refresh must invalidate old selected version');
+  assert.equal(ui.state().fpmPrepareDisabled,true,'Old Preview never survives Refresh');
+  ui.openOverview(); ui.openPhp();
+  assert.equal(ui.requests.length,before+1,'Pending PHP refresh is not repeated by navigation');
+  refresh.respond(ui.phpVersions());
+  assert.equal(ui.state().phpVersion,'85','The reverified version may stay selected');
+  assert.equal(ui.state().fpmPrepareDisabled,true,'Reverified version does not revive old Preview or approval');
+  assert.equal(ui.state().phpVersionDisabled,false);
+  ui.openOverview(); ui.openPhp();
+  assert.equal(ui.requests.length,before+1,'Successful Refresh result remains cached');
+});
+
+test('PHP discovery Activity invalidation does not disrupt unrelated cached tabs', () => {
+  const ui=loadUi();
+  ui.requests[0].respond(monitorOverview());
+  const activity=ui.openActivity();
+  activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  const fetch=ui.openPhp();
+  fetch.respond(ui.phpVersions());
+  assert.match(ui.activityMessage(),/may have changed/);
+  const current=ui.openActivity();
+  assert.match(current.options.url,/s=get_activity$/);
+  current.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  const count=ui.requests.length;
+  ui.openPhp(); ui.openActivity();
+  assert.equal(ui.requests.length,count,'Read-only PHP tab reentry does not spur another Activity invalidation');
+});
+
+test('Native tab navigation reuses loaded panels and explicit Refresh fetches latest', () => {
+  const ui=loadUi();
+  ui.requests[0].respond(monitorOverview({state_revision:9}));
+  ui.openSites();
+  ui.respond(page());
+  assert.match(ui.state().siteStatus,/Page 1/);
+  const before=ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,before,'revisit must not re-fetch');
+  const refresh=ui.refreshSites();
+  assert.equal(ui.requests.length,before+1);
+  assert.match(refresh.options.url,/s=get_sites$/);
+  refresh.respond(page([]));
+  assert.match(ui.state().siteStatus,/0 website/);
+  const monitor=ui.refreshOverview();
+  assert.match(monitor.options.url,/s=get_overview$/);
+  monitor.respond(monitorOverview({state_revision:10}));
+  assert.equal(ui.state().stateRevision,'State revision: 10');
+});
+
+test('Status Pages unsaved brand values survive native tab switching', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-name','Unsaved operator change');
+  ui.openSites(); ui.respond(page());
+  const before=ui.requests.length;
+  ui.openStatus();
+  assert.equal(ui.requests.length,before,'no unnecessary status_preferences request');
+  assert.equal(ui.state().statusName,'Unsaved operator change');
+  ui.statusClick('#ach-status-load').respond(statusPrefs());
+  assert.notEqual(ui.state().statusName,'Unsaved operator change');
+});
+
+test('Native lazy navigation uses per-view loading state, not a global flash', () => {
+  const ui=loadUi();
+  assert.equal(ui.state().error,'');
+  const inventory=ui.openSites();
+  assert.match(inventory.options.url,/s=get_sites$/);
+  assert.match(ui.state().siteStatus,/Loading website inventory/);
+  assert.equal(ui.state().error,'');
+  const activity=ui.openActivity();
+  assert.match(activity.options.url,/s=get_activity$/);
+  assert.equal(ui.state().error,'');
+  inventory.respond(page());
+  assert.equal(ui.state().error,'');
+});
+
+test('Review R1: primary action white text meets AA against normal and hover fills', () => {
+  const match = html.match(/--ach-primary-fill:(#[0-9a-f]{6}); --ach-primary-fill-hover:(#[0-9a-f]{6});/i);
+  assert.ok(match, 'Primary action must have distinct readable fill tokens');
+  function lum(hex) {
+    const parts = hex.slice(1).match(/.{2}/g).map(v => parseInt(v, 16) / 255)
+      .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    return parts[0] * 0.2126 + parts[1] * 0.7152 + parts[2] * 0.0722;
+  }
+  for (const fill of match.slice(1)) {
+    const contrast = 1.05 / (lum(fill) + 0.05);
+    assert.ok(contrast >= 4.5, fill + ' white-on-green contrast ' + contrast.toFixed(3));
+  }
+  assert.match(html, /button\.btn-success \{\s*color:#fff; background:var\(--ach-primary-fill\)/);
+  assert.match(html, /button\.btn-success:hover:not\(:disabled\) \{[\s\S]*?background:var\(--ach-primary-fill-hover\)/);
+});
+
+test('Review R2: an older Overview read completing BEFORE Monitor acknowledgement cannot replace it', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  const oldRead = ui.refreshOverview();
+  const update = ui.toggleMonitor('overall', false);
+  assert.match(update.options.url, /s=set_control$/);
+  const pendingCount = ui.requests.length;
+  ui.refreshOverview();
+  ui.toggleMonitor('site_inventory', false);
+  assert.equal(ui.requests.length, pendingCount, 'No duplicate read or control mutation while writing');
+  oldRead.respond(monitorOverview({state_revision:10, overall_enabled:true}));
+  assert.equal(ui.state().controls.overall.disabled, true);
+  update.respond(monitorAck({state_revision:11, overall_enabled:false, mode:'Disabled'}));
+  assert.equal(ui.state().stateRevision, 'State revision: 11');
+  assert.equal(ui.state().controls.overall.checked, false);
+  assert.equal(ui.state().controls.overall.disabled, false);
+});
+
+test('Review R2: an older Overview read completing AFTER Monitor acknowledgement is discarded', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  const oldRead = ui.refreshOverview();
+  const update = ui.toggleMonitor('overall', false);
+  update.respond(monitorAck({state_revision:11, overall_enabled:false, mode:'Disabled'}));
+  oldRead.respond(monitorOverview({state_revision:10, overall_enabled:true}));
+  assert.equal(ui.state().stateRevision, 'State revision: 11');
+  assert.equal(ui.state().controls.overall.checked, false);
+  const lateServerRead = ui.refreshOverview();
+  lateServerRead.respond(monitorOverview({state_revision:9, overall_enabled:true}));
+  assert.equal(ui.state().stateRevision, 'State revision: 11');
+  assert.match(ui.state().overview, /Older Monitor state ignored/);
+});
+
+test('Review R2: failed or conflicted Monitor write retains known controls and explicit recovery', () => {
+  for (const outcome of ['timeout','conflict']) {
+    const ui = loadUi();
+    ui.respondOverview(monitorOverview({state_revision:4}));
+    const oldRead = ui.refreshOverview();
+    const mutation = ui.toggleMonitor('overall', false);
+    if (outcome === 'timeout') mutation.reject(null, 'timeout');
+    else mutation.respond({status:false, stage:'monitor_state_write', msg:'Revision conflict'});
+    oldRead.respond(monitorOverview({state_revision:4, overall_enabled:false}));
+    assert.equal(ui.state().stateRevision, 'State revision: 4');
+    assert.equal(ui.state().controls.overall.checked, true);
+    assert.equal(ui.state().controls.overall.disabled, true);
+    assert.match(ui.state().overview, /not confirmed/);
+    const newest = ui.refreshOverview();
+    assert.match(newest.options.url, /s=get_overview$/);
+    newest.respond(monitorOverview({state_revision:5, overall_enabled:false}));
+    assert.equal(ui.state().stateRevision, 'State revision: 5');
+    assert.equal(ui.state().controls.overall.checked, false);
+    assert.equal(ui.state().controls.overall.disabled, false);
+  }
+});
+
+test('Review R2: failed Monitor write stays locked after failed refresh; only verified GET re-enables', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const write=ui.toggleMonitor('overall',false);
+  assert.deepEqual(ui.state().rows,[],'Possible backend change immediately invalidates inventory');
+  write.reject(null,'timeout');
+  assert.equal(ui.state().stateRevision,'State revision: 10');
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().controls.overall.disabled,true);
+  const initialCount=ui.requests.length;
+  ui.toggleMonitor('site_inventory',false);
+  assert.equal(ui.requests.length,initialCount,'Unconfirmed state must not allow another mutation');
+  const badRead=ui.refreshOverview();
+  badRead.reject(null,'timeout');
+  assert.equal(ui.state().controls.overall.disabled,true);
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().stateRevision,'State revision: 10','Keep last-known revision for diagnosis');
+  const retry=ui.refreshOverview();
+  retry.respond(monitorOverview({state_revision:11,overall_enabled:false,mode:'Disabled'}));
+  assert.equal(ui.state().stateRevision,'State revision: 11');
+  assert.equal(ui.state().controls.overall.checked,false);
+  assert.equal(ui.state().controls.overall.disabled,false);
+  const updated=ui.openSites();
+  assert.match(updated.options.url,/s=get_sites$/);
+  updated.respond({status:false,stage:'monitor_disabled',msg:'Monitor disabled'});
+  assert.deepEqual(ui.state().rows,[]);
+});
+
+test('Review R2: a malformed refresh does not unlock after an uncertain write', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:2}));
+  const write=ui.toggleMonitor('overall',false);
+  write.reject(null,'timeout');
+  const refresh=ui.refreshOverview();
+  refresh.respond(monitorOverview({state_schema:2,state_revision:3,overall_enabled:false}));
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().controls.overall.disabled,true);
+  assert.equal(ui.state().stateRevision,'State revision: 2');
+  assert.match(ui.state().overview,/unverified|Refresh state/);
+  const count=ui.requests.length;
+  ui.toggleMonitor('overall',false);
+  assert.equal(ui.requests.length,count);
+  ui.refreshOverview().respond(monitorOverview({state_revision:3,overall_enabled:false,mode:'Disabled'}));
+  assert.equal(ui.state().controls.overall.disabled,false);
+  assert.equal(ui.state().controls.overall.checked,false);
+});
+
+test('Review R2: inconsistent successful Monitor acknowledgements are rejected and locked', () => {
+  const invalid=[
+    ['missing changed',monitorOverview({state_revision:5,overall_enabled:false})],
+    ['changed false despite changed flag',monitorAck({changed:false,state_revision:5,overall_enabled:false})],
+    ['no revision increment',monitorAck({state_revision:4,overall_enabled:false})],
+    ['unexpected revision jump',monitorAck({state_revision:6,overall_enabled:false})],
+    ['requested value unchanged',monitorAck({state_revision:5,overall_enabled:true})],
+    ['unrelated module altered',monitorAck({state_revision:5,overall_enabled:false,
+      modules_enabled:{site_inventory:false,php_fpm_file_preview:true}})]
+  ];
+  for(const [reason,reply] of invalid){
+    const ui=loadUi();
+    ui.respondOverview(monitorOverview({state_revision:4}));
+    const write=ui.toggleMonitor('overall',false);
+    write.respond(reply);
+    assert.equal(ui.state().stateRevision,'State revision: 4',reason);
+    assert.equal(ui.state().controls.overall.checked,true,reason);
+    assert.equal(ui.state().controls.overall.disabled,true,reason);
+    assert.match(ui.state().overview,/stale or incompatible/,reason);
+    const count=ui.requests.length;
+    ui.toggleMonitor('site_inventory',false);
+    assert.equal(ui.requests.length,count,'Failed closed: '+reason);
+    ui.refreshOverview().respond(monitorOverview({state_revision:5,overall_enabled:false,mode:'Disabled'}));
+    assert.equal(ui.state().controls.overall.disabled,false,'Recovered: '+reason);
+    assert.equal(ui.state().controls.overall.checked,false,'Recovered: '+reason);
+  }
+});
+
+test('Review R2: consistent no-op acknowledgment is accepted without inventing a revision', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:8}));
+  const change=ui.toggleMonitor('overall',true);
+  assert.equal(change.options.data.enabled,'true');
+  change.respond(monitorAck({changed:false,state_revision:8,overall_enabled:true}));
+  assert.equal(ui.state().stateRevision,'State revision: 8');
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().controls.overall.disabled,false);
+});
+
+test('Review R3: Websites navigation while policy write is pending never caches a pre-transition page', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',false);
+  assert.deepEqual(ui.state().rows,[]);
+  assert.equal(ui.state().nextDisabled,true);
+  const pendingRequests=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,pendingRequests,
+    'A get_sites request must not launch under an unsettled Monitor policy');
+  assert.deepEqual(ui.state().rows,[]);
+  assert.match(ui.state().siteStatus,/Monitor update pending/);
+  write.respond(monitorAck({state_revision:11,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const confirmedRead=ui.requests.at(-1);
+  assert.match(confirmedRead.options.url,/s=get_sites$/);
+  assert.equal(ui.requests.length,pendingRequests+1,
+    'The next read must be initiated only after a confirmed policy transition');
+  confirmedRead.respond({status:false,stage:'monitor_disabled',msg:'Website inventory disabled'});
+  assert.deepEqual(ui.state().rows,[]);
+  assert.equal(ui.state().nextDisabled,true);
+  const afterLoad=ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,afterLoad+1,
+    'A failed current-policy read must keep explicit retry available');
+});
+
+test('Review R3: pending inventory is discarded after conflicted Website Monitor write', () => {
+  for(const outcome of ['conflict','timeout','incompatible-success']){
+    const ui=loadUi();
+    ui.respondOverview(monitorOverview({state_revision:6}));
+    const stale=ui.openSites();
+    ui.openOverview();
+    const write=ui.toggleMonitor('site_inventory',false);
+    if(outcome==='conflict') write.respond({status:false,stage:'monitor_state_write',msg:'Revision conflict'});
+    else if(outcome==='timeout') write.reject(null,'timeout');
+    else write.respond(monitorAck({state_revision:7,
+      modules_enabled:{site_inventory:true,php_fpm_file_preview:true}}));
+    stale.respond(page());
+    assert.deepEqual(ui.state().rows,[],'Stale inventory must not return: '+outcome);
+    assert.match(ui.state().siteStatus,/Monitor policy unverified/,outcome);
+    assert.equal(ui.state().controls.site_inventory.disabled,true,outcome);
+    const blockedCount=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,blockedCount,'Do not fetch under unverified policy: '+outcome);
+    assert.equal(ui.state().nextDisabled,true);
+    ui.openOverview();
+    ui.refreshOverview().respond(monitorOverview({state_revision:7,
+      modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+    assert.equal(ui.state().controls.site_inventory.checked,false,outcome);
+    assert.equal(ui.state().controls.site_inventory.disabled,false,outcome);
+    const recovered=ui.openSites();
+    assert.match(recovered.options.url,/s=get_sites$/);
+    recovered.respond({status:false,stage:'monitor_disabled',msg:'Monitor state not verified'});
+    assert.equal(ui.state().nextDisabled,true);
+  }
+});
+
+test('Review R3: uncertain policy outcomes require a verified GET before any Websites read', () => {
+  for (const outcome of ['timeout','conflict','contradictory-success']) {
+    const ui=loadUi();
+    ui.respondOverview(monitorOverview({state_revision:10}));
+    ui.openSites().respond(page());
+    ui.openOverview();
+    const write=ui.toggleMonitor('overall',false);
+    const pendingCount=ui.requests.length;
+    ui.openSites();
+    ui.refreshSites(); // Even a synthetic disabled-button click must not dispatch.
+    assert.equal(ui.requests.length,pendingCount,'Pending policy blocks get_sites: '+outcome);
+    assert.deepEqual(ui.state().rows,[],outcome);
+    assert.match(ui.state().siteStatus,/Monitor update pending/,outcome);
+    if (outcome==='timeout') write.reject(null,'timeout');
+    else if (outcome==='conflict') write.respond({
+      status:false,stage:'monitor_state_write',msg:'Revision conflict'});
+    else write.respond(monitorAck({state_revision:11,overall_enabled:true}));
+    assert.match(ui.state().siteStatus,/Monitor policy unverified/,outcome);
+    assert.equal(ui.state().controls.overall.disabled,true,outcome);
+    const blocked=ui.requests.length;
+    ui.openSites(); ui.refreshSites();
+    assert.equal(ui.requests.length,blocked,'Unconfirmed policy blocks retries: '+outcome);
+    ui.openOverview();
+    const bad=ui.refreshOverview();
+    bad.respond(monitorOverview({state_schema:2,state_revision:11,overall_enabled:false}));
+    const afterBad=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,afterBad,'Malformed recheck cannot unlock Websites: '+outcome);
+    ui.openOverview().respond(monitorOverview({state_revision:9,overall_enabled:true}));
+    const afterStale=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,afterStale,'Older recheck cannot unlock Websites: '+outcome);
+    ui.openOverview().reject(null,'timeout');
+    const afterFailed=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,afterFailed,'Failed recheck cannot unlock Websites: '+outcome);
+    ui.openOverview();
+    ui.refreshOverview().respond(monitorOverview({state_revision:11,overall_enabled:false,mode:'Disabled'}));
+    assert.equal(ui.state().controls.overall.disabled,false,outcome);
+    const afterGood=ui.requests.length;
+    const fresh=ui.openSites();
+    assert.equal(ui.requests.length,afterGood+1,'Fresh policy read permits inventory: '+outcome);
+    assert.match(fresh.options.url,/s=get_sites$/);
+    fresh.respond(page([]));
+    assert.deepEqual(ui.state().rows,[['No sites in this page']],outcome);
+    assert.equal(ui.state().page,'1',outcome);
+    assert.equal(ui.state().nextDisabled,true,outcome);
+  }
+});
+
+test('Review R3: pre-mutation inventory response cannot replace post-acknowledgment data', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:4}));
+  const oldRead=ui.openSites();
+  ui.openOverview();
+  const mutation=ui.toggleMonitor('site_inventory',false);
+  const pendingCount=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,pendingCount,'Do not launch during mutation');
+  mutation.respond(monitorAck({state_revision:5,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const fresh=ui.requests.at(-1);
+  assert.match(fresh.options.url,/s=get_sites$/);
+  oldRead.respond(page());
+  assert.deepEqual(ui.state().rows,[],'Pre-mutation request discarded after newer policy');
+  fresh.respond(page([]));
+  assert.deepEqual(ui.state().rows,[['No sites in this page']]);
+  assert.equal(ui.state().nextDisabled,true);
+  const afterFresh=ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,afterFresh,'Successful current-policy read remains cached');
+  ui.refreshSites().respond(page());
+  assert.equal(ui.state().rows.length,1,'Explicit Refresh still fetches new data');
+});
+
+test('Review R3: valid no-op policy acknowledgment safely releases deferred inventory read', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:8}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',true);
+  const count=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,count,'No data read during even a no-op write');
+  write.respond(monitorAck({changed:false,state_revision:8}));
+  assert.equal(ui.state().stateRevision,'State revision: 8');
+  const fresh=ui.requests.at(-1);
+  assert.match(fresh.options.url,/s=get_sites$/);
+  assert.equal(ui.requests.length,count+1);
+  fresh.respond(page([]));
+  assert.deepEqual(ui.state().rows,[['No sites in this page']]);
+  assert.equal(ui.state().nextDisabled,true);
+});
+
+test('Review R3: PHP-only Monitor update does not stall or invalidate Websites inventory', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:8}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const mutation=ui.toggleMonitor('php_fpm_file_preview',false);
+  const pendingCount=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,pendingCount,'Unrelated policy does not invalidate cached Websites');
+  assert.equal(ui.state().rows.length,1);
+  mutation.respond(monitorAck({state_revision:9,
+    modules_enabled:{site_inventory:true,php_fpm_file_preview:false}}));
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,pendingCount,'No duplicate Websites request after PHP-only update');
+  assert.equal(ui.state().rows.length,1);
+});
+
+test('Review R3: changing Website Monitor invalidates cached and in-flight inventory only', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:5}));
+  const old = ui.openSites();
+  ui.openOverview();
+  const mutation = ui.toggleMonitor('site_inventory',false);
+  mutation.respond(monitorAck({
+    state_revision:6, modules_enabled:{site_inventory:false,php_fpm_file_preview:true}
+  }));
+  old.respond(page());
+  assert.deepEqual(ui.state().rows, [], 'Old pending inventory must not be displayed');
+  assert.equal(ui.state().nextDisabled, true);
+  assert.match(ui.state().siteStatus, /Monitor settings changed/);
+  const fresh = ui.openSites();
+  assert.match(fresh.options.url, /s=get_sites$/);
+  fresh.respond({status:false, stage:'monitor_disabled', msg:'Website inventory disabled'});
+  assert.deepEqual(ui.state().rows, []);
+  assert.equal(ui.state().nextDisabled, true);
+});
+
+test('Review R3: a loaded Website snapshot reloads once after Overall Monitor change', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview({state_revision:1}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  ui.toggleMonitor('overall', false).respond(monitorAck({
+    state_revision:2,overall_enabled:false,mode:'Disabled'
+  }));
+  assert.deepEqual(ui.state().rows, []);
+  const count = ui.requests.length;
+  const fresh = ui.openSites();
+  assert.equal(ui.requests.length, count + 1);
+  fresh.respond(page([]));
+  const rereadCount = ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length, rereadCount, 'Clean tab return must remain cached');
+});
+
+const reviewActivity = (entries = []) => ({
+  status:true,schema:1,read_only:true,configured_level:'INFO',entries
+});
+const reviewActivityEntry = () => ({
+  schema:1,time_utc:'2026-11-04T00:00:00Z',level:'INFO',module:'monitor',
+  action:'set_control',stage:'complete',outcome:'success',
+  operation_id:'f'.repeat(32),target:'overall',detail:'Changed',
+  recovery_id:'',error_class:''
+});
+
+test('Review R3: operation completion invalidates Activity and reveals new evidence once', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  ui.openActivity().respond(reviewActivity());
+  ui.openOverview();
+  ui.toggleMonitor('overall',false).respond(monitorAck({state_revision:1,overall_enabled:false}));
+  assert.deepEqual(ui.activityRows(), [], 'Old Activity rows must not masquerade as current');
+  assert.match(ui.activityMessage(), /may have changed/);
+  const next = ui.openActivity();
+  assert.match(next.options.url, /s=get_activity$/);
+  next.respond(reviewActivity([reviewActivityEntry()]));
+  assert.equal(ui.activityRows().length,1);
+  const count=ui.requests.length;
+  ui.openOverview(); ui.openActivity();
+  assert.equal(ui.requests.length,count,'Unrelated navigation does not refetch a clean snapshot');
+});
+
+test('Review R3: completion while Activity is already open invalidates in-flight results', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  const write=ui.toggleMonitor('overall',false);
+  const pending=ui.openActivity();
+  write.respond(monitorAck({state_revision:1,overall_enabled:false}));
+  const fresh=ui.requests.at(-1);
+  assert.notEqual(fresh,pending);
+  assert.match(fresh.options.url,/s=get_activity$/);
+  pending.respond(reviewActivity());
+  fresh.respond(reviewActivity([reviewActivityEntry()]));
+  assert.equal(ui.activityRows().length,1);
+});
+
+test('Review R3: successful and failed PHP-FPM Apply mark Activity stale, including warnings', () => {
+  for (const result of ['success','failure']) {
+    const ui=loadUi();
+    ui.openActivity().respond(reviewActivity([reviewActivityEntry()]));
+    ui.openOverview();
+    ui.submitPhp().respond(phpPreview());
+    ui.prepareFpm().respond(guardedPlan());
+    ui.approveFpm(true);
+    const operation=ui.commitFpm();
+    if (result==='success') operation.respond(appliedResult({
+      activity_logged:false, activity_warning:'Plugin Activity persistence uncertain'
+    }));
+    else operation.reject(null,'timeout');
+    assert.deepEqual(ui.activityRows(), []);
+    assert.match(ui.activityMessage(),/may have changed/);
+    const read=ui.openActivity();
+    assert.match(read.options.url,/s=get_activity$/);
+    read.respond(reviewActivity());
+    assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
+  }
+});
+
+test('Review R3: Status Pages writes invalidate Activity without clearing unrelated unsaved fields', () => {
+  const ui=loadUi();
+  ui.openActivity().respond(reviewActivity());
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-name','Unsaved ACh');
+  const save=ui.statusClick('#ach-status-save');
+  save.respond({status:true,schema:1,revision:3,effective:brand(),changed:true,source:'Global'});
+  assert.match(ui.activityMessage(),/may have changed/);
+  const read=ui.openActivity();
+  assert.match(read.options.url,/s=get_activity$/);
+  read.respond(reviewActivity());
+  ui.openStatus();
+  assert.equal(ui.requests.at(-1),read,'Cached status panel was not reloaded');
+});
+
+
+test('Review R2: a malformed or older acknowledged Monitor revision is not shown as success', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:7}));
+  const mutation=ui.toggleMonitor('overall',false);
+  mutation.respond(monitorOverview({state_revision:6,overall_enabled:false}));
+  assert.equal(ui.state().stateRevision,'State revision: 7');
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.match(ui.state().overview,/stale or incompatible/);
+  ui.refreshOverview().respond(monitorOverview({state_revision:8,overall_enabled:false}));
+  assert.equal(ui.state().controls.overall.checked,false);
+  assert.equal(ui.state().controls.overall.disabled,false);
+});
+
+test('Review R3: Status Pages reset and failed save each invalidate prior Activity snapshot', () => {
+  for (const action of ['reset','failed-save']) {
+    const ui=loadUi();
+    ui.openActivity().respond(reviewActivity([reviewActivityEntry()]));
+    ui.openStatus().respond(statusPrefs());
+    let operation;
+    if (action==='reset') {
+      ui.statusSetChecked('#ach-status-reset-approve',true);
+      operation=ui.statusClick('#ach-status-reset');
+      operation.respond({status:true,schema:1,revision:3,effective:brand(),source:'Global'});
+    } else {
+      operation=ui.statusClick('#ach-status-save');
+      operation.reject(null,'timeout');
+    }
+    assert.deepEqual(ui.activityRows(),[]);
+    assert.match(ui.activityMessage(),/may have changed/);
+    ui.openActivity().respond(reviewActivity());
+    assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
+  }
+});
+
+test('Review R3: PHP-FPM Restore confirmation and uncertain result both invalidate Activity', () => {
+  for (const action of ['success','timeout']) {
+    const ui=loadUi();
+    ui.openActivity().respond(reviewActivity([reviewActivityEntry()]));
+    ui.openOverview();
+    ui.inspectFpmRecovery().respond(recoveryPreview());
+    ui.approveFpmRollback(true);
+    const operation=ui.rollbackFpm();
+    if (action==='success') operation.respond(rolledBackResult({
+      activity_logged:false,activity_warning:'Plugin Activity log not persisted'
+    }));
+    else operation.reject(null,'timeout');
+    assert.deepEqual(ui.activityRows(),[]);
+    assert.match(ui.activityMessage(),/may have changed/);
+    const next=ui.openActivity();
+    assert.match(next.options.url,/s=get_activity$/);
+    next.respond(reviewActivity());
+  }
+});
+
+
+test('Native Nginx form rhythm: compact left labels, 150px inputs and responsive reflow', () => {
+  assert.match(html, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/,
+    'Desktop setting groups must have two balanced columns');
+  assert.match(html, /grid-template-columns:minmax\(0,1fr\) minmax\(0,150px\)/,
+    'Each setting has a 150px Nginx-style input with a neighboring label');
+  assert.match(html, /@media \(max-width:880px\)/);
+  assert.match(html, /@media \(max-width:460px\)/);
+  assert.match(html, /class="ach-field-site"/);
+  assert.match(html, /#ach-customizer \.ach-table-skeleton\[hidden\]/);
+  assert.match(html, /prefers-reduced-motion:reduce/);
+});
+
+test('Website initial pending shows skeleton, never a fabricated empty inventory', () => {
+  const ui=loadUi();
+  const request=ui.openSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  assert.equal(ui.state().sitesTableRowsHidden,true);
+  assert.equal(ui.state().prevDisabled,true);
+  assert.equal(ui.state().nextDisabled,true);
+  assert.match(ui.state().siteStatus,/Loading website inventory/);
+  assert.doesNotMatch(ui.state().siteStatus,/No sites/);
+  request.respond(page([]));
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+  assert.deepEqual(ui.state().rows,[['No sites in this page']]);
+});
+
+test('Website refresh and errors always settle skeleton; retry remains available', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const req=ui.refreshSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  assert.equal(ui.state().sitesTableRowsHidden,true);
+  req.respond({status:false,stage:'inventory_disabled',msg:'Monitor disabled'});
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+  assert.equal(ui.state().rows.length,0);
+  assert.match(ui.state().siteStatus,/unavailable/i);
+  const retry=ui.refreshSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  retry.respond(page([]));
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+});
+
+test('Old invalidated Website read cannot cancel current request skeleton', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:3}));
+  const old=ui.openSites();
+  ui.openOverview();
+  // A valid set_control ack includes the CAS changed bit. An ordinary
+  // get_overview fixture must not unlock pending Website reads.
+  ui.toggleMonitor('site_inventory',false).respond(monitorAck({
+    state_revision:4,modules_enabled:{site_inventory:false,php_fpm_file_preview:true}
+  }));
+  const fresh=ui.openSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  old.respond(page());
+  assert.equal(ui.state().sitesSkeletonHidden,false,'Stale reply must not hide fresh pending skeleton');
+  fresh.respond({status:false,stage:'monitor_disabled',msg:'Website inventory disabled'});
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+});
+
+test('Policy uncertainty hides Websites skeleton without pretending a read is pending', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:7}));
+  const old=ui.openSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  ui.openOverview();
+  const mutation=ui.toggleMonitor('site_inventory',false);
+  assert.equal(ui.state().sitesSkeletonHidden,true,'Old request skeleton was invalidated');
+  const count=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,count,'Pending policy must block new website reads');
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+  old.respond(page());
+  assert.deepEqual(ui.state().rows,[]);
+  mutation.reject(null,'timeout');
+  assert.match(ui.state().siteStatus,/unverified/i);
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  ui.openOverview();
+  ui.refreshOverview().respond(monitorOverview({state_schema:2,state_revision:8,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const blocked=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,blocked,'Invalid recovery GET cannot enable Website reads');
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  ui.openOverview();
+  ui.refreshOverview().respond(monitorOverview({state_revision:8,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const fresh=ui.openSites();
+  assert.match(fresh.options.url,/s=get_sites$/);
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  assert.equal(ui.state().sitesTableRowsHidden,true);
+  fresh.respond(page([]));
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+});
+
+test('Activity loading, empty/error and retry states maintain truthful loading feedback', () => {
+  const ui=loadUi();
+  const initial=ui.openActivity();
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  assert.equal(ui.state().activityTableRowsHidden,true);
+  assert.match(ui.activityMessage(),/Loading recent activity/);
+  initial.respond(reviewActivity());
+  assert.equal(ui.state().activitySkeletonHidden,true);
+  assert.equal(ui.state().activityTableRowsHidden,false);
+  assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
+  const retry=ui.activityRefresh();
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  retry.reject(null,'timeout');
+  assert.equal(ui.state().activitySkeletonHidden,true);
+  assert.equal(ui.state().activityTableRowsHidden,false);
+  assert.match(ui.activityMessage(),/unavailable/i);
+});
+
+test('Changing Activity filter keeps only newest pending request visible', () => {
+  const ui=loadUi();
+  const old=ui.openActivity();
+  const fresh=ui.activityFilter('#ach-activity-level','ERROR');
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  old.respond(reviewActivity([reviewActivityEntry()]));
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  fresh.respond(reviewActivity());
+  assert.equal(ui.state().activitySkeletonHidden,true);
+  assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
+});
+
+test('Review optional: rapid reentry does not duplicate same pending Status or Activity reads', () => {
+  const ui=loadUi();
+  const status=ui.openStatus();
+  ui.openSites();
+  const afterSites=ui.requests.length;
+  ui.openStatus();
+  assert.equal(ui.requests.length,afterSites);
+  status.respond(statusPrefs());
+  const pendingActivity=ui.openActivity();
+  const activityCount=ui.requests.length;
+  ui.openStatus(); ui.openActivity();
+  assert.equal(ui.requests.length,activityCount);
+  pendingActivity.reject(null,'timeout');
+  ui.openSites(); ui.openActivity();
+  assert.equal(ui.requests.length,activityCount+1,'Retry after failure remains possible');
 });
