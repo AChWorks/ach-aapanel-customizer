@@ -21,7 +21,11 @@ if os.path.isdir(_PANEL_CLASS_DIR) and _PANEL_CLASS_DIR not in sys.path:
 
 from ach_customizer_activity import ActivityError, append_activity, configured_level, read_activity, record
 from ach_customizer_monitor import (
-    MonitorInputError, get_site_page, inspect_php_fpm_site_impact, preview_php_fpm,
+    MonitorInputError, _bound_domains_for_sites, get_site_page,
+    inspect_php_fpm_site_impact, preview_php_fpm,
+)
+from ach_customizer_hosts import (
+    HostsInspectionError, inspect_local_hosts as inspect_hosts_file,
 )
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
@@ -52,7 +56,7 @@ class ach_customizer_main:
             # Log a useful controlled error, but never dump arbitrary exception
             # representations, request objects or authentication material.
             controlled = (PermissionError, StateError, StatusPageError,
-                          MonitorInputError, FpmApplyError, ActivityError)
+                          MonitorInputError, FpmApplyError, HostsInspectionError, ActivityError)
             detail = str(error) if allow_error_detail and isinstance(error, controlled) else ""
             impact = response.get("shared_impact")
             needs_review = (not failed and
@@ -90,7 +94,7 @@ class ach_customizer_main:
         # Do not expose arbitrary DB/filesystem/internal exception text to
         # browsers: retain the precise exception class in private Activity.
         controlled = (PermissionError, StateError, StatusPageError,
-                      MonitorInputError, FpmApplyError, ActivityError)
+                      MonitorInputError, FpmApplyError, HostsInspectionError, ActivityError)
         if isinstance(error, controlled) or (
                 isinstance(error, str) and diagnostic_error is not None):
             message = str(error)[:300]
@@ -100,7 +104,7 @@ class ach_customizer_main:
                     "msg": message, "operation_id": operation_id}
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith("website_") else
+                  "websites" if stage.startswith(("website_", "hosts_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
             response, module, stage, error=diagnostic_error or error)
@@ -217,6 +221,87 @@ class ach_customizer_main:
                                          target="page:" + str(result["page"]), level="DEBUG")
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
+
+    def inspect_local_hosts(self, args):
+        """Full-admin-only, read-only origin-local /etc/hosts diagnosis.
+
+        Native site identity and real domain bindings are rechecked before
+        returning; no client path/domain is trusted, and no correction exists.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            # aaPanel can keep the previous Hosts module in the panel Python
+            # process after an in-place plugin import. A newer helper must
+            # never make unrelated Monitor/Website endpoints fail at import.
+            try:
+                from ach_customizer_hosts import native_site_snapshot
+            except ImportError as exc:
+                raise HostsInspectionError(
+                    "Hosts diagnostic module is outdated after plugin update. "
+                    "Restart aaPanel panel service (not server), reopen this plugin "
+                    "and refresh website inventory before inspecting."
+                ) from exc
+            # The browser-selected site key is a precondition, never a lookup
+            # source. Refuse stale/reassigned aaPanel IDs before reading hosts.
+            expected_site_key = self._argument(args, "expected_site_key")
+            expected_snapshot = self._argument(args, "expected_site_snapshot")
+            if (not isinstance(expected_site_key, str) or not expected_site_key
+                    or len(expected_site_key) > 255 or
+                    not isinstance(expected_snapshot, str) or
+                    not 1 <= len(expected_snapshot) <= 110000):
+                raise HostsInspectionError("Refresh the native website inventory before inspection")
+            try:
+                selected_identity = json.loads(expected_snapshot)
+            except (ValueError, TypeError):
+                raise HostsInspectionError(
+                    "Invalid selected website inventory snapshot; refresh inventory") from None
+            if (not isinstance(selected_identity, list) or len(selected_identity) != 5 or
+                    type(selected_identity[0]) is not int or
+                    not isinstance(selected_identity[1], str) or
+                    not isinstance(selected_identity[2], str) or
+                    not isinstance(selected_identity[3], str) or
+                    not isinstance(selected_identity[4], list) or
+                    len(selected_identity[4]) > 100 or
+                    any(not isinstance(pair, list) or len(pair) != 2 or
+                        not isinstance(pair[0], str) or
+                        type(pair[1]) is not int
+                        for pair in selected_identity[4])):
+                raise HostsInspectionError("Invalid selected website snapshot; refresh inventory")
+            site_id = self._status_site_id(args)
+            if site_id is None:
+                raise HostsInspectionError("Choose an existing native aaPanel site ID")
+            import public
+            def current_site():
+                record = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(record, dict) or type(record.get("id")) not in
+                        (int, str) or str(record["id"]) != str(site_id)
+                        or not isinstance(record.get("name"), str)
+                        or not record["name"]):
+                    raise HostsInspectionError("Native site identity changed")
+                site = {"id": site_id, "name": record["name"],
+                        "path": record.get("path"), "status": record.get("status")}
+                _bound_domains_for_sites(public, [site])
+                return site
+            before = current_site()
+            if (before["name"] != expected_site_key or
+                    native_site_snapshot(before) != selected_identity):
+                raise HostsInspectionError(
+                    "Selected website identity or bound domains changed; refresh native inventory")
+            names = [item["name"] for item in before["bound_domains"]]
+            result = inspect_hosts_file(names)
+            if current_site() != before:
+                raise HostsInspectionError("Native site or bound domains changed; recheck")
+            return self._activity_result(
+                {"status": True, "request_id": request_id,
+                 "site_id": site_id, "site_key": before["name"], **result},
+                "websites", "inspect_local_hosts", target=str(site_id))
+        except PermissionError as exc:
+            return self._fail("hosts_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("hosts_inspection", exc, request_id)
 
     def preview_php_fpm(self, args):
         operation_id = uuid4().hex

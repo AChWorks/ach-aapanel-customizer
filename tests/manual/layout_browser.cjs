@@ -65,6 +65,25 @@ const {chromium} = require('playwright');
           throw Error('Layout invariant failed '+JSON.stringify({width,height,name,...x}));
         }
         if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
+        if(name==='websites') {
+          // Inspect the shipped DOM, not a reconstructed control: discovery
+          // is a select that remains disabled until native inventory arrives.
+          const sitePicker = await page.evaluate(()=>{
+            const picker=document.getElementById('ach-hosts-site-id');
+            const label=document.querySelector('label[for="ach-hosts-site-id"]');
+            const action=document.getElementById('ach-hosts-inspect-button');
+            return {tag:picker?.tagName, disabled:picker?.disabled,
+              label:label?.textContent?.trim(), actionDisabled:action?.disabled,
+              right:picker?.getBoundingClientRect().right};
+          });
+          if(sitePicker.tag!=='SELECT' || sitePicker.disabled!==true ||
+             sitePicker.actionDisabled!==true ||
+             !sitePicker.label?.includes('Website') ||
+             sitePicker.right>width+1) {
+            throw Error('Native inventory-backed Hosts picker missing/unsafe '+
+              JSON.stringify({width,height,...sitePicker}));
+          }
+        }
         if(name==='php' || name==='status') {
           const rows = await page.evaluate(name => {
             const section = name==='php' ? '#ach-php-form .ach-fields' :

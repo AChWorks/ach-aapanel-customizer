@@ -90,6 +90,24 @@ keyboard-visible and CSS-scoped; no undocumented aaPanel Vue component is
 imported. Material shared-service warnings and safe Status Pages draft
 preservation remain intact. [Read-only guest UI reference](https://github.com/AChWorks/ach-aapanel-customizer/issues/17#issuecomment-6622156377).
 
+### In-place native upgrade and resident Python module cache (2026-11-04)
+
+In the isolated authenticated aaPanel 8.0.7 guest, the native 0.1.8 Hosts
+ZIP installed successfully but the first `get_overview` returned HTTP 500:
+a resident `ach_customizer_hosts` module lacked the newly shipped
+`native_site_snapshot` attribute, even though the exact ZIP contained it.
+An authorized **Restart → Restart panel** (not `Restart server`) in the guest
+restored real Overview, Inventory and read-only Hosts inspection.
+
+The new entrypoint imports the added snapshot helper **only inside the
+authorized Hosts diagnostic**. A stale module therefore returns an actionable,
+audited fail-closed Hosts error instead of an import-time failure of unrelated
+Monitor/Website endpoints. This isolates the blast radius; it does **not**
+silently reload Python modules, change host services or waive operator
+approval for a production panel restart. The [native Hosts lifecycle and UI
+evidence](evidence/aaPanel-8.0.7-2026-11-04-native-hosts-qa.md) records exact
+package checksums, observed errors, retry, and remaining limitations.
+
 ## First non-production implementation slice
 
 `plugin/ach_customizer/` is a prototype native plugin package with an English-only in-panel read-only UI, following aaPanel conventions, and two narrowly bounded read operations:
@@ -406,6 +424,16 @@ The bounded source inspector reads without following symbolic links on any path 
 **Exact non-production native QA (2026-11-03):** In a disposable child QEMU overlay of the existing Debian 12 / aaPanel 8.0.7 / Nginx 1.28.3 / PHP-FPM 8.5.12 lab, the native panelPlugin update_zip/input_zip flow installed the unreleased 0.1.5 development ZIP (SHA-256 f4cf90f2661d68e1ecb3dc270aed59cb7e96dcca23788caaef631e3fa1f558aa); all 35 installed files matched the package. The installed endpoint ran in a fresh panel Python process. Both real site IDs 7 and 8 had existing site-owned 404/502 HTML files with bytes different from the selected original templates; the source inspector correctly reported Conflict and detected existing error_page directives. A temporary 404.html test fixture exactly matched the selected bundled HTML digest, which the endpoint reported as Same bytes *without* asserting Nginx runtime or safe Apply. The fixture was restored byte-for-byte. Synthetic Flask POST tests denied nonprimary and temporary identities, and GET. Both site VHosts, PHP-FPM config, 404/502 files and previously saved plugin settings were unchanged by the whole test; nginx -t passed and both sites returned HTTP 200 before/after. The guest powered off gracefully and qemu-img check found no errors. This is **not** live 404/502 HTTP routing, CSRF/authenticated-browser or cross-version acceptance. [Sanitized bounded native evidence](evidence/aaPanel-8.0.7-2026-11-03-status-pages-site-inspect-qa.json).
 
 **Remaining verification boundary:** Source unit/UI tests prove fixture and deployed-script behavior; the non-production native QA above exercises the installed backend and existing site files in a fresh Python process. Real authenticated browser session/CSRF, VHost regeneration timing for this exact candidate, cross-version support, and effective Nginx error-page routing remain unverified. No public release or Production deployment is authorized.
+
+## Read-only origin-local hosts inspection (Issue #2)
+
+**Unreleased development candidate 0.1.8; no Production, file/DNS edits or auto-correction.** The Websites tab provides an inventory-backed website selector for the current page (with Previous/Next pagination), rather than free-form site ID typing, for the origin-local diagnostic for the historic WordPress Toolkit hosts-override symptom recorded in Issue #2. The primary-aaPanel-admin-only POST requires a **comparison-only snapshot of the exact selected native site record** from the validated inventory (ID, site key, document root, panel status, and the complete canonical sorted domain/port bindings), as well as its site key; client data never supplies file paths or domains to inspect. The backend independently re-resolves the native site and its bound-domain table, rejects pre-request binding changes, reassignments, renames, site-status or document-root changes *before* reading the file, and rechecks the same native identity/bindings after inspection. Snapshot inputs are bounded and reject malformed, oversized or missing selections; sites with more than 100 domain bindings are not offered for this operation. Nonprimary/temporary and GET sessions are refused before file access; no client-supplied hostname or file path is accepted.
+
+The inspector reads only origin-local /etc/hosts with descriptor-anchored O_NOFOLLOW and O_RDONLY, rejects untrusted/multiply linked/group-writable/symlinked sources, caps file size to 64 KiB, line count to 2048 and matching entries to 100, and verifies file metadata before/after the bounded read. It also rechecks the fixed final filename through the same pinned parent directory with no symlink following, rejecting an atomic rename or symlink replacement that would leave the opened descriptor pointing to superseded source content. The last pathname check is the observation boundary; a later operating-system mutation cannot be excluded. IDNA, IPv4 loopback, IPv6 loopback and IPv4-mapped IPv6 loopback are handled. Wildcard domains are not resolved as exact hosts aliases. The frontend shows only the matched native domains, local addresses and line numbers, plus file SHA-256; it never exposes unrelated hosts-file lines.
+
+**Meaning:** Local Loopback Entry is an origin-local source observation, not evidence of a Gateway DNS or reachability error. No Local Loopback Entry excludes only explicit loopback records for the exact inspected domains in that file snapshot, not hidden resolver/caching mechanisms. Needs Review applies to uninspected wildcard domains or unsupported inputs. No writer is attributed; an intentional hosts override is not changed. Local NSS resolution, public DNS, Cloudflare, TLS/HTTP from origin and a genuinely separate remote Gateway path still require independent evidence before any proposed fix. No repair or Apply API exists.
+
+**Verification boundary:** Source tests exercise native site/domain identity, authorization with synthetic Flask context, file bounds, symlinks, parser semantics and deployed frontend validation. Authenticated real-browser/CSRF and cross-version results are not claimed without separate guest testing. Related tracking stays in Issue #2.
 
 ### Review REQUIRED-01: contrast-safe customized themes (2026-11-03)
 

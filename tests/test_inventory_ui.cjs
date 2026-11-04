@@ -35,6 +35,7 @@ function loadUi() {
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
+    '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -219,6 +220,12 @@ function loadUi() {
   function state() {
     return {
       rows: rows(),
+      hostsResult: elements.get('#ach-hosts-result').textContent,
+      hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
+      hostsSelectorDisabled: elements.get('#ach-hosts-site-id').props.disabled,
+      hostsChoices: elements.get('#ach-hosts-site-id').children.map(option => ({
+        id:option.props.value, text:option.textContent
+      })),
       error: elements.get('#ach-message').textContent,
       errorClass: elements.get('#ach-message').classes.has('ach-error'),
       prevDisabled: elements.get('#ach-prev').props.disabled,
@@ -346,6 +353,7 @@ const site = () => ({
   id: 3,
   name: 'site.example.test',
   document_root: '/www/site.example.test',
+  panel_status: '1',
   classification: 'Needs Review',
   bound_domains: [
     { name: 'site.example.test', port: 80 },
@@ -377,6 +385,9 @@ function invalidCase(title, mutate, expectedError = /Invalid inventory response/
     assert.equal(output.prevDisabled, true);
     assert.equal(output.nextDisabled, true);
     assert.equal(output.page, 'Unavailable');
+    assert.equal(output.hostsInspectDisabled,true);
+    assert.equal(output.hostsSelectorDisabled,true);
+    assert.match(output.hostsResult,/inventory unavailable/);
     assert.doesNotMatch(output.error, /No sites in this page|None \(review required\)/);
   });
 }
@@ -389,6 +400,8 @@ invalidCase('Missing sites array is rejected',
   r => { delete r.sites; });
 invalidCase('Null sites array is rejected',
   r => { r.sites = null; });
+invalidCase('Missing panel status is rejected before any hosts selector is populated',
+  r => { delete r.sites[0].panel_status; });
 invalidCase('Missing bound_domains is rejected',
   r => { delete r.sites[0].bound_domains; });
 invalidCase('Null binding is rejected without a TypeError',
@@ -962,6 +975,216 @@ function statusPrefs(revision = 2, source = 'Global default', effective = brand(
     locales:['en','fa']
   };
 }
+
+
+const hostsInspection = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  read_only:true,fix_supported:false,resolver_verified:false,
+  remote_dns_verified:false,gateway_verified:false,
+  state:'Local Loopback Entry',reason:'Exact hosts entry observed',
+  hosts_sha256:'a'.repeat(64),domains:['site.test'],
+  uninspected_wildcards:[],
+  entries:[{domain:'site.test',address:'127.0.0.2',line:3,loopback:true}],
+  note:'Origin local only; Gateway unverified.',...overrides
+});
+
+const hostsInventory = (name = 'site.test') => page([
+  {...site(), id:7, name, document_root:'/www/site.test',
+   bound_domains:[{name:'site.test',port:80}], canonical_domain_bound:name === 'site.test'},
+  {...site(), id:8, name:'other.test', document_root:'/www/other.test',
+   bound_domains:[{name:'other.test',port:80}], canonical_domain_bound:true}
+]);
+function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
+  ui.openSites();
+  ui.respond(inventory);
+  ui.statusSetValue('#ach-hosts-site-id',id,'input change');
+}
+
+test('Native-site local hosts inspection reports loopback without claiming Gateway failure', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const query=ui.statusClick('#ach-hosts-inspect-button');
+  assert.match(query.options.url,/s=inspect_local_hosts$/);
+  assert.equal(query.options.data.site_id,'7');
+  assert.equal(query.options.data.expected_site_key,'site.test');
+  assert.deepEqual(JSON.parse(query.options.data.expected_site_snapshot), [
+    7, 'site.test', '/www/site.test', '1', [['site.test', 80]]
+  ]);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  query.respond(hostsInspection());
+  assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+  assert.match(ui.state().hostsResult,/127.0.0.2 \(loopback\)/);
+  assert.match(ui.state().hostsResult,/Gateway unverified/);
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.match(ui.state().hostsResult,/Site selection changed/);
+});
+
+test('Invalid or cross-site hosts responses cannot masquerade as confirmed result', () => {
+  for (const bad of [
+    hostsInspection({site_id:8}),
+    hostsInspection({fix_supported:true}),
+    hostsInspection({gateway_verified:true}),
+    hostsInspection({resolver_verified:true}),
+    hostsInspection({hosts_sha256:'bad'}),
+    hostsInspection({entries:null}),
+    hostsInspection({state:'Installed'}),
+    hostsInspection({state:'Local Loopback Entry', entries:[]}),
+    hostsInspection({state:'No Local Loopback Entry'}),
+    hostsInspection({uninspected_wildcards:null}),
+    hostsInspection({entries:[{domain:'wrong.test',address:'127.0.0.1',line:1,loopback:true}]})
+  ]) {
+    const ui=loadUi();
+    selectHostsSite(ui);
+    ui.statusClick('#ach-hosts-inspect-button').respond(bad);
+    assert.match(ui.state().hostsResult,/unconfirmed/);
+    assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  }
+});
+
+test('Inventory identity mismatch rejects unrelated site keys; failed inspection clears stale evidence', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection({
+    site_key:'<img src=x onerror=alert(1)>'
+  }));
+  assert.match(ui.state().hostsResult,/unconfirmed/);
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  request.respond({status:false,stage:'hosts_inspection',msg:'Hosts source changed'});
+  assert.match(ui.state().hostsResult,/unconfirmed/);
+  assert.match(ui.state().error,/Hosts source changed/);
+});
+
+test('Discovered site selection is bounded to current inventory and text-rendered safely', () => {
+  const ui=loadUi();
+  const malicious='<img src=x onerror=alert(1)>';
+  selectHostsSite(ui,'7',hostsInventory(malicious));
+  assert.deepEqual(ui.state().hostsChoices.map(x => x.id),['','7','8']);
+  assert.match(ui.state().hostsChoices[1].text,/<img src=x onerror=alert\(1\)>/);
+  const r=hostsInspection({site_key:malicious});
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  assert.equal(request.options.data.expected_site_key,malicious);
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot), [
+    7, malicious, '/www/site.test', '1', [['site.test', 80]]
+  ]);
+  request.respond(r);
+  assert.match(ui.state().hostsResult,/<img src=x onerror=alert\(1\)>/);
+  ui.statusSetValue('#ach-hosts-site-id','9','input change');
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('Hosts optimistic snapshot binds domains, ports, root and native status', () => {
+  const ui=loadUi();
+  const chosen=hostsInventory();
+  const record=chosen.sites[0];
+  record.panel_status='0';
+  record.document_root='/www/relocated';
+  record.bound_domains=[
+    {name:'sub.site.test',port:8443},
+    {name:'site.test',port:80},
+    {name:'sub.site.test',port:443}
+  ];
+  record.canonical_domain_bound=true;
+  selectHostsSite(ui,'7',chosen);
+  const request=ui.statusClick('#ach-hosts-inspect-button');
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot), [
+    7,'site.test','/www/relocated','0',
+    [['site.test',80],['sub.site.test',443],['sub.site.test',8443]]
+  ]);
+  request.respond(hostsInspection());
+  assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+  // Native tab reentry preserves the accepted page and selection, unlike a
+  // deliberate Refresh, which revokes the snapshot before a new read.
+  const requestCount=ui.requests.length;
+  ui.openOverview();
+  ui.openSites();
+  assert.equal(ui.requests.length,requestCount,'No redundant inventory read on tab reentry');
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  const reload=ui.refreshSites();
+  assert.match(reload.options.url,/s=get_sites$/);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  reload.respond(hostsInventory());
+});
+
+test('Oversized website binding snapshots never create an inspectable option', () => {
+  const ui=loadUi();
+  const inventory=hostsInventory();
+  inventory.sites[0].bound_domains=Array.from({length:101},(_,n)=>({
+    name:'site'+n+'.test',port:80
+  }));
+  inventory.sites[0].canonical_domain_bound=false;
+  ui.openSites();ui.respond(inventory);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['','8']);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('Inventory reload invalidates pending hosts inspection and stale site selection', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const older=ui.statusClick('#ach-hosts-inspect-button');
+  const reload=ui.refreshSites(); // Explicit fresh snapshot revokes old confirmation.
+  assert.match(reload.options.url,/s=get_sites$/);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  older.respond(hostsInspection());
+  assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  reload.respond(page([]));
+  assert.equal(ui.state().hostsSelectorDisabled,true);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['']);
+});
+
+test('Hosts selection and pending inspection are invalidated by Monitor policy uncertainty', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:9}));
+  selectHostsSite(ui);
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  const old=ui.statusClick('#ach-hosts-inspect-button');
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',false);
+  assert.match(write.options.url,/s=set_control$/);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.equal(ui.state().hostsSelectorDisabled,true);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['']);
+  const count=ui.requests.length;
+  ui.openSites(); // No inventory read is permitted while policy is pending.
+  ui.refreshSites(); // Even artificially dispatched disabled control must not bypass.
+  assert.equal(ui.requests.length,count);
+  old.respond(hostsInspection());
+  assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  write.reject(null,'timeout');
+  ui.openSites();
+  assert.equal(ui.requests.length,count);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  ui.openOverview();
+  const refresh=ui.refreshOverview();
+  assert.match(refresh.options.url,/s=get_overview$/);
+  refresh.respond(monitorOverview({state_revision:9}));
+  const current=ui.openSites();
+  assert.match(current.options.url,/s=get_sites$/);
+  assert.equal(ui.state().hostsInspectDisabled,true,'No stale selection before verified inventory read');
+  current.respond(hostsInventory());
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['','7','8']);
+  assert.equal(ui.state().hostsInspectDisabled,true,'Explicit new selection is still required');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  assert.equal(ui.state().hostsInspectDisabled,false);
+});
+
+test('Failed or stale Website inventory cannot retain a Hosts inspection target', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const old=ui.statusClick('#ach-hosts-inspect-button');
+  const refresh=ui.refreshSites();
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  refresh.reject(null,'timeout');
+  old.respond(hostsInspection());
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['']);
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.doesNotMatch(ui.state().hostsResult,/State: Local Loopback Entry/);
+  const retry=ui.refreshSites();
+  retry.respond({status:true,inventory_schema:1});
+  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.equal(ui.state().hostsSelectorDisabled,true);
+});
 
 test('Status Pages tab loads saved branding and safely renders sandbox-only preview', () => {
   const ui=loadUi();
