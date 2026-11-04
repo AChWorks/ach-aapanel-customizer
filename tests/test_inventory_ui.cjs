@@ -2227,7 +2227,9 @@ test('Old invalidated Website read cannot cancel current request skeleton', () =
   ui.respondOverview(monitorOverview({state_revision:3}));
   const old=ui.openSites();
   ui.openOverview();
-  ui.toggleMonitor('site_inventory',false).respond(monitorOverview({
+  // A valid set_control ack includes the CAS changed bit. An ordinary
+  // get_overview fixture must not unlock pending Website reads.
+  ui.toggleMonitor('site_inventory',false).respond(monitorAck({
     state_revision:4,modules_enabled:{site_inventory:false,php_fpm_file_preview:true}
   }));
   const fresh=ui.openSites();
@@ -2236,6 +2238,43 @@ test('Old invalidated Website read cannot cancel current request skeleton', () =
   assert.equal(ui.state().sitesSkeletonHidden,false,'Stale reply must not hide fresh pending skeleton');
   fresh.respond({status:false,stage:'monitor_disabled',msg:'Website inventory disabled'});
   assert.equal(ui.state().sitesSkeletonHidden,true);
+});
+
+test('Policy uncertainty hides Websites skeleton without pretending a read is pending', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:7}));
+  const old=ui.openSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  ui.openOverview();
+  const mutation=ui.toggleMonitor('site_inventory',false);
+  assert.equal(ui.state().sitesSkeletonHidden,true,'Old request skeleton was invalidated');
+  const count=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,count,'Pending policy must block new website reads');
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+  old.respond(page());
+  assert.deepEqual(ui.state().rows,[]);
+  mutation.reject(null,'timeout');
+  assert.match(ui.state().siteStatus,/unverified/i);
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  ui.openOverview();
+  ui.refreshOverview().respond(monitorOverview({state_schema:2,state_revision:8,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const blocked=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,blocked,'Invalid recovery GET cannot enable Website reads');
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  ui.openOverview();
+  ui.refreshOverview().respond(monitorOverview({state_revision:8,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const fresh=ui.openSites();
+  assert.match(fresh.options.url,/s=get_sites$/);
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  assert.equal(ui.state().sitesTableRowsHidden,true);
+  fresh.respond(page([]));
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
 });
 
 test('Activity loading, empty/error and retry states maintain truthful loading feedback', () => {
