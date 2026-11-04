@@ -21,7 +21,7 @@ if os.path.isdir(_PANEL_CLASS_DIR) and _PANEL_CLASS_DIR not in sys.path:
 
 from ach_customizer_activity import ActivityError, append_activity, configured_level, read_activity, record
 from ach_customizer_monitor import (
-    MonitorInputError, _bound_domains_for_sites, discover_php_fpm_versions,
+    MonitorInputError, _bound_domains_for_sites,
     get_site_page, inspect_php_fpm_site_impact, preview_php_fpm,
 )
 from ach_customizer_hosts import (
@@ -227,6 +227,17 @@ class ach_customizer_main:
         operation_id = uuid4().hex
         try:
             self._status_primary_admin_post()
+            # aaPanel may retain an older monitor helper in the panel process
+            # after an in-place ZIP update. Resolve this new symbol only after
+            # authorization so stale code cannot break unrelated endpoints.
+            try:
+                from ach_customizer_monitor import discover_php_fpm_versions
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "PHP discovery module is outdated after plugin update. "
+                    "Restart aaPanel panel service (not server), reopen the "
+                    "plugin and Refresh installed PHP."
+                ) from exc
             result = discover_php_fpm_versions("/www/server/php")
             response = {"status": True, "operation_id": operation_id, **result}
             return self._activity_result(

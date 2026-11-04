@@ -1,5 +1,6 @@
 """Bounded aaPanel PHP-version discovery: no runtime commands or host writes."""
 import hashlib
+import json
 import importlib.util
 import sys
 import tempfile
@@ -171,7 +172,7 @@ class NativePHPDiscoveryEndpointTests(unittest.TestCase):
     def test_primary_post_returns_only_bounded_read_only_discovery(self):
         data = monitor.discover_php_fpm_versions('/missing/ach/php-test')
         with patch.dict(sys.modules, {'flask': self.flask()}):
-            with patch.object(endpoint, 'discover_php_fpm_versions', return_value=data) as spy:
+            with patch.object(monitor, 'discover_php_fpm_versions', return_value=data) as spy:
                 result = self.plugin.get_php_versions({'root': '/etc', 'php_version': '85'})
         self.assertTrue(result['status'], result)
         self.assertTrue(result['read_only'])
@@ -185,7 +186,7 @@ class NativePHPDiscoveryEndpointTests(unittest.TestCase):
                     "read_only": True, "runtime_verified": False,
                     "reason": "Missing PHP binary", "note": "Observed files only"}
         with patch.dict(sys.modules, {'flask': self.flask()}):
-            with patch.object(endpoint, 'discover_php_fpm_versions', return_value=response):
+            with patch.object(monitor, 'discover_php_fpm_versions', return_value=response):
                 observed = self.plugin.get_php_versions({})
         self.assertTrue(observed['status'])
         self.assertEqual(observed['state'], 'Partial')
@@ -200,7 +201,7 @@ class NativePHPDiscoveryEndpointTests(unittest.TestCase):
                       self.flask(method='GET'), self.flask(context=False)):
             with self.subTest(login=login.session, method=login.request.method):
                 with patch.dict(sys.modules, {'flask': login}):
-                    with patch.object(endpoint, 'discover_php_fpm_versions',
+                    with patch.object(monitor, 'discover_php_fpm_versions',
                                       side_effect=AssertionError('must not inspect')) as spy:
                         result = self.plugin.get_php_versions({})
                 self.assertFalse(result['status'])
@@ -209,7 +210,7 @@ class NativePHPDiscoveryEndpointTests(unittest.TestCase):
 
     def test_discovery_exception_is_contained_and_operation_logged(self):
         with patch.dict(sys.modules, {'flask': self.flask()}):
-            with patch.object(endpoint, 'discover_php_fpm_versions',
+            with patch.object(monitor, 'discover_php_fpm_versions',
                               side_effect=monitor.MonitorInputError('PHP inventory exceeds limit')):
                 result = self.plugin.get_php_versions({})
         self.assertFalse(result['status'])
@@ -224,7 +225,7 @@ class NativePHPDiscoveryEndpointTests(unittest.TestCase):
             denied = self.plugin.get_php_versions({})
         self.assertFalse(denied['status'])
         with patch.dict(sys.modules, {'flask': self.flask()}):
-            with patch.object(endpoint, 'discover_php_fpm_versions',
+            with patch.object(monitor, 'discover_php_fpm_versions',
                               side_effect=monitor.MonitorInputError('PHP inventory exceeds limit')):
                 failed = self.plugin.get_php_versions({})
         self.assertFalse(failed['status'])
@@ -233,6 +234,113 @@ class NativePHPDiscoveryEndpointTests(unittest.TestCase):
             self.assertTrue(any(item['stage'] == stage and item['level'] == 'ERROR'
                                 and item['module'] == 'php_fpm'
                                 for item in php_events), stage)
+
+
+    def test_cached_monitor_helper_cannot_break_native_entrypoint(self):
+        """Cold entrypoint against a warm pre-0.1.9 helper remains usable.
+
+        In-memory aaPanel update reproduction: no panel restart, host file scan,
+        session extraction, or real PHP-FPM operation.
+        """
+        prior = monitor.discover_php_fpm_versions
+        try:
+            del monitor.discover_php_fpm_versions
+
+            # The module imported under the normal name is cached but lacks the
+            # new symbol. Import the *actual* new main source as aaPanel would.
+            spec = importlib.util.spec_from_file_location(
+                'ach_customizer_main_cached_monitor_fixture',
+                PLUGIN / 'ach_customizer_main.py'
+            )
+            self.assertIsNotNone(spec)
+            updated = importlib.util.module_from_spec(spec)
+            with patch('os.scandir',
+                       side_effect=AssertionError('No PHP discovery during import')):
+                spec.loader.exec_module(updated)
+            plugin = updated.ach_customizer_main()
+            public = types.ModuleType('public')
+
+            class SiteQuery:
+                def where(self, *args): return self
+                def field(self, *args): return self
+                def find(self):
+                    return {'id': 7, 'name': 'site.test',
+                            'path': '/www/site.test', 'status': '1'}
+
+            class DomainQuery:
+                def where(self, *args): return self
+                def order(self, *args): return self
+                def limit(self, *args): return self
+                def field(self, *args): return self
+                def select(self):
+                    return [{'id': 20, 'pid': 7,
+                             'name': 'site.test', 'port': 80}]
+
+            public.M = lambda table: SiteQuery() if table == 'sites' else DomainQuery()
+            snapshot = json.dumps([7, 'site.test', '/www/site.test',
+                                   '1', [['site.test', 80]]])
+            with patch.object(updated, '_STATE_DIR', self.tmp.name):
+                # Old in-memory monitor still serves the independent endpoints.
+                self.assertTrue(plugin.get_overview({})['status'])
+                with patch.dict(sys.modules, {'public': public, 'flask': self.flask()}):
+                    with patch.object(updated, 'get_site_page',
+                                      return_value={'page': 1, 'page_size': 25,
+                                                    'sites': [], 'has_more': False,
+                                                    'schema': 2}):
+                        sites = plugin.get_sites({'page': 1, 'page_size': 25})
+                    self.assertTrue(sites['status'], sites)
+                    with patch.object(updated, 'inspect_hosts_file',
+                                      return_value={'schema': 1, 'read_only': True,
+                                                    'state': 'No Local Loopback Entry',
+                                                    'entries': []}) as reader:
+                        hosts = plugin.inspect_local_hosts({
+                            'site_id': '7', 'expected_site_key': 'site.test',
+                            'expected_site_snapshot': snapshot,
+                        })
+                    self.assertTrue(hosts['status'], hosts)
+                    reader.assert_called_once_with(['site.test'])
+
+                    with patch('os.scandir',
+                               side_effect=AssertionError('Stale module must not scan files')):
+                        outdated = plugin.get_php_versions({})
+                        self.assertFalse(outdated['status'], outdated)
+                        self.assertEqual(outdated['stage'], 'php_versions_discovery')
+                        self.assertIn('Restart aaPanel panel service (not server)',
+                                      outdated['msg'])
+                        self.assertTrue(outdated['activity_logged'])
+                        self.assertNotIn('/www/server/php', str(outdated))
+                        for session in (self.flask(uid=2),
+                                        self.flask(temporary=True),
+                                        self.flask(method='GET'),
+                                        self.flask(context=False)):
+                            with patch.dict(sys.modules, {'flask': session}):
+                                denied = plugin.get_php_versions({})
+                            self.assertEqual(denied['stage'],
+                                             'php_versions_authorization')
+                            self.assertNotIn('outdated', denied['msg'])
+                    from ach_customizer_activity import read_activity
+                    events = read_activity(self.tmp.name, module='php_fpm', limit=20)
+                    self.assertTrue(any(
+                        e['stage'] == 'php_versions_discovery'
+                        and e['level'] == 'ERROR'
+                        and e['error_class'] == 'MonitorInputError'
+                        for e in events
+                    ))
+        finally:
+            monitor.discover_php_fpm_versions = prior
+
+        # An updated helper can answer a new authorized request normally.
+        expected = prior('/missing/ach/php-test')
+        with patch.object(updated, '_STATE_DIR', self.tmp.name):
+            with patch.dict(sys.modules, {'flask': self.flask()}):
+                with patch.object(monitor, 'discover_php_fpm_versions',
+                                  return_value=expected) as discover:
+                    current = plugin.get_php_versions({'root': '/etc'})
+        self.assertTrue(current['status'], current)
+        self.assertEqual(current['schema'], 1)
+        self.assertTrue(current['read_only'])
+        self.assertFalse(current['runtime_verified'])
+        discover.assert_called_once_with('/www/server/php')
 
 
 if __name__ == '__main__':
