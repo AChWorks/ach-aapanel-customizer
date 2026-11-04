@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const {TextEncoder} = require('node:util');
 
 const html = fs.readFileSync(
   path.join(__dirname, '../plugin/ach_customizer/index.html'), 'utf8'
@@ -168,7 +169,7 @@ function loadUi() {
     return request;
   };
 
-  vm.runInNewContext(script, { $, encodeURIComponent }, { timeout: 1000 });
+  vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder }, { timeout: 1000 });
 
   function trigger(node, event) {
     assert.equal(typeof node.handlers[event], 'function', event + ' handler missing');
@@ -1407,7 +1408,7 @@ test('Site 404/502 compare shows untrusted on-disk HTML strictly as text, never 
   ui.statusSetValue('#ach-status-site-id','7','change');
   ui.requests.at(-1).respond(statusPrefs());
   const dangerous='<img src=x onerror=alert(1)>';
-  const diff='--- current 404.html\\n+++ proposed 404.html\\n@@ -1 +1 @@\\n-'+dangerous+'\\n+<h1>Safe preview</h1>';
+  const diff='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-'+dangerous+'\\n+<h1>Safe preview</h1>';
   const req=ui.statusClick('#ach-status-inspect-button');
   assert.match(req.options.url,/s=status_inspect$/);
   req.respond(statusInspection({
@@ -1458,7 +1459,7 @@ test('Branding field changes while a compare request is in flight reject its old
 test('Malformed, mismatched or enormous compare responses cannot display stale diff evidence', () => {
   const valid={
     schema:1,state:'Different',reason:'bounded textual diff',
-    excerpt:'--- current 404.html\\n+++ proposed 404.html\\n-old\\n+new',
+    excerpt:'--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-old\n+new',
     truncated:false,old_lines:1,new_lines:1
   };
   for (const comparison of [
@@ -1470,7 +1471,7 @@ test('Malformed, mismatched or enormous compare responses cannot display stale d
     {...valid,truncated:'yes'},
     {...valid,state:'Identical'},
     {...valid,state:'New File'},
-    {...valid,excerpt:'--- current 502.html\\n+++ proposed 502.html'},
+    {...valid,excerpt:'--- current 502.html\n+++ proposed 502.html'},
     {...valid,state:'Unavailable'},
   ]) {
     const ui=loadUi();
@@ -1487,6 +1488,91 @@ test('Malformed, mismatched or enormous compare responses cannot display stale d
     assert.match(ui.state().statusCompareSummary,/unavailable or incompatible/);
   }
 });
+
+
+test('UTF-8 byte limit rejects multibyte excerpts that fit UTF-16 and per-line limits', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs());
+  const marker='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n';
+  const manyArabic=Array.from({length:12},()=>'-'+'پ'.repeat(300)).join('\n');
+  const excerpt=marker+manyArabic;
+  assert.ok(excerpt.length<6144, 'UTF-16 guard alone incorrectly accepts this');
+  assert.ok(new TextEncoder().encode(excerpt).length>6144);
+  assert.ok(excerpt.split('\n').every(line=>Array.from(line).length<=360));
+  ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
+    state:'Conflict',page_file_state:'Different bytes',
+    page_file_sha256:'b'.repeat(64),page_file_bytes:3800,
+    comparison:{
+      schema:1,state:'Different',reason:'bad multibyte payload',
+      excerpt,truncated:false,old_lines:12,new_lines:1
+    }
+  }));
+  assert.equal(ui.state().statusCompareExcerpt,'');
+  assert.match(ui.state().statusCompareSummary,/unavailable or incompatible/);
+  assert.doesNotMatch(ui.state().statusInspect,/State: Conflict/);
+});
+
+test('Diff validation rejects oversized line counts and malformed unified headers/hunks', () => {
+  const valid='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-قبلی ID-404\n+به‌روزرسانی ID-404';
+  const base={schema:1,state:'Different',reason:'display-only',
+    excerpt:valid,truncated:false,old_lines:1,new_lines:1};
+  const failures=[
+    {...base,old_lines:241},
+    {...base,new_lines:241},
+    {...base,old_lines:-1},
+    {...base,new_lines:null},
+    {...base,excerpt:valid.replace('@@ -1 +1 @@','@@ missing counts @@')},
+    {...base,excerpt:valid.replace('+++ proposed 404.html','+++ proposed 502.html')},
+    {...base,excerpt:valid.replace('--- current 404.html','--- current 502.html')},
+    {...base,excerpt:'--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@'},
+    {...base,excerpt:'--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\nXmalformed'},
+    {...base,excerpt:'--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-'+'a'.repeat(361)},
+    {...base,state:'New File',excerpt:'',old_lines:0,new_lines:32769},
+    {...base,state:'Identical',excerpt:'',old_lines:32769,new_lines:32769},
+    {...base,state:'Unavailable',excerpt:'',old_lines:null,new_lines:0},
+  ];
+  for(const malformed of failures) {
+    const ui=loadUi();
+    ui.openStatus().respond(statusPrefs());
+    ui.statusSetValue('#ach-status-scope','site','change');
+    ui.statusSetValue('#ach-status-site-id','7','change');
+    ui.requests.at(-1).respond(statusPrefs());
+    ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
+      state:'Conflict',page_file_state:'Different bytes',
+      page_file_sha256:'b'.repeat(64),page_file_bytes:99,
+      comparison:malformed
+    }));
+    assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
+    assert.equal(ui.state().statusCompareExcerpt,'');
+  }
+});
+
+test('A valid Persian diff still renders, then stale content disappears on invalid reinspection', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs());
+  const valid='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-درخواست‌ها ID-404\n+به‌روزرسانی‌شده ID-404';
+  const response=statusInspection({
+    state:'Conflict',page_file_state:'Different bytes',
+    page_file_sha256:'b'.repeat(64),page_file_bytes:99,
+    comparison:{schema:1,state:'Different',reason:'display-only',
+      excerpt:valid,truncated:false,old_lines:1,new_lines:1}
+  });
+  ui.statusClick('#ach-status-inspect-button').respond(response);
+  assert.equal(ui.state().statusCompareExcerpt,valid);
+  ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
+    ...response,comparison:{...response.comparison,excerpt:valid+'😀'.repeat(1800)}
+  }));
+  assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
+  assert.equal(ui.state().statusCompareExcerpt,'');
+  assert.match(ui.state().statusCompareSummary,/unavailable or incompatible/);
+});
+
 
 test('Native sidebar sections are linked to panels and scrollable content', () => {
   for (const name of ['overview','websites','php','status','activity']) {

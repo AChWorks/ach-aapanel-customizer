@@ -301,6 +301,178 @@ class SiteSourceTests(unittest.TestCase):
         self.assertIn("changed", result["reason"])
         self.assertEqual(current.read_text(), "<html>old site markup</html>")
 
+    def test_document_root_directory_replacement_cannot_retain_old_comparison(self):
+        old_html = "<html>old document root</html>"
+        replacement_html = "<html>unrelated replacement</html>"
+        (self.document_root / "404.html").write_text(old_html)
+        proposed_sha = hashlib.sha256(old_html.encode()).hexdigest()
+        detached = self.root / "detached-site-root"
+        real_compare = inspection._content_comparison
+
+        def replace_after_read(*args):
+            result = real_compare(*args)
+            self.document_root.rename(detached)
+            self.document_root.mkdir()
+            (self.document_root / "404.html").write_text(replacement_html)
+            return result
+
+        with patch.object(inspection, "_content_comparison", side_effect=replace_after_read):
+            result = self.scan(digest=proposed_sha, rendered_html=old_html)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertEqual(result["comparison"]["excerpt"], "")
+        self.assertEqual(result["page_file_state"], "Uninspected")
+        self.assertIsNone(result["page_file_sha256"])
+        self.assertIn("directory binding changed", result["reason"])
+        self.assertEqual((detached / "404.html").read_text(), old_html)
+        self.assertEqual((self.document_root / "404.html").read_text(), replacement_html)
+
+    def test_document_root_ancestor_replacement_is_rechecked_from_root(self):
+        old_html = "<p>old</p>"
+        (self.document_root / "404.html").write_text(old_html)
+        ancestor = self.document_root.parent
+        detached = self.root / "detached-websites"
+        real_compare = inspection._content_comparison
+
+        def replace_ancestor_after_read(*args):
+            result = real_compare(*args)
+            ancestor.rename(detached)
+            ancestor.mkdir()
+            replacement = ancestor / self.key
+            replacement.mkdir()
+            (replacement / "404.html").write_text("<p>foreign</p>")
+            return result
+
+        with patch.object(inspection, "_content_comparison",
+                          side_effect=replace_ancestor_after_read):
+            result = self.scan(digest=hashlib.sha256(old_html.encode()).hexdigest(),
+                               rendered_html=old_html)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertEqual(result["page_file_state"], "Uninspected")
+        self.assertEqual((detached / self.key / "404.html").read_text(), old_html)
+
+    def test_vhost_directory_replacement_cannot_report_previous_source_or_diff(self):
+        proposed = "<html>new HTML</html>"
+        (self.document_root / "404.html").write_text("<html>old HTML</html>")
+        detached = self.root / "detached-vhosts"
+        real_active = inspection._active
+        replaced = False
+
+        def replace_after_vhost_read(data):
+            nonlocal replaced
+            result = real_active(data)
+            if not replaced:
+                replaced = True
+                self.vhosts.rename(detached)
+                self.vhosts.mkdir()
+                self.set_vhost("error_page 404 /foreign.html;")
+            return result
+
+        with patch.object(inspection, "_active", side_effect=replace_after_vhost_read):
+            result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),
+                               rendered_html=proposed)
+        self.assertTrue(replaced)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertIsNone(result["vhost_sha256"])
+        self.assertEqual(result["page_file_state"], "Uninspected")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertEqual(result["comparison"]["excerpt"], "")
+        self.assertIn("directory binding changed", result["reason"])
+        self.assertIn("foreign.html", self.vhost.read_text())
+
+    def test_missing_site_file_created_during_other_inspection_is_not_new_file(self):
+        proposed = "<p>preview</p>"
+        target = self.document_root / "404.html"
+        self.assertFalse(target.exists())
+        real_active = inspection._active
+
+        def create_file_during_vhost(data):
+            target.write_text("<p>new operator file</p>")
+            return real_active(data)
+
+        with patch.object(inspection, "_active", side_effect=create_file_during_vhost):
+            result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),
+                               rendered_html=proposed)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertEqual(result["page_file_state"], "Uninspected")
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertEqual(target.read_text(), "<p>new operator file</p>")
+
+    def test_extension_directory_replacement_is_conservatively_uncertain(self):
+        extension = self.vhosts / "extension" / self.key
+        extension.mkdir(parents=True)
+        (extension / "site.conf").write_text("location /a { return 200; }\n")
+        detached = self.root / "detached-extension"
+        real_active = inspection._active
+        calls = 0
+
+        def replace_after_fragment(data):
+            nonlocal calls
+            calls += 1
+            text = real_active(data)
+            if calls == 2:
+                extension.rename(detached)
+                extension.mkdir()
+                (extension / "site.conf").write_text("error_page 502 /foreign.html;\n")
+            return text
+
+        with patch.object(inspection, "_active", side_effect=replace_after_fragment):
+            result = self.scan()
+        self.assertEqual(calls, 2)
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertIsNone(result["vhost_sha256"])
+        self.assertEqual(result["comparison"]["state"], "Unavailable")
+        self.assertEqual(result["extensions_scanned"], [])
+        self.assertIn("directory binding changed", result["reason"])
+
+    def test_unicode_controls_and_directional_marks_never_appear_in_plain_diff(self):
+        proposed = "<html><p>پیشنهاد 404 ID-42</p></html>\n"
+        unsafe = ("\u0085", "\u200e", "\u200f", "\u061c", "\u202a",
+                  "\u202e", "\u2066", "\u2028", "\u2029", "\ufeff", "\x07")
+        file = self.document_root / "404.html"
+        for marker in unsafe:
+            with self.subTest(kind="current", marker=hex(ord(marker))):
+                file.write_text("<p>old " + marker + "</p>\n", encoding="utf-8")
+                result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),
+                                   rendered_html=proposed)
+                self.assertEqual(result["comparison"]["state"], "Unavailable")
+                self.assertEqual(result["comparison"]["excerpt"], "")
+                self.assertIn("Control or directional", result["comparison"]["reason"])
+            with self.subTest(kind="proposed", marker=hex(ord(marker))):
+                file.write_text("<p>benign existing</p>\n")
+                candidate = "<p>new " + marker + "</p>\n"
+                result = self.scan(digest=hashlib.sha256(candidate.encode()).hexdigest(),
+                                   rendered_html=candidate)
+                self.assertEqual(result["comparison"]["state"], "Unavailable")
+                self.assertEqual(result["comparison"]["excerpt"], "")
+                self.assertIn("Control or directional", result["comparison"]["reason"])
+
+    def test_legitimate_persian_zwnj_and_mixed_rtl_ltr_remain_comparable(self):
+        current = "<p>درخواست‌ها ID-404: ثبت‌شده</p>\n"
+        proposed = "<p>درخواست‌ها ID-404: به‌روزرسانی‌شده</p>\n"
+        (self.document_root / "404.html").write_text(current, encoding="utf-8")
+        result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),
+                           rendered_html=proposed)
+        self.assertEqual(result["comparison"]["state"], "Different")
+        self.assertIn("درخواست‌ها ID-404:", result["comparison"]["excerpt"])
+        self.assertIn("به‌روزرسانی‌شده", result["comparison"]["excerpt"])
+        self.assertLessEqual(len(result["comparison"]["excerpt"].encode()),
+                             inspection.MAX_COMPARE_EXCERPT)
+
+    def test_line_clipping_includes_marker_within_exact_character_limit(self):
+        current = "<p>" + "a" * 600 + "</p>\n"
+        proposed = "<p>" + "b" * 600 + "</p>\n"
+        (self.document_root / "404.html").write_text(current)
+        result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),
+                           rendered_html=proposed)
+        comparison = result["comparison"]
+        self.assertEqual(comparison["state"], "Different")
+        self.assertTrue(comparison["truncated"])
+        lines = comparison["excerpt"].splitlines()
+        self.assertTrue(any("[long line clipped]" in line for line in lines))
+        self.assertTrue(all(len(line) <= inspection.MAX_COMPARE_DISPLAY_LINE for line in lines))
+
     def test_oversized_internal_render_never_bypasses_preview_size_contract(self):
         proposed = "<html>" + ("x" * 32768) + "</html>"
         result = self.scan(digest=hashlib.sha256(proposed.encode()).hexdigest(),

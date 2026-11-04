@@ -1192,32 +1192,46 @@
         value.every(function (entry) { return typeof entry === 'string' && entry.length > 0 && entry.length <= 256; });
     };
     var comparison = r && r.comparison;
-    var integerOrNull = function (value, max) {
-      return value === null || (Number.isSafeInteger(value) && value >= 0 && value <= max);
+    var integerWithin = function (value, max) {
+      return Number.isSafeInteger(value) && value >= 0 && value <= max;
     };
+    var diffFormat = function (excerpt) {
+      var lines = excerpt.split('\n');
+      var hunk = /^@@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? @@(?: .*)?$/;
+      return lines.length >= 4 &&
+        lines[0] === '--- current ' + template + '.html' &&
+        lines[1] === '+++ proposed ' + template + '.html' &&
+        hunk.test(lines[2]) &&
+        lines.slice(3).some(function (line) { return /^[ +\-]/.test(line); }) &&
+        lines.slice(3).every(function (line) {
+          return /^[ +\-]/.test(line) || hunk.test(line);
+        }) &&
+        lines.every(function (line) { return Array.from(line).length <= 360; });
+    };
+    var validExcerpt = comparison && typeof comparison.excerpt === 'string' &&
+      comparison.excerpt.length <= 6144 &&
+      typeof TextEncoder === 'function' &&
+      new TextEncoder().encode(comparison.excerpt).length <= 6144;
     var validComparison = comparison && comparison.schema === 1 &&
       ['Unavailable','New File','Identical','Different'].includes(comparison.state) &&
       typeof comparison.reason === 'string' && comparison.reason.length <= 200 &&
-      typeof comparison.excerpt === 'string' && comparison.excerpt.length <= 6144 &&
-      typeof comparison.truncated === 'boolean' &&
-      integerOrNull(comparison.old_lines, 65536) &&
-      integerOrNull(comparison.new_lines, 32768) &&
+      validExcerpt && typeof comparison.truncated === 'boolean' &&
       (comparison.state !== 'Unavailable' ||
         (comparison.excerpt === '' && comparison.old_lines === null && comparison.new_lines === null &&
          comparison.truncated === false)) &&
       (comparison.state !== 'New File' ||
         (r.page_file_state === 'Absent' && comparison.old_lines === 0 &&
-         Number.isSafeInteger(comparison.new_lines) && comparison.excerpt === '' &&
+         integerWithin(comparison.new_lines, 32768) && comparison.excerpt === '' &&
          comparison.truncated === false)) &&
       (comparison.state !== 'Identical' ||
         (r.page_file_state === 'Same bytes' && comparison.excerpt === '' &&
-         comparison.truncated === false && Number.isSafeInteger(comparison.old_lines) &&
+         comparison.truncated === false && integerWithin(comparison.old_lines, 32768) &&
          comparison.old_lines === comparison.new_lines)) &&
       (comparison.state !== 'Different' ||
         (r.page_file_state === 'Different bytes' &&
-         comparison.excerpt.startsWith('--- current ' + template + '.html') &&
-         Number.isSafeInteger(comparison.old_lines) &&
-         Number.isSafeInteger(comparison.new_lines)));
+         integerWithin(comparison.old_lines, 240) &&
+         integerWithin(comparison.new_lines, 240) &&
+         diffFormat(comparison.excerpt)));
     return r && validComparison && r.schema === 1 && r.status === true &&
       r.read_only === true && r.apply_supported === false &&
       r.nginx_runtime_verified === false &&

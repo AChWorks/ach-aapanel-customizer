@@ -11,6 +11,7 @@ import hashlib
 import os
 import re
 import stat
+import unicodedata
 
 from ach_customizer_monitor import MonitorInputError, _active_nginx_text
 
@@ -26,6 +27,10 @@ MAX_COMPARE_DISPLAY_LINE = 360
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+# Used only for source-snapshot identity, never returned to panel clients.
+_FILE_FIELDS = ("st_dev", "st_ino", "st_size", "st_mtime_ns",
+                "st_ctime_ns", "st_uid", "st_gid", "st_mode", "st_nlink")
+_LONG_LINE_MARKER = " [long line clipped]"
 
 
 class StatusInspectError(ValueError):
@@ -54,6 +59,62 @@ def _directory(path):
         raise
 
 
+def _identity(stat_result):
+    return tuple(getattr(stat_result, key) for key in _FILE_FIELDS)
+
+
+def _remember_source(bindings, path, directory_fd, name, snapshot, names=None):
+    """Remember the original absolute binding, not just an open directory FD."""
+    directory = os.fstat(directory_fd)
+    entry = {
+        "path": path,
+        "directory": (directory.st_dev, directory.st_ino),
+        "name": name,
+        "file": None if snapshot is None else snapshot["identity"],
+        "names": names,
+    }
+    bindings.append(entry)
+
+
+def _verify_source_bindings(bindings, missing_directories):
+    """Re-resolve each original absolute path and reject detached source trees.
+
+    This is a final best-effort *snapshot* check; no read-only inspection can
+    guarantee a file remains unchanged after the check finishes.
+    """
+    for entry in bindings:
+        descriptor = _directory(entry["path"])
+        try:
+            current = os.fstat(descriptor)
+            if (current.st_dev, current.st_ino) != entry["directory"]:
+                raise StatusInspectError("Inspected directory binding changed")
+            if entry["name"] is not None:
+                try:
+                    observed = os.stat(entry["name"], dir_fd=descriptor,
+                                       follow_symlinks=False)
+                except FileNotFoundError:
+                    if entry["file"] is not None:
+                        raise StatusInspectError("Inspected file disappeared")
+                else:
+                    if entry["file"] is None or _identity(observed) != entry["file"]:
+                        raise StatusInspectError("Inspected file binding changed")
+            if entry["names"] is not None:
+                observed_names = sorted(name for name in os.listdir(descriptor)
+                                        if name.endswith(".conf"))
+                if observed_names != entry["names"]:
+                    raise StatusInspectError("Site extension config list changed")
+        finally:
+            os.close(descriptor)
+    for path in missing_directories:
+        try:
+            descriptor = _directory(path)
+        except FileNotFoundError:
+            continue
+        else:
+            os.close(descriptor)
+            raise StatusInspectError("Previously missing extension directory appeared")
+
+
 def _file_snapshot(directory_fd, name):
     """Return a stable regular-file byte snapshot; missing is distinct."""
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,255}", name):
@@ -74,8 +135,7 @@ def _file_snapshot(directory_fd, name):
                 break
             data.extend(piece)
         after = os.fstat(fd)
-        fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns",
-                  "st_ctime_ns", "st_uid", "st_gid", "st_mode", "st_nlink")
+        fields = _FILE_FIELDS
         # fstat alone cannot prove that the pathname still names this inode:
         # aaPanel or an operator may atomically replace a site page/VHost
         # while the descriptor remains open. Recheck the exact basename
@@ -89,7 +149,7 @@ def _file_snapshot(directory_fd, name):
                     getattr(before, k) != getattr(pathname, k) for k in fields)):
             raise StatusInspectError("File changed during read-only inspection")
         return {"data": bytes(data), "sha256": hashlib.sha256(data).hexdigest(),
-                "bytes": len(data)}
+                "bytes": len(data), "identity": _identity(after)}
     finally:
         os.close(fd)
 
@@ -153,11 +213,13 @@ def _content_comparison(current, rendered_html, rendered_sha256, page_file):
         old = current["data"].decode("utf-8")
     except UnicodeError:
         return {**result, "reason": "Existing site page is not valid UTF-8 text"}
-    # Refuse binary/control characters and misleading bidi controls in excerpts.
+    # Display integrity: C0/C1 controls, formatting/directional controls
+    # (including LRM/RLM/ALM and isolates), Unicode line/paragraph separators
+    # must not silently change how the human reviewer reads a line.
+    # Ordinary CR/LF/TAB and Persian ZWNJ (U+200C) are intentional exceptions.
     for text in (old, rendered_html):
-        if any((ord(ch) < 32 and ch not in "\t\n\r") or
-               ord(ch) == 127 or
-               ch in "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+        if any((unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp") and
+                ch not in ("\t", "\n", "\r", "\u200c"))
                for ch in text):
             return {**result, "reason": "Control or directional formatting bytes prevent a safe text diff"}
     old_lines = old.splitlines(keepends=True)
@@ -172,7 +234,7 @@ def _content_comparison(current, rendered_html, rendered_sha256, page_file):
             tofile="proposed " + page_file, n=2, lineterm="\n"):
         line = raw.rstrip("\n").replace("\r", "\\r").replace("\t", "\\t")
         if len(line) > MAX_COMPARE_DISPLAY_LINE:
-            line = line[:MAX_COMPARE_DISPLAY_LINE] + " [long line clipped]"
+            line = line[:MAX_COMPARE_DISPLAY_LINE - len(_LONG_LINE_MARKER)] + _LONG_LINE_MARKER
             truncated = True
         # Enforce an actual UTF-8 response *byte* cap, not only a character
         # count: a page may contain multibyte Persian/Unicode characters.
@@ -232,10 +294,13 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
                  "during aaPanel regeneration; neither loaded Nginx routes nor HTTP "
                  "response status are verified. Apply and Restore are disabled."),
     }
+    bindings = []
+    missing_directories = []
     try:
         directory_fd = _directory(document_root)
         try:
             site_page = _file_snapshot(directory_fd, template + ".html")
+            _remember_source(bindings, document_root, directory_fd, template + ".html", site_page)
         finally:
             os.close(directory_fd)
         # A content diff is independent of whether Nginx actually routes to
@@ -254,10 +319,12 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         vhost_dir = _directory(vhost_root)
         try:
             vhost = _file_snapshot(vhost_dir, key + ".conf")
+            _remember_source(bindings, vhost_root, vhost_dir, key + ".conf", vhost)
         finally:
             os.close(vhost_dir)
         if vhost is None:
             result.update(state="Unsupported", reason="Native website VHost file not found")
+            _verify_source_bindings(bindings, missing_directories)
             return result
         result["vhost_sha256"] = vhost["sha256"]
         vhost_text = _active(vhost["data"])
@@ -269,6 +336,7 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         try:
             extension_fd = _directory(extension_path)
         except FileNotFoundError:
+            missing_directories.append(extension_path)
             extension_fd = None
         if extension_fd is not None:
             try:
@@ -277,10 +345,12 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
                 )
                 if len(names) > MAX_EXTENSIONS:
                     raise StatusInspectError("Too many site extension config fragments")
+                _remember_source(bindings, extension_path, extension_fd, None, None, names=names)
                 for name in names:
                     fragment = _file_snapshot(extension_fd, name)
                     if fragment is None:
                         raise StatusInspectError("Extension fragment disappeared during inspection")
+                    _remember_source(bindings, extension_path, extension_fd, name, fragment)
                     text = _active(fragment["data"])
                     result["extensions_scanned"].append(name)
                     if _has_directive(text, "error_page"):
@@ -303,6 +373,9 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
                 "Matching site page bytes, but HTTP serving is not verified" if result["state"] == "File Match"
                 else "No site page file; a textual extension include exists, but its lifetime is unverified"
             )
+        # Do not present an old descriptor's bytes after aaPanel has renamed
+        # any original site/VHost path or modified the corresponding file.
+        _verify_source_bindings(bindings, missing_directories)
     except (OSError, StatusInspectError) as exc:
         result["state"] = "Needs Review"
         result["reason"] = ("Read-only inspection incomplete: " + str(exc))[:240]
@@ -313,6 +386,10 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
             "old_lines": None, "new_lines": None,
         }
         result["vhost_sha256"] = None
+        result["page_file_state"] = "Uninspected"
+        result["page_file_sha256"] = None
+        result["page_file_bytes"] = None
+        result["extension_include_textual"] = False
         result["extensions_scanned"] = []
         result["error_page_sources"] = []
     return result
