@@ -329,6 +329,43 @@ class NativeEndpointTests(unittest.TestCase):
             module.session["tmp_login"] = True
         return module
 
+    def test_cached_older_hosts_helper_fails_only_hosts_without_breaking_overview(self):
+        """In-place aaPanel import must not turn unrelated endpoints into 500s.
+
+        A persistent panel Python process can hold a previous Hosts module
+        lacking the latest snapshot helper until an authorized panel restart.
+        """
+        original = hosts.native_site_snapshot
+        try:
+            del hosts.native_site_snapshot
+            overview = self.plugin.get_overview({})
+            self.assertTrue(overview["status"], overview)
+            with patch.dict(sys.modules, {"flask": self.flask(), "public": self.panel()}):
+                with patch.object(endpoint, "inspect_hosts_file",
+                                  side_effect=AssertionError("No source read while module is stale")) as reader:
+                    result = self.plugin.inspect_local_hosts({
+                        "site_id": "7", "expected_site_key": "site.test",
+                        "expected_site_snapshot": self.snapshot(),
+                    })
+            self.assertFalse(result["status"])
+            self.assertEqual(result["stage"], "hosts_inspection")
+            self.assertIn("Restart aaPanel panel service", result["msg"])
+            self.assertNotIn("Traceback", str(result))
+            self.assertTrue(result["activity_logged"])
+            self.assertEqual(self.reads, 0)
+            reader.assert_not_called()
+
+            # The authorization gate still precedes the backend-version check.
+            with patch.dict(sys.modules, {"flask": self.flask(temporary=True)}):
+                denied = self.plugin.inspect_local_hosts({
+                    "site_id": "7", "expected_site_key": "site.test",
+                    "expected_site_snapshot": self.snapshot(),
+                })
+            self.assertEqual(denied["stage"], "hosts_authorization")
+            self.assertNotIn("outdated", denied["msg"])
+        finally:
+            hosts.native_site_snapshot = original
+
     def test_full_admin_post_uses_native_domains_not_untrusted_input(self):
         response = {"schema":1, "state":"Needs Review", "read_only":True}
         with patch.dict(sys.modules, {"public":self.panel(), "flask":self.flask()}):

@@ -90,6 +90,24 @@ keyboard-visible and CSS-scoped; no undocumented aaPanel Vue component is
 imported. Material shared-service warnings and safe Status Pages draft
 preservation remain intact. [Read-only guest UI reference](https://github.com/AChWorks/ach-aapanel-customizer/issues/17#issuecomment-6622156377).
 
+### In-place native upgrade and resident Python module cache (2026-11-04)
+
+In the isolated authenticated aaPanel 8.0.7 guest, the native 0.1.8 Hosts
+ZIP installed successfully but the first `get_overview` returned HTTP 500:
+a resident `ach_customizer_hosts` module lacked the newly shipped
+`native_site_snapshot` attribute, even though the exact ZIP contained it.
+An authorized **Restart → Restart panel** (not `Restart server`) in the guest
+restored real Overview, Inventory and read-only Hosts inspection.
+
+The new entrypoint imports the added snapshot helper **only inside the
+authorized Hosts diagnostic**. A stale module therefore returns an actionable,
+audited fail-closed Hosts error instead of an import-time failure of unrelated
+Monitor/Website endpoints. This isolates the blast radius; it does **not**
+silently reload Python modules, change host services or waive operator
+approval for a production panel restart. The [native Hosts lifecycle and UI
+evidence](evidence/aaPanel-8.0.7-2026-11-04-native-hosts-qa.md) records exact
+package checksums, observed errors, retry, and remaining limitations.
+
 ## First non-production implementation slice
 
 `plugin/ach_customizer/` is a prototype native plugin package with an English-only in-panel read-only UI, following aaPanel conventions, and two narrowly bounded read operations:

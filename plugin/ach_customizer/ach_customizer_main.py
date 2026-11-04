@@ -26,7 +26,6 @@ from ach_customizer_monitor import (
 )
 from ach_customizer_hosts import (
     HostsInspectionError, inspect_local_hosts as inspect_hosts_file,
-    native_site_snapshot,
 )
 from ach_customizer_fpm_apply import FpmApplyError
 from ach_customizer_fpm_workflow import ManualFpmWorkflow
@@ -233,6 +232,17 @@ class ach_customizer_main:
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
+            # aaPanel can keep the previous Hosts module in the panel Python
+            # process after an in-place plugin import. A newer helper must
+            # never make unrelated Monitor/Website endpoints fail at import.
+            try:
+                from ach_customizer_hosts import native_site_snapshot
+            except ImportError as exc:
+                raise HostsInspectionError(
+                    "Hosts diagnostic module is outdated after plugin update. "
+                    "Restart aaPanel panel service (not server), reopen this plugin "
+                    "and refresh website inventory before inspecting."
+                ) from exc
             # The browser-selected site key is a precondition, never a lookup
             # source. Refuse stale/reassigned aaPanel IDs before reading hosts.
             expected_site_key = self._argument(args, "expected_site_key")
