@@ -195,6 +195,13 @@
     border-radius:3px; background:#fff;
   }
   #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #ach-customizer .ach-status-comparison {
+    max-width:100%; max-height:260px; margin:8px 0 14px; overflow:auto;
+    border:1px solid var(--ach-line); border-radius:3px; padding:10px 12px;
+    background:#f7f9fb; color:#233141; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;
+    white-space:pre-wrap; overflow-wrap:anywhere; tab-size:2;
+  }
+  #ach-customizer .ach-status-comparison:empty { display:none; }
   #ach-customizer .ach-badge { display:inline-block; font-size:11px; padding:2px 7px; border-radius:3px; background:#e9f2ec; color:#21642d; }
   #ach-customizer .ach-activity-error { color:#ac3431; font-weight:600; }
   #ach-customizer .ach-activity-warning { color:#8c601c; font-weight:600; }
@@ -366,9 +373,11 @@
         <label><input id="ach-status-reset-approve" type="checkbox" /> I approve resetting this scope to inherited or ACh defaults.</label>
         <button id="ach-status-reset" type="button" class="btn btn-warning" disabled>Reset selected branding scope</button>
       </div>
-      <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect selected site 404/502 (read-only)</button></div>
+      <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
       <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
       <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
+      <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
+      <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
       <p id="ach-status-result" role="status" aria-live="polite">Open Status Pages to load saved preferences.</p>
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
       <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
@@ -1021,6 +1030,8 @@
     root.find('#ach-status-iframe').prop('srcdoc', '');
     root.find('#ach-status-sha').text('');
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
+    root.find('#ach-status-comparison-summary').text('Content comparison not run.');
+    root.find('#ach-status-comparison-excerpt').text('');
   }
   function statusLoad() {
     sectionsLoaded.status = false;
@@ -1132,20 +1143,28 @@
     if (siteMode && !statusSites.length) loadStatusSites(true);
   });
   root.find('#ach-status-site-id').on('change', statusLoad);
+  // Both the sandbox preview and on-disk comparison are bound to the exact
+  // unsaved branding fields. Editing any field must revoke their old evidence.
+  root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer')
+    .on('input change', statusClearPreview);
   root.find('#ach-status-reset-approve').on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-preview-button').on('click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
     if (!scope) { root.find('#ach-status-result').text('Select a native site ID.'); return; }
     statusClearPreview();
-    var ticket = statusTicket;
+    var ticket = statusTicket, selectedBrand = statusFields();
     statusLock(true);
-    request('status_preview', Object.assign({}, scope, statusFields(), {
+    request('status_preview', Object.assign({}, scope, selectedBrand, {
       template:root.find('#ach-status-template').val(),
       locale:root.find('#ach-status-locale').val()
     }), function (r) {
       if (ticket !== statusTicket) return;
-      if (!r || r.schema !== 1 || r.apply_supported !== false ||
+      var currentBrand = statusFields();
+      var brandUnchanged = Object.keys(selectedBrand).every(function (key) {
+        return selectedBrand[key] === currentBrand[key];
+      });
+      if (!brandUnchanged || !r || r.schema !== 1 || r.apply_supported !== false ||
           typeof r.html !== 'string' || r.html.length > 32768 ||
           !/^[0-9a-f]{64}$/.test(r.rendered_sha256 || '') ||
           !/^[0-9a-f]{64}$/.test(r.source_sha256 || '') ||
@@ -1172,7 +1191,48 @@
       return Array.isArray(value) && value.length <= max &&
         value.every(function (entry) { return typeof entry === 'string' && entry.length > 0 && entry.length <= 256; });
     };
-    return r && r.schema === 1 && r.status === true &&
+    var comparison = r && r.comparison;
+    var integerWithin = function (value, max) {
+      return Number.isSafeInteger(value) && value >= 0 && value <= max;
+    };
+    var diffFormat = function (excerpt) {
+      var lines = excerpt.split('\n');
+      var hunk = /^@@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? @@(?: .*)?$/;
+      return lines.length >= 4 &&
+        lines[0] === '--- current ' + template + '.html' &&
+        lines[1] === '+++ proposed ' + template + '.html' &&
+        hunk.test(lines[2]) &&
+        lines.slice(3).some(function (line) { return /^[ +\-]/.test(line); }) &&
+        lines.slice(3).every(function (line) {
+          return /^[ +\-]/.test(line) || hunk.test(line);
+        }) &&
+        lines.every(function (line) { return Array.from(line).length <= 360; });
+    };
+    var validExcerpt = comparison && typeof comparison.excerpt === 'string' &&
+      comparison.excerpt.length <= 6144 &&
+      typeof TextEncoder === 'function' &&
+      new TextEncoder().encode(comparison.excerpt).length <= 6144;
+    var validComparison = comparison && comparison.schema === 1 &&
+      ['Unavailable','New File','Identical','Different'].includes(comparison.state) &&
+      typeof comparison.reason === 'string' && comparison.reason.length <= 200 &&
+      validExcerpt && typeof comparison.truncated === 'boolean' &&
+      (comparison.state !== 'Unavailable' ||
+        (comparison.excerpt === '' && comparison.old_lines === null && comparison.new_lines === null &&
+         comparison.truncated === false)) &&
+      (comparison.state !== 'New File' ||
+        (r.page_file_state === 'Absent' && comparison.old_lines === 0 &&
+         integerWithin(comparison.new_lines, 32768) && comparison.excerpt === '' &&
+         comparison.truncated === false)) &&
+      (comparison.state !== 'Identical' ||
+        (r.page_file_state === 'Same bytes' && comparison.excerpt === '' &&
+         comparison.truncated === false && integerWithin(comparison.old_lines, 32768) &&
+         comparison.old_lines === comparison.new_lines)) &&
+      (comparison.state !== 'Different' ||
+        (r.page_file_state === 'Different bytes' &&
+         integerWithin(comparison.old_lines, 240) &&
+         integerWithin(comparison.new_lines, 240) &&
+         diffFormat(comparison.excerpt)));
+    return r && validComparison && r.schema === 1 && r.status === true &&
       r.read_only === true && r.apply_supported === false &&
       r.nginx_runtime_verified === false &&
       Number(r.site_id) === Number(scope.site_id) && Number.isSafeInteger(r.site_id) &&
@@ -1209,20 +1269,30 @@
     if (statusBusy || statusRevision === null || !scope || scope.scope !== 'site' ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
         (template !== '404' && template !== '502')) return;
-    var ticket = statusTicket;
+    var ticket = statusTicket, submittedBrand = statusFields();
     root.find('#ach-status-inspect-result').text('Inspecting on-disk site and Nginx sources only...');
+    root.find('#ach-status-comparison-summary').text('Comparing read-only document-root file snapshot...');
+    root.find('#ach-status-comparison-excerpt').text('');
     statusLock(true);
-    request('status_inspect', Object.assign({}, scope, statusFields(), {
+    request('status_inspect', Object.assign({}, scope, submittedBrand, {
       template:template, locale:locale
     }), function (r) {
       if (ticket !== statusTicket) return;
-      var sameSelection = scope.site_id === statusScope()?.site_id &&
+      var currentBrand = statusFields();
+      var sameBrand = Object.keys(submittedBrand).every(function (key) {
+        return submittedBrand[key] === currentBrand[key];
+      });
+      var sameSelection = sameBrand &&
+        scope.site_id === statusScope()?.site_id &&
         statusLoadedScope === scope.scope + ':' + scope.site_id &&
         template === root.find('#ach-status-template').val() &&
         locale === root.find('#ach-status-locale').val();
       if (!sameSelection || !validStatusInspection(r, scope, template, locale)) {
         root.find('#ach-status-inspect-result').text(
           'Inspection unconfirmed or incompatible. No site routing was inferred.');
+        root.find('#ach-status-comparison-summary').text(
+          'Content comparison unavailable or incompatible. No changes made.');
+        root.find('#ach-status-comparison-excerpt').text('');
       } else {
         root.find('#ach-status-inspect-result').text(
           'State: ' + r.state + ' — ' + r.reason +
@@ -1236,6 +1306,13 @@
           '\nScanned extension files: ' + (r.extensions_scanned.join(', ') || 'None') +
           '\nPotential error_page declarations: ' + (r.error_page_sources.join(', ') || 'None observed') +
           '\n' + r.note);
+        var comparison = r.comparison;
+        root.find('#ach-status-comparison-summary').text(
+          'Document-root content: ' + comparison.state + ' — ' + comparison.reason +
+          (comparison.truncated ? ' (excerpt truncated)' : '') +
+          '. No files changed; Nginx routing is not verified.');
+        // Site-owned HTML is untrusted; never insert it through .html() or srcdoc.
+        root.find('#ach-status-comparison-excerpt').text(comparison.excerpt);
       }
       statusLock(false);
     });
