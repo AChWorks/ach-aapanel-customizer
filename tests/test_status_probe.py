@@ -290,6 +290,27 @@ class NativeProbeEndpointTests(unittest.TestCase):
         self.assertEqual(response["stage"], "status_probe")
         self.assertIn("branding", response["msg"])
 
+    def test_successful_probe_writes_bounded_plugin_activity_only(self):
+        from ach_customizer_activity import read_activity
+        with patch.dict(sys.modules, {
+            "public": self.public(), "flask": self.flask()
+        }), patch.object(backend, "_bound_domains_for_sites", side_effect=self.bound), \
+             patch.object(probe, "probe_site_404",
+                          return_value=self.observed(state="HTTP Match")):
+            response = self.plugin.status_probe({
+                "site_id": "7", "template": "404", "locale": "en"
+            })
+        self.assertTrue(response["status"])
+        self.assertTrue(response["activity_logged"])
+        entries = read_activity(self.tmp.name, module="status_pages", limit=10)
+        self.assertTrue(any(
+            e["action"] == "status_probe" and e["module"] == "status_pages"
+            and e["target"] == "site:7" and e["outcome"] == "HTTP Match"
+            and e["operation_id"] == response["request_id"]
+            for e in entries
+        ))
+        self.assertFalse(any("evil.example" in str(e) for e in entries))
+
     def test_native_full_admin_post_uses_only_authoritative_site_and_domain(self):
         request = {"site_id": "7", "template": "404", "locale": "en",
                    "host": "evil.example", "url": "http://evil.example/private",

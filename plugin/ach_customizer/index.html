@@ -1366,7 +1366,7 @@
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
         root.find('#ach-status-template').val() !== '404') return;
     var ticket = statusTicket, submittedBrand = statusFields();
-    root.find('#ach-status-probe-result').text('Checking local HTTP/80 404 response; no files will change...');
+    root.find('#ach-status-probe-result').text('Checking local HTTP/80 404; website/config files are not changed...');
     statusLock(true);
     request('status_probe', Object.assign({}, scope, submittedBrand, {
       template:'404', locale:locale
