@@ -34,7 +34,7 @@ function loadUi() {
   for (const tab of tabs) elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-overview-refresh',
-    '#ach-sites-rows', '#ach-sites-status', '#ach-sites-refresh',
+    '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -52,7 +52,7 @@ function loadUi() {
     '#ach-status-inspect-button', '#ach-status-inspect-result',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
-    '#ach-activity-result', '#ach-activity-rows'
+    '#ach-activity-result', '#ach-activity-rows', '#ach-activity-loading'
   ]) elements.set(name, fakeNode('div'));
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
@@ -230,6 +230,10 @@ function loadUi() {
       statusSource: elements.get('#ach-status-source').textContent,
       statusName: elements.get('#ach-status-name').props.value,
       siteStatus: elements.get('#ach-sites-status').textContent,
+      sitesSkeletonHidden: elements.get('#ach-sites-loading').props.hidden,
+      sitesTableRowsHidden: elements.get('#ach-sites-rows').props.hidden,
+      activitySkeletonHidden: elements.get('#ach-activity-loading').props.hidden,
+      activityTableRowsHidden: elements.get('#ach-activity-rows').props.hidden,
       statusHtml: elements.get('#ach-status-iframe').props.srcdoc,
       statusHash: elements.get('#ach-status-sha').textContent,
       statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
@@ -306,7 +310,9 @@ function loadUi() {
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
     openStatus, statusSetValue, statusSetChecked,
-    statusClick, openActivity, respond, respondOverview, toggleMonitor, submitPhp,
+    statusClick, openActivity,
+    activityRefresh: () => { trigger(elements.get('#ach-activity-refresh'), 'click'); return requests.at(-1); },
+    respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -1903,6 +1909,98 @@ test('Review R3: PHP-FPM Restore confirmation and uncertain result both invalida
     assert.match(next.options.url,/s=get_activity$/);
     next.respond(reviewActivity());
   }
+});
+
+
+test('Native Nginx form rhythm: compact left labels, 150px inputs and responsive reflow', () => {
+  assert.match(html, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/,
+    'Desktop setting groups must have two balanced columns');
+  assert.match(html, /grid-template-columns:minmax\(0,1fr\) minmax\(0,150px\)/,
+    'Each setting has a 150px Nginx-style input with a neighboring label');
+  assert.match(html, /@media \(max-width:880px\)/);
+  assert.match(html, /@media \(max-width:460px\)/);
+  assert.match(html, /class="ach-field-site"/);
+  assert.match(html, /#ach-customizer \.ach-table-skeleton\[hidden\]/);
+  assert.match(html, /prefers-reduced-motion:reduce/);
+});
+
+test('Website initial pending shows skeleton, never a fabricated empty inventory', () => {
+  const ui=loadUi();
+  const request=ui.openSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  assert.equal(ui.state().sitesTableRowsHidden,true);
+  assert.equal(ui.state().prevDisabled,true);
+  assert.equal(ui.state().nextDisabled,true);
+  assert.match(ui.state().siteStatus,/Loading website inventory/);
+  assert.doesNotMatch(ui.state().siteStatus,/No sites/);
+  request.respond(page([]));
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+  assert.deepEqual(ui.state().rows,[['No sites in this page']]);
+});
+
+test('Website refresh and errors always settle skeleton; retry remains available', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const req=ui.refreshSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  assert.equal(ui.state().sitesTableRowsHidden,true);
+  req.respond({status:false,stage:'inventory_disabled',msg:'Monitor disabled'});
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+  assert.equal(ui.state().rows.length,0);
+  assert.match(ui.state().siteStatus,/unavailable/i);
+  const retry=ui.refreshSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  retry.respond(page([]));
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+  assert.equal(ui.state().sitesTableRowsHidden,false);
+});
+
+test('Old invalidated Website read cannot cancel current request skeleton', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:3}));
+  const old=ui.openSites();
+  ui.openOverview();
+  ui.toggleMonitor('site_inventory',false).respond(monitorOverview({
+    state_revision:4,modules_enabled:{site_inventory:false,php_fpm_file_preview:true}
+  }));
+  const fresh=ui.openSites();
+  assert.equal(ui.state().sitesSkeletonHidden,false);
+  old.respond(page());
+  assert.equal(ui.state().sitesSkeletonHidden,false,'Stale reply must not hide fresh pending skeleton');
+  fresh.respond({status:false,stage:'monitor_disabled',msg:'Website inventory disabled'});
+  assert.equal(ui.state().sitesSkeletonHidden,true);
+});
+
+test('Activity loading, empty/error and retry states maintain truthful loading feedback', () => {
+  const ui=loadUi();
+  const initial=ui.openActivity();
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  assert.equal(ui.state().activityTableRowsHidden,true);
+  assert.match(ui.activityMessage(),/Loading recent activity/);
+  initial.respond(reviewActivity());
+  assert.equal(ui.state().activitySkeletonHidden,true);
+  assert.equal(ui.state().activityTableRowsHidden,false);
+  assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
+  const retry=ui.activityRefresh();
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  retry.reject(null,'timeout');
+  assert.equal(ui.state().activitySkeletonHidden,true);
+  assert.equal(ui.state().activityTableRowsHidden,false);
+  assert.match(ui.activityMessage(),/unavailable/i);
+});
+
+test('Changing Activity filter keeps only newest pending request visible', () => {
+  const ui=loadUi();
+  const old=ui.openActivity();
+  const fresh=ui.activityFilter('#ach-activity-level','ERROR');
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  old.respond(reviewActivity([reviewActivityEntry()]));
+  assert.equal(ui.state().activitySkeletonHidden,false);
+  fresh.respond(reviewActivity());
+  assert.equal(ui.state().activitySkeletonHidden,true);
+  assert.deepEqual(ui.activityRows(),[['No matching activity records.']]);
 });
 
 test('Review optional: rapid reentry does not duplicate same pending Status or Activity reads', () => {

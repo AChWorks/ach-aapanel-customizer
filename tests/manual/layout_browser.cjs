@@ -65,8 +65,55 @@ const {chromium} = require('playwright');
           throw Error('Layout invariant failed '+JSON.stringify({width,height,name,...x}));
         }
         if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
+        if(name==='php' || name==='status') {
+          const rows = await page.evaluate(name => {
+            const section = name==='php' ? '#ach-php-form .ach-fields' :
+              '#ach-panel-status .ach-status-fields';
+            const row = document.querySelector(section + ' > div');
+            const label = row?.querySelector('label');
+            const input = row?.querySelector('input');
+            const rect = x => x?.getBoundingClientRect().toJSON();
+            return {label:rect(label),input:rect(input)};
+          },name);
+          if(!rows.label || !rows.input) throw Error('Native form row missing '+name);
+          if(width>=900 && (
+            rows.input.left<rows.label.right+5 ||
+            Math.abs(rows.input.width-150)>2 ||
+            Math.abs(rows.input.height-32)>2
+          )) throw Error('Desktop label / 150px native control rhythm failed '+
+              JSON.stringify({name,width,rows}));
+          if(width<=460 && rows.input.top<rows.label.bottom) {
+            throw Error('Mobile stacked label/control overlap '+JSON.stringify({name,width,rows}));
+          }
+        }
       }
     }
+    // Verify actual table skeleton layout and reduced-motion support.
+    await page.setViewportSize({width:375,height:650});
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.setContent(html, {waitUntil:'domcontentloaded'});
+    const skeletons = await page.evaluate(() => {
+      return ['sites','activity'].map(name => {
+        document.querySelectorAll('[data-view]').forEach(view => {
+          view.hidden=view.getAttribute('data-view')!==(name==='sites'?'websites':'activity');
+        });
+        const loading=document.querySelector('#ach-'+name+'-loading');
+        const rows=document.querySelector('#ach-'+name+'-rows');
+        loading.hidden=false;rows.hidden=true;
+        const r=loading.getBoundingClientRect();
+        const bar=loading.querySelector('.ach-skeleton-row span');
+        return {name,height:r.height,right:r.right,display:getComputedStyle(loading).display,
+          animation:getComputedStyle(bar).animationName,rowsHidden:getComputedStyle(rows).display==='none'};
+      });
+    });
+    for(const s of skeletons) {
+      if(s.height<150 || s.right>375 || s.display==='none' ||
+          s.animation!=='none' || !s.rowsHidden) {
+        throw Error('Skeleton layout/reduced motion failure '+JSON.stringify(s));
+      }
+    }
+    console.log('NATIVE_SKELETON_PASS '+skeletons.length+' mobile reduced-motion checks');
+    await page.emulateMedia({reducedMotion:'no-preference'});
     // Inspect computed primary button colors in Chromium, including real hover.
     // This complements source token calculations; white-on-green text is 13px.
     await page.setViewportSize({width:1280,height:720});
