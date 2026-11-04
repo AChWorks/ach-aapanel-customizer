@@ -538,6 +538,9 @@ const monitorOverview = (overrides = {}) => ({
   modules_enabled: {site_inventory: true, php_fpm_file_preview: true},
   ...overrides
 });
+// Successful set_control acknowledgements include the backend CAS changed bit.
+// Read-only get_overview responses do not carry this mutation field.
+const monitorAck = (overrides = {}) => monitorOverview({changed:true, ...overrides});
 
 test('Native overview shows all three safe Monitor switches and revision', () => {
   const ui = loadUi();
@@ -563,7 +566,7 @@ test('Overall Monitor disable updates only the intended switch and preserves mod
   assert.equal(pending.options.data.enabled, 'false');
   assert.equal(pending.options.data.expected_revision, 0);
   assert.equal(ui.state().controls.overall.disabled, true);
-  ui.respondControl(monitorOverview({
+  ui.respondControl(monitorAck({
     mode: 'Disabled',
     notice: 'Monitoring is disabled',
     overall_enabled: false,
@@ -585,7 +588,7 @@ test('Module-level disable does not enable enforcement or disable unrelated modu
   assert.equal(ui.requests.at(-1).options.data.control, 'site_inventory');
   assert.equal(ui.requests.at(-1).options.data.enabled, 'false');
   assert.equal(ui.requests.at(-1).options.data.expected_revision, 0);
-  ui.respondControl(monitorOverview({
+  ui.respondControl(monitorAck({
     state_revision: 1,
     modules_enabled: {site_inventory: false, php_fpm_file_preview: true}
   }));
@@ -604,8 +607,9 @@ test('Failed Monitor state update restores previous switches and exposes backend
     msg: 'Primary administrator required', operation_id: 'op123'});
   const current = ui.state();
   assert.equal(current.controls.overall.checked, true);
-  assert.equal(current.controls.overall.disabled, false);
+  assert.equal(current.controls.overall.disabled, true);
   assert.equal(current.stateRevision, 'State revision: 0');
+  assert.match(current.overview, /Refresh state before retrying/);
   assert.match(current.error, /monitor_authorization: Primary administrator required/);
   assert.match(current.error, /op123/);
   assert.equal(current.errorClass, true);
@@ -636,7 +640,7 @@ test('Stale control revision fails visibly without repeating the conflicting mut
   });
   const current = ui.state();
   assert.equal(current.controls.overall.checked, true);
-  assert.equal(current.controls.overall.disabled, false);
+  assert.equal(current.controls.overall.disabled, true);
   assert.match(current.error, /revision changed/);
   assert.equal(ui.requests.length, 2);
   ui.openOverview();
@@ -1699,7 +1703,7 @@ test('Review R2: an older Overview read completing BEFORE Monitor acknowledgemen
   assert.equal(ui.requests.length, pendingCount, 'No duplicate read or control mutation while writing');
   oldRead.respond(monitorOverview({state_revision:10, overall_enabled:true}));
   assert.equal(ui.state().controls.overall.disabled, true);
-  update.respond(monitorOverview({state_revision:11, overall_enabled:false, mode:'Disabled'}));
+  update.respond(monitorAck({state_revision:11, overall_enabled:false, mode:'Disabled'}));
   assert.equal(ui.state().stateRevision, 'State revision: 11');
   assert.equal(ui.state().controls.overall.checked, false);
   assert.equal(ui.state().controls.overall.disabled, false);
@@ -1710,7 +1714,7 @@ test('Review R2: an older Overview read completing AFTER Monitor acknowledgement
   ui.respondOverview(monitorOverview({state_revision:10}));
   const oldRead = ui.refreshOverview();
   const update = ui.toggleMonitor('overall', false);
-  update.respond(monitorOverview({state_revision:11, overall_enabled:false, mode:'Disabled'}));
+  update.respond(monitorAck({state_revision:11, overall_enabled:false, mode:'Disabled'}));
   oldRead.respond(monitorOverview({state_revision:10, overall_enabled:true}));
   assert.equal(ui.state().stateRevision, 'State revision: 11');
   assert.equal(ui.state().controls.overall.checked, false);
@@ -1731,12 +1735,129 @@ test('Review R2: failed or conflicted Monitor write retains known controls and e
     oldRead.respond(monitorOverview({state_revision:4, overall_enabled:false}));
     assert.equal(ui.state().stateRevision, 'State revision: 4');
     assert.equal(ui.state().controls.overall.checked, true);
+    assert.equal(ui.state().controls.overall.disabled, true);
     assert.match(ui.state().overview, /not confirmed/);
     const newest = ui.refreshOverview();
     assert.match(newest.options.url, /s=get_overview$/);
     newest.respond(monitorOverview({state_revision:5, overall_enabled:false}));
     assert.equal(ui.state().stateRevision, 'State revision: 5');
     assert.equal(ui.state().controls.overall.checked, false);
+    assert.equal(ui.state().controls.overall.disabled, false);
+  }
+});
+
+test('Review R2: failed Monitor write stays locked after failed refresh; only verified GET re-enables', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const write=ui.toggleMonitor('overall',false);
+  assert.deepEqual(ui.state().rows,[],'Possible backend change immediately invalidates inventory');
+  write.reject(null,'timeout');
+  assert.equal(ui.state().stateRevision,'State revision: 10');
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().controls.overall.disabled,true);
+  const initialCount=ui.requests.length;
+  ui.toggleMonitor('site_inventory',false);
+  assert.equal(ui.requests.length,initialCount,'Unconfirmed state must not allow another mutation');
+  const badRead=ui.refreshOverview();
+  badRead.reject(null,'timeout');
+  assert.equal(ui.state().controls.overall.disabled,true);
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().stateRevision,'State revision: 10','Keep last-known revision for diagnosis');
+  const retry=ui.refreshOverview();
+  retry.respond(monitorOverview({state_revision:11,overall_enabled:false,mode:'Disabled'}));
+  assert.equal(ui.state().stateRevision,'State revision: 11');
+  assert.equal(ui.state().controls.overall.checked,false);
+  assert.equal(ui.state().controls.overall.disabled,false);
+  const updated=ui.openSites();
+  assert.match(updated.options.url,/s=get_sites$/);
+  updated.respond({status:false,stage:'monitor_disabled',msg:'Monitor disabled'});
+  assert.deepEqual(ui.state().rows,[]);
+});
+
+test('Review R2: a malformed refresh does not unlock after an uncertain write', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:2}));
+  const write=ui.toggleMonitor('overall',false);
+  write.reject(null,'timeout');
+  const refresh=ui.refreshOverview();
+  refresh.respond(monitorOverview({state_schema:2,state_revision:3,overall_enabled:false}));
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().controls.overall.disabled,true);
+  assert.equal(ui.state().stateRevision,'State revision: 2');
+  assert.match(ui.state().overview,/unverified|Refresh state/);
+  const count=ui.requests.length;
+  ui.toggleMonitor('overall',false);
+  assert.equal(ui.requests.length,count);
+  ui.refreshOverview().respond(monitorOverview({state_revision:3,overall_enabled:false,mode:'Disabled'}));
+  assert.equal(ui.state().controls.overall.disabled,false);
+  assert.equal(ui.state().controls.overall.checked,false);
+});
+
+test('Review R2: inconsistent successful Monitor acknowledgements are rejected and locked', () => {
+  const invalid=[
+    ['missing changed',monitorOverview({state_revision:5,overall_enabled:false})],
+    ['changed false despite changed flag',monitorAck({changed:false,state_revision:5,overall_enabled:false})],
+    ['no revision increment',monitorAck({state_revision:4,overall_enabled:false})],
+    ['unexpected revision jump',monitorAck({state_revision:6,overall_enabled:false})],
+    ['requested value unchanged',monitorAck({state_revision:5,overall_enabled:true})],
+    ['unrelated module altered',monitorAck({state_revision:5,overall_enabled:false,
+      modules_enabled:{site_inventory:false,php_fpm_file_preview:true}})]
+  ];
+  for(const [reason,reply] of invalid){
+    const ui=loadUi();
+    ui.respondOverview(monitorOverview({state_revision:4}));
+    const write=ui.toggleMonitor('overall',false);
+    write.respond(reply);
+    assert.equal(ui.state().stateRevision,'State revision: 4',reason);
+    assert.equal(ui.state().controls.overall.checked,true,reason);
+    assert.equal(ui.state().controls.overall.disabled,true,reason);
+    assert.match(ui.state().overview,/stale or incompatible/,reason);
+    const count=ui.requests.length;
+    ui.toggleMonitor('site_inventory',false);
+    assert.equal(ui.requests.length,count,'Failed closed: '+reason);
+    ui.refreshOverview().respond(monitorOverview({state_revision:5,overall_enabled:false,mode:'Disabled'}));
+    assert.equal(ui.state().controls.overall.disabled,false,'Recovered: '+reason);
+    assert.equal(ui.state().controls.overall.checked,false,'Recovered: '+reason);
+  }
+});
+
+test('Review R2: consistent no-op acknowledgment is accepted without inventing a revision', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:8}));
+  const change=ui.toggleMonitor('overall',true);
+  assert.equal(change.options.data.enabled,'true');
+  change.respond(monitorAck({changed:false,state_revision:8,overall_enabled:true}));
+  assert.equal(ui.state().stateRevision,'State revision: 8');
+  assert.equal(ui.state().controls.overall.checked,true);
+  assert.equal(ui.state().controls.overall.disabled,false);
+});
+
+test('Review R3: pending inventory is discarded after conflicted Website Monitor write', () => {
+  for(const outcome of ['conflict','timeout','incompatible-success']){
+    const ui=loadUi();
+    ui.respondOverview(monitorOverview({state_revision:6}));
+    const stale=ui.openSites();
+    ui.openOverview();
+    const write=ui.toggleMonitor('site_inventory',false);
+    if(outcome==='conflict') write.respond({status:false,stage:'monitor_state_write',msg:'Revision conflict'});
+    else if(outcome==='timeout') write.reject(null,'timeout');
+    else write.respond(monitorAck({state_revision:7,
+      modules_enabled:{site_inventory:true,php_fpm_file_preview:true}}));
+    stale.respond(page());
+    assert.deepEqual(ui.state().rows,[],'Stale inventory must not return: '+outcome);
+    assert.match(ui.state().siteStatus,/Monitor settings changed/,outcome);
+    assert.equal(ui.state().controls.site_inventory.disabled,true,outcome);
+    const pending=ui.openSites();
+    assert.match(pending.options.url,/s=get_sites$/);
+    pending.respond({status:false,stage:'monitor_disabled',msg:'Monitor state not verified'});
+    assert.equal(ui.state().nextDisabled,true);
+    ui.openOverview();
+    ui.refreshOverview().respond(monitorOverview({state_revision:7,
+      modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+    assert.equal(ui.state().controls.site_inventory.checked,false,outcome);
+    assert.equal(ui.state().controls.site_inventory.disabled,false,outcome);
   }
 });
 
@@ -1746,7 +1867,7 @@ test('Review R3: changing Website Monitor invalidates cached and in-flight inven
   const old = ui.openSites();
   ui.openOverview();
   const mutation = ui.toggleMonitor('site_inventory',false);
-  mutation.respond(monitorOverview({
+  mutation.respond(monitorAck({
     state_revision:6, modules_enabled:{site_inventory:false,php_fpm_file_preview:true}
   }));
   old.respond(page());
@@ -1765,7 +1886,7 @@ test('Review R3: a loaded Website snapshot reloads once after Overall Monitor ch
   ui.respondOverview(monitorOverview({state_revision:1}));
   ui.openSites().respond(page());
   ui.openOverview();
-  ui.toggleMonitor('overall', false).respond(monitorOverview({
+  ui.toggleMonitor('overall', false).respond(monitorAck({
     state_revision:2,overall_enabled:false,mode:'Disabled'
   }));
   assert.deepEqual(ui.state().rows, []);
@@ -1793,7 +1914,7 @@ test('Review R3: operation completion invalidates Activity and reveals new evide
   ui.respondOverview(monitorOverview());
   ui.openActivity().respond(reviewActivity());
   ui.openOverview();
-  ui.toggleMonitor('overall',false).respond(monitorOverview({state_revision:1,overall_enabled:false}));
+  ui.toggleMonitor('overall',false).respond(monitorAck({state_revision:1,overall_enabled:false}));
   assert.deepEqual(ui.activityRows(), [], 'Old Activity rows must not masquerade as current');
   assert.match(ui.activityMessage(), /may have changed/);
   const next = ui.openActivity();
@@ -1810,7 +1931,7 @@ test('Review R3: completion while Activity is already open invalidates in-flight
   ui.respondOverview(monitorOverview());
   const write=ui.toggleMonitor('overall',false);
   const pending=ui.openActivity();
-  write.respond(monitorOverview({state_revision:1,overall_enabled:false}));
+  write.respond(monitorAck({state_revision:1,overall_enabled:false}));
   const fresh=ui.requests.at(-1);
   assert.notEqual(fresh,pending);
   assert.match(fresh.options.url,/s=get_activity$/);

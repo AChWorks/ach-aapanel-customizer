@@ -400,7 +400,7 @@
     id: 'Operation ID'
   };
   var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false, siteTicket = 0;
-  var controlBusy = false, lastOverview = null;
+  var controlBusy = false, lastOverview = null, monitorRecheckRequired = false;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
   var fpmFormGeneration = 0, fpmPreviewTicket = 0, fpmPrepareTicket = 0;
   var fpmActivePrepareTicket = 0;
@@ -626,16 +626,41 @@
       .prop('hidden', false).toggleClass('ach-error', false)
       .attr('role', 'status').attr('aria-live', 'polite');
   }
+  function validMonitorState(r) {
+    return r && r.state_schema === 1 &&
+      Number.isSafeInteger(r.state_revision) &&
+      r.state_revision >= 0 && r.state_revision <= 2147483647 &&
+      typeof r.overall_enabled === 'boolean' &&
+      r.modules_enabled && typeof r.modules_enabled === 'object' &&
+      !Array.isArray(r.modules_enabled) &&
+      typeof r.modules_enabled.site_inventory === 'boolean' &&
+      typeof r.modules_enabled.php_fpm_file_preview === 'boolean' &&
+      r.enforcement === false;
+  }
+  function monitorValue(state, control) {
+    return control === 'overall' ? state.overall_enabled : state.modules_enabled[control];
+  }
+  function validMonitorAck(r, before, control, enabled) {
+    // set_enabled() is compare-and-swap and changes exactly one Monitor flag.
+    // A changed write increments its revision once; a no-op keeps the revision.
+    if (!validMonitorState(r) || !validMonitorState(before) ||
+        typeof r.changed !== 'boolean' ||
+        ['overall','site_inventory','php_fpm_file_preview'].indexOf(control) === -1) return false;
+    var changed = monitorValue(before, control) !== enabled;
+    if (r.changed !== changed ||
+        r.state_revision !== before.state_revision + (changed ? 1 : 0) ||
+        monitorValue(r, control) !== enabled) return false;
+    return ['overall','site_inventory','php_fpm_file_preview'].every(function (other) {
+      return other === control || monitorValue(r, other) === monitorValue(before, other);
+    });
+  }
   function displayControls(r) {
-    if (!r || r.state_schema !== 1 || !Number.isSafeInteger(r.state_revision) ||
-        r.state_revision < 0 || typeof r.overall_enabled !== 'boolean' ||
-        !r.modules_enabled || typeof r.modules_enabled !== 'object' ||
-        typeof r.modules_enabled.site_inventory !== 'boolean' ||
-        typeof r.modules_enabled.php_fpm_file_preview !== 'boolean' ||
-        r.enforcement !== false) {
-      lastOverview = null;
+    if (!validMonitorState(r)) {
+      // Keep last-known values visible, but do not authorize another mutation
+      // on an unverified or incompatible Overview response.
+      monitorRecheckRequired = true;
       root.find('[data-monitor-control]').prop('disabled', true);
-      root.find('#ach-state-revision').text('Monitor state unavailable');
+      if (!lastOverview) root.find('#ach-state-revision').text('Monitor state unavailable');
       if (r) msg('Monitor state API mismatch: no preferences were inferred.', true);
       return false;
     }
@@ -648,7 +673,7 @@
     root.find('#ach-site-enabled').prop('checked', r.modules_enabled.site_inventory);
     root.find('#ach-fpm-enabled').prop('checked', r.modules_enabled.php_fpm_file_preview);
     root.find('#ach-state-revision').text('State revision: ' + r.state_revision);
-    root.find('[data-monitor-control]').prop('disabled', controlBusy);
+    root.find('[data-monitor-control]').prop('disabled', controlBusy || monitorRecheckRequired);
     return true;
   }
   function overview() {
@@ -663,20 +688,34 @@
       overviewBusy = false;
       root.find('#ach-overview-refresh').prop('disabled', false);
       var accepted = displayControls(r);
-      root.find('#ach-overview-status').text(!accepted && lastOverview ?
-        'Older Monitor state ignored; latest acknowledged revision retained.' :
-        r ? r.mode + ' — ' + r.notice :
-        'Monitor state unavailable. Use Refresh state to retry.');
+      if (accepted) {
+        // This request started after the uncertain write and is the only path
+        // that can release the recheck gate.
+        monitorRecheckRequired = false;
+        root.find('[data-monitor-control]').prop('disabled', false);
+      }
+      root.find('#ach-overview-status').text(accepted ?
+        r.mode + ' — ' + r.notice :
+        monitorRecheckRequired ?
+          'Monitor state unverified. Last known controls shown; Refresh state to retry. Changes remain locked.' :
+          'Older Monitor state ignored; latest acknowledged revision retained.');
       sectionsLoaded.overview = Boolean(accepted);
     });
   }
   root.find('#ach-overview-refresh').on('click', overview);
   root.find('[data-monitor-control]').on('change', function () {
-    if (controlBusy || !lastOverview) return;
+    if (controlBusy || monitorRecheckRequired || !lastOverview) {
+      if (lastOverview) displayControls(lastOverview);
+      return;
+    }
     var control = $(this).attr('data-monitor-control');
     var enabled = $(this).prop('checked') === true;
     var previousSnapshot = lastOverview;
+    if (['overall','site_inventory','php_fpm_file_preview'].indexOf(control) === -1) return;
     controlBusy = true;
+    // Even a timeout/conflict can leave a changed backend state; never keep a
+    // Website inventory snapshot issued under an unverified Monitor policy.
+    if (control === 'overall' || control === 'site_inventory') invalidateWebsitesSnapshot();
     // An already pending Overview read may have been issued under an older state.
     overviewTicket++;
     overviewBusy = false;
@@ -688,24 +727,27 @@
     }, function (r) {
       controlBusy = false;
       root.find('#ach-overview-refresh').prop('disabled', false);
-      if (!r) {
+      if (!r || !validMonitorAck(r, previousSnapshot, control, enabled)) {
+        // A timeout, rejected CAS, malformed ack or contradictory "success"
+        // must not unlock writes until a fresh verified GET is observed.
+        monitorRecheckRequired = true;
+        displayControls(previousSnapshot);
         sectionsLoaded.overview = false;
-        displayControls(lastOverview);
-        root.find('#ach-overview-status').text('Monitor update not confirmed. Last known controls shown; Refresh state before retrying.');
+        root.find('#ach-overview-status').text(!r ?
+          'Monitor update not confirmed. Last known controls shown; Refresh state before retrying. Changes locked.' :
+          'Monitor response stale or incompatible. Last known state shown; Refresh state before any new change. Changes locked.');
         return;
       }
+      monitorRecheckRequired = false;
       if (!displayControls(r)) {
-        // Restore only the previously observed revision, never treat the
-        // incompatible acknowledgement as an accepted state transition.
+        monitorRecheckRequired = true;
         displayControls(previousSnapshot);
-        root.find('[data-monitor-control]').prop('disabled', true);
         sectionsLoaded.overview = false;
-        root.find('#ach-overview-status').text('Monitor response stale or incompatible. Last known state shown; Refresh before any new change.');
+        root.find('#ach-overview-status').text('Monitor response unverified. Refresh state before any new change. Changes locked.');
         return;
       }
       sectionsLoaded.overview = true;
       root.find('#ach-overview-status').text(r.mode + ' — ' + r.notice);
-      if (control === 'overall' || control === 'site_inventory') invalidateWebsitesSnapshot();
     });
   });
   function sites() {
