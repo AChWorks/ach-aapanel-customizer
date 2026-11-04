@@ -2,6 +2,8 @@
 import hashlib
 import json
 import importlib.util
+import os
+import shutil
 import sys
 import tempfile
 import types
@@ -110,6 +112,94 @@ class PHPDiscoveryFilesTests(unittest.TestCase):
         self.assertFalse(versions['82']['preview_candidate'])
         self.assertFalse(versions['86']['config_present'])
         self.assertFalse(versions['86']['preview_candidate'])
+
+    def test_original_php_root_replaced_mid_scan_returns_no_stale_versions(self):
+        self.make('81')
+        prior = self.root.parent / 'old-php-root'
+        old_stat = os.stat
+        mutated = False
+
+        def racing_stat(path, *args, **kwargs):
+            nonlocal mutated
+            meta = old_stat(path, *args, **kwargs)
+            if path == 'php-fpm.conf' and not mutated:
+                mutated = True
+                self.root.rename(prior)
+                self.root.mkdir()
+                self.make('85')
+            return meta
+
+        with patch.object(os, 'stat', side_effect=racing_stat):
+            result = self.scan()
+        self.assertTrue(mutated)
+        self.assertEqual(result['state'], 'Needs Review')
+        self.assertEqual(result['versions'], [])
+        self.assertIn('changed during inspection', result['reason'])
+
+    def test_php_binary_replaced_mid_scan_cannot_be_reported_present(self):
+        folder = self.make('81')
+        binary = folder / 'sbin' / 'php-fpm'
+        old_stat = os.stat
+        mutated = False
+
+        def racing_stat(path, *args, **kwargs):
+            nonlocal mutated
+            meta = old_stat(path, *args, **kwargs)
+            if path == 'php-fpm.conf' and not mutated:
+                mutated = True
+                binary.rename(binary.with_name('php-fpm.replaced'))
+                binary.write_bytes(b'\x7fELF' + b'NEW!' * 15)
+                binary.chmod(0o755)
+            return meta
+
+        with patch.object(os, 'stat', side_effect=racing_stat):
+            result = self.scan()
+        self.assertTrue(mutated)
+        self.assertEqual(result['state'], 'Needs Review')
+        self.assertEqual(result['versions'], [])
+
+    def test_new_php_version_appearing_mid_scan_invalidates_inventory(self):
+        self.make('81')
+        old_stat = os.stat
+        mutated = False
+
+        def racing_stat(path, *args, **kwargs):
+            nonlocal mutated
+            meta = old_stat(path, *args, **kwargs)
+            if path == 'php-fpm.conf' and not mutated:
+                mutated = True
+                self.make('85')
+            return meta
+
+        with patch.object(os, 'stat', side_effect=racing_stat):
+            result = self.scan()
+        self.assertTrue(mutated)
+        self.assertEqual(result['state'], 'Needs Review')
+        self.assertEqual(result['versions'], [])
+
+    def test_php_ancestor_path_rebound_mid_scan_refuses_detached_tree(self):
+        self.make('81')
+        previous_parent = self.root.parent.with_name(self.root.parent.name + '-detached')
+        self.addCleanup(shutil.rmtree, previous_parent, ignore_errors=True)
+        old_stat = os.stat
+        mutated = False
+
+        def racing_stat(path, *args, **kwargs):
+            nonlocal mutated
+            meta = old_stat(path, *args, **kwargs)
+            if path == 'php-fpm.conf' and not mutated:
+                mutated = True
+                self.root.parent.rename(previous_parent)
+                self.root.parent.mkdir()
+                self.root.mkdir()
+                self.make('85')
+            return meta
+
+        with patch.object(os, 'stat', side_effect=racing_stat):
+            result = self.scan()
+        self.assertTrue(mutated)
+        self.assertEqual(result['state'], 'Needs Review')
+        self.assertEqual(result['versions'], [])
 
     def test_missing_root_no_fake_installation_or_service_assertion(self):
         result = monitor.discover_php_fpm_versions(str(self.root / 'absent'))

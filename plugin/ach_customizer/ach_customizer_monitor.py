@@ -78,30 +78,67 @@ def discover_php_fpm_versions(config_root):
     path = Path(config_root)
     if not path.is_absolute() or ".." in path.parts:
         raise MonitorInputError("Invalid aaPanel PHP installation root")
-    try:
-        # A no-follow final open alone is insufficient: anchor every ancestor.
-        root = os.open("/", directory_flags)
+    def anchored_root():
+        # Reopen the *original absolute pathname* for the final source check.
+        # A pinned descriptor may otherwise survive a directory rename while
+        # its original path now refers to a different PHP installation.
+        fd = os.open("/", directory_flags)
         try:
             for name in path.parts[1:]:
-                following = os.open(name, directory_flags, dir_fd=root)
-                os.close(root)
-                root = following
-        except OSError:
-            os.close(root)
+                following = os.open(name, directory_flags, dir_fd=fd)
+                os.close(fd)
+                fd = following
+            return fd
+        except BaseException:
+            os.close(fd)
             raise
-    except OSError:
-        response["reason"] = "aaPanel PHP installation root missing or inaccessible"
-        return response
-    try:
-        # scandir processes at most LIMIT+1 items; os.listdir() would first
-        # materialize an arbitrarily large vendor-managed directory in memory.
+
+    def identity(info):
+        return tuple(getattr(info, key) for key in
+                     ("st_dev", "st_ino", "st_mode", "st_nlink",
+                      "st_size", "st_mtime_ns", "st_ctime_ns"))
+
+    def file_present(ver, dirname, filename, *, executable=False):
+        # The file is only stat'ed, never opened/executed. Capture both the
+        # parent directory identity and final regular-file identity so an
+        # atomic replacement cannot masquerade as the inspected source.
+        try:
+            sub = os.open(dirname, directory_flags, dir_fd=ver)
+        except OSError:
+            return False, None
+        try:
+            directory_identity = identity(os.fstat(sub))
+            try:
+                meta = os.stat(filename, dir_fd=sub, follow_symlinks=False)
+            except OSError:
+                return False, (directory_identity, None)
+            found = (stat.S_ISREG(meta.st_mode) and meta.st_size > 0 and
+                     (not executable or bool(meta.st_mode & 0o111)))
+            return found, (directory_identity, identity(meta))
+        finally:
+            os.close(sub)
+
+    def bounded_names(fd):
         names = []
-        with os.scandir(root) as entries:
+        with os.scandir(fd) as entries:
             for entry in entries:
                 if len(names) >= MAX_PHP_ROOT_ENTRIES:
                     raise MonitorInputError("Too many entries in aaPanel PHP installation root")
                 names.append(entry.name)
+        return sorted(names)
+
+    try:
+        root = anchored_root()
+    except OSError:
+        response["reason"] = "aaPanel PHP installation root missing or inaccessible"
+        return response
+    try:
+        # Two bounded scans are compared; the second is rooted at the actual
+        # current path, not the original, possibly detached descriptor.
+        names = bounded_names(root)
+        original_root_identity = identity(os.fstat(root))
         version_names = [name for name in names if re.fullmatch(r"[1-9][0-9]{1,2}", name)]
+        observed = {}
         if len(version_names) > MAX_PHP_VERSION_DIRECTORIES:
             raise MonitorInputError("Too many PHP version directories for bounded discovery")
         for code in sorted(version_names, key=lambda x: (int(x[0]), int(x[1:]))):
@@ -115,26 +152,16 @@ def discover_php_fpm_versions(config_root):
             try:
                 ver = os.open(code, directory_flags, dir_fd=root)
             except OSError:
+                observed[code] = None
                 version["reason"] = "Versioned PHP directory is inaccessible or linked"
                 continue
             try:
-                def file_present(dirname, filename, *, executable=False):
-                    try:
-                        sub = os.open(dirname, directory_flags, dir_fd=ver)
-                    except OSError:
-                        return False
-                    try:
-                        try:
-                            meta = os.stat(filename, dir_fd=sub, follow_symlinks=False)
-                        except OSError:
-                            return False
-                        return (stat.S_ISREG(meta.st_mode) and meta.st_size > 0 and
-                                (not executable or bool(meta.st_mode & 0o111)))
-                    finally:
-                        os.close(sub)
-
-                version["binary_present"] = file_present("sbin", "php-fpm", executable=True)
-                version["config_present"] = file_present("etc", "php-fpm.conf")
+                ver_identity = identity(os.fstat(ver))
+                binary, binary_identity = file_present(ver, "sbin", "php-fpm", executable=True)
+                config, config_identity = file_present(ver, "etc", "php-fpm.conf")
+                observed[code] = (ver_identity, binary_identity, config_identity)
+                version["binary_present"] = binary
+                version["config_present"] = config
                 if (major, minor) < (8, 1):
                     version["state"] = "Unsupported"
                     version["reason"] = "Below the PHP 8.1+ inspection target"
@@ -150,6 +177,41 @@ def discover_php_fpm_versions(config_root):
                     version["reason"] = "Native PHP-FPM binary or main config is missing or unsupported"
             finally:
                 os.close(ver)
+        # A directory rename, aaPanel update or site-level operation may
+        # replace any ancestor, version folder, binary or config during the
+        # scan. Never return those stale positive findings as current.
+        try:
+            current_root = anchored_root()
+            try:
+                if (identity(os.fstat(current_root)) != original_root_identity
+                        or bounded_names(current_root) != names):
+                    raise OSError("PHP installation root or entries changed")
+                for code in version_names:
+                    try:
+                        current_ver = os.open(code, directory_flags, dir_fd=current_root)
+                    except OSError:
+                        if observed[code] is not None:
+                            raise OSError("PHP installation directory changed")
+                        continue
+                    try:
+                        binary, binary_identity = file_present(
+                            current_ver, "sbin", "php-fpm", executable=True)
+                        config, config_identity = file_present(
+                            current_ver, "etc", "php-fpm.conf")
+                        current = (identity(os.fstat(current_ver)),
+                                   binary_identity, config_identity)
+                        if observed[code] != current:
+                            raise OSError("PHP installation file changed")
+                    finally:
+                        os.close(current_ver)
+            finally:
+                os.close(current_root)
+        except OSError:
+            response.update(
+                state="Needs Review", versions=[],
+                reason="aaPanel PHP source pathname or file changed during inspection; Refresh installed PHP"
+            )
+            return response
         if not response["versions"]:
             response["reason"] = "No versioned aaPanel PHP installation directories found"
         elif any(item["state"] != "File Preview Candidate" for item in response["versions"]):
