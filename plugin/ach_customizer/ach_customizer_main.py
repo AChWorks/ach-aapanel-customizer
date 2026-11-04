@@ -56,7 +56,8 @@ class ach_customizer_main:
             # Log a useful controlled error, but never dump arbitrary exception
             # representations, request objects or authentication material.
             controlled = (PermissionError, StateError, StatusPageError,
-                          MonitorInputError, FpmApplyError, HostsInspectionError, ActivityError)
+                          MonitorInputError, FpmApplyError, HostsInspectionError,
+                          ActivityError)
             detail = str(error) if allow_error_detail and isinstance(error, controlled) else ""
             impact = response.get("shared_impact")
             needs_review = (not failed and
@@ -94,7 +95,8 @@ class ach_customizer_main:
         # Do not expose arbitrary DB/filesystem/internal exception text to
         # browsers: retain the precise exception class in private Activity.
         controlled = (PermissionError, StateError, StatusPageError,
-                      MonitorInputError, FpmApplyError, HostsInspectionError, ActivityError)
+                      MonitorInputError, FpmApplyError, HostsInspectionError,
+                      ActivityError)
         if isinstance(error, controlled) or (
                 isinstance(error, str) and diagnostic_error is not None):
             message = str(error)[:300]
@@ -508,6 +510,76 @@ class ach_customizer_main:
             return self._fail("status_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("status_inspect", exc, request_id)
+
+    def status_probe(self, args):
+        """Primary-admin-triggered localhost HTTP/80 404 probe for a bound site.
+
+        Deliberately not automatic or a generic host/proxy request feature.
+        HTTP evidence cannot grant Apply/Restore eligibility.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            # During in-place native ZIP updates, a stale/missing new helper
+            # must not prevent unrelated plugin endpoints from importing.
+            try:
+                from ach_customizer_status_probe import probe_site_404
+            except ImportError as exc:
+                raise StatusPageError(
+                    "Status probe helper is outdated after plugin update. Restart "
+                    "aaPanel panel service, reopen the plugin, and recheck."
+                ) from exc
+            site_id = self._status_site_id(args)
+            if site_id is None:
+                raise StatusPageError("Select an existing native website for an HTTP 404 probe")
+            if (self._argument(args, "template") != "404" or
+                    self._argument(args, "locale") not in LOCALES):
+                raise StatusPageError("HTTP probe supports only English/Persian site 404")
+            import public
+            if public.get_webserver() != "nginx":
+                raise StatusPageError("Only native Nginx HTTP/80 can be probed")
+            def native_record():
+                site = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(site, dict) or
+                        type(site.get("id")) is not int or site["id"] != site_id):
+                    raise StatusPageError("Native site identity changed during HTTP probe")
+                # Read the exact native bound-domain set on both sides of the
+                # request. Do not infer website routing from the site name.
+                _bound_domains_for_sites(public, [site])
+                return site
+
+            before = native_record()
+            preferences = read_preferences(_STATE_DIR)
+            effective, source = select_brand(preferences, site_id)
+            if self._argument(args, "brand_name") is not None:
+                effective = self._status_values(args)
+                source = "Unsaved probe selection"
+            rendered = render_page(self._argument(args, "locale"), "404", effective)
+            observed = probe_site_404(
+                before, locale=self._argument(args, "locale"),
+                rendered_sha256=rendered["rendered_sha256"],
+                rendered_html=rendered["html"],
+            )
+            if (native_record() != before or public.get_webserver() != "nginx"
+                    or read_preferences(_STATE_DIR) != preferences):
+                raise StatusPageError(
+                    "Native website, branding or Nginx service changed during HTTP probe"
+                )
+            response = {
+                "status": True, "request_id": request_id,
+                "revision": preferences["revision"], "selection_source": source,
+                **observed,
+            }
+            return self._activity_result(
+                response, "status_pages", "status_probe",
+                target="site:" + str(site_id),
+                level="INFO" if observed["state"] == "HTTP Match" else "WARNING",
+            )
+        except PermissionError as exc:
+            return self._fail("status_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("status_probe", exc, request_id)
 
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""

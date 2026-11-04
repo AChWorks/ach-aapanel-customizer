@@ -52,6 +52,7 @@ function loadUi() {
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
+    '#ach-status-probe-button', '#ach-status-probe-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -248,6 +249,8 @@ function loadUi() {
       statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
       statusResetDisabled: elements.get('#ach-status-reset').props.disabled,
       statusInspectDisabled: elements.get('#ach-status-inspect-button').props.disabled,
+      statusProbeDisabled: elements.get('#ach-status-probe-button').props.disabled,
+      statusProbe: elements.get('#ach-status-probe-result').textContent,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       statusCompareSummary: elements.get('#ach-status-comparison-summary').textContent,
       statusCompareExcerpt: elements.get('#ach-status-comparison-excerpt').textContent,
@@ -1328,6 +1331,97 @@ test('Site inspection is scoped, read-only, renders a bounded disk/source diagno
   assert.match(ui.state().statusInspect,/not run/);
   assert.match(ui.state().statusCompareSummary,/not run/);
   assert.equal(ui.state().statusCompareExcerpt,'');
+});
+
+function statusProbe(overrides={}) {
+  const sha='a'.repeat(64);
+  return {
+    status:true,schema:1,site_id:7,site_key:'demo.test',
+    template:'404',locale:'en',scope:'loopback_http_80',
+    state:'HTTP Match',reason:'Observed HTTP 404 with byte-identical site page',
+    read_only:true,apply_supported:false,nginx_runtime_verified:false,
+    revision:2,http_status:404,http_404_observed:true,
+    body_sha256:sha,body_bytes:50,page_file_sha256:sha,rendered_sha256:sha,
+    body_matches_file:true,body_matches_render:true,
+    note:'One explicit local-only HTTP/80 GET. No Apply permission.',
+    ...overrides
+  };
+}
+function statusProbeUi() {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs());
+  return ui;
+}
+
+test('Explicit live 404 probe reports HTTP/body evidence without granting Apply', () => {
+  const ui=statusProbeUi();
+  assert.equal(ui.state().statusProbeDisabled,false);
+  const request=ui.statusClick('#ach-status-probe-button');
+  assert.match(request.options.url,/s=status_probe$/);
+  assert.equal(request.options.data.site_id,'7');
+  assert.equal(request.options.data.locale,'en');
+  assert.equal(request.options.data.template,'404');
+  assert.equal(ui.state().statusProbeDisabled,true);
+  request.respond(statusProbe());
+  assert.match(ui.state().statusProbe,/HTTP Match/);
+  assert.match(ui.state().statusProbe,/HTTP status: 404/);
+  assert.match(ui.state().statusProbe,/body matches site file: Yes/);
+  assert.match(ui.state().statusProbe,/not proof|No Apply permission/);
+  assert.equal(ui.state().statusProbeDisabled,false);
+  ui.statusSetValue('#ach-status-template','502','change');
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.match(ui.state().statusProbe,/not checked/);
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,before,'Cannot probe a 502 through the 404-only endpoint');
+});
+
+test('HTTP mismatch, soft success, and unknown evidence stay distinguishable', () => {
+  const responses=[
+    statusProbe({state:'HTTP Mismatch',http_status:200,http_404_observed:false,
+      body_matches_file:false,body_matches_render:false}),
+    statusProbe({state:'HTTP Mismatch',http_status:404,http_404_observed:true,
+      body_sha256:'b'.repeat(64),body_matches_file:false,body_matches_render:false}),
+    statusProbe({state:'Needs Review',http_status:null,http_404_observed:false,
+      body_sha256:null,body_bytes:null,page_file_sha256:null,
+      body_matches_file:false,body_matches_render:false,reason:'Local HTTP unavailable'})
+  ];
+  for (const response of responses) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(response);
+    assert.match(ui.state().statusProbe,/HTTP Mismatch|Needs Review/);
+    assert.doesNotMatch(ui.state().statusProbe,/Apply ready|verified Nginx config/i);
+  }
+});
+
+test('Untrusted, stale, cross-site, overclaiming HTTP probe responses fail closed', () => {
+  const sha='a'.repeat(64);
+  const invalid=[
+    statusProbe({site_id:8}),statusProbe({status:false}),
+    statusProbe({schema:2}),statusProbe({revision:3}),statusProbe({read_only:false}),
+    statusProbe({apply_supported:true}),statusProbe({nginx_runtime_verified:true}),
+    statusProbe({scope:'remote_http'}),statusProbe({body_sha256:'wrong'}),
+    statusProbe({body_bytes:65537}),statusProbe({http_status:200,http_404_observed:true}),
+    statusProbe({state:'HTTP Match',body_matches_file:false}),
+    statusProbe({body_matches_render:true,body_sha256:'b'.repeat(64)}),
+    statusProbe({state:'Needs Review',body_sha256:sha,http_status:null}),
+    statusProbe({site_key:'<img onerror=alert(1)>'}),
+    statusProbe({reason:'x'.repeat(400)})
+  ];
+  for (const bad of invalid) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(bad);
+    assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
+  }
+  const ui=statusProbeUi();
+  const pending=ui.statusClick('#ach-status-probe-button');
+  ui.statusSetValue('#ach-status-name','Changed after request','input change');
+  pending.respond(statusProbe());
+  assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
+  assert.doesNotMatch(ui.state().statusProbe,/HTTP Match/);
 });
 
 test('Invalid, cross-site and routing-overclaim inspection replies fail closed', () => {

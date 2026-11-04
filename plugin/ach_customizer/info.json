@@ -1,8 +1,8 @@
 {
   "title": "ACh aaPanel Customizer",
   "name": "ach_customizer",
-  "ps": "Native Monitor and guarded PHP 8.5 Manual Apply; offline Status Pages preview, native sidebar, Activity and read-only local hosts diagnostics (no Status Pages Apply)",
-  "versions": "0.1.8",
+  "ps": "Native Monitor, guarded PHP 8.5 Manual Apply, offline Status Pages and explicit local-only HTTP 404 verification; no Status Pages Apply",
+  "versions": "0.1.10",
   "checks": "/www/server/panel/plugin/ach_customizer",
   "author": "AChWorks",
   "home": "https://github.com/AChWorks/ach-aapanel-customizer"

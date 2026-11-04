@@ -376,6 +376,9 @@
       <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
       <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
       <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
+      <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check live HTTP/80 site 404 (read-only)</button></div>
+      <p class="ach-note">HTTP probe makes one explicit GET for a random nonexistent path through 127.0.0.1:80 with the selected website's native, bound Host. It cannot prove HTTPS, Cloudflare, other routes, or safe Apply. The request may appear in website access logs.</p>
+      <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Live HTTP/80 404 not checked.</p>
       <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
       <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
       <p id="ach-status-result" role="status" aria-live="polite">Open Status Pages to load saved preferences.</p>
@@ -503,6 +506,7 @@
   }
   function hasPotentialActivity(method) {
     return method === 'set_control' || method === 'inspect_local_hosts' || method === 'status_save' ||
+      method === 'status_probe' ||
       method === 'fpm_apply' || method === 'fpm_rollback';
   }
   function validInventoryPage(r, expectedPage) {
@@ -1025,11 +1029,16 @@
       !scope || scope.scope !== 'site' ||
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
       (template !== '404' && template !== '502'));
+    root.find('#ach-status-probe-button').prop('disabled', busy || statusRevision === null ||
+      !scope || scope.scope !== 'site' ||
+      statusLoadedScope !== scope.scope + ':' + scope.site_id ||
+      template !== '404');
   }
   function statusClearPreview() {
     root.find('#ach-status-iframe').prop('srcdoc', '');
     root.find('#ach-status-sha').text('');
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
+    root.find('#ach-status-probe-result').text('Live HTTP/80 404 not checked.');
     root.find('#ach-status-comparison-summary').text('Content comparison not run.');
     root.find('#ach-status-comparison-excerpt').text('');
   }
@@ -1313,6 +1322,76 @@
           '. No files changed; Nginx routing is not verified.');
         // Site-owned HTML is untrusted; never insert it through .html() or srcdoc.
         root.find('#ach-status-comparison-excerpt').text(comparison.excerpt);
+      }
+      statusLock(false);
+    });
+  });
+  function validStatusProbe(r, scope, locale) {
+    var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
+    var maybeHash = function (value) { return value === null || hash(value); };
+    return r && r.schema === 1 && r.status === true &&
+      r.read_only === true && r.apply_supported === false &&
+      r.nginx_runtime_verified === false && r.scope === 'loopback_http_80' &&
+      r.site_id === Number(scope.site_id) && Number.isSafeInteger(r.site_id) &&
+      r.template === '404' && r.locale === locale &&
+      ['HTTP Match','HTTP Mismatch','Needs Review'].includes(r.state) &&
+      typeof r.site_key === 'string' && /^[A-Za-z0-9.-]{3,253}$/.test(r.site_key) &&
+      typeof r.reason === 'string' && r.reason.length <= 240 &&
+      typeof r.note === 'string' && r.note.length <= 600 &&
+      Number.isSafeInteger(r.revision) && r.revision === statusRevision &&
+      hash(r.rendered_sha256) && maybeHash(r.page_file_sha256) &&
+      maybeHash(r.body_sha256) &&
+      typeof r.body_matches_file === 'boolean' &&
+      typeof r.body_matches_render === 'boolean' &&
+      typeof r.http_404_observed === 'boolean' &&
+      (r.http_status === null ||
+        (Number.isSafeInteger(r.http_status) && r.http_status >= 100 && r.http_status <= 599)) &&
+      (r.body_bytes === null ||
+        (Number.isSafeInteger(r.body_bytes) && r.body_bytes >= 0 && r.body_bytes <= 65536)) &&
+      (r.state === 'Needs Review' ?
+        r.http_status === null && r.body_sha256 === null && r.body_bytes === null &&
+        !r.body_matches_file && !r.body_matches_render && !r.http_404_observed :
+        r.http_status !== null && hash(r.body_sha256) && r.body_bytes !== null &&
+        r.page_file_sha256 !== null &&
+        (r.http_404_observed === (r.http_status === 404)) &&
+        (r.state === 'HTTP Match' ? r.http_404_observed && r.body_matches_file &&
+          r.body_sha256 === r.page_file_sha256 :
+          !r.body_matches_file)) &&
+      (!r.body_matches_render ||
+        (r.body_matches_file && r.body_sha256 === r.rendered_sha256));
+  }
+  root.find('#ach-status-probe-button').on('click', function () {
+    var scope = statusScope(), locale = root.find('#ach-status-locale').val();
+    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'site' ||
+        statusLoadedScope !== scope.scope + ':' + scope.site_id ||
+        root.find('#ach-status-template').val() !== '404') return;
+    var ticket = statusTicket, submittedBrand = statusFields();
+    root.find('#ach-status-probe-result').text('Checking local HTTP/80 404 response; no files will change...');
+    statusLock(true);
+    request('status_probe', Object.assign({}, scope, submittedBrand, {
+      template:'404', locale:locale
+    }), function (r) {
+      if (ticket !== statusTicket) return;
+      var currentBrand = statusFields();
+      var sameSelection = Object.keys(submittedBrand).every(function (key) {
+        return submittedBrand[key] === currentBrand[key];
+      }) && statusScope()?.site_id === scope.site_id &&
+        statusLoadedScope === scope.scope + ':' + scope.site_id &&
+        root.find('#ach-status-template').val() === '404' &&
+        root.find('#ach-status-locale').val() === locale;
+      if (!sameSelection || !validStatusProbe(r, scope, locale)) {
+        root.find('#ach-status-probe-result').text(
+          'HTTP response evidence unconfirmed or incompatible. No Apply readiness inferred.');
+      } else {
+        root.find('#ach-status-probe-result').text(
+          r.state + ': ' + r.reason +
+          '\nHTTP status: ' + (r.http_status === null ? 'Unavailable' : r.http_status) +
+          '\nCurrent source page SHA-256: ' + (r.page_file_sha256 || 'Unavailable') +
+          '\nObserved HTTP body SHA-256: ' + (r.body_sha256 || 'Unavailable') +
+          '\nSelected render SHA-256: ' + r.rendered_sha256 +
+          '\nHTTP body matches site file: ' + (r.body_matches_file ? 'Yes' : 'No') +
+          '\nHTTP body matches selected render: ' + (r.body_matches_render ? 'Yes' : 'No') +
+          '\n' + r.note);
       }
       statusLock(false);
     });
