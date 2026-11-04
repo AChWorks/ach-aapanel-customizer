@@ -124,6 +124,38 @@ const {chromium} = require('playwright');
         }
       }
     }
+    // Inspect the real shipped, sandbox-free DOM with an explicitly TEXT-only
+    // display of untrusted existing-site HTML. No backend/auth/native QA claim.
+    for(const [width,height] of [[1280,720],[375,650]]) {
+      await page.setViewportSize({width,height});
+      await page.setContent(html, {waitUntil:'domcontentloaded'});
+      const check=await page.evaluate(() => {
+        document.querySelectorAll('[data-view]').forEach(view=>{
+          view.hidden=view.getAttribute('data-view')!=='status';
+        });
+        const pre=document.getElementById('ach-status-comparison-excerpt');
+        const summary=document.getElementById('ach-status-comparison-summary');
+        const hostile='<img src=x onerror=alert(1)>';
+        summary.textContent='Different - display-only source comparison; no Apply';
+        pre.textContent='--- current 404.html\\n+++ proposed 404.html\\n' +
+          Array.from({length:90},(_,i)=>'-'+i+' '+hostile+'\\n+'+i+' <p>Reviewed</p>').join('\\n');
+        const rect=pre.getBoundingClientRect();
+        const css=getComputedStyle(pre);
+        return {right:rect.right,height:rect.height,maxHeight:css.maxHeight,
+          overflowY:css.overflowY,scrollHeight:pre.scrollHeight,
+          clientHeight:pre.clientHeight,containsLiteral:pre.textContent.includes(hostile),
+          unexpectedImages:document.querySelectorAll('img[src="x"]').length,
+          documentOverflow:document.documentElement.scrollWidth>innerWidth,
+          statusVisible:summary.getBoundingClientRect().height>0};
+      });
+      if(check.documentOverflow || check.unexpectedImages || !check.containsLiteral ||
+         !check.statusVisible || check.right>width+1 || check.overflowY!=='auto' ||
+         check.scrollHeight<=check.clientHeight || check.height>260+1) {
+        throw Error('Unsafe or unscrollable Status Pages diff at 100% zoom '+
+          JSON.stringify({width,height,...check}));
+      }
+    }
+    console.log('STATUS_COMPARE_VIEWPORT_PASS 2 responsive scroll/plain-text checks');
     // Verify actual table skeleton layout and reduced-motion support.
     await page.setViewportSize({width:375,height:650});
     await page.emulateMedia({reducedMotion:'reduce'});

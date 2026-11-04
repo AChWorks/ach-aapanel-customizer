@@ -521,6 +521,7 @@ class ach_customizer_main:
             inspected = inspect_site_files(
                 before, template=template, locale=locale,
                 rendered_sha256=rendered["rendered_sha256"],
+                rendered_html=rendered["html"],
             )
             if native_record() != before:
                 raise StatusPageError("Native site changed during inspection; recheck")
