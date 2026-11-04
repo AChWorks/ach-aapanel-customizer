@@ -1828,6 +1828,35 @@ test('Review R2: consistent no-op acknowledgment is accepted without inventing a
   assert.equal(ui.state().controls.overall.disabled,false);
 });
 
+test('Review R3: Websites navigation while policy write is pending never caches a pre-transition page', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:10}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',false);
+  assert.deepEqual(ui.state().rows,[]);
+  assert.equal(ui.state().nextDisabled,true);
+  const pendingRequests=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,pendingRequests,
+    'A get_sites request must not launch under an unsettled Monitor policy');
+  assert.deepEqual(ui.state().rows,[]);
+  assert.match(ui.state().siteStatus,/Monitor update pending/);
+  write.respond(monitorAck({state_revision:11,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const confirmedRead=ui.requests.at(-1);
+  assert.match(confirmedRead.options.url,/s=get_sites$/);
+  assert.equal(ui.requests.length,pendingRequests+1,
+    'The next read must be initiated only after a confirmed policy transition');
+  confirmedRead.respond({status:false,stage:'monitor_disabled',msg:'Website inventory disabled'});
+  assert.deepEqual(ui.state().rows,[]);
+  assert.equal(ui.state().nextDisabled,true);
+  const afterLoad=ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,afterLoad+1,
+    'A failed current-policy read must keep explicit retry available');
+});
+
 test('Review R3: pending inventory is discarded after conflicted Website Monitor write', () => {
   for(const outcome of ['conflict','timeout','incompatible-success']){
     const ui=loadUi();
@@ -1841,18 +1870,133 @@ test('Review R3: pending inventory is discarded after conflicted Website Monitor
       modules_enabled:{site_inventory:true,php_fpm_file_preview:true}}));
     stale.respond(page());
     assert.deepEqual(ui.state().rows,[],'Stale inventory must not return: '+outcome);
-    assert.match(ui.state().siteStatus,/Monitor settings changed/,outcome);
+    assert.match(ui.state().siteStatus,/Monitor policy unverified/,outcome);
     assert.equal(ui.state().controls.site_inventory.disabled,true,outcome);
-    const pending=ui.openSites();
-    assert.match(pending.options.url,/s=get_sites$/);
-    pending.respond({status:false,stage:'monitor_disabled',msg:'Monitor state not verified'});
+    const blockedCount=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,blockedCount,'Do not fetch under unverified policy: '+outcome);
     assert.equal(ui.state().nextDisabled,true);
     ui.openOverview();
     ui.refreshOverview().respond(monitorOverview({state_revision:7,
       modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
     assert.equal(ui.state().controls.site_inventory.checked,false,outcome);
     assert.equal(ui.state().controls.site_inventory.disabled,false,outcome);
+    const recovered=ui.openSites();
+    assert.match(recovered.options.url,/s=get_sites$/);
+    recovered.respond({status:false,stage:'monitor_disabled',msg:'Monitor state not verified'});
+    assert.equal(ui.state().nextDisabled,true);
   }
+});
+
+test('Review R3: uncertain policy outcomes require a verified GET before any Websites read', () => {
+  for (const outcome of ['timeout','conflict','contradictory-success']) {
+    const ui=loadUi();
+    ui.respondOverview(monitorOverview({state_revision:10}));
+    ui.openSites().respond(page());
+    ui.openOverview();
+    const write=ui.toggleMonitor('overall',false);
+    const pendingCount=ui.requests.length;
+    ui.openSites();
+    ui.refreshSites(); // Even a synthetic disabled-button click must not dispatch.
+    assert.equal(ui.requests.length,pendingCount,'Pending policy blocks get_sites: '+outcome);
+    assert.deepEqual(ui.state().rows,[],outcome);
+    assert.match(ui.state().siteStatus,/Monitor update pending/,outcome);
+    if (outcome==='timeout') write.reject(null,'timeout');
+    else if (outcome==='conflict') write.respond({
+      status:false,stage:'monitor_state_write',msg:'Revision conflict'});
+    else write.respond(monitorAck({state_revision:11,overall_enabled:true}));
+    assert.match(ui.state().siteStatus,/Monitor policy unverified/,outcome);
+    assert.equal(ui.state().controls.overall.disabled,true,outcome);
+    const blocked=ui.requests.length;
+    ui.openSites(); ui.refreshSites();
+    assert.equal(ui.requests.length,blocked,'Unconfirmed policy blocks retries: '+outcome);
+    ui.openOverview();
+    const bad=ui.refreshOverview();
+    bad.respond(monitorOverview({state_schema:2,state_revision:11,overall_enabled:false}));
+    const afterBad=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,afterBad,'Malformed recheck cannot unlock Websites: '+outcome);
+    ui.openOverview().respond(monitorOverview({state_revision:9,overall_enabled:true}));
+    const afterStale=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,afterStale,'Older recheck cannot unlock Websites: '+outcome);
+    ui.openOverview().reject(null,'timeout');
+    const afterFailed=ui.requests.length;
+    ui.openSites();
+    assert.equal(ui.requests.length,afterFailed,'Failed recheck cannot unlock Websites: '+outcome);
+    ui.openOverview();
+    ui.refreshOverview().respond(monitorOverview({state_revision:11,overall_enabled:false,mode:'Disabled'}));
+    assert.equal(ui.state().controls.overall.disabled,false,outcome);
+    const afterGood=ui.requests.length;
+    const fresh=ui.openSites();
+    assert.equal(ui.requests.length,afterGood+1,'Fresh policy read permits inventory: '+outcome);
+    assert.match(fresh.options.url,/s=get_sites$/);
+    fresh.respond(page([]));
+    assert.deepEqual(ui.state().rows,[['No sites in this page']],outcome);
+    assert.equal(ui.state().page,'1',outcome);
+    assert.equal(ui.state().nextDisabled,true,outcome);
+  }
+});
+
+test('Review R3: pre-mutation inventory response cannot replace post-acknowledgment data', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:4}));
+  const oldRead=ui.openSites();
+  ui.openOverview();
+  const mutation=ui.toggleMonitor('site_inventory',false);
+  const pendingCount=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,pendingCount,'Do not launch during mutation');
+  mutation.respond(monitorAck({state_revision:5,
+    modules_enabled:{site_inventory:false,php_fpm_file_preview:true}}));
+  const fresh=ui.requests.at(-1);
+  assert.match(fresh.options.url,/s=get_sites$/);
+  oldRead.respond(page());
+  assert.deepEqual(ui.state().rows,[],'Pre-mutation request discarded after newer policy');
+  fresh.respond(page([]));
+  assert.deepEqual(ui.state().rows,[['No sites in this page']]);
+  assert.equal(ui.state().nextDisabled,true);
+  const afterFresh=ui.requests.length;
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,afterFresh,'Successful current-policy read remains cached');
+  ui.refreshSites().respond(page());
+  assert.equal(ui.state().rows.length,1,'Explicit Refresh still fetches new data');
+});
+
+test('Review R3: valid no-op policy acknowledgment safely releases deferred inventory read', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:8}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',true);
+  const count=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,count,'No data read during even a no-op write');
+  write.respond(monitorAck({changed:false,state_revision:8}));
+  assert.equal(ui.state().stateRevision,'State revision: 8');
+  const fresh=ui.requests.at(-1);
+  assert.match(fresh.options.url,/s=get_sites$/);
+  assert.equal(ui.requests.length,count+1);
+  fresh.respond(page([]));
+  assert.deepEqual(ui.state().rows,[['No sites in this page']]);
+  assert.equal(ui.state().nextDisabled,true);
+});
+
+test('Review R3: PHP-only Monitor update does not stall or invalidate Websites inventory', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:8}));
+  ui.openSites().respond(page());
+  ui.openOverview();
+  const mutation=ui.toggleMonitor('php_fpm_file_preview',false);
+  const pendingCount=ui.requests.length;
+  ui.openSites();
+  assert.equal(ui.requests.length,pendingCount,'Unrelated policy does not invalidate cached Websites');
+  assert.equal(ui.state().rows.length,1);
+  mutation.respond(monitorAck({state_revision:9,
+    modules_enabled:{site_inventory:true,php_fpm_file_preview:false}}));
+  ui.openOverview(); ui.openSites();
+  assert.equal(ui.requests.length,pendingCount,'No duplicate Websites request after PHP-only update');
+  assert.equal(ui.state().rows.length,1);
 });
 
 test('Review R3: changing Website Monitor invalidates cached and in-flight inventory only', () => {

@@ -361,6 +361,8 @@
     id: 'Operation ID'
   };
   var page = 1, sitePageSize = 25, hasMore = false, siteBusy = false, siteTicket = 0;
+  // Website reads depend on the effective Monitor policy, not just their own ticket.
+  var websitePolicyState = 'stable'; // stable | pending | unverified
   var controlBusy = false, lastOverview = null, monitorRecheckRequired = false;
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
   var fpmFormGeneration = 0, fpmPreviewTicket = 0, fpmPrepareTicket = 0;
@@ -416,6 +418,16 @@
     root.find('#ach-sites-refresh').prop('disabled', false);
     root.find('#ach-sites-status').text('Monitor settings changed. Reload website inventory to verify current access.');
     if (root.find('#ach-tab-websites').attr('aria-selected') === 'true') sites();
+  }
+  function settleWebsitesPolicy(confirmed) {
+    if (websitePolicyState !== 'pending') return; // Unrelated Monitor controls.
+    websitePolicyState = confirmed ? 'stable' : 'unverified';
+    if (!confirmed) {
+      sites(); // Show the recheck requirement; never dispatch get_sites.
+    } else {
+      root.find('#ach-sites-refresh').prop('disabled', false);
+      if (root.find('#ach-tab-websites').attr('aria-selected') === 'true') sites();
+    }
   }
   function invalidateActivitySnapshot() {
     // Failed or unconfirmed writes can still emit an Activity record.
@@ -646,6 +658,12 @@
         // that can release the recheck gate.
         monitorRecheckRequired = false;
         root.find('[data-monitor-control]').prop('disabled', false);
+        if (websitePolicyState === 'unverified') {
+          websitePolicyState = 'stable';
+          root.find('#ach-sites-refresh').prop('disabled', false);
+          root.find('#ach-sites-status').text('Monitor state verified. Reload website inventory for current access.');
+          if (root.find('#ach-tab-websites').attr('aria-selected') === 'true') sites();
+        }
       }
       root.find('#ach-overview-status').text(accepted ?
         r.mode + ' — ' + r.notice :
@@ -668,7 +686,10 @@
     controlBusy = true;
     // Even a timeout/conflict can leave a changed backend state; never keep a
     // Website inventory snapshot issued under an unverified Monitor policy.
-    if (control === 'overall' || control === 'site_inventory') invalidateWebsitesSnapshot();
+    if (control === 'overall' || control === 'site_inventory') {
+      websitePolicyState = 'pending';
+      invalidateWebsitesSnapshot();
+    }
     // An already pending Overview read may have been issued under an older state.
     overviewTicket++;
     overviewBusy = false;
@@ -685,6 +706,7 @@
         // must not unlock writes until a fresh verified GET is observed.
         monitorRecheckRequired = true;
         displayControls(previousSnapshot);
+        settleWebsitesPolicy(false);
         sectionsLoaded.overview = false;
         root.find('#ach-overview-status').text(!r ?
           'Monitor update not confirmed. Last known controls shown; Refresh state before retrying. Changes locked.' :
@@ -695,16 +717,26 @@
       if (!displayControls(r)) {
         monitorRecheckRequired = true;
         displayControls(previousSnapshot);
+        settleWebsitesPolicy(false);
         sectionsLoaded.overview = false;
         root.find('#ach-overview-status').text('Monitor response unverified. Refresh state before any new change. Changes locked.');
         return;
       }
       sectionsLoaded.overview = true;
+      settleWebsitesPolicy(true);
       root.find('#ach-overview-status').text(r.mode + ' — ' + r.notice);
     });
   });
   function sites() {
     if (siteBusy) return;
+    if (websitePolicyState !== 'stable') {
+      root.find('#ach-sites-refresh').prop('disabled', true);
+      root.find('#ach-prev, #ach-next').prop('disabled', true);
+      root.find('#ach-sites-status').text(websitePolicyState === 'pending' ?
+        'Monitor update pending. Website inventory will load only after confirmation.' :
+        'Monitor policy unverified. Open Overview and Refresh state before loading websites.');
+      return;
+    }
     var ticket = ++siteTicket, requestedPage = page;
     siteBusy = true;
     root.find('#ach-sites-refresh').prop('disabled', true);
