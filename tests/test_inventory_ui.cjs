@@ -2178,6 +2178,27 @@ test('Stale PHP discovery response after a refresh cannot restore old version ch
 });
 
 
+test('Changed PHP source path fails closed after Refresh, revoking prior selection and approval', () => {
+  const ui=loadUi();
+  ui.requests[0].respond(monitorOverview());
+  ui.openPhp().respond(ui.phpVersions());
+  const preview=ui.submitPhp('85', false);
+  preview.respond(phpPreview());
+  assert.equal(ui.state().phpVersion,'85');
+  const refresh=ui.refreshPhp();
+  refresh.respond({...ui.phpVersions([]), state:'Needs Review',
+    reason:'aaPanel PHP source pathname or file changed during inspection; Refresh installed PHP'});
+  const state=ui.state();
+  assert.equal(state.phpVersionDisabled,true);
+  assert.deepEqual(state.phpOptions.map(o=>o.value),['']);
+  assert.equal(state.fpmPrepareDisabled,true);
+  assert.match(state.phpDiscovery,/changed during inspection/);
+  const requests=ui.requests.length;
+  ui.submitPhp('85', false);
+  assert.equal(ui.requests.length,requests,
+    'A former PHP85 file candidate must not survive a changed-path inventory');
+});
+
 test('PHP tab return reuses valid discovery and selected preview until explicit Refresh', () => {
   const ui=loadUi();
   ui.requests[0].respond(monitorOverview());
