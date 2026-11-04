@@ -102,7 +102,7 @@ class ach_customizer_main:
             message = "Unexpected plugin error; inspect Activity using Operation ID"
         response = {"status": False, "stage": stage,
                     "msg": message, "operation_id": operation_id}
-        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_")) else
+        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_")) else
                   "status_pages" if stage.startswith("status_") else
                   "websites" if stage.startswith(("website_", "hosts_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")

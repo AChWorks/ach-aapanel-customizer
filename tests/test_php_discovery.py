@@ -218,6 +218,22 @@ class NativePHPDiscoveryEndpointTests(unittest.TestCase):
         self.assertRegex(result['operation_id'], r'^[0-9a-f]{32}$')
         self.assertTrue(result['activity_logged'])
 
+    def test_failed_php_discovery_is_classified_in_php_fpm_activity(self):
+        from ach_customizer_activity import read_activity
+        with patch.dict(sys.modules, {'flask': self.flask(uid=2)}):
+            denied = self.plugin.get_php_versions({})
+        self.assertFalse(denied['status'])
+        with patch.dict(sys.modules, {'flask': self.flask()}):
+            with patch.object(endpoint, 'discover_php_fpm_versions',
+                              side_effect=monitor.MonitorInputError('PHP inventory exceeds limit')):
+                failed = self.plugin.get_php_versions({})
+        self.assertFalse(failed['status'])
+        php_events = read_activity(self.tmp.name, module='php_fpm', limit=10)
+        for stage in ('php_versions_authorization', 'php_versions_discovery'):
+            self.assertTrue(any(item['stage'] == stage and item['level'] == 'ERROR'
+                                and item['module'] == 'php_fpm'
+                                for item in php_events), stage)
+
 
 if __name__ == '__main__':
     unittest.main()
