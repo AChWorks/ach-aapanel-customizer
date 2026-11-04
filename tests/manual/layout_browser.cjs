@@ -21,7 +21,7 @@ const {chromium} = require('playwright');
     for(const [width,height] of [[1280,720],[1366,768],[1920,1080],[720,650],[375,650]]) {
       await page.setViewportSize({width,height});
       await page.setContent(html, {waitUntil:'domcontentloaded'});
-      for(const name of ['overview','status','php','activity']) {
+      for(const name of ['overview','websites','status','php','activity']) {
         await page.evaluate((name)=>{
           document.querySelectorAll('[data-view]').forEach(v=>v.hidden=v.getAttribute('data-view')!==name);
         },name);
@@ -40,6 +40,25 @@ const {chromium} = require('playwright');
             contentBottom:Math.round(mb.bottom),
             controlsHiddenBehindBody:body.scrollHeight>innerHeight+1};
         });
+        // Verify reusable control geometry in the actual rendered plugin DOM.
+        // This detects aaPanel-style drift even if the parent layer still fits.
+        const controls=await page.evaluate(()=>{
+          const main=document.getElementById('ach-content');
+          const edge=main.getBoundingClientRect();
+          const found=[...main.querySelectorAll('button,input:not([type="checkbox"]),select')]
+            .filter(el=>el.getClientRects().length>0 && !el.closest('[hidden]'));
+          const failures=found.filter(el=>{
+            const r=el.getBoundingClientRect();
+            const css=getComputedStyle(el);
+            return r.height<31 || r.height>96 || r.width<15 ||
+              r.left<edge.left-1 || r.right>edge.right+1 ||
+              css.borderRadius!==(el.tagName==='BUTTON' ? '6px' : '10px');
+          }).map(el=>el.id||el.tagName);
+          return {visible:found.length,failures};
+        });
+        if(controls.failures.length) {
+          throw Error('Inconsistent native control sizing '+JSON.stringify({width,height,name,...controls}));
+        }
         output.push({section:name,...x});
         if(x.documentOverflow || !x.rootVisible || !x.navVisible || !x.contentWithinViewport ||
           x.contentOverflowMode!=='auto') {
@@ -48,6 +67,48 @@ const {chromium} = require('playwright');
         if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
       }
     }
+    // Inspect computed primary button colors in Chromium, including real hover.
+    // This complements source token calculations; white-on-green text is 13px.
+    await page.setViewportSize({width:1280,height:720});
+    await page.setContent(html, {waitUntil:'domcontentloaded'});
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-view]').forEach(view => {
+        view.hidden = view.getAttribute('data-view') !== 'php';
+      });
+    });
+    const primary = page.locator('#ach-php-form button.btn-success');
+    const getPrimary = () => primary.evaluate(element => {
+      const css = getComputedStyle(element);
+      return {background:css.backgroundColor, foreground:css.color, disabled:element.disabled};
+    });
+    const normal = await getPrimary();
+    await primary.hover();
+    await page.waitForTimeout(220);
+    const hover = await getPrimary();
+    function luminance(value) {
+      const channels = value.match(/[0-9]+/g)?.slice(0,3).map(Number);
+      if (!channels || channels.length !== 3) throw Error('Invalid computed color ' + value);
+      const [r,g,b] = channels.map(v => {
+        const c = v / 255;
+        return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126*r + 0.7152*g + 0.0722*b;
+    }
+    function contrast(a,b) {
+      const x = luminance(a), y = luminance(b);
+      return (Math.max(x,y) + .05) / (Math.min(x,y) + .05);
+    }
+    for (const [state,colors] of [['normal',normal],['hover',hover]]) {
+      const ratio = contrast(colors.background,colors.foreground);
+      if (colors.disabled || ratio < 4.5) {
+        throw Error('Primary action contrast below AA ' + JSON.stringify({state,colors,ratio}));
+      }
+    }
+    console.log('PRIMARY_CONTRAST_PASS '+JSON.stringify({
+      normal:contrast(normal.background,normal.foreground).toFixed(3),
+      hover:contrast(hover.background,hover.foreground).toFixed(3),
+      normalFill:normal.background,hoverFill:hover.background
+    }));
     // Exercise the shipped resize helper inside a simulated aaPanel layer.
     // This is NOT an authenticated aaPanel guest/browser acceptance test.
     const complete = fs.readFileSync(filename, 'utf8');

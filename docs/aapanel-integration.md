@@ -17,6 +17,60 @@ The aaPanel PDF explicitly warns: **dynamic plugin routes do not inherit aaPanel
 
 This first candidate intentionally **does not define `_check`** and only uses the conventional in-panel `/plugin?action=a` route. In the isolated aaPanel **8.0.7** test, unauthenticated requests returned HTTP 404, authenticated requests without aaPanel's `x-http-token` header returned `INIT_CSRF_ERR`, and the same read-only methods succeeded through the panel's own UI. This verifies the observed version/route, **not** a general security guarantee for other versions or future privileged methods. No Apply/write endpoint is exposed in this candidate.
 
+## Native aaPanel dialog UI (unreleased UI refinement)
+
+The ACh Customizer management surface follows the compact Nginx-management
+dialog pattern illustrated by the official [Nginx deployment guide](https://www.aapanel.com/docs/Function/Deployment.html):
+use the **host-managed layer title**, a light side navigation, immediate in-place
+section switching, compact labeled fields, and semantic primary actions.
+Do not add a second dialog title, a browser-style route transition, or
+unscoped styles that could alter other aaPanel layers.
+
+The plugin CSS stays scoped under `#ach-customizer` and uses common roles for
+surfaces, typography, borders, inputs, selects, buttons, focus, and dangerous
+actions. Normal text inputs, selects and action buttons have consistent 32px
+visual height, with 10px form-field and 6px action-button corner radii;
+form labels, notes, wrapping and responsive layout share one rhythm.
+The native green `#20a53a` remains a reference accent, but filled
+primary controls use darker `#167a2f` / hover `#146f2b` with white text:
+Chromium-computed text contrast is 5.44:1 and 6.29:1, respectively.
+Keep the bounded native modal sizing fallback and small-viewport
+horizontal navigation.
+
+First-time read-only requests use stable **per-panel** pending/empty/error text
+rather than a dialog-wide loading flash. A tab retains its DOM and already
+validated data on return **unless an acknowledged or uncertain related mutation
+invalidates that snapshot**. A successful Monitor overall/website switch drops
+pending and cached Websites results; potential Activity-producing Monitor,
+branding, and PHP-FPM Apply/Restore writes (success, failure or uncertain outcome)
+invalidate Activity and trigger one refresh when Activity is open. In-flight
+older Activity and inventory replies are ignored. Monitor Refresh and
+set_control share ticket/revision ordering so stale Overview responses cannot
+replace newer acknowledged state. Operators can explicitly **Refresh state**,
+**Refresh websites**, use existing Activity **Refresh**, and **Recheck saved
+branding** in Status Pages when external state changes. Re-entering Status Pages never erases unsaved branding text;
+explicit recheck or a deliberate scope change may reload. PHP-FPM
+Apply/Restore safety, recovery and audit outcomes are unchanged.
+
+Evidence: automated JS behavior tests and Chromium simulations measure the
+shipped DOM, viewport/control geometry and navigation. A **real authenticated
+Nginx management dialog** was inspected end-to-end on aaPanel's **official
+public Demo** (8.0.7 / Nginx 1.24.0): all seven tabs, modal/nav/form
+measurements, selected state, scrolling, network requests, narrow viewports,
+and a dialog-cropped screenshot. See the [measured native Nginx UI study](evidence/aaPanel-demo-8.0.7-nginx-1.24.0-2026-11-04-study.md).
+The separately authenticated **QEMU guest** (aaPanel 8.0.7 / Nginx 1.28.3)
+did not expose Nginx in Official Installed App Store (Total 0), so its own
+**Nginx dialog inspection remains unverified**. The public Demo is a real,
+different environment, **not a substitute for this guest-specific gap**.
+The refined PR16 UI **was** installed through the guest's native browser
+file-picker and inspected across tabs, viewport sizes, cached data, retained
+branding and synthetic network failure/retry; see the [native QEMU UI QA](evidence/aaPanel-8.0.7-2026-11-04-native-ui-pr16-qa.md).
+Source tests and these focused browser probes do not establish
+supported release status or production readiness. The focused independent
+review's three required accessibility/Monitor-order/cache-coherence repairs
+are documented in [PR16 remediation evidence](evidence/aaPanel-8.0.7-2026-11-04-pr16-review-remediation.md), including a separately controlled
+QEMU browser-only synthetic response-order test.
+
 ## First non-production implementation slice
 
 `plugin/ach_customizer/` is a prototype native plugin package with an English-only in-panel read-only UI, following aaPanel conventions, and two narrowly bounded read operations:
