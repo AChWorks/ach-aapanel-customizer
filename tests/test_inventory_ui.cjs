@@ -34,7 +34,7 @@ function loadUi() {
   }));
   for (const tab of tabs) elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
   for (const name of [
-    '#ach-message', '#ach-overview-status', '#ach-overview-refresh',
+    '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
@@ -235,8 +235,11 @@ function loadUi() {
       nextDisabled: elements.get('#ach-next').props.disabled,
       page: elements.get('#ach-page').textContent,
       overview: elements.get('#ach-overview-status').textContent,
+      overviewControlResult: elements.get('#ach-overview-control-result').textContent,
+      overviewFeedbackState: elements.get('#ach-overview-control-result').attributes['data-state'],
       stateRevision: elements.get('#ach-state-revision').textContent,
       statusResult: elements.get('#ach-status-result').textContent,
+      statusFeedbackState: elements.get('#ach-status-result').attributes['data-state'],
       statusSource: elements.get('#ach-status-source').textContent,
       statusName: elements.get('#ach-status-name').props.value,
       siteStatus: elements.get('#ach-sites-status').textContent,
@@ -599,6 +602,25 @@ test('Overall Monitor disable updates only the intended switch and preserves mod
   assert.equal(current.controls.php_fpm_file_preview.checked, true);
   assert.equal(current.controls.overall.disabled, false);
   assert.equal(current.error, '');
+});
+
+
+test('Overview Monitor write provides nearby pending/success and unconfirmed feedback', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview());
+  assert.match(ui.state().overviewControlResult,/Monitor settings verified.*Revision 0/);
+  const saved=ui.toggleMonitor('overall',false);
+  assert.match(ui.state().overviewControlResult,/Saving overall Monitor setting/);
+  saved.respond(monitorAck({overall_enabled:false,state_revision:1,mode:'Disabled'}));
+  assert.equal(ui.state().overviewFeedbackState,'saved');
+  assert.match(ui.state().overviewControlResult,/Saved overall: disabled.*Revision 1/);
+
+  const failed=ui.toggleMonitor('overall',true);
+  assert.match(ui.state().overviewControlResult,/Saving overall/);
+  failed.respond({status:false,stage:'monitor_state_write',msg:'revision conflict'});
+  assert.equal(ui.state().overviewFeedbackState,'error');
+  assert.match(ui.state().overviewControlResult,/Monitor change not confirmed.*Refresh state/);
+  assert.equal(ui.state().controls.overall.disabled,true);
 });
 
 test('Module-level disable does not enable enforcement or disable unrelated modules', () => {
@@ -1236,7 +1258,7 @@ test('Status Pages save is revision-bound and failed response requires recheck',
   assert.equal(save.options.data.scope,'global');
   save.respond({status:false,stage:'status_settings',msg:'Branding was changed elsewhere'});
   assert.equal(ui.state().statusSaveDisabled,true);
-  assert.match(ui.state().statusResult,/Recheck before retrying/);
+  assert.match(ui.state().statusResult,/Recheck saved branding before retrying/);
   assert.match(ui.state().error,/Branding was changed elsewhere/);
 });
 
@@ -1266,10 +1288,82 @@ test('Status Pages site override is explicit and reset needs confirmation', () =
   assert.equal(reset.options.data.expected_revision,'5');
   reset.respond({
     status:true,schema:1,revision:6,changed:true,
-    source:'Global default',effective:brand()
+    scope:'site',site_id:7,source:'Global default',effective:brand()
   });
   assert.equal(ui.state().statusResetDisabled,true);
   assert.match(ui.state().statusResult,/reset for this scope only/);
+});
+
+
+test('All tabs place routine feedback by its operation rather than below long content', () => {
+  function ordered(...ids) {
+    const positions=ids.map(id => {
+      const offset=html.indexOf('id="' + id + '"');
+      assert.ok(offset > 0, 'Missing feedback/action anchor ' + id);
+      return offset;
+    });
+    for (let i=1;i<positions.length;i++)
+      assert.ok(positions[i]>positions[i-1], ids.join(' > '));
+  }
+  ordered('ach-overview-refresh','ach-monitor-enabled','ach-overview-control-result','ach-state-revision');
+  ordered('ach-sites-status','ach-sites-refresh','ach-hosts-inspect-button','ach-hosts-result');
+  ordered('ach-fpm-prepare','ach-fpm-plan','ach-fpm-operation-notice','ach-fpm-commit');
+  ordered('ach-fpm-check-recovery','ach-fpm-recovery-status','ach-fpm-rollback');
+  ordered('ach-status-save','ach-status-result','ach-status-reset-approve','ach-status-inspect-button');
+  ordered('ach-activity-result','ach-activity-rows');
+  assert.equal((html.match(/id="ach-status-result"/g) || []).length,1);
+  assert.match(html,/id="ach-status-result"[^>]*aria-live="polite"/);
+});
+
+test('Status Pages Save visibly distinguishes changed, no-op, in-flight, unsaved, and uncertainty', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(4));
+  assert.match(ui.state().statusResult,/Saved preferences loaded.*Revision 4/);
+  const noop=ui.statusClick('#ach-status-save');
+  assert.match(ui.state().statusResult,/Saving global branding preferences/);
+  noop.respond({status:true,schema:1,revision:4,changed:false,scope:'global',
+    site_id:null,source:'Global default',effective:brand()});
+  assert.equal(ui.state().statusFeedbackState,'saved');
+  assert.match(ui.state().statusResult,/No changes needed.*Revision 4/);
+  assert.equal(ui.state().statusSaveDisabled,false);
+  ui.statusSetValue('#ach-status-name','Distinct brand','input change');
+  assert.match(ui.state().statusResult,/Unsaved changes/);
+  const save=ui.statusClick('#ach-status-save');
+  assert.match(ui.state().statusResult,/Saving global branding preferences/);
+  save.respond({status:true,schema:1,revision:5,changed:true,scope:'global',
+    site_id:null,source:'Global default',effective:{...brand(),brand_name:'Distinct brand'}});
+  assert.equal(ui.state().statusFeedbackState,'saved');
+  assert.match(ui.state().statusResult,/Saved global branding preferences.*Revision 5/);
+  assert.match(ui.state().statusSource,/revision 5/);
+  assert.equal(ui.state().statusName,'Distinct brand');
+  ui.statusSetValue('#ach-status-name','Distinct brand','input change');
+  assert.match(ui.state().statusResult,/Fields match saved preferences.*Revision 5/);
+  const incompatible=ui.statusClick('#ach-status-save');
+  incompatible.respond({status:true,schema:1,revision:6,changed:true,
+    source:'Global default',effective:brand()});
+  assert.equal(ui.state().statusFeedbackState,'error');
+  assert.match(ui.state().statusResult,/Save not confirmed.*Recheck/);
+  assert.equal(ui.state().statusSaveDisabled,true);
+});
+
+test('Status Pages Reset distinguishes no-op and refuses mismatched acknowledgement', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(2));
+  ui.statusSetChecked('#ach-status-reset-approve',true);
+  const noop=ui.statusClick('#ach-status-reset');
+  assert.match(ui.state().statusResult,/Resetting global branding preferences/);
+  noop.respond({status:true,schema:1,revision:2,changed:false,scope:'global',
+    site_id:null,source:'Global default',effective:brand()});
+  assert.match(ui.state().statusResult,/No changes needed.*Revision 2/);
+  assert.equal(ui.state().statusFeedbackState,'saved');
+  assert.equal(ui.state().statusResetDisabled,true);
+  ui.statusSetChecked('#ach-status-reset-approve',true);
+  const bad=ui.statusClick('#ach-status-reset');
+  bad.respond({status:true,schema:1,revision:3,changed:true,scope:'site',
+    site_id:7,source:'Global default',effective:brand()});
+  assert.equal(ui.state().statusFeedbackState,'error');
+  assert.match(ui.state().statusResult,/Reset not confirmed/);
+  assert.equal(ui.state().statusSaveDisabled,true);
 });
 
 test('Status Pages rejects malformed preview and never renders fallback HTML', () => {

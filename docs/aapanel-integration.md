@@ -122,6 +122,26 @@ approval for a production panel restart. The [native Hosts lifecycle and UI
 evidence](evidence/aaPanel-8.0.7-2026-11-04-native-hosts-qa.md) records exact
 package checksums, observed errors, retry, and remaining limitations.
 
+### Action feedback stays beside the affected control (0.1.12 QA refinement)
+
+The real 2026-11-05 aaPanel 8.0.7 owner session confirmed that five
+`status_save` calls were logged as successful but did not visibly acknowledge
+Save: the UI's sole result paragraph appeared **after** the Status Pages
+inspection/comparison and 440px preview, below the action's scroll position.
+The server's unchanged default brand produces a valid **no-op** (`changed=false`,
+revision unchanged), which must not be confused with either a failed write or
+a newly persisted change. Show a persistent, screen-reader-live acknowledgement
+directly beneath the **Save** button. Distinguish loading, saved changes,
+already matching/no-op, unsaved edits, and ambiguous/rejected responses; state
+the confirmed revision and never imply that any site or service was applied.
+Keep Reset feedback in the same action group and gate uncertain writes on a
+fresh read. Monitor switches likewise need visible local pending/confirmed/
+unconfirmed feedback beside their controls. Websites, Hosts diagnostics,
+PHP-FPM Preview/Apply/Recovery, and Activity have their operation status near
+the applicable controls; preserve those placements. Browser layout checks
+explicitly assert visible Save feedback across desktop and narrow viewports,
+separately from actual authenticated native-session acceptance.
+
 ## First non-production implementation slice
 
 `plugin/ach_customizer/` is a prototype native plugin package with an English-only in-panel read-only UI, following aaPanel conventions, and two narrowly bounded read operations:
