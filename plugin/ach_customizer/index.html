@@ -1429,7 +1429,7 @@
     if (!scope) { root.find('#ach-status-result').text('Select a native site ID.'); return; }
     statusLock(true);
     request('status_save', Object.assign({}, scope, statusFields(), {
-      action:'save', expected_revision:String(statusRevision)
+      branding_action:'save', expected_revision:String(statusRevision)
     }), function (r) {
       if (!r || r.schema !== 1 || !Number.isSafeInteger(r.revision) ||
           !r.effective || typeof r.changed !== 'boolean') {
@@ -1453,7 +1453,7 @@
     if (!scope) return;
     statusLock(true);
     request('status_save', Object.assign({}, scope, {
-      action:'reset', expected_revision:String(statusRevision)
+      branding_action:'reset', expected_revision:String(statusRevision)
     }), function (r) {
       root.find('#ach-status-reset-approve').prop('checked', false);
       if (!r || r.schema !== 1 || !Number.isSafeInteger(r.revision) || !r.effective) {

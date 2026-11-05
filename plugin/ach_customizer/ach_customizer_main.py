@@ -630,7 +630,7 @@ class ach_customizer_main:
             self._status_primary_admin_post()
             scope = self._argument(args, "scope")
             site_id = self._status_site_id(args)
-            action = self._argument(args, "action")
+            action = self._argument(args, "branding_action")
             if (scope == "site") != (site_id is not None):
                 raise StatusPageError("Selected scope and website do not match")
             from ach_customizer_state import parse_revision

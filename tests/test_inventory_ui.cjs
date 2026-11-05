@@ -1228,8 +1228,10 @@ test('Status Pages save is revision-bound and failed response requires recheck',
   ui.openStatus().respond(statusPrefs(4));
   ui.statusSetValue('#ach-status-name','New brand');
   const save=ui.statusClick('#ach-status-save');
-  assert.match(save.options.url,/s=status_save$/);
-  assert.equal(save.options.data.action,'save');
+  assert.equal(save.options.url,'/plugin?action=a&name=ach_customizer&s=status_save');
+  assert.equal(save.options.data.branding_action,'save');
+  assert.equal(Object.prototype.hasOwnProperty.call(save.options.data, 'action'), false,
+    'aaPanel reserves action for native plugin routing; POST must not override URL action=a');
   assert.equal(save.options.data.expected_revision,'4');
   assert.equal(save.options.data.scope,'global');
   save.respond({status:false,stage:'status_settings',msg:'Branding was changed elsewhere'});
@@ -1255,9 +1257,12 @@ test('Status Pages site override is explicit and reset needs confirmation', () =
   ui.statusSetChecked('#ach-status-reset-approve',true);
   assert.equal(ui.state().statusResetDisabled,false);
   const reset=ui.statusClick('#ach-status-reset');
+  assert.equal(reset.options.url,'/plugin?action=a&name=ach_customizer&s=status_save');
   assert.equal(reset.options.data.scope,'site');
   assert.equal(reset.options.data.site_id,'7');
-  assert.equal(reset.options.data.action,'reset');
+  assert.equal(reset.options.data.branding_action,'reset');
+  assert.equal(Object.prototype.hasOwnProperty.call(reset.options.data, 'action'), false,
+    'Reset must not overwrite the native aaPanel action=a route');
   assert.equal(reset.options.data.expected_revision,'5');
   reset.respond({
     status:true,schema:1,revision:6,changed:true,

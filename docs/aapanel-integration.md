@@ -17,6 +17,20 @@ The aaPanel PDF explicitly warns: **dynamic plugin routes do not inherit aaPanel
 
 This first candidate intentionally **does not define `_check`** and only uses the conventional in-panel `/plugin?action=a` route. In the isolated aaPanel **8.0.7** test, unauthenticated requests returned HTTP 404, authenticated requests without aaPanel's `x-http-token` header returned `INIT_CSRF_ERR`, and the same read-only methods succeeded through the panel's own UI. This verifies the observed version/route, **not** a general security guarantee for other versions or future privileged methods. No Apply/write endpoint is exposed in this candidate.
 
+### Native plugin dispatch parameter namespace (aaPanel 8.0.7)
+
+The native `BTPanel/app.py:get_input()` merges `request.args` before
+`request.form`, letting POST form fields replace same-named query keys.
+Native plugin routing requires `/plugin?action=a&name=ach_customizer&s=<method>`;
+a POST body named `action` therefore shadows the required router action `a`
+and returns `Specific parameters are invalid!` *before the plugin method runs*.
+The verified 2026-11-05 owner Save/Reset issue used `action=save|reset` in
+the Status Pages POST body. The corrected plugin uses `branding_action` as an
+explicitly plugin-owned form key for both actions. Keep `action`, `name`, and
+`s` reserved for native aaPanel dispatch in all plugin AJAX payloads.
+Retain the normal aaPanel `x-http-token`, primary-administrator authorization
+and optimistic preference revision; this is not permission to weaken any gate.
+
 ## Native aaPanel dialog UI (unreleased UI refinement)
 
 The ACh Customizer management surface follows the compact Nginx-management

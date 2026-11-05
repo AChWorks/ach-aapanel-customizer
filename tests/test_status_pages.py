@@ -377,7 +377,7 @@ class EntrypointTests(unittest.TestCase):
         fake_flask.has_request_context = lambda: fake_flask.request is not None
         fake_flask.request = None
         payload = dict(customized("Acme"), scope="global", site_id="",
-                       action="save",expected_revision="0",footer_enabled="false")
+                       branding_action="save",expected_revision="0",footer_enabled="false")
         with patch.dict(sys.modules, {"public":self._native_public()}):
             with patch.dict(sys.modules, {"flask":fake_flask}):
                 self.assertEqual(self.plugin.status_save(payload)["stage"],"status_authorization")
@@ -391,6 +391,12 @@ class EntrypointTests(unittest.TestCase):
                 self.assertFalse((Path(self.tmp.name)/STATE_FILE).exists())
                 fake_flask.request = types.SimpleNamespace(method="POST")
                 fake_flask.session = dict(login=True,uid=1)
+                # Native aaPanel merges request.form AFTER request.args. Its
+                # routing field `action=a` must never be replaced by `action=save`.
+                missing_branding_action = dict(payload, action="save")
+                missing_branding_action.pop("branding_action")
+                self.assertEqual(self.plugin.status_save(missing_branding_action)["stage"],
+                                 "status_settings")
                 first=self.plugin.status_save(payload)
                 self.assertTrue(first["status"],first)
                 self.assertEqual(first["revision"],1)
