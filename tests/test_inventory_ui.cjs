@@ -53,7 +53,7 @@ function loadUi() {
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
-    '#ach-status-probe-button', '#ach-status-probe-result',
+    '#ach-status-probe-button', '#ach-status-probe-result', '#ach-status-adoption-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -257,6 +257,7 @@ function loadUi() {
       statusInspectDisabled: elements.get('#ach-status-inspect-button').props.disabled,
       statusProbeDisabled: elements.get('#ach-status-probe-button').props.disabled,
       statusProbe: elements.get('#ach-status-probe-result').textContent,
+      statusAdoption: elements.get('#ach-status-adoption-result').textContent,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       statusCompareSummary: elements.get('#ach-status-comparison-summary').textContent,
       statusCompareExcerpt: elements.get('#ach-status-comparison-excerpt').textContent,
@@ -1537,6 +1538,60 @@ test('Explicit live 404 probe reports HTTP/body evidence without granting Apply'
   const before=ui.requests.length;
   ui.statusClick('#ach-status-probe-button');
   assert.equal(ui.requests.length,before,'Cannot probe a 502 through the 404-only endpoint');
+});
+
+test('Read-only 404 adoption preview preserves observed content conflicts and denies writes', () => {
+  const ui=statusProbeUi();
+  const sha='a'.repeat(64);
+  const other='b'.repeat(64);
+  const observed=statusProbe({
+    body_sha256:other, page_file_sha256:other, body_matches_file:true,
+    body_matches_render:false, rendered_sha256:sha,
+    adoption_preview:{
+      schema:1,state:'Backup Required',route_source_state:'Native VHost',
+      current_sha256:other,proposed_sha256:sha,
+      requires_adoption:true,requires_backup:true,
+      ownership_verified:false,recovery_verified:false,apply_supported:false,
+      reason:'Explicit adoption and recoverable backup required'
+    }
+  });
+  ui.statusClick('#ach-status-probe-button').respond(observed);
+  assert.match(ui.state().statusProbe,/HTTP Match/);
+  assert.match(ui.state().statusAdoption,/Backup Required/);
+  assert.match(ui.state().statusAdoption,/Apply\/Restore: unsupported/);
+  ui.statusSetValue('#ach-status-name','Changed during observation','input change');
+  assert.match(ui.state().statusAdoption,/not checked/);
+});
+
+test('Tampered 404 adoption preflight never authorizes Apply or a trusted result', () => {
+  const base={
+    schema:1,state:'Matches Preview',route_source_state:'Native VHost',
+    current_sha256:'a'.repeat(64),proposed_sha256:'a'.repeat(64),
+    requires_adoption:false,requires_backup:false,
+    ownership_verified:false,recovery_verified:false,apply_supported:false,
+    reason:'Observed current site file matches selected preview'
+  };
+  for (const altered of [
+    {apply_supported:true}, {ownership_verified:true},
+    {recovery_verified:true},{route_source_state:'unknown'},
+    {state:'Backup Required'}, {requires_backup:true},
+    {proposed_sha256:'b'.repeat(64)},
+    {current_sha256:'b'.repeat(64)},
+    {reason:'x'.repeat(400)}
+  ]) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(
+      statusProbe({adoption_preview:{...base,...altered}})
+    );
+    assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
+    assert.match(ui.state().statusAdoption,/unavailable or incompatible/);
+  }
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(
+    statusProbe({adoption_preview:base})
+  );
+  assert.match(ui.state().statusAdoption,/Matches Preview/);
+  assert.match(ui.state().statusAdoption,/Apply\/Restore: unsupported/);
 });
 
 test('HTTP mismatch, soft success, and unknown evidence stay distinguishable', () => {

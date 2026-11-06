@@ -360,6 +360,7 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         },
         "vhost_sha256": None, "extension_include_textual": False,
         "extensions_scanned": [], "error_page_sources": [],
+        "route_source_state": "Uninspected",
         "note": ("Disk and textual VHost/extension snapshot only; error_page sources concern "
                  "the selected HTTP status or unrecognized syntax, not unrelated statuses. "
                  "An include may disappear "
@@ -402,6 +403,7 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         vhost_text = _active(vhost["data"])
         sources = []
         selected = _selected_error_page(vhost_text, template)
+        site_declaration = selected
         if selected:
             sources.append(selected)
             result["error_page_sources"].append("site VHost")
@@ -437,6 +439,20 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
 
         routing_uncertain = "ambiguous" in sources or len(sources) > 1
         routing_competes = "different" in sources
+        # Provenance of the *textual* selected-status declaration, never a
+        # claim about Nginx server scope, active routes, or Apply eligibility.
+        if routing_uncertain:
+            result["route_source_state"] = "Ambiguous"
+        elif routing_competes:
+            result["route_source_state"] = "Alternate"
+        elif not sources:
+            result["route_source_state"] = "None"
+        elif site_declaration == "native":
+            result["route_source_state"] = "Native VHost"
+        elif result["extension_include_textual"]:
+            result["route_source_state"] = "Referenced Extension"
+        else:
+            result["route_source_state"] = "Unreferenced Extension"
         if result["page_file_state"] == "Different bytes":
             # Verified site-owned page contents take precedence over uncertain
             # routing classifications; do not hide a known content conflict.
@@ -496,4 +512,5 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         result["extension_include_textual"] = False
         result["extensions_scanned"] = []
         result["error_page_sources"] = []
+        result["route_source_state"] = "Uninspected"
     return result

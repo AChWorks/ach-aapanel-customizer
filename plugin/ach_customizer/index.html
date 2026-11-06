@@ -397,6 +397,7 @@
       <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check live HTTP/80 site 404 (read-only)</button></div>
       <p class="ach-note">HTTP probe makes one explicit GET for a random nonexistent path through 127.0.0.1:80 with the selected website's native, bound Host. It cannot prove HTTPS, Cloudflare, other routes, or safe Apply. The request may appear in website access logs.</p>
       <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Live HTTP/80 404 not checked.</p>
+      <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">404 adoption preflight not checked. Apply/Restore remain unavailable.</p>
       <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
       <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
@@ -1093,6 +1094,7 @@
     root.find('#ach-status-sha').text('');
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
     root.find('#ach-status-probe-result').text('Live HTTP/80 404 not checked.');
+    root.find('#ach-status-adoption-result').text('404 adoption preflight not checked. Apply/Restore remain unavailable.');
     root.find('#ach-status-comparison-summary').text('Content comparison not run.');
     root.find('#ach-status-comparison-excerpt').text('');
   }
@@ -1266,6 +1268,8 @@
   function validStatusInspection(r, scope, template, locale) {
     var states = ['Needs Review','Conflict','Unsupported','Unmanaged','File Match'];
     var pageStates = ['Uninspected','Absent','Same bytes','Different bytes'];
+    var routeStates = ['Uninspected','None','Native VHost','Referenced Extension',
+                       'Unreferenced Extension','Alternate','Ambiguous'];
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
     var boundedStrings = function (value, max) {
@@ -1329,6 +1333,11 @@
       typeof r.extension_include_textual === 'boolean' &&
       boundedStrings(r.extensions_scanned, 32) &&
       boundedStrings(r.error_page_sources, 33) &&
+      (r.route_source_state === undefined || routeStates.includes(r.route_source_state)) &&
+      (r.route_source_state !== 'Native VHost' ||
+        r.error_page_sources.includes('site VHost')) &&
+      (r.route_source_state !== 'Unreferenced Extension' ||
+        r.extension_include_textual === false) &&
       ((r.page_file_state === 'Absent' || r.page_file_state === 'Uninspected') ?
         r.page_file_sha256 === null && r.page_file_bytes === null :
         hash(r.page_file_sha256) && Number.isSafeInteger(r.page_file_bytes)) &&
@@ -1386,6 +1395,7 @@
           '\nExtension include mentioned in VHost text: ' + (r.extension_include_textual ? 'Yes' : 'No') +
           '\nScanned extension files: ' + (r.extensions_scanned.join(', ') || 'None') +
           '\nSelected-status error_page source references: ' + (r.error_page_sources.join(', ') || 'None observed') +
+          '\nTextual route source: ' + (r.route_source_state || 'Not reported by backend') +
           '\n' + r.note);
         var comparison = r.comparison;
         root.find('#ach-status-comparison-summary').text(
@@ -1398,6 +1408,28 @@
       statusLock(false);
     });
   });
+  function validAdoptionPreview(plan, probe) {
+    var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };
+    var routes = ['Uninspected','None','Native VHost','Referenced Extension',
+                  'Unreferenced Extension','Alternate','Ambiguous'];
+    if (!plan || plan.schema !== 1 || plan.apply_supported !== false ||
+        plan.ownership_verified !== false || plan.recovery_verified !== false ||
+        !routes.includes(plan.route_source_state) ||
+        !['Needs Review','Matches Preview','Backup Required'].includes(plan.state) ||
+        plan.current_sha256 !== probe.page_file_sha256 ||
+        plan.proposed_sha256 !== probe.rendered_sha256 ||
+        (plan.current_sha256 !== null && !hash(plan.current_sha256)) ||
+        typeof plan.reason !== 'string' || plan.reason.length > 240 ||
+        typeof plan.requires_adoption !== 'boolean' ||
+        typeof plan.requires_backup !== 'boolean') return false;
+    var expected = (probe.state === 'HTTP Match' &&
+      plan.route_source_state === 'Native VHost') ?
+      (probe.body_matches_render ? 'Matches Preview' : 'Backup Required') :
+      'Needs Review';
+    return plan.state === expected &&
+      plan.requires_adoption === (expected === 'Backup Required') &&
+      plan.requires_backup === (expected === 'Backup Required');
+  }
   function validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot) {
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
@@ -1430,7 +1462,8 @@
         (r.http_404_observed === (r.http_status === 404)) &&
         r.body_matches_file === (r.http_404_observed && r.body_sha256 === r.page_file_sha256) &&
         (r.state === 'HTTP Match' ? r.body_matches_file : !r.body_matches_file)) &&
-      r.body_matches_render === (r.body_matches_file && r.body_sha256 === r.rendered_sha256);
+      r.body_matches_render === (r.body_matches_file && r.body_sha256 === r.rendered_sha256) &&
+      (r.adoption_preview === undefined || validAdoptionPreview(r.adoption_preview, r));
   }
   root.find('#ach-status-probe-button').on('click', function () {
     var scope = statusScope(), locale = root.find('#ach-status-locale').val();
@@ -1441,6 +1474,7 @@
     var selectedSnapshot = nativeHostsSnapshot(selectedSite);
     var ticket = statusTicket, submittedBrand = statusFields();
     root.find('#ach-status-probe-result').text('Checking local HTTP/80 404; website/config files are not changed...');
+    root.find('#ach-status-adoption-result').text('Checking read-only 404 source/adoption prerequisites...');
     statusLock(true);
     request('status_probe', Object.assign({}, scope, submittedBrand, {
       template:'404', locale:locale,
@@ -1460,6 +1494,7 @@
       if (!sameSelection || !validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot)) {
         root.find('#ach-status-probe-result').text(
           'HTTP response evidence unconfirmed or incompatible. No Apply readiness inferred.');
+        root.find('#ach-status-adoption-result').text('Preflight unavailable or incompatible. No Apply/Restore permission.');
       } else {
         root.find('#ach-status-probe-result').text(
           r.state + ': ' + r.reason +
@@ -1470,6 +1505,15 @@
           '\nHTTP body matches site file: ' + (r.body_matches_file ? 'Yes' : 'No') +
           '\nHTTP body matches selected render: ' + (r.body_matches_render ? 'Yes' : 'No') +
           '\n' + r.note);
+        var adoption = r.adoption_preview;
+        root.find('#ach-status-adoption-result').text(adoption ?
+          'Read-only 404 adoption preflight: ' + adoption.state + ' — ' + adoption.reason +
+          '\nTextual route provenance: ' + adoption.route_source_state +
+          '\nExisting file SHA-256: ' + (adoption.current_sha256 || 'Unavailable') +
+          '\nProposed SHA-256: ' + adoption.proposed_sha256 +
+          '\nExplicit adoption and backup required: ' + (adoption.requires_backup ? 'Yes' : 'Not inferred') +
+          '\nApply/Restore: unsupported; ownership and crash recovery are not verified.' :
+          'This backend supplied no adoption preflight. No Apply/Restore permission.');
       }
       statusLock(false);
     });

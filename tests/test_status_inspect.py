@@ -52,6 +52,7 @@ class SiteSourceTests(unittest.TestCase):
         self.assertEqual(r["state"], "Unmanaged")
         self.assertEqual(r["page_file_state"], "Absent")
         self.assertTrue(r["extension_include_textual"])
+        self.assertEqual(r["route_source_state"], "None")
         self.assertFalse(r["nginx_runtime_verified"])
         self.assertFalse(r["apply_supported"])
         self.assertTrue(r["read_only"])
@@ -81,6 +82,7 @@ class SiteSourceTests(unittest.TestCase):
         r = self.scan()
         self.assertEqual(r["state"], "Conflict")
         self.assertEqual(r["error_page_sources"], ["site VHost"])
+        self.assertEqual(r["route_source_state"], "Alternate")
         self.set_vhost()
         extension = self.vhosts / "extension" / self.key
         extension.mkdir(parents=True)
@@ -89,6 +91,7 @@ class SiteSourceTests(unittest.TestCase):
         r = self.scan(page="502")
         self.assertEqual(r["state"], "Conflict")
         self.assertEqual(r["error_page_sources"], ["extension/operator.conf"])
+        self.assertEqual(r["route_source_state"], "Alternate")
         self.assertEqual(r["extensions_scanned"], ["operator.conf", "site_total.conf"])
         self.assertFalse(r["nginx_runtime_verified"])
 
@@ -102,9 +105,33 @@ class SiteSourceTests(unittest.TestCase):
                 result = self.scan(page=page)
                 self.assertEqual(result["state"], "Needs Review", result)
                 self.assertEqual(result["error_page_sources"], ["site VHost"])
+                self.assertEqual(result["route_source_state"], "Native VHost")
                 self.assertIn("existing", result["reason"].lower())
                 self.assertFalse(result["nginx_runtime_verified"])
                 self.assertFalse(result["apply_supported"])
+
+    def test_extension_reference_and_regeneration_loss_are_distinct_source_states(self):
+        extension = self.vhosts / "extension" / self.key
+        extension.mkdir(parents=True)
+        (extension / "brand.conf").write_text("error_page 404 /404.html;\n")
+        referenced = self.scan()
+        self.assertEqual(referenced["route_source_state"], "Referenced Extension")
+        self.assertEqual(referenced["error_page_sources"], ["extension/brand.conf"])
+        self.assertFalse(referenced["apply_supported"])
+        # Native regeneration can drop the extension include but leave the
+        # previously deployed fragment on disk. Never promote that fragment.
+        self.vhost.write_text("server { listen 80; server_name demo.test;\n}\n")
+        orphan = self.scan()
+        self.assertEqual(orphan["route_source_state"], "Unreferenced Extension")
+        self.assertFalse(orphan["extension_include_textual"])
+        self.assertFalse(orphan["nginx_runtime_verified"])
+        # A second selected-status declaration remains ambiguous even when
+        # every source agrees on the same filename.
+        self.set_vhost("error_page 404 /404.html;")
+        ambiguous = self.scan()
+        self.assertEqual(ambiguous["route_source_state"], "Ambiguous")
+        self.assertEqual(len(ambiguous["error_page_sources"]), 2)
+        self.assertFalse(ambiguous["apply_supported"])
 
     def test_unrelated_status_497_does_not_change_selected_mapping(self):
         self.set_vhost("error_page 497 https://$host$request_uri;")
@@ -129,6 +156,7 @@ class SiteSourceTests(unittest.TestCase):
                 self.assertEqual(result["state"], "Needs Review", result)
                 self.assertFalse(result["apply_supported"])
                 self.assertFalse(result["nginx_runtime_verified"])
+                self.assertEqual(result["route_source_state"], "Ambiguous")
 
     def test_different_existing_page_dominates_ambiguous_selected_status_routing(self):
         for page in ("404", "502"):

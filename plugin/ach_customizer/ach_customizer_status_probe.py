@@ -47,7 +47,47 @@ def _source_identity(result):
         result.get("extension_include_textual"),
         tuple(result.get("extensions_scanned", [])),
         tuple(result.get("error_page_sources", [])),
+        result.get("route_source_state"),
     )
+
+
+def _adoption_preview(source, observation):
+    """Explain precisely which *non-mutating* 404 facts were observed.
+
+    Neither an HTTP Match nor a conventional source directive authorizes a
+    write: ownership, an operator-approved backup, conflict-free atomic
+    replacement and crash-safe recovery remain unverified in this release.
+    """
+    route = source.get("route_source_state", "Uninspected") if source else "Uninspected"
+    current = observation.get("page_file_sha256")
+    proposed = observation["rendered_sha256"]
+    matched = (
+        observation["state"] == "HTTP Match"
+        and observation["http_status"] == 404
+        and observation["body_matches_file"]
+        and current is not None
+    )
+    if route != "Native VHost":
+        state = "Needs Review"
+        reason = "No unique native 404 VHost source declaration was verified"
+    elif not matched:
+        state = "Needs Review"
+        reason = "Observed HTTP 404 and current site-file bytes do not match"
+    elif observation["body_matches_render"]:
+        state = "Matches Preview"
+        reason = "The observed 404 bytes match the selected preview; file ownership remains unverified"
+    else:
+        state = "Backup Required"
+        reason = ("The observed 404 file differs from the preview. Explicit adoption, "
+                  "a recoverable backup and checked Restore would be required")
+    return {
+        "schema": 1, "state": state, "route_source_state": route,
+        "current_sha256": current, "proposed_sha256": proposed,
+        "requires_adoption": state == "Backup Required",
+        "requires_backup": state == "Backup Required",
+        "ownership_verified": False, "recovery_verified": False,
+        "apply_supported": False, "reason": reason,
+    }
 
 
 def _remaining(deadline):
@@ -149,6 +189,7 @@ def probe_site_404(site, *, locale, rendered_sha256, rendered_html=None,
         "body_sha256": None, "body_bytes": None,
         "page_file_sha256": None, "rendered_sha256": rendered_sha256,
         "body_matches_file": False, "body_matches_render": False,
+        "adoption_preview": None,
         "note": (
             "One explicit GET of a random nonexistent path on 127.0.0.1:80 "
             "with the native bound Host header. It is not proof of loaded "
@@ -160,6 +201,7 @@ def probe_site_404(site, *, locale, rendered_sha256, rendered_html=None,
         rendered_sha256=rendered_sha256, rendered_html=rendered_html,
         vhost_root=vhost_root, source_fingerprint=True,
     )
+    result["adoption_preview"] = _adoption_preview(pre, result)
     if (pre.get("page_file_state") not in ("Same bytes", "Different bytes")
             or not pre.get("_source_fingerprint")
             or pre.get("vhost_sha256") is None
@@ -252,4 +294,5 @@ def probe_site_404(site, *, locale, rendered_sha256, rendered_html=None,
         page_file_sha256=pre["page_file_sha256"],
         body_matches_file=match_file, body_matches_render=match_render,
     )
+    result["adoption_preview"] = _adoption_preview(post, result)
     return result
