@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = ROOT / 'plugin' / 'ach_customizer' / 'ach_customizer_monitor.py'
@@ -615,6 +616,9 @@ class SharedPHPFileImpactTests(unittest.TestCase):
             'fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n',
             encoding='utf-8'
         )
+        (self.nginx / 'enable-php-00.conf').write_text(
+            'location ~ [^/]\\.php(/|$) { return 404; }\n', encoding='utf-8'
+        )
         self.rows = [
             {'id': 3, 'name': 'site-a.example.test'},
             {'id': 6, 'name': 'site-b.example.test'},
@@ -647,6 +651,7 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         got = self.inspect()
         self.assertEqual(got['schema'], 1)
         self.assertEqual(got['state'], 'File Mapping')
+        self.assertIs(got['manual_apply_eligible'], True)
         self.assertEqual(got['site_count'], 3)
         self.assertEqual(got['other_php_sites_count'], 1)
         self.assertEqual(got['matched_sites'], [
@@ -1085,15 +1090,159 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         self.assertEqual([s['id'] for s in got['unresolved_sites']], [6])
 
     def test_alt_php_version_or_noncanonical_socket_does_not_overclaim(self):
+        (self.nginx / 'enable-php-84.conf').write_text(
+            'location ~ \\.php$ {\n fastcgi_pass unix:/tmp/php-cgi-84.sock;\n}\n')
         self.vhost('site-b.example.test').write_text(
             'server {\n include enable-php-84.conf;\n}\n')
         got = self.inspect()
         self.assertEqual(got['state'], 'File Mapping')
         self.assertEqual([s['id'] for s in got['matched_sites']], [3])
         self.assertEqual(got['other_php_sites_count'], 2)
+        (self.nginx / 'enable-php-84.conf').write_text(
+            'location ~ \\.php$ {\n fastcgi_pass unix:/tmp/php-cgi-85.sock;\n}\n')
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+        (self.nginx / 'enable-php-84.conf').write_text(
+            'location ~ \\.php$ {\n fastcgi_pass unix:/tmp/php-cgi-84.sock;\n}\n')
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
         self.pool.write_text(self.pool.read_text().replace(
             '/tmp/php-cgi-85.sock', '127.0.0.1:10851'))
         self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+
+    def _native_qa_shapes(self):
+        """The exact aaPanel 8.0.7 VHost include shapes observed in QA."""
+        for site_id, site_name in ((3, 'site-a.example.test'), (6, 'site-b.example.test')):
+            extension = self.vhosts / 'extension' / site_name
+            extension.mkdir(parents=True)
+            (extension / 'site_total.conf').write_text(
+                'access_log syslog:server=unix:/tmp/site_total.sock,nohostname,tag='
+                + str(site_id) + '__access site_total;\n', encoding='utf-8'
+            )
+            rewrite = self.rewrites / (site_name + '.conf')
+            rewrite.write_text('location / {\n try_files $uri $uri/ /index.php?$args;\n}\n')
+            php = ('enable-php-85-wpfastcgi.conf' if site_id == 6 else
+                   'enable-php-85.conf')
+            self.vhost(site_name).write_text(
+                'server {\n server_name ' + site_name + ';\n'
+                ' include ' + str(extension) + '/*.conf;\n'
+                ' include ' + php + ';\n'
+                ' include ' + str(rewrite) + ';\n}\n', encoding='utf-8'
+            )
+        (self.nginx / 'fastcgi.conf').write_text(
+            'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n')
+        (self.nginx / 'enable-php-85-wpfastcgi.conf').write_text(
+            'set $skip_cache 0;\n'
+            'if ($request_method = POST) { set $skip_cache 1; }\n'
+            'location ~ [^/]\\.php(/|$) {\n'
+            ' try_files $uri $uri/ /index.php?$args;\n'
+            ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n'
+            ' include fastcgi.conf;\n'
+            ' fastcgi_cache_bypass $skip_cache;\n'
+            ' fastcgi_cache WORDPRESS;\n}\n'
+            'location ~ /purge(/.*) { allow 127.0.0.1; deny all;\n'
+            ' fastcgi_cache_purge WORDPRESS "$scheme$request_method$host$1";\n}\n',
+            encoding='utf-8')
+
+    def test_native_site_extension_glob_and_wordpress_fastcgi_mapping(self):
+        self._native_qa_shapes()
+        got = self.inspect()
+        self.assertEqual(got['state'], 'File Mapping', got)
+        self.assertIs(got['manual_apply_eligible'], False)
+        self.assertEqual([s['id'] for s in got['matched_sites']], [3, 6])
+        self.assertEqual(got['other_php_sites_count'], 1)
+        self.assertRegex(got['dependency_sha256'], '^[0-9a-f]{64}$')
+        self.assertIn('not proof of effective routing', got['note'])
+
+    def test_native_extension_changes_invalidate_approval_identity(self):
+        self._native_qa_shapes()
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping', good)
+        overlay = self.vhosts / 'extension' / 'site-a.example.test' / 'site_total.conf'
+        overlay.write_text(overlay.read_text() + '\n# changed comment\n')
+        self.assertNotEqual(self.inspect()['dependency_sha256'], good['dependency_sha256'])
+        overlay.write_text('access_log off;\ninclude /tmp/hidden.conf;\n')
+        bad = self.inspect()
+        self.assertEqual(bad['state'], 'Needs Review')
+        self.assertEqual([s['id'] for s in bad['unresolved_sites']], [3])
+        self.assertNotIn('dependency_sha256', bad)
+        overlay.write_text('access_log off;\n')
+        approved = self.inspect()
+        self.assertEqual(approved['state'], 'File Mapping', approved)
+        (overlay.parent / 'extra.conf').write_text('error_log /tmp/qa-error.log warn;\n')
+        self.assertNotEqual(self.inspect()['dependency_sha256'], approved['dependency_sha256'])
+        (overlay.parent / 'extra.conf').write_text('location ~ \\.php$ { return 403; }\n')
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+    def test_native_extension_concurrent_change_refuses_stable_mapping(self):
+        self._native_qa_shapes()
+        overlay = self.vhosts / 'extension' / 'site-a.example.test' / 'site_total.conf'
+        read_file = monitor._bounded_file_text
+        changed = False
+
+        def mutate_after_first_read(path, *args, **kwargs):
+            nonlocal changed
+            result = read_file(path, *args, **kwargs)
+            if Path(path) == overlay and not changed:
+                changed = True
+                overlay.write_text(overlay.read_text() + '# concurrent change\n')
+            return result
+
+        with patch.object(monitor, '_bounded_file_text', side_effect=mutate_after_first_read):
+            got = self.inspect()
+        self.assertTrue(changed)
+        self.assertEqual(got['state'], 'Needs Review', got)
+        self.assertNotIn('dependency_sha256', got)
+        # A fresh, stable scan is allowed to show read-only attribution.
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_native_extension_glob_rejects_unsafe_or_ambiguous_shapes(self):
+        self._native_qa_shapes()
+        extension = self.vhosts / 'extension' / 'site-a.example.test'
+        overlay = extension / 'site_total.conf'
+        original = overlay.read_text()
+        for attack in (
+            'fastcgi_pass unix:/tmp/other.sock;',
+            'proxy_pass http://backend;',
+            'include /tmp/other.conf;',
+            'location /hidden { return 200; }',
+            'access_log off; fastcgi_pass unix:/tmp/other.sock;',
+        ):
+            with self.subTest(attack=attack):
+                overlay.write_text(attack + '\n')
+                bad = self.inspect()
+                self.assertEqual(bad['state'], 'Needs Review')
+                self.assertNotIn('dependency_sha256', bad)
+        overlay.write_text(original)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+        overlay.unlink()
+        overlay.symlink_to(self.pool)
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+        overlay.unlink()
+        overlay.write_text(original)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+        moved = extension.parent / 'old-extension'
+        extension.rename(moved)
+        extension.symlink_to(moved, target_is_directory=True)
+        self.assertEqual(self.inspect()['state'], 'Needs Review')
+
+    def test_wordpress_fastcgi_socket_or_indirect_routing_fails_closed(self):
+        self._native_qa_shapes()
+        php = self.nginx / 'enable-php-85-wpfastcgi.conf'
+        before = php.read_text()
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
+        for changed in (
+            before.replace('/tmp/php-cgi-85.sock', '/tmp/php-cgi-81.sock'),
+            before + '\nfastcgi_pass unix:/tmp/other.sock;\n',
+            before + '\ninclude /tmp/unsafe.conf;\n',
+            before + '\nproxy_pass http://backend;\n',
+        ):
+            with self.subTest(changed=changed[-40:]):
+                php.write_text(changed)
+                got = self.inspect()
+                self.assertEqual(got['state'], 'Needs Review')
+                self.assertNotIn('dependency_sha256', got)
+        php.write_text(before)
+        self.assertEqual(self.inspect()['state'], 'File Mapping')
 
 
 if __name__ == '__main__':
