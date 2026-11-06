@@ -649,6 +649,148 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("status_probe", exc, request_id)
 
+    def status_manage(self, args):
+        """Strictly gated existing-404-file Apply/Recheck/Restore (Nginx 8.0.7).
+
+        The existing source-only probe cannot grant this action. Independently
+        validate primary-admin POST, selected native site identity, installed
+        Nginx version and source/runtime evidence under the Status Pages lock.
+        No vendor/VHost/extension file or service is ever modified here.
+        """
+        request_id = uuid4().hex
+        site_id = None
+        action = self._argument(args, "site_action")
+        try:
+            self._status_primary_admin_post()
+            if action not in ("apply", "restore", "recheck"):
+                raise StatusPageError("Unsupported status file operation")
+            if self._argument(args, "scope") != "site":
+                raise StatusPageError("Only explicitly selected website scope supports file-only 404")
+            site_id = self._status_site_id(args)
+            if site_id is None or self._argument(args, "template") != "404":
+                raise StatusPageError("Select an existing website and the 404 template")
+            locale = self._argument(args, "locale")
+            if locale not in LOCALES:
+                raise StatusPageError("Unsupported Status Pages locale")
+            if action == "apply" and self._argument(args, "site_approval") != "apply_exact_site_404":
+                raise StatusPageError("Explicit site 404 replacement approval required")
+            if action == "restore" and self._argument(args, "site_approval") != "restore_exact_site_404":
+                raise StatusPageError("Explicit saved 404 recovery approval required")
+            expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
+            from ach_customizer_state import _open_state_dir, parse_revision
+            from ach_customizer_status_pages import _load_at, _take_lock
+            try:
+                from ach_customizer_status_manage import manage_site_404, StatusManageError
+            except ImportError as exc:
+                raise StatusPageError(
+                    "Site 404 manager not loaded after plugin update; restart panel and reopen"
+                ) from exc
+            import public
+            if public.get_webserver() != "nginx" or str(public.get_panel_version()).strip() != "8.0.7":
+                raise StatusPageError("File-only 404 adapter verified only for aaPanel 8.0.7 Nginx")
+
+            def native_record():
+                record = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(record, dict) or
+                        type(record.get("id")) is not int or record["id"] != site_id):
+                    raise StatusPageError("Native website changed; refresh selection")
+                _bound_domains_for_sites(public, [record])
+                return record
+
+            before = native_record()
+            if (before.get("name") != expected_key or
+                    native_site_snapshot(before) != expected_identity):
+                raise StatusPageError("Website identity/domains changed; reload site inventory")
+
+            def unique_native_root():
+                # A path shared by two native websites is not an isolated
+                # status-page target. Confirm under a bounded native SQL read,
+                # not from browser-provided inventory or VHost filename.
+                rows = public.M("sites").where(
+                    "path=?", (before["path"],)
+                ).field("id,path").limit("0,2").select()
+                if (not isinstance(rows, list) or len(rows) != 1 or
+                        not isinstance(rows[0], dict) or
+                        type(rows[0].get("id")) is not int or
+                        rows[0]["id"] != site_id or
+                        rows[0].get("path") != before["path"]):
+                    raise StatusPageError(
+                        "Native document root is shared or could not be proven exclusive; "
+                        "site 404 write is unsafe"
+                    )
+
+            if action != "recheck":
+                unique_native_root()
+            if str(before.get("status")) != "1":
+                raise StatusPageError("Selected website is stopped")
+
+            state_fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock_fd = _take_lock(state_fd)
+                try:
+                    state = _load_at(state_fd)
+                    revision = parse_revision(self._argument(args, "expected_revision"))
+                    if state["revision"] != revision:
+                        raise StatusPageError("Branding revision changed; recheck selected website")
+                    effective, _source = select_brand(state, site_id)
+                    if self._argument(args, "brand_name") is not None:
+                        effective = self._status_values(args)
+                    rendered = render_page(locale, "404", effective)
+                    if native_record() != before:
+                        raise StatusPageError("Native website changed during 404 preflight")
+                    if action != "recheck":
+                        unique_native_root()
+                    result = manage_site_404(
+                        action, before, locale=locale, html=rendered["html"],
+                        expected_current=self._argument(args, "expected_page_sha256"),
+                        expected_vhost=self._argument(args, "expected_vhost_sha256"),
+                        expected_render=self._argument(args, "expected_render_sha256"),
+                        expected_recovery=self._argument(args, "expected_recovery_id"),
+                        data_fd=state_fd,
+                    )
+                    try:
+                        if action != "recheck":
+                            unique_native_root()
+                        if (native_record() != before or
+                                public.get_webserver() != "nginx" or
+                                str(public.get_panel_version()).strip() != "8.0.7"):
+                            raise StatusPageError(
+                                "Native site or webserver changed during 404 operation"
+                            )
+                    except StatusPageError as exc:
+                        raise StatusManageError(
+                            "uncertain",
+                            "Native target changed; inspect saved 404 recovery before retrying",
+                        ) from exc
+                    response = {
+                        "status": True, "request_id": request_id,
+                        "operation_id": request_id, "schema": 1,
+                        "site_action": action, "revision": revision,
+                        "verified_site_snapshot": serialized,
+                        "locale": locale, "template": "404",
+                        **result,
+                    }
+                finally:
+                    os.close(lock_fd)
+            finally:
+                os.close(state_fd)
+            return self._activity_result(
+                response, "status_pages", "status_" + action,
+                target="site:" + str(site_id),
+                level="WARNING" if result["state"] in ("Drift", "Recovery Required", "Needs Review") else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("status_manage_authorization", exc, request_id)
+        except StatusPageError as exc:
+            step = getattr(exc, "stage", "preflight")
+            response = self._fail("status_manage_" + str(step), exc, request_id)
+            if step in ("uncertain", "postcheck", "recovery"):
+                response["recovery_required"] = True
+            return response
+        except Exception as exc:
+            return self._fail("status_manage_unexpected", exc, request_id)
+
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""
         request_id = uuid4().hex

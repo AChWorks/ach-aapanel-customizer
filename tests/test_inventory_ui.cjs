@@ -54,6 +54,9 @@ function loadUi() {
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
     '#ach-status-probe-button', '#ach-status-probe-result', '#ach-status-adoption-result',
+    '#ach-status-manage-recheck', '#ach-status-manage-apply',
+    '#ach-status-manage-restore', '#ach-status-manage-apply-approve',
+    '#ach-status-manage-restore-approve', '#ach-status-manage-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -257,6 +260,10 @@ function loadUi() {
       statusInspectDisabled: elements.get('#ach-status-inspect-button').props.disabled,
       statusProbeDisabled: elements.get('#ach-status-probe-button').props.disabled,
       statusProbe: elements.get('#ach-status-probe-result').textContent,
+      statusManage: elements.get('#ach-status-manage-result').textContent,
+      statusManageRecheckDisabled: elements.get('#ach-status-manage-recheck').props.disabled,
+      statusManageApplyDisabled: elements.get('#ach-status-manage-apply').props.disabled,
+      statusManageRestoreDisabled: elements.get('#ach-status-manage-restore').props.disabled,
       statusAdoption: elements.get('#ach-status-adoption-result').textContent,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       statusCompareSummary: elements.get('#ach-status-comparison-summary').textContent,
@@ -1540,6 +1547,135 @@ test('Explicit live 404 probe reports HTTP/body evidence without granting Apply'
   assert.equal(ui.requests.length,before,'Cannot probe a 502 through the 404-only endpoint');
 });
 
+const managed404Original='b'.repeat(64);
+const managed404Render='a'.repeat(64);
+const managed404Vhost='c'.repeat(64);
+const managed404Recovery='e'.repeat(32);
+function native404Proposal() {
+  return statusProbe({
+    body_sha256:managed404Original,page_file_sha256:managed404Original,
+    rendered_sha256:managed404Render,body_matches_file:true,body_matches_render:false,
+    adoption_preview:{
+      schema:1,state:'Backup Required',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,
+      requires_adoption:true,requires_backup:true,
+      ownership_verified:false,recovery_verified:false,apply_supported:false,
+      reason:'Explicit adoption and backup required'
+    }
+  });
+}
+function manage404Response(action,fields={}) {
+  return {
+    status:true,schema:1,site_id:7,site_action:action,
+    verified_site_snapshot:probeSnapshot,locale:'en',template:'404',
+    revision:2,mode:'native_existing_404_file',
+    request_id:'d'.repeat(32),operation_id:'d'.repeat(32),
+    read_only:action==='recheck',changed:action!=='recheck',
+    state:action==='apply'?'Applied':action==='restore'?'Restored':'Applied',
+    page_file_sha256:action==='restore'?managed404Original:managed404Render,
+    recovery_id:managed404Recovery,
+    ...(action==='recheck'?{
+      rendered_sha256:managed404Render,
+      before_sha256:managed404Original,after_sha256:managed404Render
+    }:{}),
+    ...fields
+  };
+}
+test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and snapshot-bound', () => {
+  const ui=statusProbeUi();
+  assert.equal(ui.state().statusManageRecheckDisabled,false);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,true,
+    'Approval without verified live/source evidence does not grant Apply');
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  assert.equal(ui.state().statusManageApplyDisabled,true,
+    'Live proof alone does not grant a write without a new confirmation');
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  assert.match(apply.options.url,/s=status_manage$/);
+  assert.equal(apply.options.data.site_action,'apply');
+  assert.equal(apply.options.data.scope,'site');
+  assert.equal(apply.options.data.site_id,'7');
+  assert.equal(apply.options.data.site_approval,'apply_exact_site_404');
+  assert.equal(apply.options.data.expected_site_snapshot,probeSnapshot);
+  assert.equal(apply.options.data.expected_page_sha256,managed404Original);
+  assert.equal(apply.options.data.expected_vhost_sha256,managed404Vhost);
+  assert.equal(apply.options.data.expected_render_sha256,managed404Render);
+  assert.equal(apply.options.timeout,45000);
+  assert.equal(ui.state().statusManageRecheckDisabled,true);
+  apply.respond(manage404Response('apply'));
+  assert.match(ui.state().statusManage,/Applied/);
+  assert.match(ui.state().statusManage,/confirmed file change/);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  const recheck=ui.statusClick('#ach-status-manage-recheck');
+  assert.match(recheck.options.url,/s=status_manage$/);
+  assert.equal(recheck.options.data.site_action,'recheck');
+  assert.equal(recheck.options.data.site_approval,'');
+  recheck.respond(manage404Response('recheck',{changed:false}));
+  assert.match(ui.state().statusManage,/Applied/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(restore.options.data.site_action,'restore');
+  assert.equal(restore.options.data.expected_recovery_id,managed404Recovery);
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_404');
+  restore.respond(manage404Response('restore'));
+  assert.match(ui.state().statusManage,/Restored/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Status 404 Apply rejects stale evidence and forged positive acknowledgements', () => {
+  for(const bad of [
+    {state:'Restored'}, {site_id:8}, {changed:false}, {recovery_id:'bad'},
+    {page_file_sha256:managed404Original},
+    {verified_site_snapshot:'[7]'},
+    {read_only:true},
+    {request_id:'x'.repeat(32)}
+  ]) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+    ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+    const action=ui.statusClick('#ach-status-manage-apply');
+    action.respond(manage404Response('apply',bad));
+    assert.match(ui.state().statusManage,/unconfirmed/);
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+    assert.equal(ui.state().statusManageApplyDisabled,true);
+  }
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  ui.statusSetValue('#ach-status-name','Changed after probe','input change');
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-manage-apply');
+  assert.equal(ui.requests.length,before);
+});
+
+test('Status 404 writes return explicit uncertainty, preserving Recheck as recovery path', () => {
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  const request=ui.statusClick('#ach-status-manage-apply');
+  request.reject(null,'timeout');
+  assert.match(ui.state().statusManage,/unconfirmed/);
+  assert.match(ui.state().error,/Outcome unknown/);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.equal(ui.state().statusManageRecheckDisabled,false);
+  // A refreshed operator recheck may report an incomplete prepared transaction.
+  ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck',{
+    state:'Recovery Required',changed:false
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+});
+
 test('Read-only 404 adoption preview preserves observed content conflicts and denies writes', () => {
   const ui=statusProbeUi();
   const sha='a'.repeat(64);
@@ -1558,7 +1694,7 @@ test('Read-only 404 adoption preview preserves observed content conflicts and de
   ui.statusClick('#ach-status-probe-button').respond(observed);
   assert.match(ui.state().statusProbe,/HTTP Match/);
   assert.match(ui.state().statusAdoption,/Backup Required/);
-  assert.match(ui.state().statusAdoption,/Apply\/Restore: unsupported/);
+  assert.match(ui.state().statusAdoption,/read-only probe cannot authorize a write/);
   ui.statusSetValue('#ach-status-name','Changed during observation','input change');
   assert.match(ui.state().statusAdoption,/not checked/);
 });
@@ -1591,7 +1727,7 @@ test('Tampered 404 adoption preflight never authorizes Apply or a trusted result
     statusProbe({adoption_preview:base})
   );
   assert.match(ui.state().statusAdoption,/Matches Preview/);
-  assert.match(ui.state().statusAdoption,/Apply\/Restore: unsupported/);
+  assert.match(ui.state().statusAdoption,/read-only probe cannot authorize a write/);
 });
 
 test('HTTP mismatch, soft success, and unknown evidence stay distinguishable', () => {

@@ -83,6 +83,7 @@ def _adoption_preview(source, observation):
     return {
         "schema": 1, "state": state, "route_source_state": route,
         "current_sha256": current, "proposed_sha256": proposed,
+        "vhost_sha256": source.get("vhost_sha256") if source else None,
         "requires_adoption": state == "Backup Required",
         "requires_backup": state == "Backup Required",
         "ownership_verified": False, "recovery_verified": False,
