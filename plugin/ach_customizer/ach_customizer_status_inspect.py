@@ -204,15 +204,26 @@ def _selected_error_page(text, status):
     relevant = []
     for declaration in declarations:
         arguments = declaration.split()
-        if (len(arguments) < 2 or
-                any(re.fullmatch(r"[0-9]{3}", item) is None
-                    for item in arguments[:-1])):
+        # Nginx permits error_page code ... [=[response]] uri;.
+        # The optional response modifier is not another source status:
+        # determine the leading status-code set BEFORE checking the
+        # selected status or validating the remaining destination syntax.
+        codes = []
+        for argument in arguments:
+            if re.fullmatch(r"[0-9]{3}", argument) is None:
+                break
+            codes.append(argument)
+        if not codes:
             return "ambiguous"
-        codes, target = arguments[:-1], arguments[-1]
         if status not in codes:
+            # A well-identified unrelated 497/403/500 rule (including
+            # =301/=200/etc.) must not contaminate 404/502 evidence.
             continue
-        if len(codes) != 1:
+        if len(codes) != 1 or len(arguments) != len(codes) + 1:
+            # Selected-status =response overrides and multi-status rules
+            # have not been proven equivalent to aaPanel's native mapping.
             return "ambiguous"
+        target = arguments[-1]
         if target == "/" + status + ".html":
             relevant.append("native")
         elif (re.fullmatch(r"/[A-Za-z0-9._/-]+", target)
@@ -424,21 +435,29 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
             finally:
                 os.close(extension_fd)
 
-        if "different" in sources:
+        routing_uncertain = "ambiguous" in sources or len(sources) > 1
+        routing_competes = "different" in sources
+        if result["page_file_state"] == "Different bytes":
+            # Verified site-owned page contents take precedence over uncertain
+            # routing classifications; do not hide a known content conflict.
+            result["state"] = "Conflict"
+            result["reason"] = "Existing site page differs; do not overwrite manually owned content"
+            if routing_competes:
+                result["reason"] += "; a selected-status routing target also differs"
+            if routing_uncertain:
+                result["reason"] += "; selected-status routing is also ambiguous or duplicated"
+        elif routing_competes:
             result["state"] = "Conflict"
             result["reason"] = (
                 "A source declaration for the selected HTTP status points to "
                 "a different page; ownership and routing need review"
             )
-        elif "ambiguous" in sources or len(sources) > 1:
+        elif routing_uncertain:
             result["state"] = "Needs Review"
             result["reason"] = (
                 "Multiple or unsupported selected-status error_page declarations; "
                 "Nginx ownership and effective routing are unverified"
             )
-        elif result["page_file_state"] == "Different bytes":
-            result["state"] = "Conflict"
-            result["reason"] = "Existing site page differs; do not overwrite manually owned content"
         elif sources:
             result["state"] = "Needs Review"
             result["reason"] = (
