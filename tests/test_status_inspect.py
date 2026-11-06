@@ -92,6 +92,156 @@ class SiteSourceTests(unittest.TestCase):
         self.assertEqual(r["extensions_scanned"], ["operator.conf", "site_total.conf"])
         self.assertFalse(r["nginx_runtime_verified"])
 
+    def test_native_status_mapping_is_not_a_duplicate_conflict(self):
+        self.set_vhost(
+            "  error_page 497 https://$host$request_uri;\n"
+            "  error_page 404 /404.html;\n"
+            "  error_page 502 /502.html;")
+        for page in ("404", "502"):
+            with self.subTest(status=page):
+                result = self.scan(page=page)
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertEqual(result["error_page_sources"], ["site VHost"])
+                self.assertIn("existing", result["reason"].lower())
+                self.assertFalse(result["nginx_runtime_verified"])
+                self.assertFalse(result["apply_supported"])
+
+    def test_unrelated_status_497_does_not_change_selected_mapping(self):
+        self.set_vhost("error_page 497 https://$host$request_uri;")
+        self.assertEqual(self.scan()["state"], "Unmanaged")
+        page = b"known existing page"
+        (self.document_root / "404.html").write_bytes(page)
+        matched = self.scan(digest=hashlib.sha256(page).hexdigest())
+        self.assertEqual(matched["state"], "File Match")
+        self.assertEqual(matched["error_page_sources"], [])
+        self.assertFalse(matched["nginx_runtime_verified"])
+
+    def test_unverified_status_syntax_and_duplicates_never_claim_a_match(self):
+        for source in (
+            "error_page 404 =200 /fallback;",
+            "error_page 404 '/404.html';",
+            "error_page 404 /404.html;\nerror_page 404 /404.html;",
+            "set $label 'error_page 404 /404.html';",
+        ):
+            with self.subTest(source=source):
+                self.set_vhost(source)
+                result = self.scan()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertFalse(result["apply_supported"])
+                self.assertFalse(result["nginx_runtime_verified"])
+
+    def test_different_existing_page_dominates_ambiguous_selected_status_routing(self):
+        for page in ("404", "502"):
+            document = self.document_root / (page + ".html")
+            document.write_bytes(b"site-owner-customized-page")
+            for source, routing_is_ambiguous in (
+                ("error_page " + page + " /" + page + ".html;\n"
+                 "error_page " + page + " /" + page + ".html;", True),
+                ("error_page " + page + " 500 /fallback.html;", True),
+                ("error_page " + page + " =200 /fallback.html;", True),
+                ("error_page " + page + " '/" + page + ".html';", True),
+                ("error_page " + page + " /different-page.html;", False),
+                ("error_page " + page + " /" + page + ".html;", False),
+            ):
+                with self.subTest(page=page, source=source):
+                    self.set_vhost(source)
+                    result = self.scan(page=page)
+                    self.assertEqual(result["page_file_state"], "Different bytes", result)
+                    self.assertEqual(result["state"], "Conflict", result)
+                    self.assertIn("Existing site page differs", result["reason"])
+                    self.assertEqual(result["error_page_sources"], ["site VHost"])
+                    if routing_is_ambiguous:
+                        self.assertIn("routing", result["reason"].lower())
+                    self.assertFalse(result["apply_supported"])
+                    self.assertFalse(result["nginx_runtime_verified"])
+
+    def test_different_existing_page_and_multiple_routing_sources_remain_visible(self):
+        (self.document_root / "404.html").write_bytes(b"site-owned-404")
+        self.set_vhost("error_page 404 /404.html;")
+        fragments = self.vhosts / "extension" / self.key
+        fragments.mkdir(parents=True)
+        (fragments / "operator.conf").write_text(
+            "error_page 404 /operator-error.html;\n", encoding="utf-8")
+        result = self.scan()
+        self.assertEqual(result["state"], "Conflict")
+        self.assertIn("Existing site page differs", result["reason"])
+        self.assertIn("routing", result["reason"].lower())
+        self.assertEqual(result["error_page_sources"], [
+            "site VHost", "extension/operator.conf"])
+        self.assertFalse(result["apply_supported"])
+
+    def test_unrelated_valid_response_modifiers_are_not_selected_status_sources(self):
+        sources = (
+            "error_page 497 https://$host$request_uri;",
+            "error_page 497 =301 https://$host$request_uri;",
+            "error_page 403 =200 /forbidden.html;",
+            "error_page 500 = /upstream-error.html;",
+            "error_page 403 500 =503 /system-error.html;",
+            "error_page 403 =502 @error_handler;",
+        )
+        for selected in ("404", "502"):
+            page = self.document_root / (selected + ".html")
+            data = b"existing-status-page"
+            page.write_bytes(data)
+            digest = hashlib.sha256(data).hexdigest()
+            for source in sources:
+                with self.subTest(selected=selected, source=source):
+                    self.set_vhost(source)
+                    observed = self.scan(page=selected)
+                    self.assertEqual(observed["state"], "Conflict", observed)
+                    self.assertEqual(observed["page_file_state"], "Different bytes")
+                    self.assertEqual(observed["error_page_sources"], [])
+                    matched = self.scan(page=selected, digest=digest)
+                    self.assertEqual(matched["state"], "File Match", matched)
+                    self.assertEqual(matched["error_page_sources"], [])
+                    self.assertFalse(matched["apply_supported"])
+                    self.assertFalse(matched["nginx_runtime_verified"])
+
+    def test_unrelated_response_override_does_not_mask_native_selected_mapping(self):
+        self.set_vhost(
+            "error_page 497 =301 https://$host$request_uri;\n"
+            "error_page 403 =200 /forbidden.html;\n"
+            "error_page 404 /404.html;\n"
+            "error_page 502 /502.html;")
+        for selected in ("404", "502"):
+            with self.subTest(status=selected):
+                result = self.scan(page=selected)
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertEqual(result["error_page_sources"], ["site VHost"])
+                self.assertIn("existing source declaration", result["reason"].lower())
+                self.assertFalse(result["apply_supported"])
+                self.assertFalse(result["nginx_runtime_verified"])
+
+    def test_selected_response_override_and_malformed_syntax_never_look_native(self):
+        for selected in ("404", "502"):
+            for source in (
+                "error_page " + selected + " =200 /fallback.html;",
+                "error_page " + selected + " = /fallback.html;",
+                "error_page " + selected + " /fallback.html extra;",
+                "error_page " + selected + " 500 /fallback.html;",
+                "error_page =301 " + selected + " /fallback.html;",
+            ):
+                with self.subTest(selected=selected, source=source):
+                    self.set_vhost(source)
+                    observed = self.scan(page=selected)
+                    self.assertEqual(observed["state"], "Needs Review", observed)
+                    self.assertEqual(observed["error_page_sources"], ["site VHost"])
+                    self.assertFalse(observed["apply_supported"])
+                    self.assertFalse(observed["nginx_runtime_verified"])
+
+    def test_incomplete_file_read_never_reuses_confirmed_conflict(self):
+        (self.document_root / "404.html").write_bytes(b"customized-content")
+        self.set_vhost("error_page 404 =200 /fallback.html;")
+        self.assertEqual(self.scan()["state"], "Conflict")
+        fragment = self.vhosts / "extension" / self.key
+        fragment.mkdir(parents=True)
+        (fragment / "unsafe.conf").symlink_to(self.vhost)
+        uncertain = self.scan()
+        self.assertEqual(uncertain["state"], "Needs Review")
+        self.assertEqual(uncertain["page_file_state"], "Uninspected")
+        self.assertEqual(uncertain["error_page_sources"], [])
+        self.assertFalse(uncertain["apply_supported"])
+
     def test_comment_does_not_imply_extension_or_error_page(self):
         self.vhost.write_text(
             "server {\n# include " + str(self.vhosts) +

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import os
 import re
 import stat
@@ -37,7 +38,7 @@ class StatusInspectError(ValueError):
     pass
 
 
-def _directory(path):
+def _directory(path, *, trace=None):
     """Anchor the entire path at root, rejecting symlinked ancestors."""
     if (not isinstance(path, str) or not 1 < len(path) <= 1024
             or not path.startswith("/") or "//" in path
@@ -49,10 +50,17 @@ def _directory(path):
         raise StatusInspectError("Noncanonical directory path")
     fd = os.open("/", DIR_FLAGS)
     try:
+        if trace is not None:
+            root = os.fstat(fd)
+            trace.append(("/", root.st_dev, root.st_ino, root.st_mode))
         for component in components:
             next_fd = os.open(component, DIR_FLAGS, dir_fd=fd)
             os.close(fd)
             fd = next_fd
+            if trace is not None:
+                current = os.fstat(fd)
+                trace.append((component, current.st_dev, current.st_ino,
+                              current.st_mode))
         return fd
     except BaseException:
         os.close(fd)
@@ -71,19 +79,22 @@ def _remember_source(bindings, path, directory_fd, name, snapshot, names=None):
         "directory": (directory.st_dev, directory.st_ino),
         "name": name,
         "file": None if snapshot is None else snapshot["identity"],
+        "sha256": None if snapshot is None else snapshot["sha256"],
         "names": names,
     }
     bindings.append(entry)
 
 
-def _verify_source_bindings(bindings, missing_directories):
+def _verify_source_bindings(bindings, missing_directories, *, fingerprint=False):
     """Re-resolve each original absolute path and reject detached source trees.
 
     This is a final best-effort *snapshot* check; no read-only inspection can
     guarantee a file remains unchanged after the check finishes.
     """
+    full_binding_trace = []
     for entry in bindings:
-        descriptor = _directory(entry["path"])
+        chain = [] if fingerprint else None
+        descriptor = _directory(entry["path"], trace=chain)
         try:
             current = os.fstat(descriptor)
             if (current.st_dev, current.st_ino) != entry["directory"]:
@@ -103,6 +114,8 @@ def _verify_source_bindings(bindings, missing_directories):
                                         if name.endswith(".conf"))
                 if observed_names != entry["names"]:
                     raise StatusInspectError("Site extension config list changed")
+            if fingerprint:
+                full_binding_trace.append({"anchor": chain, "binding": entry})
         finally:
             os.close(descriptor)
     for path in missing_directories:
@@ -113,6 +126,18 @@ def _verify_source_bindings(bindings, missing_directories):
         else:
             os.close(descriptor)
             raise StatusInspectError("Previously missing extension directory appeared")
+    if fingerprint:
+        # This value is for private cross-probe comparison only. It includes
+        # original path bindings, all anchored directory identities, each
+        # read file's metadata+SHA, fragment lists and missing directories.
+        # No source contents/paths are returned by the public HTTP probe.
+        payload = json.dumps(
+            {"bindings": full_binding_trace,
+             "missing": sorted(missing_directories)},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+    return None
 
 
 def _file_snapshot(directory_fd, name):
@@ -161,10 +186,54 @@ def _active(source):
         raise StatusInspectError("Ambiguous Nginx configuration text") from exc
 
 
-def _has_directive(text, name):
-    # This intentionally over-detects quoted references: false conflicts are
-    # safe; claiming an absent routing directive when one exists is not.
-    return re.search(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?=\s)", text) is not None
+def _selected_error_page(text, status):
+    """Classify bounded *textual* references to one selected HTTP status.
+
+    This is not an Nginx scope, inheritance, include-order or runtime parser.
+    Recognize only aaPanel's single literal `error_page 404 /404.html;`
+    style. Malformed/multi-status/embedded/duplicate forms remain uncertain;
+    unrelated statuses (such as the TLS-only 497 redirect) are not conflicts.
+    """
+    references = re.findall(r"(?<![A-Za-z0-9_])error_page(?=\s)", text)
+    declarations = re.findall(
+        r"(?m)^[ \t]*error_page[ \t]+([^;{}\r\n]+);[ \t]*(?=\r?$)",
+        text,
+    )
+    if len(declarations) != len(references):
+        return "ambiguous" if references else None
+    relevant = []
+    for declaration in declarations:
+        arguments = declaration.split()
+        # Nginx permits error_page code ... [=[response]] uri;.
+        # The optional response modifier is not another source status:
+        # determine the leading status-code set BEFORE checking the
+        # selected status or validating the remaining destination syntax.
+        codes = []
+        for argument in arguments:
+            if re.fullmatch(r"[0-9]{3}", argument) is None:
+                break
+            codes.append(argument)
+        if not codes:
+            return "ambiguous"
+        if status not in codes:
+            # A well-identified unrelated 497/403/500 rule (including
+            # =301/=200/etc.) must not contaminate 404/502 evidence.
+            continue
+        if len(codes) != 1 or len(arguments) != len(codes) + 1:
+            # Selected-status =response overrides and multi-status rules
+            # have not been proven equivalent to aaPanel's native mapping.
+            return "ambiguous"
+        target = arguments[-1]
+        if target == "/" + status + ".html":
+            relevant.append("native")
+        elif (re.fullmatch(r"/[A-Za-z0-9._/-]+", target)
+              and ".." not in target.split("/")):
+            relevant.append("different")
+        else:
+            return "ambiguous"
+    if len(relevant) > 1:
+        return "ambiguous"
+    return relevant[0] if relevant else None
 
 
 def _textual_extension_include(text, key):
@@ -253,7 +322,8 @@ def _content_comparison(current, rendered_html, rendered_sha256, page_file):
 
 
 def inspect_site_files(site, *, locale, template, rendered_sha256,
-                       rendered_html=None, vhost_root=VHOST_ROOT):
+                       rendered_html=None, vhost_root=VHOST_ROOT,
+                       source_fingerprint=False):
     """Compare a rendered 404/502 with native site files; never change them.
 
     Result is only a source/disk snapshot. Even when every file hash matches,
@@ -290,7 +360,9 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         },
         "vhost_sha256": None, "extension_include_textual": False,
         "extensions_scanned": [], "error_page_sources": [],
-        "note": ("Disk and textual VHost/extension snapshot only. An include may disappear "
+        "note": ("Disk and textual VHost/extension snapshot only; error_page sources concern "
+                 "the selected HTTP status or unrecognized syntax, not unrelated statuses. "
+                 "An include may disappear "
                  "during aaPanel regeneration; neither loaded Nginx routes nor HTTP "
                  "response status are verified. Apply and Restore are disabled."),
     }
@@ -328,7 +400,10 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
             return result
         result["vhost_sha256"] = vhost["sha256"]
         vhost_text = _active(vhost["data"])
-        if _has_directive(vhost_text, "error_page"):
+        sources = []
+        selected = _selected_error_page(vhost_text, template)
+        if selected:
+            sources.append(selected)
             result["error_page_sources"].append("site VHost")
         result["extension_include_textual"] = _textual_extension_include(vhost_text, key)
 
@@ -353,17 +428,43 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
                     _remember_source(bindings, extension_path, extension_fd, name, fragment)
                     text = _active(fragment["data"])
                     result["extensions_scanned"].append(name)
-                    if _has_directive(text, "error_page"):
+                    selected = _selected_error_page(text, template)
+                    if selected:
+                        sources.append(selected)
                         result["error_page_sources"].append("extension/" + name)
             finally:
                 os.close(extension_fd)
 
-        if result["error_page_sources"]:
-            result["state"] = "Conflict"
-            result["reason"] = "Existing error_page directives require owner and routing review"
-        elif result["page_file_state"] == "Different bytes":
+        routing_uncertain = "ambiguous" in sources or len(sources) > 1
+        routing_competes = "different" in sources
+        if result["page_file_state"] == "Different bytes":
+            # Verified site-owned page contents take precedence over uncertain
+            # routing classifications; do not hide a known content conflict.
             result["state"] = "Conflict"
             result["reason"] = "Existing site page differs; do not overwrite manually owned content"
+            if routing_competes:
+                result["reason"] += "; a selected-status routing target also differs"
+            if routing_uncertain:
+                result["reason"] += "; selected-status routing is also ambiguous or duplicated"
+        elif routing_competes:
+            result["state"] = "Conflict"
+            result["reason"] = (
+                "A source declaration for the selected HTTP status points to "
+                "a different page; ownership and routing need review"
+            )
+        elif routing_uncertain:
+            result["state"] = "Needs Review"
+            result["reason"] = (
+                "Multiple or unsupported selected-status error_page declarations; "
+                "Nginx ownership and effective routing are unverified"
+            )
+        elif sources:
+            result["state"] = "Needs Review"
+            result["reason"] = (
+                "An existing source declaration references the native " + template +
+                ".html page; no competing selected-status target was detected. "
+                "Actual Nginx scope, ownership and HTTP behavior remain unverified"
+            )
         elif not result["extension_include_textual"]:
             result["state"] = "Needs Review"
             result["reason"] = "No literal native site-extension include observed in this VHost"
@@ -375,7 +476,10 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
             )
         # Do not present an old descriptor's bytes after aaPanel has renamed
         # any original site/VHost path or modified the corresponding file.
-        _verify_source_bindings(bindings, missing_directories)
+        identity = _verify_source_bindings(
+            bindings, missing_directories, fingerprint=source_fingerprint)
+        if source_fingerprint:
+            result["_source_fingerprint"] = identity
     except (OSError, StatusInspectError) as exc:
         result["state"] = "Needs Review"
         result["reason"] = ("Read-only inspection incomplete: " + str(exc))[:240]
