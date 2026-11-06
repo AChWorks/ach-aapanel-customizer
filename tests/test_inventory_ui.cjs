@@ -1630,6 +1630,76 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   assert.equal(ui.state().statusManageRestoreDisabled,true);
 });
 
+test('Status 404 Restore confirms an interrupted earlier rollback without a second file write', () => {
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck',{
+    state:'Recovery Required',changed:false,
+    page_file_sha256:managed404Original
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.match(restore.options.url,/s=status_manage$/);
+  restore.respond(manage404Response('restore',{changed:false,state:'Restored'}));
+  assert.match(ui.state().statusManage,/Restored — no file change/);
+  assert.doesNotMatch(ui.state().statusManage,/unconfirmed/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Status 404 orphaned backup is visible but never grants Restore without a journal', () => {
+  const ui=statusProbeUi();
+  const recheck=ui.statusClick('#ach-status-manage-recheck');
+  recheck.respond(manage404Response('recheck',{
+    state:'Orphan Backup',changed:false,page_file_sha256:managed404Original,
+    before_sha256:managed404Original,after_sha256:null,recovery_id:null
+  }));
+  assert.match(ui.state().statusManage,/Orphan Backup/);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  const calls=ui.requests.length;
+  ui.statusClick('#ach-status-manage-restore');
+  assert.equal(ui.requests.length,calls);
+  const drift=ui.statusClick('#ach-status-manage-recheck');
+  drift.respond(manage404Response('recheck',{
+    state:'Orphan Drift',changed:false,page_file_sha256:managed404Render,
+    before_sha256:managed404Original,after_sha256:null,recovery_id:null
+  }));
+  assert.match(ui.state().statusManage,/Orphan Drift/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Forged 404 recovery-state acknowledgements cannot enable Restore or prove success', () => {
+  for (const forged of [
+    {state:'Unmanaged',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:null},
+    {state:'Orphan Backup',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:managed404Recovery,
+     page_file_sha256:managed404Original},
+    {state:'Orphan Backup',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:null,page_file_sha256:managed404Render},
+    {state:'Orphan Drift',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:null,page_file_sha256:managed404Original},
+    {state:'Restored',changed:false,page_file_sha256:managed404Render}
+  ]) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-manage-recheck').respond(
+      manage404Response('recheck',forged));
+    assert.match(ui.state().statusManage,/incomplete or incompatible/,
+      'Do not accept an inconsistent recovery snapshot '+JSON.stringify(forged));
+    ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+  }
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck',{
+    state:'Recovery Required',changed:false,page_file_sha256:managed404Original
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  restore.respond(manage404Response('restore',{
+    state:'Already Restored',changed:true,page_file_sha256:managed404Original
+  }));
+  assert.match(ui.state().statusManage,/unconfirmed/);
+});
+
 test('Status 404 Apply rejects stale evidence and forged positive acknowledgements', () => {
   for(const bad of [
     {state:'Restored'}, {site_id:8}, {changed:false}, {recovery_id:'bad'},

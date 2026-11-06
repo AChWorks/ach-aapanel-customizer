@@ -778,7 +778,9 @@ class ach_customizer_main:
             return self._activity_result(
                 response, "status_pages", "status_" + action,
                 target="site:" + str(site_id),
-                level="WARNING" if result["state"] in ("Drift", "Recovery Required", "Needs Review") else "INFO",
+                level="WARNING" if result["state"] in (
+                    "Drift", "Recovery Required", "Needs Review", "Orphan Backup", "Orphan Drift"
+                ) else "INFO",
             )
         except PermissionError as exc:
             return self._fail("status_manage_authorization", exc, request_id)

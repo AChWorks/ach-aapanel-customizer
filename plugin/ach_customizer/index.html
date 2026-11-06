@@ -1595,22 +1595,31 @@
         (r.recovery_id !== null && !token(r.recovery_id)) ||
         r.read_only !== (action === 'recheck')) return false;
     if (action === 'recheck') {
-      if (!['Unmanaged','Restored','Applied','Recovery Required','Drift','Needs Review'].includes(r.state) ||
-          r.changed !== false || !hash(r.rendered_sha256) ||
-          (r.before_sha256 !== null && !hash(r.before_sha256)) ||
-          (r.after_sha256 !== null && !hash(r.after_sha256)) ||
-          (r.recovery_id === null &&
-            (r.state !== 'Unmanaged' || r.before_sha256 !== null || r.after_sha256 !== null)) ||
-          (r.recovery_id !== null &&
-            (!hash(r.before_sha256) || !hash(r.after_sha256)))) return false;
-      return true;
+      if (!['Unmanaged','Restored','Applied','Recovery Required','Drift','Needs Review',
+             'Orphan Backup','Orphan Drift'].includes(r.state) ||
+          r.changed !== false || !hash(r.rendered_sha256)) return false;
+      if (r.state === 'Unmanaged') {
+        return r.recovery_id === null && r.before_sha256 === null &&
+          r.after_sha256 === null;
+      }
+      if (r.state === 'Orphan Backup' || r.state === 'Orphan Drift') {
+        return r.recovery_id === null && hash(r.before_sha256) &&
+          r.after_sha256 === null &&
+          (r.state === 'Orphan Backup' ?
+            r.page_file_sha256 === r.before_sha256 :
+            r.page_file_sha256 !== r.before_sha256);
+      }
+      return token(r.recovery_id) && hash(r.before_sha256) &&
+        hash(r.after_sha256) &&
+        (r.state !== 'Restored' || r.page_file_sha256 === r.before_sha256) &&
+        (r.state !== 'Applied' || r.page_file_sha256 === r.after_sha256);
     }
     return action === 'apply' ?
       ['Applied','Already Applied','Already Current'].includes(r.state) &&
       r.changed === (r.state === 'Applied') &&
       (r.state === 'Already Current' || token(r.recovery_id)) :
       ['Restored','Already Restored'].includes(r.state) &&
-      r.changed === (r.state === 'Restored') && token(r.recovery_id);
+      (r.state === 'Restored' || r.changed === false) && token(r.recovery_id);
   }
   function manageStatusRequest(action) {
     var scope = statusScope(), site = selectedProbeSite(scope);
@@ -1680,6 +1689,10 @@
           (action === 'recheck' && r.state === 'Applied' &&
            r.rendered_sha256 !== r.after_sha256 ?
             ' — saved page differs from current selected branding/template' : '') +
+          (action === 'recheck' && r.state === 'Orphan Backup' ?
+            ' — durable backup matches the site file, but no journal exists. Restore is unavailable. Recheck live HTTP, then explicitly approve a new Apply to safely recover the backup.' : '') +
+          (action === 'recheck' && r.state === 'Orphan Drift' ?
+            ' — current site 404 differs from an unjournaled backup. No automatic overwrite or Restore is allowed; manual investigation is required.' : '') +
           '\nWebsite ID: ' + r.site_id +
           '\nCurrent 404 SHA-256: ' + r.page_file_sha256 +
           '\nOriginal SHA-256: ' + (r.before_sha256 || recovery?.before_sha256 || 'None stored') +

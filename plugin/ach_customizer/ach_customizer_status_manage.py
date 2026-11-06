@@ -97,9 +97,12 @@ def _json_record(data_fd, site_id):
     journal, backup = _names(site_id)
     raw = _read_data(data_fd, journal, limit=MAX_JOURNAL)
     if raw is None:
-        if _read_data(data_fd, backup) is not None:
-            raise StatusManageError("recovery", "Orphaned site backup; manual recovery review required")
-        return None
+        # Backups are durably persisted BEFORE their prepared journal. A
+        # crash at that boundary cannot have initiated a site file write by
+        # this manager, but must not be silently discarded or overwritten.
+        # Return the bounded original bytes for exact-match reconciliation
+        # under an entirely new, explicitly approved Apply preflight.
+        return None, _read_data(data_fd, backup)
     try:
         record = json.loads(raw.decode("utf-8"))
     except (UnicodeError, ValueError) as exc:
@@ -119,7 +122,7 @@ def _json_record(data_fd, site_id):
     original = _read_data(data_fd, backup)
     if original is None or _sha(original) != record["before_sha256"]:
         raise StatusManageError("recovery", "Site backup missing or checksum mismatch")
-    return record
+    return record, None
 
 
 def _create_data(data_fd, name, content):
@@ -287,7 +290,7 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
         raise StatusManageError("input", "Rendered 404 page exceeds size limit")
     sha = _sha(desired)
     site_id = site.get("id")
-    record = _json_record(data_fd, site_id)
+    record, orphan_backup = _json_record(data_fd, site_id)
     if record and (record["site_key"] != site.get("name") or
                    record["document_root"] != site.get("path")):
         raise StatusManageError("identity", "Site ID was rebound; preserve recovery and review")
@@ -295,10 +298,22 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
     current_sha = _sha(content)
 
     if action == "recheck":
+        if orphan_backup is not None:
+            # File-only evidence. An orphan is never an actionable Restore:
+            # there is no durable operation ID or accepted journal identity.
+            # A fresh authenticated Apply can safely journal the exact saved
+            # bytes only if its independent HTTP/VHost preflight still passes.
+            state = "Orphan Backup" if orphan_backup == content else "Orphan Drift"
+            return {"state": state, "changed": False, "site_id": site_id,
+                    "page_file_sha256": current_sha, "rendered_sha256": sha,
+                    "before_sha256": _sha(orphan_backup),
+                    "after_sha256": None, "recovery_id": None,
+                    "read_only": True, "mode": "native_existing_404_file"}
         state = ("Unmanaged" if record is None else
                  "Recovery Required" if (
-                     record["phase"] == "prepared" or
-                     record["phase"] == "applied" and current_sha == record["before_sha256"]
+                     record["phase"] == "prepared" and current_sha in (
+                         record["before_sha256"], record["after_sha256"])
+                     or record["phase"] == "applied" and current_sha == record["before_sha256"]
                  ) else "Drift")
         if record and record["phase"] != "prepared":
             goal = record["after_sha256"] if record["phase"] == "applied" else record["before_sha256"]
@@ -328,6 +343,15 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
         if (observation["body_sha256"] != expected_current or
                 observation["adoption_preview"].get("vhost_sha256") != expected_vhost):
             raise StatusManageError("concurrency", "Observed 404/VHost differs from approved preview")
+        if orphan_backup is not None:
+            if orphan_backup != content:
+                raise StatusManageError(
+                    "recovery", "Unjournaled site backup differs from current 404; "
+                    "do not overwrite operator edits")
+            if current_sha == sha:
+                raise StatusManageError(
+                    "recovery", "Proposed 404 already matches an unjournaled backup; "
+                    "preserve backup and request manual recovery review")
         if record and record["phase"] != "restored":
             if (record["phase"] == "applied" and record["after_sha256"] == sha and
                     current_sha == sha):
@@ -357,9 +381,11 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                 "concurrency", "Site file metadata/ownership changed since HTTP preflight"
             )
         _, backup_name = _names(site_id)
-        if record is None:
+        if record is None and orphan_backup is None:
             _create_data(data_fd, backup_name, content)
         else:
+            # A verified matching orphan is reused, not recreated. The next
+            # step journals 'prepared' durably before touching the website.
             if _read_data(data_fd, backup_name) != content:
                 raise StatusManageError("recovery", "Saved original bytes changed")
         transaction = {

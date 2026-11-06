@@ -140,6 +140,27 @@ class NativeStatusManagementTests(unittest.TestCase):
         self.assertTrue(response["status"])
         self.assertEqual(call.args[0], "recheck")
 
+    def test_orphan_recheck_is_visible_as_warning_without_a_restore_identity(self):
+        from ach_customizer_activity import read_activity
+        response, call = self.run_api(
+            self.args("recheck"),
+            manager_result={"state": "Orphan Backup", "changed": False,
+                            "site_id": 7, "page_file_sha256": "a" * 64,
+                            "rendered_sha256": "b" * 64,
+                            "before_sha256": "a" * 64,
+                            "after_sha256": None, "recovery_id": None,
+                            "read_only": True, "mode": "native_existing_404_file"})
+        self.assertTrue(response["status"], response)
+        self.assertEqual(response["state"], "Orphan Backup")
+        self.assertIsNone(response["recovery_id"])
+        self.assertTrue(response["read_only"])
+        self.assertEqual(call.args[0], "recheck")
+        rows = read_activity(self.tmp.name, module="status_pages", limit=10)
+        self.assertTrue(any(row["action"] == "status_recheck" and
+                            row["level"] == "WARNING" and
+                            row["outcome"] == "Orphan Backup"
+                            for row in rows), rows)
+
     def test_denied_sessions_and_missing_approval_never_reach_manager(self):
         for args, flask in (
             (self.args(), self.flask(uid=2)),

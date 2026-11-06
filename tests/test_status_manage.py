@@ -206,6 +206,111 @@ class Site404TransactionTests(unittest.TestCase):
         self.assertIsNone(self.recovery())
         self.assertEqual(self.page.read_bytes(), self.original)
 
+    def test_orphaned_backup_after_prepared_journal_fault_can_resume_only_with_fresh_apply_proof(self):
+        # A successful durable backup followed by a failed initial journal
+        # write leaves the site's original bytes untouched. A later explicit
+        # approved Apply with full new HTTP/source preflight should reuse the
+        # *exact same* backup, not overwrite it or require manual deletion.
+        original = self.original
+        with patch.object(manager, "_save_journal",
+                          side_effect=OSError("prepared journal not saved")):
+            with self.assertRaises(OSError):
+                self.run_manager()
+        self.assertIsNone(self.recovery())
+        backup = self.state / "ach_customizer.site404.9.before"
+        self.assertEqual(backup.read_bytes(), original)
+        self.assertEqual(self.page.read_bytes(), original)
+        orphan = self.run_manager("recheck")
+        self.assertEqual(orphan["state"], "Orphan Backup")
+        self.assertEqual(orphan["before_sha256"], self.before_sha)
+        self.assertIsNone(orphan["recovery_id"])
+        self.assertIsNone(orphan["after_sha256"])
+        applied = self.run_manager("apply")
+        self.assertEqual(applied["state"], "Applied")
+        self.assertTrue(applied["changed"])
+        self.assertEqual(backup.read_bytes(), original)
+        self.assertEqual(self.recovery()["phase"], "applied")
+        restored = self.run_manager("restore", expected_recovery=applied["recovery_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertEqual(self.page.read_bytes(), original)
+
+    def test_orphaned_backup_with_drift_or_without_fresh_proof_refuses_write(self):
+        with patch.object(manager, "_save_journal",
+                          side_effect=OSError("prepared journal not saved")):
+            with self.assertRaises(OSError):
+                self.run_manager()
+        backup = self.state / "ach_customizer.site404.9.before"
+        saved_backup = backup.read_bytes()
+        self.page.write_bytes(b"Third-party content after crash")
+        orphan = self.run_manager("recheck")
+        self.assertEqual(orphan["state"], "Orphan Drift")
+        self.assertIsNone(orphan["recovery_id"])
+        with self.assertRaises(manager.StatusManageError) as error:
+            self.run_manager(expected_current=hashlib.sha256(self.page.read_bytes()).hexdigest())
+        self.assertEqual(error.exception.stage, "recovery")
+        self.assertEqual(self.page.read_bytes(), b"Third-party content after crash")
+        self.assertEqual(backup.read_bytes(), saved_backup)
+        self.assertIsNone(self.recovery())
+        self.page.write_bytes(self.original)
+        self.fail_probe_numbers = {1}
+        self.probes = 0
+        with self.assertRaises(manager.StatusManageError):
+            self.run_manager()
+        self.assertEqual(backup.read_bytes(), saved_backup)
+        self.assertIsNone(self.recovery())
+        self.fail_probe_numbers = set()
+        with self.assertRaises(manager.StatusManageError):
+            self.run_manager("restore", expected_recovery="a" * 32)
+        self.assertEqual(self.page.read_bytes(), self.original)
+
+    def test_orphan_retry_cannot_mutate_site_if_new_prepared_journal_also_fails(self):
+        with patch.object(manager, "_save_journal",
+                          side_effect=OSError("no prepared journal persisted")):
+            for _ in range(2):
+                with self.assertRaises(OSError):
+                    self.run_manager()
+                self.assertEqual(self.page.read_bytes(), self.original)
+                self.assertIsNone(self.recovery())
+        self.assertEqual(self.run_manager("recheck")["state"], "Orphan Backup")
+        self.assertEqual((self.state / "ach_customizer.site404.9.before").read_bytes(),
+                         self.original)
+
+    def test_orphan_matching_selected_render_does_not_discard_backup_without_journal(self):
+        with patch.object(manager, "_save_journal",
+                          side_effect=OSError("prepared write failed")):
+            with self.assertRaises(OSError):
+                self.run_manager()
+        # User changes the selected brand so the newly rendered 404 equals
+        # the saved existing page. There is no durable transaction to claim.
+        with self.assertRaises(manager.StatusManageError) as error:
+            manager.manage_site_404(
+                "apply", self.site, locale="en", html=self.original.decode(),
+                expected_current=self.before_sha, expected_vhost=self.vhost_sha,
+                expected_render=self.before_sha, data_fd=self.fd,
+                vhost_root=str(self.vhosts), probe=self.fake_probe,
+                site_root_prefix=str(self.root) + "/")
+        self.assertEqual(error.exception.stage, "recovery")
+        self.assertIsNone(self.recovery())
+        self.assertEqual((self.state / "ach_customizer.site404.9.before").read_bytes(),
+                         self.original)
+        self.assertEqual(self.page.read_bytes(), self.original)
+
+    def test_prepared_journal_with_third_party_drift_is_drift_not_recovery_ready(self):
+        previous_save = manager._save_journal
+        def fault(fd, site_id, record):
+            if record["phase"] == "applied":
+                raise OSError("final journal not persisted")
+            return previous_save(fd, site_id, record)
+        with patch.object(manager, "_save_journal", side_effect=fault):
+            with self.assertRaises(manager.StatusManageError):
+                self.run_manager()
+        self.assertEqual(self.recovery()["phase"], "prepared")
+        self.page.write_bytes(b"<html>Independent operator change</html>")
+        recheck = self.run_manager("recheck")
+        self.assertEqual(recheck["state"], "Drift")
+        self.assertEqual(self.page.read_bytes(),
+                         b"<html>Independent operator change</html>")
+
     def test_final_recovery_journal_failure_never_claims_apply_success(self):
         previous_save = manager._save_journal
         stages = []
