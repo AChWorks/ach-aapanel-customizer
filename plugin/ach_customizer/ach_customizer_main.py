@@ -267,10 +267,39 @@ class ach_customizer_main:
                     "restart aaPanel panel service, reopen and Refresh installed PHP"
                 ) from exc
             result = inspect_php_fpm_runtime("/www/server/php", version)
+            # This is a second, independent read-only file attribution. An
+            # old/stale native ZIP worker must keep the existing process
+            # inspection usable, but must NOT claim site-map success.
+            try:
+                import public
+                from ach_customizer_php_topology import inspect_php_fpm_site_topology
+                topology = inspect_php_fpm_site_topology(
+                    public, "/www/server/php", version,
+                    observed_runtime_socket=(
+                        result["socket_path"] if result["state"] == "Observed" else None
+                    ),
+                )
+            except (ImportError, RuntimeError, TypeError) as exc:
+                topology = {
+                    "schema": 1, "state": "Needs Review", "version": version,
+                    "scope": "shared_service", "read_only": True,
+                    "runtime_verified": False, "apply_eligible": False,
+                    "pool": None, "config_path": None, "socket_path": None,
+                    "site_count": 0, "matched_sites": [], "other_sites": [],
+                    "unresolved_sites": [], "source_sha256": None,
+                    "reason": "Native PHP site-topology adapter unavailable or incompatible",
+                    "note": (
+                        "No site-to-service impact boundary established. Restart panel "
+                        "after plugin update; reload native website inventory."
+                    ),
+                }
+            result["site_mapping"] = topology
             response = {"status": True, "operation_id": operation_id, **result}
             return self._activity_result(
                 response, "php_fpm", "inspect_php_runtime",
-                target=str(version)[:16], level="DEBUG" if result["state"] == "Observed" else "WARNING"
+                target=str(version)[:16],
+                level="DEBUG" if result["state"] == "Observed" and
+                topology["state"] == "File Mapping" else "WARNING"
             )
         except PermissionError as exc:
             return self._fail("php_runtime_authorization", exc, operation_id)

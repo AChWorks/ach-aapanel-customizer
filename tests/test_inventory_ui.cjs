@@ -42,6 +42,7 @@ function loadUi() {
     '#ach-impact-summary', '#ach-impact-rows',
     '#ach-php-version', '#ach-php-discover', '#ach-php-discovery-status',
     '#ach-php-runtime-check', '#ach-php-runtime-result',
+    '#ach-php-topology-rows', '#ach-php-topology-summary',
     '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-operation-notice', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
@@ -265,6 +266,9 @@ function loadUi() {
       impactSummary: elements.get('#ach-impact-summary').textContent,
       phpDiscovery: elements.get('#ach-php-discovery-status').textContent,
       phpRuntime: elements.get('#ach-php-runtime-result').textContent,
+      phpTopology: elements.get('#ach-php-topology-summary').textContent,
+      phpTopologyRows: elements.get('#ach-php-topology-rows').children.map(tr =>
+        tr.children.map(td => td.textContent)),
       phpRuntimeDisabled: elements.get('#ach-php-runtime-check').props.disabled,
       phpVersion: elements.get('#ach-php-version').props.value,
       phpVersionDisabled: elements.get('#ach-php-version').props.disabled,
@@ -2407,6 +2411,152 @@ function phpRuntimeEvidence(overrides={}) {
     ...overrides
   };
 }
+
+function phpTopologyEvidence(overrides={}) {
+  return {
+    schema:1,state:'File Mapping',version:'81',scope:'shared_service',
+    read_only:true,runtime_verified:false,apply_eligible:false,
+    pool:'www',config_path:'/www/server/php/81/etc/php-fpm.conf',
+    socket_path:'/tmp/php-cgi-81.sock',site_count:3,
+    matched_sites:[
+      {id:3,site_key:'first.test'},{id:4,site_key:'wordpress.test'}],
+    other_sites:[
+      {id:6,site_key:'other.test',version:'85',socket_path:'/tmp/another-85.sock'}],
+    unresolved_sites:[],source_sha256:'a'.repeat(64),
+    reason:'',note:'Native Nginx FILE attribution only, not loaded configuration.',
+    ...overrides
+  };
+}
+
+test('Selected PHP81 runtime displays native cross-version file site mapping only', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    site_mapping:phpTopologyEvidence()
+  }));
+  assert.match(ui.state().phpRuntime,/Observed/);
+  assert.match(ui.state().phpTopology,/File Mapping/);
+  assert.match(ui.state().phpTopology,/2 assigned to selected service/);
+  assert.match(ui.state().phpTopology,/Apply\/Restore eligibility: NEVER inferred/);
+  assert.deepEqual(ui.state().phpTopologyRows,[
+    ['3','first.test','PHP 81 / www','File-assigned to selected shared socket'],
+    ['4','wordpress.test','PHP 81 / www','File-assigned to selected shared socket'],
+    ['6','other.test','PHP 85 / www','Other native file/socket assignment']
+  ]);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  ui.selectPhpVersion('85');
+  assert.equal(ui.state().phpTopologyRows.length,0,'Version change revokes mapping');
+  assert.match(ui.state().phpTopology,/revoked/);
+});
+
+test('Partial PHP topology honestly labels uninspected sites, not complete impact', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    site_mapping:phpTopologyEvidence({
+      state:'Partial',site_count:4,source_sha256:null,
+      unresolved_sites:[{id:7,site_key:'operator-site.test',reason:'VHost PHP assignment needs review'}],
+      reason:'Some website assignments are ambiguous; shared impact is incomplete'
+    })
+  }));
+  assert.match(ui.state().phpTopology,/Partial/);
+  assert.match(ui.state().phpTopology,/1 unresolved/);
+  assert.deepEqual(ui.state().phpTopologyRows.at(-1),[
+    '7','operator-site.test','Needs Review','VHost PHP assignment needs review'
+  ]);
+  assert.doesNotMatch(ui.state().phpTopology,/all sites proven|effective routing verified/i);
+});
+
+test('Untrusted site topology payloads never manufacture complete shared impact', () => {
+  const wrong=[
+    {apply_eligible:true},{runtime_verified:true},{site_count:10000},
+    {version:'85'}, {socket_path:'/tmp/other.sock'},
+    {source_sha256:null},
+    {site_count:4},
+    {unresolved_sites:[{id:7,site_key:'bad.test',reason:'Ambiguous'}]},
+    {matched_sites:[{id:3,site_key:'first.test'},{id:3,site_key:'duplicate.test'}]},
+    {other_sites:[{id:6,site_key:'other.test',version:'85',socket_path:'/tmp/../evil.sock'}]},
+    {other_sites:[{id:6,site_key:'other.test',version:'81',socket_path:'/tmp/another.sock'}]},
+    {other_sites:[{id:6,site_key:'other.test',version:'00',socket_path:'/tmp/other.sock'}]},
+    {state:'File Mapping',reason:'Unknown'},
+    {state:'Partial',source_sha256:null,reason:'Partial'},
+    {config_path:'/outside/81/php-fpm.conf'}
+  ];
+  for(const patch of wrong){
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+      site_mapping:phpTopologyEvidence(patch)
+    }));
+    assert.match(ui.state().phpTopology,/missing or incompatible/,
+      JSON.stringify(patch));
+    assert.equal(ui.state().phpTopologyRows.length,0);
+    assert.equal(ui.state().fpmPrepareDisabled,true);
+  }
+});
+
+test('PHP topology Needs Review, absent backend adapter and source switch remain non-authorizing', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    site_mapping:phpTopologyEvidence({
+      state:'Needs Review',pool:null,socket_path:null,config_path:null,
+      site_count:0,matched_sites:[],other_sites:[],unresolved_sites:[],
+      source_sha256:null,reason:'Unsupported aaPanel PHP pool layout'
+    })
+  }));
+  assert.match(ui.state().phpTopology,/Needs Review/);
+  assert.equal(ui.state().phpTopologyRows.length,0);
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence());
+  assert.match(ui.state().phpTopology,/missing or incompatible/);
+  const previous=ui.inspectPhpRuntime();
+  ui.refreshPhp().respond(ui.phpVersions());
+  previous.respond(phpRuntimeEvidence({site_mapping:phpTopologyEvidence()}));
+  assert.equal(ui.state().phpTopologyRows.length,0);
+  assert.match(ui.state().phpTopology,/revoked/);
+});
+
+test('PHP85 manual Apply/Restore attempts revoke any earlier file-to-service mapping', () => {
+  const mapped85 = phpTopologyEvidence({
+    version:'85',config_path:'/www/server/php/85/etc/php-fpm.conf',
+    socket_path:'/tmp/php-cgi-85.sock',
+    matched_sites:[{id:6,site_key:'php85.test'}],
+    other_sites:[{id:3,site_key:'php81.test',version:'81',
+      socket_path:'/tmp/php-cgi-81.sock'}],site_count:2
+  });
+  const evidence85 = phpRuntimeEvidence({
+    version:'85',socket_path:'/tmp/php-cgi-85.sock',site_mapping:mapped85
+  });
+  const apply=loadUi();
+  apply.openPhp().respond(apply.phpVersions());
+  apply.selectPhpVersion('85');
+  apply.inspectPhpRuntime().respond(evidence85);
+  assert.equal(apply.state().phpTopologyRows.length,2);
+  apply.submitPhp('85',false).respond(phpPreview());
+  apply.prepareFpm().respond(guardedPlan());
+  apply.approveFpm(true);
+  const commit=apply.commitFpm();
+  assert.equal(apply.state().phpTopologyRows.length,0);
+  assert.match(apply.state().phpTopology,/revoked/);
+  assert.match(apply.state().phpRuntime,/Apply attempt invalidated/);
+  commit.respond(appliedResult());
+
+  const restore=loadUi();
+  restore.openPhp().respond(restore.phpVersions());
+  restore.selectPhpVersion('85');
+  restore.inspectPhpRuntime().respond(evidence85);
+  assert.equal(restore.state().phpTopologyRows.length,2);
+  restore.inspectFpmRecovery().respond(recoveryPreview());
+  restore.approveFpmRollback(true);
+  const rollback=restore.rollbackFpm();
+  assert.equal(restore.state().phpTopologyRows.length,0);
+  assert.match(restore.state().phpRuntime,/Restore attempt invalidated/);
+  rollback.respond(rolledBackResult());
+});
 
 test('Read-only PHP 8.1 runtime inspection requires a discovered version and preserves no Apply claim', () => {
   const ui=loadUi();

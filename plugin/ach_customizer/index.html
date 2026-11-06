@@ -306,8 +306,13 @@
       <p class="ach-note">Installed PHP, master-process/Unix-socket observations and PHP-FPM file/default comparisons are separate read-only evidence. Conventional Nginx site-to-pool file assignments are shown below. No process/source observation proves effective site routing or authorizes a PHP-FPM Apply.</p>
       <div class="ach-controls"><button id="ach-php-discover" type="button">Refresh installed PHP</button></div>
       <p id="ach-php-discovery-status" role="status" aria-live="polite">Open PHP-FPM to discover installed versioned services. File presence does not verify running processes or enable Apply.</p>
-      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP master/socket (read-only)</button></div>
+      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP service + site files (read-only)</button></div>
       <p id="ach-php-runtime-result" class="ach-status-metadata" role="status" aria-live="polite">Select a discovered PHP 8.1+ version for bounded Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
+      <p id="ach-php-topology-summary" class="ach-status-metadata" role="status" aria-live="polite">No site-to-PHP socket file mapping loaded. The runtime process check does not by itself identify impacted sites.</p>
+      <div class="ach-scroll" aria-label="Read-only native PHP file assignments"><table>
+        <thead><tr><th>Site ID</th><th>Native site key</th><th>File-assigned PHP</th><th>Attribution</th></tr></thead>
+        <tbody id="ach-php-topology-rows"><tr><td colspan="4">Inspect selected PHP to map source files.</td></tr></tbody>
+      </table></div>
       <form id="ach-php-form">
         <div class="ach-fields">
           <div><label for="ach-php-version">Installed PHP-FPM version</label><select id="ach-php-version" name="php_version" disabled required><option value="">Discover PHP installations first</option></select></div>
@@ -1614,11 +1619,17 @@
     root.find('#ach-php-runtime-check').prop('disabled',
       phpRuntimeBusy || phpInventoryBusy || !phpInventory.get(version)?.preview_candidate);
   }
+  function clearPhpTopology(reason) {
+    root.find('#ach-php-topology-rows').empty();
+    root.find('#ach-php-topology-summary').text(reason ||
+      'Site-to-PHP file mapping not established. No complete shared impact boundary inferred.');
+  }
   function invalidatePhpRuntime(reason) {
     ++phpRuntimeTicket;
     phpRuntimeBusy = false;
     root.find('#ach-php-runtime-result').text(reason ||
       'Select installed PHP and Inspect runtime. No process or effective pool state assumed.');
+    clearPhpTopology('Site mapping revoked: selected PHP source or inventory may have changed.');
     phpRuntimeLock();
   }
   function validPhpRuntime(r, version) {
@@ -1649,6 +1660,96 @@
     }
     return ['Not Observed','Needs Review'].includes(r.master_state) &&
       r.socket_state === 'Needs Review' && r.master_pid === null && r.reason.length > 0;
+  }
+  function validPhpTopology(t, version, runtime) {
+    var socket = function (v) {
+      return typeof v === 'string' && v.length <= 200 &&
+        /^\/[A-Za-z0-9_./-]+\.sock$/.test(v) &&
+        !v.includes('/../') && !v.includes('//');
+    };
+    if (!t || t.schema !== 1 || t.version !== version || t.scope !== 'shared_service' ||
+        t.read_only !== true || t.runtime_verified !== false || t.apply_eligible !== false ||
+        !['File Mapping','Partial','Needs Review'].includes(t.state) ||
+        (t.pool !== null && t.pool !== 'www') ||
+        (t.config_path !== null && t.config_path !== '/www/server/php/' + version + '/etc/php-fpm.conf') ||
+        (t.socket_path !== null && !socket(t.socket_path)) ||
+        !Number.isSafeInteger(t.site_count) || t.site_count < 0 || t.site_count > 100 ||
+        typeof t.reason !== 'string' || t.reason.length > 250 ||
+        typeof t.note !== 'string' || t.note.length > 600 ||
+        !Array.isArray(t.matched_sites) || !Array.isArray(t.other_sites) ||
+        !Array.isArray(t.unresolved_sites) ||
+        (t.source_sha256 !== null &&
+         (typeof t.source_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(t.source_sha256)))) return false;
+    var entries = t.matched_sites.concat(t.other_sites,t.unresolved_sites), seen=new Set();
+    if (entries.length !== t.site_count) return false;
+    for (var item of entries) {
+      if (!item || typeof item !== 'object' || Array.isArray(item) ||
+          !Number.isSafeInteger(item.id) || item.id < 1 || item.id > 2147483647 ||
+          typeof item.site_key !== 'string' || !item.site_key ||
+          item.site_key.length > 255 || seen.has(item.id)) return false;
+      seen.add(item.id);
+    }
+    for (var other of t.other_sites) {
+      var validCode = other.version === '00' ||
+        typeof other.version === 'string' && /^[1-9][0-9]{1,2}$/.test(other.version) &&
+        (Number(other.version[0]) > 8 ||
+         Number(other.version[0]) === 8 && Number(other.version.slice(1)) >= 1);
+      if (!validCode || other.version === version ||
+          (other.version === '00' ? other.socket_path !== null : !socket(other.socket_path))) return false;
+    }
+    for (var unresolved of t.unresolved_sites) {
+      if (typeof unresolved.reason !== 'string' || !unresolved.reason ||
+          unresolved.reason.length > 180) return false;
+    }
+    if (t.state === 'Needs Review') {
+      return t.site_count === 0 && entries.length === 0 &&
+        t.source_sha256 === null && t.reason.length > 0;
+    }
+    if (t.pool !== 'www' || !socket(t.socket_path) ||
+        t.config_path !== '/www/server/php/' + version + '/etc/php-fpm.conf' ||
+        runtime.state === 'Observed' && runtime.socket_path !== t.socket_path) return false;
+    if (t.state === 'Partial')
+      return t.unresolved_sites.length > 0 && t.source_sha256 === null && t.reason.length > 0;
+    return t.unresolved_sites.length === 0 && t.source_sha256 !== null && t.reason === '';
+  }
+  function renderPhpTopology(mapping, version) {
+    var rows = root.find('#ach-php-topology-rows').empty();
+    if (mapping.state === 'Needs Review') {
+      root.find('#ach-php-topology-summary').text(
+        'PHP ' + version + ' site file mapping: Needs Review — ' + mapping.reason +
+        '\nNo site assignment is trusted. ' + mapping.note);
+      return;
+    }
+    var displayed = mapping.matched_sites.map(function (item) {
+      return {id:item.id,key:item.site_key,assignment:'PHP '+version+' / www',
+        note:'File-assigned to selected shared socket'};
+    }).concat(mapping.other_sites.map(function (item) {
+      return {id:item.id,key:item.site_key,
+        assignment:item.version === '00' ? 'No PHP (00)' : 'PHP '+item.version+' / www',
+        note:'Other native file/socket assignment'};
+    }),mapping.unresolved_sites.map(function (item) {
+      return {id:item.id,key:item.site_key,assignment:'Needs Review',note:item.reason};
+    }));
+    displayed.sort(function(a,b){return a.id-b.id;});
+    displayed.forEach(function (site) {
+      var tr=$('<tr>');
+      $('<td>').text(String(site.id)).appendTo(tr);
+      $('<td>').text(site.key).appendTo(tr);
+      $('<td>').text(site.assignment).appendTo(tr);
+      $('<td>').text(site.note).appendTo(tr);
+      rows.append(tr);
+    });
+    if (!displayed.length) {
+      rows.append($('<tr>').append($('<td colspan="4">').text('No native websites registered.')));
+    }
+    root.find('#ach-php-topology-summary').text(
+      'PHP '+version+' — '+mapping.state+' (native FILE attribution only)' +
+      '\nBound [www] Unix socket source: '+mapping.socket_path +
+      '\nSites: '+mapping.site_count+' total, '+mapping.matched_sites.length+
+      ' assigned to selected service, '+mapping.other_sites.length+
+      ' other/no-PHP, '+mapping.unresolved_sites.length+' unresolved.'+
+      (mapping.reason ? '\n'+mapping.reason : '')+
+      '\n'+mapping.note+'\nApply/Restore eligibility: NEVER inferred from file topology.');
   }
   function validPhpInventory(r) {
     if (!r || r.schema !== 1 || r.read_only !== true || r.runtime_verified !== false ||
@@ -1737,6 +1838,7 @@
     phpRuntimeLock();
     root.find('#ach-php-runtime-result').text(
       'Inspecting exact PHP binary/master process/Unix socket in Linux procfs...');
+    clearPhpTopology('Checking native site-to-versioned socket source mappings...');
     request('inspect_php_runtime', {php_version:selected}, function (r) {
       if (ticket !== phpRuntimeTicket || inventory !== phpInventoryTicket ||
           String(root.find('#ach-php-version').val() || '') !== selected) return;
@@ -1745,8 +1847,12 @@
       if (!validPhpRuntime(r, selected)) {
         root.find('#ach-php-runtime-result').text(
           'PHP runtime evidence unavailable/incompatible. No running state or Apply eligibility inferred.');
+        clearPhpTopology('Untrusted PHP runtime response; no site file mapping is accepted.');
         return;
       }
+      if (validPhpTopology(r.site_mapping, selected, r))
+        renderPhpTopology(r.site_mapping, selected);
+      else clearPhpTopology('Native PHP file mapping missing or incompatible. No site-service attribution inferred.');
       root.find('#ach-php-runtime-result').text(
         'PHP ' + selected + ' — ' + r.state +
         '\nMaster process: ' + r.master_state +
@@ -1930,6 +2036,7 @@
     phpPreviewEligible = false;
     resetFpmPlan();
     resetRecovery();
+    invalidatePhpRuntime('PHP-FPM Apply attempt invalidated prior master/socket and site source evidence. Inspect again.');
     fpmLock(true);
     markFpmOperationPending('Apply');
     request('fpm_apply', Object.assign({}, fieldsNow, approval), function (r) {
@@ -2004,7 +2111,9 @@
   root.find('#ach-fpm-rollback').on('click', function () {
     if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
     var op = fpmRecovery.operation_id, current = fpmRecovery;
-    resetRecovery(); fpmLock(true);
+    resetRecovery();
+    invalidatePhpRuntime('PHP-FPM Restore attempt invalidated prior master/socket and site source evidence. Inspect again.');
+    fpmLock(true);
     markFpmOperationPending('Restore');
     request('fpm_rollback', {php_version:'85', approved_scope:'PHP85-www-shared-service',
       operation_id:op, expected_impact:current.impact_sha256,
