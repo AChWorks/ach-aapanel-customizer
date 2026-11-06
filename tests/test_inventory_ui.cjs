@@ -3253,9 +3253,11 @@ test('Site lifecycle comparison requires reviewed baseline and refuses blind ret
   assert.equal(ui.state().siteChangesSaveDisabled,false);
   const save=ui.siteChangesSave();
   assert.match(save.options.url,/s=save_site_baseline$/);
-  assert.deepEqual(save.options.data,{
-    expected_revision:0,expected_source_sha256:'a'.repeat(64),reviewed:'true'
-  });
+  assert.equal(save.options.data.expected_revision,0);
+  assert.equal(save.options.data.expected_source_sha256,'a'.repeat(64));
+  assert.equal(save.options.data.reviewed,'true');
+  assert.deepEqual(Object.keys(save.options.data).sort(),
+    ['expected_revision','expected_source_sha256','reviewed']);
   assert.equal(ui.state().siteChangesSaveDisabled,true);
   save.respond({status:true,schema:1,state:'Baseline Saved',changed:true,
     baseline_revision:1,source_sha256:'a'.repeat(64)});
