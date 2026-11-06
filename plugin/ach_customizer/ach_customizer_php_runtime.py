@@ -189,6 +189,10 @@ def _master_holds_listener(proc_root, pid, inode):
     fd = _open_directory(Path(proc_root) / pid / "fd")
     try:
         count = 0
+        matched_listener = False
+        # Scan to completion before trusting a positive fd match: otherwise
+        # a valid listener encountered first could hide an unbounded number
+        # of later entries on another filesystem/directory ordering.
         with os.scandir(fd) as entries:
             for entry in entries:
                 if count >= MAX_MASTER_FDS:
@@ -201,8 +205,8 @@ def _master_holds_listener(proc_root, pid, inode):
                 except (FileNotFoundError, ProcessLookupError):
                     continue
                 if link == "socket:[" + inode + "]":
-                    return True
-        return False
+                    matched_listener = True
+        return matched_listener
     finally:
         os.close(fd)
 

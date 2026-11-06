@@ -186,6 +186,11 @@ class RuntimeIdentityTests(unittest.TestCase):
 
     def test_file_descriptor_overflow_must_not_infer_bound_master(self):
         folder = self.proc / self.pid / "fd"
+        # The valid listener is present before hundreds of unrelated FDs.
+        # Even if scandir yields the valid listener first, no positive result
+        # may be returned before the complete bounded-list validation.
+        self.assertEqual((folder / "7").readlink().as_posix(),
+                         "socket:[" + self.inode + "]")
         for idx in range(runtime.MAX_MASTER_FDS + 1):
             (folder / str(1000 + idx)).symlink_to("pipe:[123]")
         r = self.inspect()
