@@ -151,6 +151,7 @@ class ManualFpmWorkflow:
     def _impact(self, panel, plan, *, observed=None):
         impact = observed if observed is not None else self._lookup_impact(panel, plan)
         if (not isinstance(impact, dict) or impact.get("state") != "File Mapping"
+                or impact.get("manual_apply_eligible") is not True
                 or impact.get("schema") != 1 or impact.get("version") != recovery.VERSION
                 or impact.get("scope") != "shared_service"
                 or impact.get("unresolved_sites") != []
@@ -177,6 +178,7 @@ class ManualFpmWorkflow:
             ids.add(item["id"])
         identity = {
             "version":recovery.VERSION, "site_count":impact["site_count"],
+            "manual_apply_eligible": impact["manual_apply_eligible"],
             "matched_sites":impact["matched_sites"],
             "other_php_sites_count":impact.get("other_php_sites_count"),
             "dependency_sha256":impact["dependency_sha256"],

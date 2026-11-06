@@ -82,6 +82,26 @@ const {chromium} = require('playwright');
             throw Error('Native PHP version picker unsafe or inaccessible '+JSON.stringify(picker));
           }
         }
+        if(name==='status') {
+          // Save/Reset acknowledgement must be visible beside the Save action,
+          // not under the 440px preview/diagnostics on a long scroll surface.
+          const feedback=await page.evaluate(()=>{
+            const button=document.getElementById('ach-status-save');
+            const notice=document.getElementById('ach-status-result');
+            const main=document.getElementById('ach-content');
+            button.scrollIntoView({block:'center',inline:'nearest'});
+            const a=button.getBoundingClientRect(), b=notice.getBoundingClientRect(),
+              m=main.getBoundingClientRect();
+            return {gap:Math.round(b.top-a.bottom),withinViewport:b.top>=m.top && b.bottom<=m.bottom+1,
+              withinMain:b.left>=m.left-1 && b.right<=m.right+1,
+              inSamePanel:notice.closest('.ach-view')===button.closest('.ach-view'),
+              live:notice.getAttribute('aria-live')};
+          });
+          if(feedback.gap<0 || feedback.gap>70 || !feedback.withinViewport ||
+             !feedback.withinMain || !feedback.inSamePanel || feedback.live!=='polite') {
+            throw Error('Save acknowledgement hidden or detached from action '+JSON.stringify({width,height,feedback}));
+          }
+        }
         if(name==='websites') {
           // Inspect the shipped DOM, not a reconstructed control: discovery
           // is a select that remains disabled until native inventory arrives.

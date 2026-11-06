@@ -41,6 +41,7 @@ class TestManualFpmWorkflow(unittest.TestCase):
         self.panel=types.SimpleNamespace(get_panel_version=lambda:"8.0.7",get_webserver=lambda:"nginx")
         self.impact={
             "schema":1,"state":"File Mapping","scope":"shared_service","version":"85",
+            "manual_apply_eligible": True,
             "matched_sites":[{"id":3,"site_key":"example-a.test"},{"id":6,"site_key":"example-b.test"}],
             "unresolved_sites":[],"site_count":2,"other_php_sites_count":0,
             "dependency_sha256":"a"*64,
@@ -147,6 +148,27 @@ class TestManualFpmWorkflow(unittest.TestCase):
                     self.assertEqual(caught.exception.stage,"fpm_authorization")
         self.assertEqual(self.config.read_bytes(),SOURCE)
         self.assertEqual(list(self.state_dir.iterdir()),[])
+
+    def test_unverified_native_mapping_cannot_prepare_apply_or_restore(self):
+        self.impact["manual_apply_eligible"] = False
+        original = self.config.read_bytes()
+        for action, args in (
+            (self.controller.prepare, VALUES),
+            (self.controller.apply, {**VALUES, "approved_scope": workflow.APPROVAL_SCOPE}),
+        ):
+            with self.subTest(action=action.__name__):
+                with self.assertRaises(core.FpmApplyError) as caught:
+                    action(args)
+                self.assertEqual(caught.exception.stage, "fpm_impact")
+                self.assertEqual(self.config.read_bytes(), original)
+                self.assertEqual(list(self.state_dir.iterdir()), [])
+
+    def test_missing_native_eligibility_cannot_prepare(self):
+        self.impact.pop("manual_apply_eligible")
+        with self.assertRaises(core.FpmApplyError) as caught:
+            self.controller.prepare(VALUES)
+        self.assertEqual(caught.exception.stage, "fpm_impact")
+        self.assertEqual(list(self.state_dir.iterdir()), [])
 
     def test_approval_and_staleness_fails_before_mutation(self):
         payload=self.payload()
