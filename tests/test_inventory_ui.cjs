@@ -37,6 +37,7 @@ function loadUi() {
     '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
+    '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -227,6 +228,8 @@ function loadUi() {
     return {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
+      cacheResult: elements.get('#ach-cache-result').textContent,
+      cacheInspectDisabled: elements.get('#ach-cache-inspect-button').props.disabled,
       hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
       hostsSelectorDisabled: elements.get('#ach-hosts-site-id').props.disabled,
       hostsChoices: elements.get('#ach-hosts-site-id').children.map(option => ({
@@ -1074,6 +1077,129 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
   ui.respond(inventory);
   ui.statusSetValue('#ach-hosts-site-id',id,'input change');
 }
+
+const cacheInspection = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  read_only:true,runtime_verified:false,cache_safe_verified:false,
+  purge_supported:false,fix_supported:false,
+  state:'Source Observed',zone_state:'Direct Zone',cache_zone:'WORDPRESS',
+  global_zone_directly_declared:true,
+  bypass_directive_seen:true,no_cache_directive_seen:true,
+  host_key_variable_seen:true,purge_directive_seen:true,
+  ignore_headers:['Set-Cookie'],
+  findings:['SHARED_ZONE_REFERENCES','RESPONSE_CACHE_HEADER_IGNORED',
+    'PURGE_DIRECTIVE_OBSERVED','PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED'],
+  other_sites_same_zone:[{id:8,site_key:'other.test'}],
+  unresolved_other_sites:0,inspected_sites:2,source_sha256:'b'.repeat(64),
+  reason:'',note:'Source-only observation. No loaded cache or Nginx Helper safety claim.',
+  ...overrides
+});
+
+test('FastCGI cache audit binds exact native website snapshot and never grants Apply/purge', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  assert.equal(ui.state().cacheInspectDisabled,false);
+  const request=ui.statusClick('#ach-cache-inspect-button');
+  assert.match(request.options.url,/s=inspect_fastcgi_cache$/);
+  assert.equal(request.options.type,'POST');
+  assert.deepEqual(Object.keys(request.options.data).sort(),[
+    'expected_site_key','expected_site_snapshot','site_id']);
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot),[
+    7,'site.test','/www/site.test','1',[['site.test',80]]
+  ]);
+  assert.equal(ui.state().cacheInspectDisabled,true);
+  request.respond(cacheInspection());
+  assert.equal(ui.state().cacheInspectDisabled,false);
+  const state=ui.state().cacheResult;
+  assert.match(state,/Cache source: Source Observed/);
+  assert.match(state,/direct directive: Direct Zone/);
+  assert.match(state,/Direct cache zone: WORDPRESS/);
+  assert.match(state,/SHARED_ZONE_REFERENCES/);
+  assert.match(state,/RESPONSE_CACHE_HEADER_IGNORED/);
+  assert.match(state,/8: other.test/);
+  assert.match(state,/DO NOT infer/);
+  assert.doesNotMatch(state,/safe to purge|private content protected/);
+});
+
+test('Partial FastCGI cache source and Needs Review never claim verified isolation', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    state:'Partial',inspected_sites:3,unresolved_other_sites:1,
+    reason:'Unknown third-party Nginx site extension'
+  }));
+  assert.match(ui.state().cacheResult,/Cache source: Partial/);
+  assert.match(ui.state().cacheResult,/unresolved sites: 1\/3/);
+  assert.match(ui.state().cacheResult,/No loaded cache or Nginx Helper safety claim/);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    state:'Needs Review',zone_state:'Needs Review',cache_zone:null,
+    global_zone_directly_declared:false,findings:[],other_sites_same_zone:[],
+    inspected_sites:0,source_sha256:null,reason:'Unsupported site Nginx include'
+  }));
+  assert.match(ui.state().cacheResult,/Needs Review/);
+  assert.doesNotMatch(ui.state().cacheResult,/Direct cache zone: WORDPRESS/);
+});
+
+test('Forged FastCGI cache source responses fail closed and do not enable mutation', () => {
+  const forged = [
+    {site_id:8},{site_key:'other.test'},{fix_supported:true},
+    {purge_supported:true},{cache_safe_verified:true},{runtime_verified:true},
+    {source_sha256:'fake'},{inspected_sites:101},
+    {zone_state:'Direct Zone',cache_zone:null},{zone_state:'Direct Off'},
+    {state:'Source Observed',unresolved_other_sites:1},
+    {state:'Partial',unresolved_other_sites:0},
+    {findings:['PERSONAL_DATA_LEAK']},
+    {ignore_headers:['xss<script>']},
+    {other_sites_same_zone:[{id:7,site_key:'selected.test'}]},
+    {other_sites_same_zone:[{id:8,site_key:'other.test'},{id:8,site_key:'again.test'}]},
+    {other_sites_same_zone:[{id:8,site_key:'other.test'}],inspected_sites:1}
+  ];
+  for (const changed of forged) {
+    const ui=loadUi();
+    selectHostsSite(ui);
+    ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection(changed));
+    assert.match(ui.state().cacheResult,/unavailable or incompatible/,JSON.stringify(changed));
+    assert.equal(ui.state().cacheInspectDisabled,false);
+  }
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    findings:['<img src=x onerror=alert(1)>']
+  }));
+  assert.doesNotMatch(ui.state().cacheResult,/<img/);
+});
+
+test('FastCGI cache result is revoked on selected website, Refresh or policy changes', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:9}));
+  selectHostsSite(ui);
+  const old=ui.statusClick('#ach-cache-inspect-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  old.respond(cacheInspection());
+  assert.match(ui.state().cacheResult,/selection changed/);
+  assert.doesNotMatch(ui.state().cacheResult,/WORDPRESS/);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection());
+  assert.match(ui.state().cacheResult,/WORDPRESS/);
+  const refresh=ui.refreshSites();
+  assert.equal(ui.state().cacheInspectDisabled,true);
+  assert.match(ui.state().cacheResult,/changed/);
+  refresh.respond(hostsInventory());
+  assert.equal(ui.state().cacheInspectDisabled,true,'Must reselect after inventory Refresh');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  const pending=ui.statusClick('#ach-cache-inspect-button');
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',false);
+  assert.match(write.options.url,/s=set_control$/);
+  assert.equal(ui.state().cacheInspectDisabled,true);
+  // A monitor write/pending policy invalidates the selected source; old
+  // in-flight callbacks never reattach a stale cache policy.
+  pending.respond(cacheInspection());
+  assert.doesNotMatch(ui.state().cacheResult,/Direct cache zone: WORDPRESS/);
+  assert.match(ui.state().cacheResult,/changed|revoked/);
+  write.reject(null,'timeout');
+  assert.equal(ui.state().cacheInspectDisabled,true);
+});
 
 test('Native-site local hosts inspection reports loopback without claiming Gateway failure', () => {
   const ui=loadUi();

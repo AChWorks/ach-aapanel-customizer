@@ -298,8 +298,12 @@
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
       <p class="ach-note"><strong>Local hosts override check (read-only):</strong> inspect exact site-bound names in origin-local /etc/hosts. Loopback does not prove DNS or Gateway failure; no correction is offered.</p>
       <div class="ach-controls"><label for="ach-hosts-site-id">Website (current inventory page)</label><select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts</button></div>
-      <p class="ach-note">Select a discovered website above, or use Previous / Next to inspect another page. This is an origin-local file check, not a remote DNS or Gateway test.</p>
+      <p class="ach-note">Select a discovered website above, or use Previous / Next to inspect another page. The same selection also supports the separate read-only FastCGI cache source audit below. Neither diagnosis tests a remote host or authorizes changing Nginx/cache files.</p>
       <p id="ach-hosts-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website from the inventory for read-only inspection.</p>
+      <hr />
+      <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines known Nginx VHost and PHP snippet text for cache-zone reuse, missing direct bypass/write-guard statements, cache-key host tokens, response-header ignore and purge directives. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
+      <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
+      <p id="ach-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
@@ -896,6 +900,18 @@
     });
   }
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
+  var cacheBusy = false, cacheTicket = 0;
+  function invalidateCacheAudit(note) {
+    ++cacheTicket;
+    cacheBusy = false;
+    root.find('#ach-cache-result').text(note ||
+      'Select a native website to inspect source-only FastCGI cache clues.');
+    cacheLock();
+  }
+  function cacheLock() {
+    root.find('#ach-cache-inspect-button').prop('disabled',
+      cacheBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+  }
   function nativeHostsSnapshot(site) {
     var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
     bindings.sort(function (a, b) {
@@ -918,11 +934,13 @@
     hostsBusy = busy;
     root.find('#ach-hosts-site-id').prop('disabled', busy || siteBusy || websitePolicyState !== 'stable' || !hostsPageSites.size);
     root.find('#ach-hosts-inspect-button').prop('disabled', busy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+    cacheLock();
   }
   function resetHostsSelection(message) {
     ++hostsTicket; // Supersede an in-flight inspection on page/navigation changes.
     hostsBusy = false;
     hostsPageSites = new Map();
+    invalidateCacheAudit('Website page/selection changed; inspect FastCGI cache sources again.');
     var select = root.find('#ach-hosts-site-id').empty().val('');
     $('<option>').val('').text('Select a website on this page').appendTo(select);
     root.find('#ach-hosts-result').text(message || 'Select a discovered website to inspect.');
@@ -932,6 +950,7 @@
     var select = root.find('#ach-hosts-site-id').empty().val('');
     $('<option>').val('').text(sites.length ? 'Select a website on this page' : 'No websites on this page').appendTo(select);
     hostsPageSites = new Map();
+    invalidateCacheAudit('Website inventory refreshed; choose a site for a new FastCGI cache audit.');
     sites.forEach(function (site) {
       var id = String(site.id);
       // A snapshot is an optimistic *comparison only*, not a domain/path source.
@@ -979,6 +998,7 @@
   root.find('#ach-hosts-site-id').on('input change', function () {
     ++hostsTicket;
     root.find('#ach-hosts-result').text('Site selection changed; recheck.');
+    invalidateCacheAudit('Website selection changed; no previous cache audit is current.');
     hostsLock(false);
   });
   root.find('#ach-hosts-inspect-button').on('click', function () {
@@ -1007,6 +1027,113 @@
           '\nFile SHA-256: ' + r.hosts_sha256 + '\n' + r.note);
       }
       hostsLock(false);
+    });
+  });
+  function validCacheAudit(r, id) {
+    var sha = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+    var same = hostsPageSites.get(id);
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== same?.name ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.cache_safe_verified !== false || r.fix_supported !== false ||
+        r.purge_supported !== false ||
+        !['Source Observed','Partial','Needs Review'].includes(r.state) ||
+        !['Direct Zone','Direct Off','No Direct Directive','Needs Review'].includes(r.zone_state) ||
+        !(r.cache_zone === null || typeof r.cache_zone === 'string' &&
+          /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(r.cache_zone)) ||
+        typeof r.global_zone_directly_declared !== 'boolean' ||
+        typeof r.bypass_directive_seen !== 'boolean' ||
+        typeof r.no_cache_directive_seen !== 'boolean' ||
+        typeof r.host_key_variable_seen !== 'boolean' ||
+        typeof r.purge_directive_seen !== 'boolean' ||
+        !Number.isSafeInteger(r.inspected_sites) || r.inspected_sites < 0 ||
+        r.inspected_sites > 100 ||
+        !Number.isSafeInteger(r.unresolved_other_sites) ||
+        r.unresolved_other_sites < 0 || r.unresolved_other_sites > 99 ||
+        typeof r.reason !== 'string' || r.reason.length > 250 ||
+        typeof r.note !== 'string' || r.note.length > 650 ||
+        !Array.isArray(r.findings) || r.findings.length > 12 ||
+        !Array.isArray(r.ignore_headers) || r.ignore_headers.length > 5 ||
+        !Array.isArray(r.other_sites_same_zone) ||
+        r.other_sites_same_zone.length > 99) return false;
+    var codes = new Set([
+      'NO_DIRECT_CACHE_BYPASS','NO_DIRECT_CACHE_WRITE_GUARD',
+      'KEY_NOT_DIRECTLY_OBSERVED','HOST_PARTITION_NOT_OBSERVED',
+      'ZONE_DECLARATION_NOT_IN_MAIN_FILE','SHARED_ZONE_REFERENCES',
+      'RESPONSE_CACHE_HEADER_IGNORED','NON_GET_CACHE_METHOD',
+      'PURGE_DIRECTIVE_OBSERVED','PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED'
+    ]);
+    if (new Set(r.findings).size !== r.findings.length ||
+        !r.findings.every(x => codes.has(x)) ||
+        !r.ignore_headers.every(x =>
+          ['Set-Cookie','Cache-Control','Expires','Vary','X-Accel-Expires'].includes(x)) ||
+        new Set(r.ignore_headers).size !== r.ignore_headers.length) return false;
+    var ids = new Set([Number(id)]);
+    for (var peer of r.other_sites_same_zone) {
+      if (!peer || !Number.isSafeInteger(peer.id) || peer.id < 1 ||
+          peer.id > 2147483647 || ids.has(peer.id) ||
+          typeof peer.site_key !== 'string' || !peer.site_key ||
+          peer.site_key.length > 255) return false;
+      ids.add(peer.id);
+    }
+    if (r.state === 'Needs Review')
+      return r.zone_state === 'Needs Review' && r.cache_zone === null &&
+        r.inspected_sites === 0 && r.source_sha256 === null &&
+        r.reason.length > 0 && r.other_sites_same_zone.length === 0 &&
+        r.unresolved_other_sites === 0 && r.findings.length === 0;
+    if (!sha(r.source_sha256) || r.inspected_sites < 1 ||
+        r.unresolved_other_sites + r.other_sites_same_zone.length >= r.inspected_sites ||
+        (r.zone_state === 'Direct Zone' ?
+          r.cache_zone === null : r.cache_zone !== null) ||
+        (r.zone_state !== 'Direct Zone' && r.other_sites_same_zone.length !== 0) ||
+        (r.global_zone_directly_declared && r.zone_state !== 'Direct Zone') ||
+        (r.state === 'Partial' ? !(r.unresolved_other_sites > 0 && r.reason) :
+          r.unresolved_other_sites !== 0 || r.reason !== '')) return false;
+    return true;
+  }
+  root.find('#ach-cache-inspect-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cacheBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var ticket = ++cacheTicket;
+    cacheBusy = true;
+    cacheLock();
+    root.find('#ach-cache-result').text(
+      'Checking native Nginx FastCGI cache SOURCE text (no HTTP, purge or Apply)...');
+    request('inspect_fastcgi_cache', {
+      site_id:id,
+      expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r) {
+      if (ticket !== cacheTicket) return;
+      cacheBusy = false;
+      cacheLock();
+      if (id !== hostsSiteId() || !validCacheAudit(r, id)) {
+        root.find('#ach-cache-result').text(
+          'Cache inspection unavailable or incompatible. No source or runtime policy inferred.');
+        return;
+      }
+      if (r.state === 'Needs Review') {
+        root.find('#ach-cache-result').text(
+          'FastCGI cache source: Needs Review — ' + r.reason + '\n' + r.note);
+        return;
+      }
+      root.find('#ach-cache-result').text(
+        'Cache source: ' + r.state + '; direct directive: ' + r.zone_state +
+        '\nDirect cache zone: ' + (r.cache_zone || 'Not established') +
+        '; declared in inspected main nginx.conf: ' + r.global_zone_directly_declared +
+        '\nDirect fastcgi_cache_bypass: ' + r.bypass_directive_seen +
+        '; direct fastcgi_no_cache: ' + r.no_cache_directive_seen +
+        '\nDirect key contains host variable: ' + r.host_key_variable_seen +
+        '; purge directive observed: ' + r.purge_directive_seen +
+        '\nIgnored response-cache headers: ' + (r.ignore_headers.join(', ') || 'None observed') +
+        '\nOther registered sites with same directly observed zone: ' +
+        (r.other_sites_same_zone.map(x=>x.id + ': ' + x.site_key).join(', ') || 'None observed') +
+        '; unresolved sites: ' + r.unresolved_other_sites + '/' + r.inspected_sites +
+        '\nReview signals: ' + (r.findings.join(', ') || 'None in this limited source scan') +
+        (r.reason ? '\n' + r.reason : '') +
+        '\nSource snapshot SHA-256: ' + r.source_sha256 +
+        '\n' + r.note +
+        '\nDO NOT infer that private routes are safe or that site-scoped Purge All is isolated.');
     });
   });
   root.find('#ach-sites-refresh').on('click', function () {
