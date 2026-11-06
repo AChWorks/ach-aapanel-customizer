@@ -1655,6 +1655,7 @@
       (impact.unresolved_sites.length === 0 &&
        typeof impact.dependency_sha256 === 'string' &&
        /^[0-9a-f]{64}$/.test(impact.dependency_sha256) &&
+       typeof impact.manual_apply_eligible === 'boolean' &&
        impact.matched_sites.length + impact.other_php_sites_count === impact.site_count);
   }
   function phpFields() {
@@ -1686,7 +1687,8 @@
   }
   function validFpmPlan(r) {
     if (!r || !r.plan || !validImpact(r.shared_impact, '85') ||
-        r.shared_impact.state !== 'File Mapping' || !r.shared_impact.matched_sites.length ||
+        r.shared_impact.state !== 'File Mapping' ||
+        r.shared_impact.manual_apply_eligible !== true || !r.shared_impact.matched_sites.length ||
         r.plan.scope !== 'shared_service' || r.plan.pool !== 'www' || r.plan.version !== '85' ||
         r.plan.source !== '/www/server/php/85/etc/php-fpm.conf' ||
         !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
@@ -1879,7 +1881,7 @@
       } else {
         var label = impact.state === 'File Mapping' ? 'File mapping' : 'Needs Review';
         root.find('#ach-impact-summary').text(
-          label + ': ' + impact.matched_sites.length + ' site(s) with a conventional PHP ' +
+          label + ': ' + impact.matched_sites.length + ' site(s) with a verified PHP ' +
           data.php_version + ' file assignment; ' + impact.unresolved_sites.length +
           ' unresolved, ' + impact.other_php_sites_count + ' assigned other PHP. ' +
           (impact.reason || '') + ' ' + impact.note
@@ -1908,9 +1910,15 @@
       });
       if (r.state === 'File Match') root.find('#ach-fpm-result').text(r.state + ': ' + t.noDrift + '. ' + r.note);
       phpPreviewEligible = data.php_version === '85' && (r.state === 'File Drift' || r.state === 'File Match') &&
-        validImpact(impact, data.php_version) && impact.state === 'File Mapping' && impact.matched_sites.length > 0;
+        validImpact(impact, data.php_version) && impact.state === 'File Mapping' &&
+        impact.manual_apply_eligible === true && impact.matched_sites.length > 0;
       root.find('#ach-fpm-prepare').prop('disabled', fpmBusy || !phpPreviewEligible);
-      root.find('#ach-fpm-plan').text(phpPreviewEligible ? 'File mapping available; prepare a guarded manual change if needed.' : 'Unsupported or unresolved: manual Apply unavailable.');
+      root.find('#ach-fpm-plan').text(phpPreviewEligible ?
+        'File mapping available; prepare a guarded manual change if needed.' :
+        validImpact(impact, data.php_version) && impact.state === 'File Mapping' &&
+          impact.manual_apply_eligible === false ?
+        'Native file mapping is read-only: Apply/Restore needs separate recovery QA.' :
+        'Unsupported or unresolved: manual Apply unavailable.');
     }, fresh);
   });
   overview();

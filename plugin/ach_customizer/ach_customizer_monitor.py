@@ -517,28 +517,155 @@ def _single_www_listen(pool_source):
     return addresses[0]
 
 
-def _native_nginx_php_version(vhost_text, *, native_rewrite=None):
-    """Identify a direct PHP include and only an explicitly known native rewrite."""
-    # A second include may define a hidden FastCGI route. aaPanel's exact
-    # generated per-site rewrite include is accepted only when its bytes and
-    # identity are independently inspected and bound to the approval digest.
+def _verified_native_php_include(nginx_dir, name, socket):
+    """Bind one known aaPanel PHP snippet and its literal FastCGI parameters.
+
+    The wpfastcgi snippet has additional cache controls and a purge location;
+    they do not constitute another PHP upstream. Neither shape may introduce
+    a second upstream, a nested routing include, or a different pool socket.
+    """
+    if not re.fullmatch(r"enable-php-[0-9]{2,3}(?:-wpfastcgi)?\.conf", name):
+        raise MonitorInputError("Unsupported native PHP snippet")
+    php_include, php_signature = _bounded_file_text(
+        nginx_dir / name, MAX_NGINX_SITE_BYTES, with_fingerprint=True,
+    )
+    active = _active_nginx_text(php_include)
+    nested = re.findall(
+        r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$", active
+    )
+    if (len(nested) != len(re.findall(r"\binclude\b", active))
+            or len(set(nested)) != len(nested)
+            or any(part not in ("fastcgi.conf", "pathinfo.conf") for part in nested)):
+        raise MonitorInputError("Unverified Nginx PHP nested include needs review")
+    if _unsupported_nginx_upstream(active, allow_fastcgi=True):
+        raise MonitorInputError("Unsupported Nginx PHP upstream routing needs review")
+    destinations = re.findall(
+        r"(?m)^[ \t]*fastcgi_pass[ \t]+unix:([^;\s]+)[ \t]*;[ \t]*$", active
+    )
+    if (len(re.findall(r"\bfastcgi_pass\b", active)) != 1
+            or destinations != [socket]):
+        raise MonitorInputError(
+            "Nginx PHP include has ambiguous FastCGI destinations or is not mapped to the [www] socket"
+        )
+    dependencies = [{"kind": "php_include", "name": name, "signature": php_signature}]
+    for part in nested:
+        content, signature = _bounded_file_text(
+            nginx_dir / part, MAX_NGINX_SITE_BYTES, with_fingerprint=True,
+        )
+        params = _active_nginx_text(content)
+        if (re.search(r"\b(?:include|location)\b", params)
+                or _unsupported_nginx_upstream(params)):
+            raise MonitorInputError("Unsafe Nginx FastCGI parameter include needs review")
+        dependencies.append({"kind": "php_params", "name": part, "signature": signature})
+    return dependencies
+
+
+def _native_extension_fingerprint(directory):
+    """Read a single native per-site '*.conf' glob without following links.
+
+    Accept only inert native logging overlays. Arbitrary extension fragments
+    may change request handling or PHP routing, so they must remain unresolved.
+    Two anchored full snapshots detect directory entry/content changes during
+    inspection; the digest is rechecked by Prepare/Apply before any write.
+    """
+    import os
+    import stat
+
+    directory = Path(directory)
+    if not directory.is_absolute() or ".." in directory.parts:
+        raise MonitorInputError("Noncanonical native extension path")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    identities = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
+                  "st_mtime_ns", "st_ctime_ns", "st_nlink")
+
+    def snapshot():
+        fd = os.open("/", flags)
+        try:
+            for component in directory.parts[1:]:
+                following = os.open(component, flags, dir_fd=fd)
+                os.close(fd)
+                fd = following
+            before = os.fstat(fd)
+            if (not stat.S_ISDIR(before.st_mode) or before.st_uid != os.geteuid()
+                    or before.st_mode & 0o022):
+                raise MonitorInputError("Unsafe native extension directory")
+            # Count every entry, including non-.conf files, and stop before
+            # collecting or sorting an unbounded directory listing.
+            with os.scandir(fd) as iterator:
+                entries = []
+                for entry in iterator:
+                    if len(entries) >= CONFIG_FILES_LIMIT:
+                        raise MonitorInputError(
+                            "Native extension directory exceeds bounded inventory"
+                        )
+                    entries.append(entry.name)
+            entries.sort()
+            files = []
+            for name in entries:
+                if not name.endswith(".conf"):
+                    continue
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,120}\.conf", name):
+                    raise MonitorInputError("Unsupported native extension filename")
+                text, signature = _bounded_file_text(
+                    directory / name, MAX_NGINX_SITE_BYTES, with_fingerprint=True,
+                )
+                active = _active_nginx_text(text)
+                for line in active.splitlines():
+                    if (line.strip() and not re.fullmatch(
+                            r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)):
+                        raise MonitorInputError("Native extension has unverified routing or directives")
+                files.append({"name": name, "signature": signature})
+            after = os.fstat(fd)
+            if any(getattr(before, field) != getattr(after, field) for field in identities):
+                raise MonitorInputError("Native extension changed during inspection")
+            # An open directory can remain valid after its pathname was
+            # rebound. Reopen the complete path and verify the live identity.
+            check_fd = os.open("/", flags)
+            try:
+                for component in directory.parts[1:]:
+                    next_fd = os.open(component, flags, dir_fd=check_fd)
+                    os.close(check_fd)
+                    check_fd = next_fd
+                rebound = os.fstat(check_fd)
+                if any(getattr(after, field) != getattr(rebound, field) for field in identities):
+                    raise MonitorInputError("Native extension directory path was rebound")
+            finally:
+                os.close(check_fd)
+            identity = {key: getattr(after, key) for key in identities}
+            return {"directory": identity, "entries": entries, "files": files}
+        finally:
+            os.close(fd)
+
+    original = snapshot()
+    if original != snapshot():
+        raise MonitorInputError("Native extension entries changed during inspection")
+    return hashlib.sha256(json.dumps(
+        original, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+
+
+def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
+                              native_extension=None):
+    """Accept only an exact native PHP include, site rewrite and inert glob."""
     active = _active_nginx_text(vhost_text)
     includes = re.findall(
-        r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$",
-        active,
+        r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$", active,
     )
     if (len(includes) != len(re.findall(r"\binclude\b", active))
+            or len(set(includes)) != len(includes)
             or _unsupported_nginx_upstream(active)):
         raise MonitorInputError("Unverified Nginx include or upstream routing needs review")
-    php = [re.fullmatch(r"enable-php-([0-9]{2,3})\.conf", name) for name in includes]
-    php = [match for match in php if match]
+    php = [(match.group(1), name) for name in includes
+           if (match := re.fullmatch(
+               r"enable-php-([0-9]{2,3})(?:-wpfastcgi)?\.conf", name))]
     if len(php) != 1:
-        raise MonitorInputError("No unique conventional Nginx PHP include")
-    extras = [name for name in includes if not re.fullmatch(r"enable-php-[0-9]{2,3}\.conf", name)]
-    if extras and (len(extras) != 1 or native_rewrite is None
-                   or extras[0] != native_rewrite):
+        raise MonitorInputError("No unique native Nginx PHP include")
+    extras = [name for name in includes if name != php[0][1]]
+    if (len(extras) > 2 or any(
+            name not in (native_rewrite, native_extension) or name is None
+            for name in extras)):
         raise MonitorInputError("Additional or unverified Nginx include/routing needs review")
-    return php[0].group(1), bool(extras)
+    return php[0][0], php[0][1], native_rewrite in extras, native_extension in extras
 
 
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
@@ -559,10 +686,14 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         "version": version,
         "matched_sites": [],
         "unresolved_sites": [],
+        # A file-only native route is not permission to reload a shared FPM
+        # service. Only the separately proven legacy/conventional shape is
+        # currently write-eligible; extensions and wpfastcgi are read-only.
+        "manual_apply_eligible": False,
         "site_count": 0,
         "other_php_sites_count": 0,
         "reason": "",
-        "note": ("Conventional Nginx VHost/PHP include and [www] Unix-socket FILE attribution only; "
+        "note": ("Verified native Nginx VHost/PHP includes, inert site extension glob and [www] Unix-socket FILE attribution only; "
                  "not proof of effective routing, PHP worker state, or a complete impact boundary for Apply."),
     }
     try:
@@ -574,48 +705,10 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         if vhost_dir.is_symlink() or nginx_dir.is_symlink() or rewrite_dir.is_symlink():
             raise MonitorInputError("Linked Nginx configuration directory")
         socket = _single_www_listen(pool_source)
-        php_include, php_signature = _bounded_file_text(
-            nginx_dir / ("enable-php-" + version + ".conf"), MAX_NGINX_SITE_BYTES,
-            with_fingerprint=True,
-        )
-        # aaPanel's native PHP snippet can include fastcgi.conf and pathinfo.conf.
-        # Inspect only these bounded parameter dependencies; never expand
-        # arbitrary routing, wildcard paths, or further nested includes.
-        php_active = _active_nginx_text(php_include)
-        php_nested = re.findall(
-            r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$",
-            php_active,
-        )
-        if (len(php_nested) != len(re.findall(r"\binclude\b", php_active))
-                or len(set(php_nested)) != len(php_nested)
-                or any(name not in ("fastcgi.conf", "pathinfo.conf") for name in php_nested)):
-            raise MonitorInputError("Unverified Nginx PHP nested include needs review")
-        dependencies = [{"kind": "php_include", "signature": php_signature}]
-        for name in php_nested:
-            params, params_signature = _bounded_file_text(
-                nginx_dir / name, MAX_NGINX_SITE_BYTES,
-                with_fingerprint=True,
-            )
-            params_active = _active_nginx_text(params)
-            if (re.search(r"\b(?:include|location)\b", params_active)
-                    or _unsupported_nginx_upstream(params_active)):
-                raise MonitorInputError("Unsafe Nginx FastCGI parameter include needs review")
-            dependencies.append({"kind": name, "signature": params_signature})
-        # Count *all* active FastCGI directives independently of the one
-        # supported Unix-socket shape. A named upstream, variable, malformed
-        # directive or additional location must never escape this comparison.
-        # Ignore Nginx comments, but fail closed on unrecognized syntax.
-        if _unsupported_nginx_upstream(php_active, allow_fastcgi=True):
-            raise MonitorInputError("Unsupported Nginx PHP upstream routing needs review")
-        all_fastcgi = re.findall(r"\bfastcgi_pass\b", php_active)
-        unix_fastcgi = re.findall(
-            r"(?m)^[ \t]*fastcgi_pass[ \t]+unix:([^;\s]+)[ \t]*;[ \t]*$",
-            php_active,
-        )
-        if len(all_fastcgi) != 1 or len(unix_fastcgi) != 1 or unix_fastcgi[0] != socket:
-            raise MonitorInputError(
-                "Nginx PHP include has ambiguous FastCGI destinations or is not mapped to the [www] socket"
-            )
+        native_standard = "enable-php-" + version + ".conf"
+        dependencies = _verified_native_php_include(nginx_dir, native_standard, socket)
+        checked_snippets = {native_standard}
+        native_unverified_write_shape = False
         # Native DB is the authority for website IDs. Refuse partial sets:
         # missing later pages would create an unsafe shared-resource claim.
         rows = (
@@ -653,8 +746,10 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     with_fingerprint=True,
                 )
                 rewrite = rewrite_dir / (name + ".conf")
-                assigned, has_rewrite = _native_nginx_php_version(
-                    vhost, native_rewrite=str(rewrite)
+                extension = vhost_dir / "extension" / name
+                assigned, php_name, has_rewrite, has_extension = _native_nginx_php_version(
+                    vhost, native_rewrite=str(rewrite),
+                    native_extension=str(extension / "*.conf"),
                 )
                 if has_rewrite:
                     rewrite_text, rewrite_signature = _bounded_file_text(
@@ -666,6 +761,38 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                         raise MonitorInputError("Unverified Nginx rewrite routing needs review")
                     dependencies.append({"kind": "native_rewrite", "id": site_id,
                                          "signature": rewrite_signature})
+                if has_extension:
+                    native_unverified_write_shape = True
+                    dependencies.append({"kind": "native_extension", "id": site_id,
+                                         "signature": _native_extension_fingerprint(extension)})
+                if php_name.endswith("-wpfastcgi.conf"):
+                    native_unverified_write_shape = True
+                if php_name not in checked_snippets:
+                    if assigned == "00":
+                        if php_name != "enable-php-00.conf":
+                            raise MonitorInputError("Unsupported no-PHP Nginx include")
+                        disabled, signature = _bounded_file_text(
+                            nginx_dir / php_name, MAX_NGINX_SITE_BYTES, with_fingerprint=True
+                        )
+                        disabled_active = _active_nginx_text(disabled)
+                        if (re.search(r"\binclude\b", disabled_active)
+                                or NGINX_UPSTREAM_DIRECTIVES.search(disabled_active)):
+                            raise MonitorInputError("No-PHP include contains unverified upstream routing")
+                        dependencies.append({"kind": "no_php_include", "name": php_name,
+                                             "signature": signature})
+                    else:
+                        # A filename alone is not proof that an 'other PHP'
+                        # website cannot also feed the inspected shared pool.
+                        # Validate its actual literal native socket as well.
+                        expected_socket = socket if assigned == version else (
+                            "/tmp/php-cgi-" + assigned + ".sock"
+                        )
+                        if assigned != version and expected_socket == socket:
+                            raise MonitorInputError("Another PHP snippet shares this pool socket")
+                        dependencies.extend(_verified_native_php_include(
+                            nginx_dir, php_name, expected_socket
+                        ))
+                    checked_snippets.add(php_name)
                 dependencies.append({"kind": "vhost", "id": site_id,
                                      "signature": vhost_signature})
             except (OSError, UnicodeError, MonitorInputError):
@@ -684,6 +811,10 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 dependencies, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")).hexdigest()
             result["state"] = "File Mapping"
+            result["manual_apply_eligible"] = not native_unverified_write_shape
+            if native_unverified_write_shape:
+                result["note"] += (" Native extension/wpcache layouts are mapped read-only; "
+                                   "shared-service Apply/Restore needs separate clone-based native QA.")
     except (OSError, UnicodeError, MonitorInputError, ValueError) as exc:
         # A global DB/schema/socket error invalidates *all* partial matches.
         # Only per-site unsupported VHosts keep already proven file links.

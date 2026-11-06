@@ -699,7 +699,7 @@ const phpImpact = (overrides = {}) => ({
     {id: 6, site_key: '<img src=x onerror=alert(1)>'}
   ],
   unresolved_sites: [], site_count: 3, other_php_sites_count: 1,
-  dependency_sha256: 'e'.repeat(64),
+  dependency_sha256: 'e'.repeat(64), manual_apply_eligible: true,
   reason: '', note: 'File-only attribution, not effective runtime.',
   ...overrides
 });
@@ -724,6 +724,19 @@ test('Native PHP preview shows two shared file-linked websites safely without im
   assert.match(result.impactSummary, /File mapping: 2 site\(s\)/);
   assert.match(result.impactSummary, /not effective runtime/);
   assert.equal(result.errorClass, false);
+});
+
+test('Native extension or WordPress cache mapping is visible but cannot enable Manual Apply', () => {
+  const ui = loadUi();
+  const request = ui.submitPhp();
+  request.respond(phpPreview(phpImpact({
+    manual_apply_eligible: false,
+    note: 'Native extension/wpcache mapping is read-only; Apply/Restore requires clone QA.'
+  })));
+  const state = ui.state();
+  assert.match(state.impactSummary, /File mapping: 2 site\(s\)/);
+  assert.match(state.fpmPlan, /Native file mapping is read-only/);
+  assert.equal(state.fpmPrepareDisabled, true);
 });
 
 test('Incomplete shared mapping shows partial evidence and visible Needs Review', () => {
