@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -1194,6 +1195,57 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         self.assertNotIn('dependency_sha256', got)
         # A fresh, stable scan is allowed to show read-only attribution.
         self.assertEqual(self.inspect()['state'], 'File Mapping')
+
+    def test_native_extension_entry_limit_counts_all_directory_entries(self):
+        self._native_qa_shapes()
+        extension = self.vhosts / 'extension' / 'site-a.example.test'
+        # One real .conf entry plus 31 harmless non-.conf entries is allowed.
+        for number in range(monitor.CONFIG_FILES_LIMIT - 1):
+            (extension / f'note-{number:02d}.txt').write_text(
+                'test fixture\n', encoding='utf-8')
+        accepted = self.inspect()
+        self.assertEqual(accepted['state'], 'File Mapping', accepted)
+        self.assertIs(accepted['manual_apply_eligible'], False)
+        self.assertIn('dependency_sha256', accepted)
+
+        (extension / 'one-more.txt').write_text('over limit\n', encoding='utf-8')
+        refused = self.inspect()
+        self.assertEqual(refused['state'], 'Needs Review', refused)
+        self.assertEqual([site['id'] for site in refused['unresolved_sites']], [3])
+        self.assertNotIn('dependency_sha256', refused)
+        self.assertIs(refused['manual_apply_eligible'], False)
+
+    def test_native_extension_scandir_stops_at_entry_33_and_closes(self):
+        self._native_qa_shapes()
+
+        class InstrumentedScandir:
+            def __init__(self):
+                self.consumed = 0
+                self.closed = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                self.closed = True
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.consumed += 1
+                if self.consumed > monitor.CONFIG_FILES_LIMIT + 1:
+                    raise AssertionError('Unbounded directory iteration')
+                return SimpleNamespace(name=f'note-{self.consumed:05d}.txt')
+
+        extension = self.vhosts / 'extension' / 'site-a.example.test'
+        iterator = InstrumentedScandir()
+        with patch('os.scandir', return_value=iterator):
+            with self.assertRaises(monitor.MonitorInputError) as error:
+                monitor._native_extension_fingerprint(extension)
+        self.assertIn('exceeds bounded inventory', str(error.exception))
+        self.assertEqual(iterator.consumed, monitor.CONFIG_FILES_LIMIT + 1)
+        self.assertTrue(iterator.closed)
 
     def test_native_extension_glob_rejects_unsafe_or_ambiguous_shapes(self):
         self._native_qa_shapes()

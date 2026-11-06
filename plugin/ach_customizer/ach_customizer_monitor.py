@@ -589,9 +589,17 @@ def _native_extension_fingerprint(directory):
             if (not stat.S_ISDIR(before.st_mode) or before.st_uid != os.geteuid()
                     or before.st_mode & 0o022):
                 raise MonitorInputError("Unsafe native extension directory")
-            entries = sorted(entry.name for entry in os.scandir(fd))
-            if len(entries) > CONFIG_FILES_LIMIT:
-                raise MonitorInputError("Native extension directory exceeds bounded inventory")
+            # Count every entry, including non-.conf files, and stop before
+            # collecting or sorting an unbounded directory listing.
+            with os.scandir(fd) as iterator:
+                entries = []
+                for entry in iterator:
+                    if len(entries) >= CONFIG_FILES_LIMIT:
+                        raise MonitorInputError(
+                            "Native extension directory exceeds bounded inventory"
+                        )
+                    entries.append(entry.name)
+            entries.sort()
             files = []
             for name in entries:
                 if not name.endswith(".conf"):
