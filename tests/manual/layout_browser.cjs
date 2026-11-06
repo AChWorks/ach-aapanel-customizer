@@ -40,6 +40,32 @@ const {chromium} = require('playwright');
             contentBottom:Math.round(mb.bottom),
             controlsHiddenBehindBody:body.scrollHeight>innerHeight+1};
         });
+        // The desktop active row must merge with the white content surface
+        // without a visible right-side stroke; narrow layouts instead use
+        // the existing horizontal bottom-border navigation treatment.
+        if (name === 'overview') {
+          const continuity = await page.evaluate(() => {
+            const side = document.querySelector('.ach-sidebar');
+            const active = side.querySelector('button[aria-selected="true"]');
+            const main = document.querySelector('.ach-main');
+            const root = document.querySelector('#ach-customizer');
+            const note = document.querySelector('.ach-note');
+            return {
+              sideBorder: getComputedStyle(side).borderRightWidth,
+              selectedFill: getComputedStyle(active).backgroundColor,
+              contentFill: getComputedStyle(main).backgroundColor,
+              corner: getComputedStyle(root).borderBottomLeftRadius,
+              noteCorner: getComputedStyle(note).borderTopLeftRadius,
+              sideDirection: getComputedStyle(side).flexDirection,
+            };
+          });
+          if (continuity.corner !== '10px' || continuity.noteCorner !== '8px' ||
+              (width > 720 && (continuity.sideBorder !== '0px' ||
+                continuity.selectedFill !== continuity.contentFill))) {
+            throw Error('Native dialog active-row continuity/corners failed ' +
+              JSON.stringify({width,height,...continuity}));
+          }
+        }
         // Verify reusable control geometry in the actual rendered plugin DOM.
         // This detects aaPanel-style drift even if the parent layer still fits.
         const controls=await page.evaluate(()=>{

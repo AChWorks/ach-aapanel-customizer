@@ -1899,6 +1899,10 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /function fitNativeLayer/);
   assert.match(html, /--ach-green:#20a53a/);
   assert.match(html, /--ach-sidebar-bg:#f0f0f1/);
+  assert.match(html, /\.ach-sidebar \{[^}]*border-right:0/);
+  assert.match(html, /\.ach-main \{[^}]*background:var\(--ach-surface\)/);
+  assert.match(html, /\.ach-workspace \{[^}]*border-radius:0 0 10px 10px/);
+  assert.match(html, /\.layui-layer:has\(#ach-customizer\) \{[^}]*border-radius:10px/);
   assert.doesNotMatch(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);

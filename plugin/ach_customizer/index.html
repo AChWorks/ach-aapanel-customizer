@@ -15,13 +15,15 @@
       max-height:calc(100dvh - 48px) !important;
       left:max(16px,calc((100vw - min(980px,calc(100vw - 32px)))/2)) !important;
       top:max(8px,calc((100dvh - min(760px,calc(100dvh - 48px)))/2)) !important;
+      border-radius:10px !important;
     }
     .layui-layer:has(#ach-customizer) > .layui-layer-title {
       background:#fff !important; border-bottom:1px solid #e5e5e5 !important;
+      border-radius:10px 10px 0 0;
     }
     .layui-layer:has(#ach-customizer) > .layui-layer-content {
       height:calc(100% - 42px) !important;
-      overflow:hidden !important;
+      overflow:hidden !important; border-radius:0 0 10px 10px;
     }
     .layui-layer:has(#ach-customizer) #ach-customizer { height:100% !important; }
   }
@@ -37,18 +39,28 @@
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
     font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
     font-size:13px; line-height:1.5; overflow:hidden;
+    border-radius:0 0 10px 10px;
   }
   #ach-customizer .ach-shell { display:flex; flex-direction:column; height:100%; min-width:0; }
   #ach-customizer .ach-sr-only {
     position:absolute; width:1px; height:1px; padding:0; margin:-1px;
     overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
   }
-  #ach-customizer .ach-workspace { display:grid; grid-template-columns:170px minmax(0,1fr); flex:1; min-height:0; }
-  #ach-customizer .ach-sidebar { min-width:0; overflow-y:auto; background:var(--ach-sidebar-bg); border-right:1px solid var(--ach-line); padding:0; }
+  #ach-customizer .ach-workspace {
+    display:grid; grid-template-columns:170px minmax(0,1fr); flex:1; min-height:0;
+    /* The host dialog owns its title. Only the scrollable content corners are clipped. */
+    border-radius:0 0 10px 10px; overflow:hidden;
+  }
+  #ach-customizer .ach-sidebar {
+    min-width:0; overflow-y:auto; background:var(--ach-sidebar-bg); padding:0;
+    /* No continuous divider: the selected white row flows into the white pane. */
+    border-right:0;
+  }
   #ach-customizer .ach-sidebar button {
     appearance:none; display:block; width:100%; min-height:40px; padding:10px 20px;
     border:0; border-radius:0; background:transparent;
     text-align:left; color:var(--ach-text); font:inherit; line-height:1.4; cursor:pointer;
+    transition:background-color .12s ease, color .12s ease;
   }
   #ach-customizer .ach-sidebar button:hover:not([aria-selected="true"]) { background:#e7e7e8; }
   #ach-customizer .ach-sidebar button[aria-selected="true"] {
@@ -57,6 +69,7 @@
   #ach-customizer .ach-main {
     overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
     padding:16px 20px 28px; min-width:0; min-height:0; scrollbar-gutter:stable;
+    background:var(--ach-surface);
   }
   #ach-customizer .ach-main h4 {
     margin:0 0 12px; font-size:14px; line-height:21px; color:#263544; font-weight:600;
@@ -67,7 +80,7 @@
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
   #ach-customizer .ach-note {
     padding:11px 13px; background:var(--ach-soft); border:1px solid #e8ecef;
-    border-radius:3px; overflow-wrap:anywhere; color:#52606d;
+    border-radius:8px; overflow-wrap:anywhere; color:#52606d;
   }
   #ach-customizer .ach-note p { margin:6px 0 0; }
   #ach-customizer .ach-note p:last-child { margin-bottom:0; }
@@ -104,7 +117,7 @@
     display:grid; grid-template-columns:1.3fr 2fr 1fr; gap:14px; min-width:0;
   }
   #ach-customizer .ach-skeleton-row span {
-    display:block; height:13px; border-radius:3px; background:#e9edf0;
+    display:block; height:13px; border-radius:8px; background:#e9edf0;
     animation:ach-placeholder 1.45s ease-in-out infinite alternate;
   }
   #ach-customizer .ach-skeleton-row:nth-child(2) span { animation-delay:.18s; }
@@ -169,7 +182,7 @@
   }
   #ach-customizer th { background:#f7f9fa; color:#586775; font-weight:600; white-space:nowrap; }
   #ach-customizer tbody tr:hover { background:#fafcfd; }
-  #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:3px; }
+  #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:8px; }
   #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0 0; }
   #ach-customizer .ach-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
   #ach-customizer .ach-toolbar [role="status"] {
@@ -178,7 +191,7 @@
   #ach-customizer .ach-toolbar > button { flex:0 0 auto; }
   #ach-customizer #ach-message {
     margin:0 0 14px; padding:9px 12px; border:1px solid #e1e7ed;
-    border-radius:3px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
+    border-radius:8px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
   }
   #ach-customizer #ach-message:empty { display:none; }
   #ach-customizer #ach-message.ach-error,
@@ -186,14 +199,14 @@
   #ach-customizer #ach-message.ach-error { background:#fff5f3; border-color:#f0d1ce; }
   #ach-customizer .ach-fpm-operation-notice {
     position:sticky; top:0; z-index:2; padding:10px 12px; margin:12px 0;
-    background:#f2f8f3; border:1px solid #d4e4d6; border-radius:3px;
+    background:#f2f8f3; border:1px solid #d4e4d6; border-radius:8px;
     font-weight:600; overflow-wrap:anywhere;
   }
   #ach-customizer .ach-fpm-operation-notice.ach-error { background:#fff5f4; border-color:#e4c8c7; }
   #ach-customizer #ach-status-result,
   #ach-customizer #ach-overview-control-result {
     padding:9px 11px; margin:8px 0 0; background:#f7f9fb;
-    border:1px solid #dde6ed; border-radius:6px;
+    border:1px solid #dde6ed; border-radius:8px;
     color:#425466; overflow-wrap:anywhere;
   }
   #ach-customizer #ach-overview-control-result[data-state="saved"],
@@ -206,17 +219,17 @@
   }
   #ach-customizer .ach-status-preview {
     display:block; width:100%; min-height:440px; border:1px solid var(--ach-line);
-    border-radius:3px; background:#fff;
+    border-radius:8px; background:#fff;
   }
   #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
   #ach-customizer .ach-status-comparison {
     max-width:100%; max-height:260px; margin:8px 0 14px; overflow:auto;
-    border:1px solid var(--ach-line); border-radius:3px; padding:10px 12px;
+    border:1px solid var(--ach-line); border-radius:8px; padding:10px 12px;
     background:#f7f9fb; color:#233141; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;
     white-space:pre-wrap; overflow-wrap:anywhere; tab-size:2;
   }
   #ach-customizer .ach-status-comparison:empty { display:none; }
-  #ach-customizer .ach-badge { display:inline-block; font-size:11px; padding:2px 7px; border-radius:3px; background:#e9f2ec; color:#21642d; }
+  #ach-customizer .ach-badge { display:inline-block; font-size:11px; padding:2px 7px; border-radius:8px; background:#e9f2ec; color:#21642d; }
   #ach-customizer .ach-activity-error { color:#ac3431; font-weight:600; }
   #ach-customizer .ach-activity-warning { color:#8c601c; font-weight:600; }
   #ach-customizer .ach-activity-info { color:#3b6474; }
