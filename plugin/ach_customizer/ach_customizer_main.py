@@ -225,6 +225,70 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
 
+    def compare_site_changes(self, args):
+        """Full-primary-admin Monitor-only native site/binding comparison."""
+        request_id = uuid4().hex
+        site_error_type = None
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            # Resolve the new optional helper lazily: a stale in-memory aaPanel
+            # module must not break unrelated installed plugin actions.
+            try:
+                from ach_customizer_site_changes import compare, SiteChangesError
+                site_error_type = SiteChangesError
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Site-change helper is outdated after plugin update; "
+                    "restart the panel service during maintenance and reopen the plugin"
+                ) from exc
+            import public
+            result = compare(public, directory=_STATE_DIR)
+            response = {"status": True, "operation_id": request_id, **result}
+            return self._activity_result(
+                response, "websites", "compare_site_changes",
+                target="native-sites", level="DEBUG")
+        except PermissionError as exc:
+            return self._fail("website_changes_authorization", exc, request_id)
+        except Exception as exc:
+            if site_error_type is not None and isinstance(exc, site_error_type):
+                return self._fail("website_changes_compare", str(exc), request_id,
+                                  diagnostic_error=exc)
+            return self._fail("website_changes_compare", exc, request_id)
+
+    def save_site_baseline(self, args):
+        """Explicit reviewed baseline revision; never writes a site or service."""
+        request_id = uuid4().hex
+        site_error_type = None
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_site_changes import save_reviewed_baseline, SiteChangesError
+                site_error_type = SiteChangesError
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Site-change helper is outdated after plugin update; "
+                    "restart the panel service during maintenance and reopen the plugin"
+                ) from exc
+            import public
+            result = save_reviewed_baseline(
+                public, directory=_STATE_DIR,
+                expected_revision=self._argument(args, "expected_revision"),
+                expected_source_sha256=self._argument(args, "expected_source_sha256"),
+                reviewed=self._argument(args, "reviewed"),
+            )
+            response = {"status": True, "operation_id": request_id, **result}
+            return self._activity_result(
+                response, "websites", "save_site_baseline", target="native-sites")
+        except PermissionError as exc:
+            return self._fail("website_baseline_authorization", exc, request_id)
+        except Exception as exc:
+            if site_error_type is not None and isinstance(exc, site_error_type):
+                return self._fail("website_baseline_save", str(exc), request_id,
+                                  diagnostic_error=exc)
+            return self._fail("website_baseline_save", exc, request_id)
+
     def get_php_versions(self, args):
         """Primary-admin-only, read-only installed PHP file discovery."""
         operation_id = uuid4().hex

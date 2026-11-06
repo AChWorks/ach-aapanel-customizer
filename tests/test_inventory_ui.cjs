@@ -36,6 +36,8 @@ function loadUi() {
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
+    '#ach-site-changes-compare', '#ach-site-changes-approve',
+    '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-rows',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
@@ -246,6 +248,11 @@ function loadUi() {
       statusSource: elements.get('#ach-status-source').textContent,
       statusName: elements.get('#ach-status-name').props.value,
       siteStatus: elements.get('#ach-sites-status').textContent,
+      siteChangesStatus: elements.get('#ach-site-changes-status').textContent,
+      siteChangesSaveDisabled: elements.get('#ach-site-changes-save').props.disabled,
+      siteChangesApproveDisabled: elements.get('#ach-site-changes-approve').props.disabled,
+      siteChangesRows: elements.get('#ach-site-changes-rows').children.map(tr =>
+        tr.children.map(td => td.textContent)),
       sitesSkeletonHidden: elements.get('#ach-sites-loading').props.hidden,
       sitesTableRowsHidden: elements.get('#ach-sites-rows').props.hidden,
       activitySkeletonHidden: elements.get('#ach-activity-loading').props.hidden,
@@ -363,6 +370,12 @@ function loadUi() {
     openPhp, refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
     activityRefresh: () => { trigger(elements.get('#ach-activity-refresh'), 'click'); return requests.at(-1); },
     respond, respondOverview, toggleMonitor, submitPhp,
+    siteChangesCompare: () => { trigger(elements.get('#ach-site-changes-compare'), 'click'); return requests.at(-1); },
+    siteChangesApprove: checked => {
+      elements.get('#ach-site-changes-approve').props.checked = checked;
+      trigger(elements.get('#ach-site-changes-approve'), 'change');
+    },
+    siteChangesSave: () => { trigger(elements.get('#ach-site-changes-save'), 'click'); return requests.at(-1); },
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -3216,4 +3229,86 @@ test('Review optional: rapid reentry does not duplicate same pending Status or A
   pendingActivity.reject(null,'timeout');
   ui.openSites(); ui.openActivity();
   assert.equal(ui.requests.length,activityCount+1,'Retry after failure remains possible');
+});
+
+const nativeSiteForDrift = (id, name) => ({
+  id, name, document_root:'/srv/' + id, panel_status:'1', bound_domains:[[name, 80]]
+});
+const siteChangesPayload = (overrides = {}) => ({
+  status:true, schema:1, state:'Baseline Missing', scope:'native_site_records',
+  read_only:true, runtime_verified:false, baseline_revision:0,
+  baseline_sha256:null, source_sha256:'a'.repeat(64), site_count:1, changes:[],
+  note:'aaPanel database only; runtime not verified.', ...overrides
+});
+
+test('Site lifecycle comparison requires reviewed baseline and refuses blind retry', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const compare=ui.siteChangesCompare();
+  assert.match(compare.options.url,/s=compare_site_changes$/);
+  compare.respond(siteChangesPayload());
+  assert.match(ui.state().siteChangesStatus,/Baseline Missing/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  ui.siteChangesApprove(true);
+  assert.equal(ui.state().siteChangesSaveDisabled,false);
+  const save=ui.siteChangesSave();
+  assert.match(save.options.url,/s=save_site_baseline$/);
+  assert.deepEqual(save.options.data,{
+    expected_revision:0,expected_source_sha256:'a'.repeat(64),reviewed:'true'
+  });
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  save.respond({status:true,schema:1,state:'Baseline Saved',changed:true,
+    baseline_revision:1,source_sha256:'a'.repeat(64)});
+  assert.match(ui.state().siteChangesStatus,/Baseline Saved/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+});
+
+test('Website lifecycle Monitor renders HTML as text and invalidates old approval on Refresh', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const before=nativeSiteForDrift(3,'old.example.test');
+  const after=nativeSiteForDrift(3,'<svg onload=alert(1)>');
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    changes:[{id:3,kind:'Changed',fields:['name','bound_domains'],before,after}]
+  }));
+  assert.deepEqual(ui.state().siteChangesRows,[
+    ['3','Changed','<svg onload=alert(1)>','name, bound_domains']]);
+  ui.siteChangesApprove(true);
+  assert.equal(ui.state().siteChangesSaveDisabled,false);
+  ui.refreshSites();
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  assert.deepEqual(ui.state().siteChangesRows,[]);
+});
+
+test('Malformed website lifecycle payload and uncertain save outcome fail closed', () => {
+  for (const bad of [
+    siteChangesPayload({read_only:false}),
+    siteChangesPayload({source_sha256:'x'}),
+    siteChangesPayload({baseline_revision:5,baseline_sha256:null}),
+    siteChangesPayload({state:'No Changes',changes:[{id:1}]}),
+    siteChangesPayload({changes:[{id:3,kind:'Added',before:null,
+      after:nativeSiteForDrift(3,'new.example.test'),fields:[]}]}),
+    siteChangesPayload({state:'Changes Observed',baseline_revision:1,
+      baseline_sha256:'b'.repeat(64),changes:[{id:3,kind:'Changed',
+        fields:['document_root'],before:nativeSiteForDrift(3,'old'),
+        after:nativeSiteForDrift(3,'new')}]})
+  ]) {
+    const ui=loadUi();
+    ui.openSites().respond(page());
+    ui.siteChangesCompare().respond(bad);
+    assert.equal(ui.state().siteChangesSaveDisabled,true);
+    assert.match(ui.state().siteChangesStatus,/unconfirmed or incompatible/);
+    assert.deepEqual(ui.state().siteChangesRows,[]);
+  }
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  ui.siteChangesCompare().respond(siteChangesPayload());
+  ui.siteChangesApprove(true);
+  ui.siteChangesSave().respond({status:true,schema:1,state:'Baseline Saved',
+    changed:true,baseline_revision:9,source_sha256:'a'.repeat(64)});
+  assert.match(ui.state().siteChangesStatus,/outcome unconfirmed/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  assert.equal(ui.state().siteChangesApproveDisabled,true);
+  assert.match(ui.siteChangesCompare().options.url,/s=compare_site_changes$/);
 });
