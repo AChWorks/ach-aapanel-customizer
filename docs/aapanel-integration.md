@@ -17,6 +17,20 @@ The aaPanel PDF explicitly warns: **dynamic plugin routes do not inherit aaPanel
 
 This first candidate intentionally **does not define `_check`** and only uses the conventional in-panel `/plugin?action=a` route. In the isolated aaPanel **8.0.7** test, unauthenticated requests returned HTTP 404, authenticated requests without aaPanel's `x-http-token` header returned `INIT_CSRF_ERR`, and the same read-only methods succeeded through the panel's own UI. This verifies the observed version/route, **not** a general security guarantee for other versions or future privileged methods. No Apply/write endpoint is exposed in this candidate.
 
+### Native plugin dispatch parameter namespace (aaPanel 8.0.7)
+
+The native `BTPanel/app.py:get_input()` merges `request.args` before
+`request.form`, letting POST form fields replace same-named query keys.
+Native plugin routing requires `/plugin?action=a&name=ach_customizer&s=<method>`;
+a POST body named `action` therefore shadows the required router action `a`
+and returns `Specific parameters are invalid!` *before the plugin method runs*.
+The verified 2026-11-05 owner Save/Reset issue used `action=save|reset` in
+the Status Pages POST body. The corrected plugin uses `branding_action` as an
+explicitly plugin-owned form key for both actions. Keep `action`, `name`, and
+`s` reserved for native aaPanel dispatch in all plugin AJAX payloads.
+Retain the normal aaPanel `x-http-token`, primary-administrator authorization
+and optimistic preference revision; this is not permission to weaken any gate.
+
 ## Native aaPanel dialog UI (unreleased UI refinement)
 
 The ACh Customizer management surface follows the compact Nginx-management
@@ -107,6 +121,26 @@ silently reload Python modules, change host services or waive operator
 approval for a production panel restart. The [native Hosts lifecycle and UI
 evidence](evidence/aaPanel-8.0.7-2026-11-04-native-hosts-qa.md) records exact
 package checksums, observed errors, retry, and remaining limitations.
+
+### Action feedback stays beside the affected control (0.1.12 QA refinement)
+
+The real 2026-11-05 aaPanel 8.0.7 owner session confirmed that five
+`status_save` calls were logged as successful but did not visibly acknowledge
+Save: the UI's sole result paragraph appeared **after** the Status Pages
+inspection/comparison and 440px preview, below the action's scroll position.
+The server's unchanged default brand produces a valid **no-op** (`changed=false`,
+revision unchanged), which must not be confused with either a failed write or
+a newly persisted change. Show a persistent, screen-reader-live acknowledgement
+directly beneath the **Save** button. Distinguish loading, saved changes,
+already matching/no-op, unsaved edits, and ambiguous/rejected responses; state
+the confirmed revision and never imply that any site or service was applied.
+Keep Reset feedback in the same action group and gate uncertain writes on a
+fresh read. Monitor switches likewise need visible local pending/confirmed/
+unconfirmed feedback beside their controls. Websites, Hosts diagnostics,
+PHP-FPM Preview/Apply/Recovery, and Activity have their operation status near
+the applicable controls; preserve those placements. Browser layout checks
+explicitly assert visible Save feedback across desktop and narrow viewports,
+separately from actual authenticated native-session acceptance.
 
 ## First non-production implementation slice
 
@@ -421,11 +455,23 @@ The comparison also reports whether the selected rendered HTML is **new, byte-id
 
 The bounded source inspector reads without following symbolic links on any path component, using an anchored directory walk and stable regular-file descriptors: the selected native document root 404.html or 502.html, the native Nginx /www/server/panel/vhost/nginx/<site-key>.conf, and up to 32 .conf fragments under the conventional site-extension directory. Each inspected file is limited to 64 KiB. Its response exposes the selected/current page hash (or missing), a VHost hash, observed textual site-extension include, filenames of scanned extensions, and potential error_page declarations. It does **not** expose page/VHost contents to the UI. After each bounded read, the inspector re-resolves the original absolute document-root, VHost and extension directory path from the filesystem root, checks directory identity, file identity and observed extension filenames, and refuses detached or replaced paths without retaining a stale page SHA or diff. The final re-resolution is a point-in-time check, not a claim that a file can never change afterward. Invalid, missing, oversized, symbolic-linked, changed-during-read or ambiguous resources are refused or explicitly classified without inventing a successful state. Conflict can identify a differing existing page or potential competing error_page, Unmanaged means no selected site file found, and File Match means *only* byte-equivalent content. Needs Review and Unsupported are conservative states; they are not enforcement decisions.
 
+**Unreleased native diagnostic precision correction (PR #20 continuation):** The inspector no longer classifies every existing `error_page` as a conflict. It distinguishes only directives referring to the *selected* 404 or 502 status, ignores unrelated standard 497 HTTPS redirects, and recognizes the literal aaPanel `error_page 404 /404.html;` / `error_page 502 /502.html;` as an **existing source reference requiring review** rather than a competing target. A different literal selected-status target remains `Conflict`; duplicate, embedded, multi-code or unsupported forms remain `Needs Review` **unless the separately verified existing site page has different bytes, in which case `Conflict` takes precedence and the additional routing ambiguity stays in the diagnostic reason and source list**. Supported unrelated Nginx `=response` forms (such as `error_page 497 =301 https://$host$request_uri;`) are excluded after identifying their leading source status codes; selected-status overrides remain uncertain. Incomplete or unstable file inspection still fails closed as `Needs Review`. `File Match` remains exclusively an on-disk byte comparison, not Nginx route/owner proof. Status Pages branding Save and Reset emit **distinct** local Activity actions (`status_save` / `status_reset`) and accurate operator-facing success messages. The source parser does not imply that a directive was loaded, inherited, or effective; Status Pages Apply/Restore remains unavailable. Earlier candidate QA results and their historical classifications remain scoped to their recorded versions.
+
 **Hard boundary:** Source text and a disk SHA are not a loaded Nginx configuration (nginx -T), a running website HTTP response, an ownership grant, or proof that a site-extension include survives aaPanel regeneration. Potential conflicts may be over-reported deliberately. This package **does not** install HTML, edit Nginx, start a reload, create backups, perform HTTP checks, or enable Apply/Restore/Auto-enforce. Those remain Issue #10 acceptance requirements and require separate native adapter evidence, live HTTP 404/502 status checks, ownership and recovery gates. The native endpoint is gated for a full primary admin POST, and the browser UI accepts only matching site/template/locale, correctly typed hashes, and explicitly non-Apply results.
 
 **Exact non-production native QA (2026-11-03):** In a disposable child QEMU overlay of the existing Debian 12 / aaPanel 8.0.7 / Nginx 1.28.3 / PHP-FPM 8.5.12 lab, the native panelPlugin update_zip/input_zip flow installed the unreleased 0.1.5 development ZIP (SHA-256 f4cf90f2661d68e1ecb3dc270aed59cb7e96dcca23788caaef631e3fa1f558aa); all 35 installed files matched the package. The installed endpoint ran in a fresh panel Python process. Both real site IDs 7 and 8 had existing site-owned 404/502 HTML files with bytes different from the selected original templates; the source inspector correctly reported Conflict and detected existing error_page directives. A temporary 404.html test fixture exactly matched the selected bundled HTML digest, which the endpoint reported as Same bytes *without* asserting Nginx runtime or safe Apply. The fixture was restored byte-for-byte. Synthetic Flask POST tests denied nonprimary and temporary identities, and GET. Both site VHosts, PHP-FPM config, 404/502 files and previously saved plugin settings were unchanged by the whole test; nginx -t passed and both sites returned HTTP 200 before/after. The guest powered off gracefully and qemu-img check found no errors. This is **not** live 404/502 HTTP routing, CSRF/authenticated-browser or cross-version acceptance. [Sanitized bounded native evidence](evidence/aaPanel-8.0.7-2026-11-03-status-pages-site-inspect-qa.json).
 
 **Remaining verification boundary:** Source unit/UI tests prove fixture and deployed-script behavior; the non-production native QA above exercises the installed backend and existing site files in a fresh Python process. Real authenticated browser session/CSRF, VHost regeneration timing for this exact candidate, cross-version support, and effective Nginx error-page routing remain unverified. No public release or Production deployment is authorized.
+
+### Explicit bounded site 404 HTTP/80 evidence (separate unmerged source candidate)
+
+After selecting a native website and an English/Persian 404 template, the primary administrator may explicitly choose **Check live HTTP/80 site 404**. The endpoint binds the explicit action to the **exact validated site selection last loaded in the native inventory** (site ID, name, document root, status, and sorted domain/port bindings). The browser-supplied snapshot is only a comparison precondition, never a network destination or filesystem path. Any rename, reassignment, rebinding, stopped site, or missing record before the request produces a refresh-required error **without opening the HTTP connection**. Native site and domain bindings are also rechecked after the request; the UI independently compares the returned verified identity to its own selected inventory record. Nginx must be the configured aaPanel web engine, and the selected source HTML/hash is resolved offline. The preflight refuses missing, symlinked, unreadable, changed or empty page sources.
+
+An explicit one-time Python `HTTPConnection` sends an unauthenticated `GET /ach-status-probe-<random-token>` to **127.0.0.1:80 only**, with the fixed native-bound `Host` header. The UI/API accept **no URL, path, host, IP or port** override. It sends neither cookies nor panel credentials, will not follow redirects, requests an uncompressed response, and caps decoded body bytes at **64 KiB** and raw incoming bytes at **256 KiB**. An internal monotonic **3-second absolute HTTP deadline** covers connection, send, status/headers and *all* response-body reads, including chunked/no-length and slow trickle: `HTTPResponse` still owns HTTP framing but reads through a bounded nonblocking socket facade. Timeout/error produces `Needs Review` and closes the socket.
+
+The pre/post read-only source fingerprints include anchored ancestor directory bindings, original absolute paths, site-page and VHost file identities and digests, all inspected extension fragment identities and digests, extension directory inventory and missing-directory bindings. The fingerprint is internal to the probe and is **not exposed to the browser**. Replacements with identical bytes, extension rewrites with unchanged directive classification, and directory rebinding invalidate positive claims. The native site/domain inventory, aaPanel engine, and branding revision are likewise rechecked across the request. This is point-in-time source comparison, not a guarantee after the response. Outcomes distinguish `HTTP Match` (actual status 404 and byte-identical site 404.html), `HTTP Mismatch` (soft 404, redirect, other status/body, or divergent site page), and `Needs Review` (missing/unsafe source, connection failure, timeout or changed source). Independent `body_matches_render` indicates whether the matched site file equals the selected locale/brand snapshot; the frontend refuses contradictory status/hash evidence. Response HTML is **not returned** to the browser.
+
+**Limitations:** This is **one local plain-HTTP request** for one random URL. It cannot prove loaded Nginx config versus on-disk files, unique VHost ownership, HTTPS/TLS, Cloudflare or public clients, 502 generation, non-tested routes, WordPress/API/ACME behavior, regeneration durability, or safety of future Apply/Restore. Even observational GET requests may be logged or handled by dynamic application code; the operator must choose to run the probe. No Nginx reload, service restart, website/configuration-file mutation or host configuration Apply is implemented. The plugin may still record a bounded Activity/Diagnostics event for the operator's explicit probe. Source-level isolated loopback-HTTP tests are not native aaPanel guest acceptance; additional source-bound native tests and independent review remain gates. Do not enable automatic health probes or auto-enforcement based on this evidence.
 
 ## Read-only origin-local hosts inspection (Issue #2)
 

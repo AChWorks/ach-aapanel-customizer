@@ -34,7 +34,7 @@ function loadUi() {
   }));
   for (const tab of tabs) elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
   for (const name of [
-    '#ach-message', '#ach-overview-status', '#ach-overview-refresh',
+    '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
@@ -52,6 +52,7 @@ function loadUi() {
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
+    '#ach-status-probe-button', '#ach-status-probe-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -234,8 +235,11 @@ function loadUi() {
       nextDisabled: elements.get('#ach-next').props.disabled,
       page: elements.get('#ach-page').textContent,
       overview: elements.get('#ach-overview-status').textContent,
+      overviewControlResult: elements.get('#ach-overview-control-result').textContent,
+      overviewFeedbackState: elements.get('#ach-overview-control-result').attributes['data-state'],
       stateRevision: elements.get('#ach-state-revision').textContent,
       statusResult: elements.get('#ach-status-result').textContent,
+      statusFeedbackState: elements.get('#ach-status-result').attributes['data-state'],
       statusSource: elements.get('#ach-status-source').textContent,
       statusName: elements.get('#ach-status-name').props.value,
       siteStatus: elements.get('#ach-sites-status').textContent,
@@ -248,6 +252,8 @@ function loadUi() {
       statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
       statusResetDisabled: elements.get('#ach-status-reset').props.disabled,
       statusInspectDisabled: elements.get('#ach-status-inspect-button').props.disabled,
+      statusProbeDisabled: elements.get('#ach-status-probe-button').props.disabled,
+      statusProbe: elements.get('#ach-status-probe-result').textContent,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       statusCompareSummary: elements.get('#ach-status-comparison-summary').textContent,
       statusCompareExcerpt: elements.get('#ach-status-comparison-excerpt').textContent,
@@ -596,6 +602,25 @@ test('Overall Monitor disable updates only the intended switch and preserves mod
   assert.equal(current.controls.php_fpm_file_preview.checked, true);
   assert.equal(current.controls.overall.disabled, false);
   assert.equal(current.error, '');
+});
+
+
+test('Overview Monitor write provides nearby pending/success and unconfirmed feedback', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview());
+  assert.match(ui.state().overviewControlResult,/Monitor settings verified.*Revision 0/);
+  const saved=ui.toggleMonitor('overall',false);
+  assert.match(ui.state().overviewControlResult,/Saving overall Monitor setting/);
+  saved.respond(monitorAck({overall_enabled:false,state_revision:1,mode:'Disabled'}));
+  assert.equal(ui.state().overviewFeedbackState,'saved');
+  assert.match(ui.state().overviewControlResult,/Saved overall: disabled.*Revision 1/);
+
+  const failed=ui.toggleMonitor('overall',true);
+  assert.match(ui.state().overviewControlResult,/Saving overall/);
+  failed.respond({status:false,stage:'monitor_state_write',msg:'revision conflict'});
+  assert.equal(ui.state().overviewFeedbackState,'error');
+  assert.match(ui.state().overviewControlResult,/Monitor change not confirmed.*Refresh state/);
+  assert.equal(ui.state().controls.overall.disabled,true);
 });
 
 test('Module-level disable does not enable enforcement or disable unrelated modules', () => {
@@ -1225,13 +1250,15 @@ test('Status Pages save is revision-bound and failed response requires recheck',
   ui.openStatus().respond(statusPrefs(4));
   ui.statusSetValue('#ach-status-name','New brand');
   const save=ui.statusClick('#ach-status-save');
-  assert.match(save.options.url,/s=status_save$/);
-  assert.equal(save.options.data.action,'save');
+  assert.equal(save.options.url,'/plugin?action=a&name=ach_customizer&s=status_save');
+  assert.equal(save.options.data.branding_action,'save');
+  assert.equal(Object.prototype.hasOwnProperty.call(save.options.data, 'action'), false,
+    'aaPanel reserves action for native plugin routing; POST must not override URL action=a');
   assert.equal(save.options.data.expected_revision,'4');
   assert.equal(save.options.data.scope,'global');
   save.respond({status:false,stage:'status_settings',msg:'Branding was changed elsewhere'});
   assert.equal(ui.state().statusSaveDisabled,true);
-  assert.match(ui.state().statusResult,/Recheck before retrying/);
+  assert.match(ui.state().statusResult,/Recheck saved branding before retrying/);
   assert.match(ui.state().error,/Branding was changed elsewhere/);
 });
 
@@ -1252,16 +1279,91 @@ test('Status Pages site override is explicit and reset needs confirmation', () =
   ui.statusSetChecked('#ach-status-reset-approve',true);
   assert.equal(ui.state().statusResetDisabled,false);
   const reset=ui.statusClick('#ach-status-reset');
+  assert.equal(reset.options.url,'/plugin?action=a&name=ach_customizer&s=status_save');
   assert.equal(reset.options.data.scope,'site');
   assert.equal(reset.options.data.site_id,'7');
-  assert.equal(reset.options.data.action,'reset');
+  assert.equal(reset.options.data.branding_action,'reset');
+  assert.equal(Object.prototype.hasOwnProperty.call(reset.options.data, 'action'), false,
+    'Reset must not overwrite the native aaPanel action=a route');
   assert.equal(reset.options.data.expected_revision,'5');
   reset.respond({
     status:true,schema:1,revision:6,changed:true,
-    source:'Global default',effective:brand()
+    scope:'site',site_id:7,source:'Global default',effective:brand()
   });
   assert.equal(ui.state().statusResetDisabled,true);
   assert.match(ui.state().statusResult,/reset for this scope only/);
+});
+
+
+test('All tabs place routine feedback by its operation rather than below long content', () => {
+  function ordered(...ids) {
+    const positions=ids.map(id => {
+      const offset=html.indexOf('id="' + id + '"');
+      assert.ok(offset > 0, 'Missing feedback/action anchor ' + id);
+      return offset;
+    });
+    for (let i=1;i<positions.length;i++)
+      assert.ok(positions[i]>positions[i-1], ids.join(' > '));
+  }
+  ordered('ach-overview-refresh','ach-monitor-enabled','ach-overview-control-result','ach-state-revision');
+  ordered('ach-sites-status','ach-sites-refresh','ach-hosts-inspect-button','ach-hosts-result');
+  ordered('ach-fpm-prepare','ach-fpm-plan','ach-fpm-operation-notice','ach-fpm-commit');
+  ordered('ach-fpm-check-recovery','ach-fpm-recovery-status','ach-fpm-rollback');
+  ordered('ach-status-save','ach-status-result','ach-status-reset-approve','ach-status-inspect-button');
+  ordered('ach-activity-result','ach-activity-rows');
+  assert.equal((html.match(/id="ach-status-result"/g) || []).length,1);
+  assert.match(html,/id="ach-status-result"[^>]*aria-live="polite"/);
+});
+
+test('Status Pages Save visibly distinguishes changed, no-op, in-flight, unsaved, and uncertainty', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(4));
+  assert.match(ui.state().statusResult,/Saved preferences loaded.*Revision 4/);
+  const noop=ui.statusClick('#ach-status-save');
+  assert.match(ui.state().statusResult,/Saving global branding preferences/);
+  noop.respond({status:true,schema:1,revision:4,changed:false,scope:'global',
+    site_id:null,source:'Global default',effective:brand()});
+  assert.equal(ui.state().statusFeedbackState,'saved');
+  assert.match(ui.state().statusResult,/No changes needed.*Revision 4/);
+  assert.equal(ui.state().statusSaveDisabled,false);
+  ui.statusSetValue('#ach-status-name','Distinct brand','input change');
+  assert.match(ui.state().statusResult,/Unsaved changes/);
+  const save=ui.statusClick('#ach-status-save');
+  assert.match(ui.state().statusResult,/Saving global branding preferences/);
+  save.respond({status:true,schema:1,revision:5,changed:true,scope:'global',
+    site_id:null,source:'Global default',effective:{...brand(),brand_name:'Distinct brand'}});
+  assert.equal(ui.state().statusFeedbackState,'saved');
+  assert.match(ui.state().statusResult,/Saved global branding preferences.*Revision 5/);
+  assert.match(ui.state().statusSource,/revision 5/);
+  assert.equal(ui.state().statusName,'Distinct brand');
+  ui.statusSetValue('#ach-status-name','Distinct brand','input change');
+  assert.match(ui.state().statusResult,/Fields match saved preferences.*Revision 5/);
+  const incompatible=ui.statusClick('#ach-status-save');
+  incompatible.respond({status:true,schema:1,revision:6,changed:true,
+    source:'Global default',effective:brand()});
+  assert.equal(ui.state().statusFeedbackState,'error');
+  assert.match(ui.state().statusResult,/Save not confirmed.*Recheck/);
+  assert.equal(ui.state().statusSaveDisabled,true);
+});
+
+test('Status Pages Reset distinguishes no-op and refuses mismatched acknowledgement', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(2));
+  ui.statusSetChecked('#ach-status-reset-approve',true);
+  const noop=ui.statusClick('#ach-status-reset');
+  assert.match(ui.state().statusResult,/Resetting global branding preferences/);
+  noop.respond({status:true,schema:1,revision:2,changed:false,scope:'global',
+    site_id:null,source:'Global default',effective:brand()});
+  assert.match(ui.state().statusResult,/No changes needed.*Revision 2/);
+  assert.equal(ui.state().statusFeedbackState,'saved');
+  assert.equal(ui.state().statusResetDisabled,true);
+  ui.statusSetChecked('#ach-status-reset-approve',true);
+  const bad=ui.statusClick('#ach-status-reset');
+  bad.respond({status:true,schema:1,revision:3,changed:true,scope:'site',
+    site_id:7,source:'Global default',effective:brand()});
+  assert.equal(ui.state().statusFeedbackState,'error');
+  assert.match(ui.state().statusResult,/Reset not confirmed/);
+  assert.equal(ui.state().statusSaveDisabled,true);
 });
 
 test('Status Pages rejects malformed preview and never renders fallback HTML', () => {
@@ -1328,6 +1430,171 @@ test('Site inspection is scoped, read-only, renders a bounded disk/source diagno
   assert.match(ui.state().statusInspect,/not run/);
   assert.match(ui.state().statusCompareSummary,/not run/);
   assert.equal(ui.state().statusCompareExcerpt,'');
+});
+
+const probeSnapshot=JSON.stringify([7,'demo.test','/www/demo.test','1',[['demo.test',80]]]);
+function statusProbe(overrides={}) {
+  const sha='a'.repeat(64);
+  return {
+    status:true,schema:1,site_id:7,site_key:'demo.test',
+    verified_site_snapshot:probeSnapshot,
+    template:'404',locale:'en',scope:'loopback_http_80',
+    state:'HTTP Match',reason:'Observed HTTP 404 with byte-identical site page',
+    read_only:true,apply_supported:false,nginx_runtime_verified:false,
+    revision:2,http_status:404,http_404_observed:true,
+    body_sha256:sha,body_bytes:50,page_file_sha256:sha,rendered_sha256:sha,
+    body_matches_file:true,body_matches_render:true,
+    note:'One explicit local-only HTTP/80 GET. No Apply permission.',
+    ...overrides
+  };
+}
+function statusProbeUi(hasMore=false) {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const inventory = ui.requests.at(-1);
+  assert.match(inventory.options.url,/s=status_sites$/);
+  const selected={...site(),id:7,name:'demo.test',
+    document_root:'/www/demo.test',bound_domains:[{name:'demo.test',port:80}],
+    canonical_domain_bound:true};
+  const remaining=hasMore ? Array.from({length:24},(_,i) => ({
+    ...site(),id:100+i,name:'other'+i+'.test',
+    document_root:'/www/other'+i+'.test',
+    bound_domains:[{name:'other'+i+'.test',port:80}],canonical_domain_bound:true
+  })) : [];
+  inventory.respond({...page([selected,...remaining]),has_more:hasMore,purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs());
+  return ui;
+}
+
+test('Explicit live 404 probe reports HTTP/body evidence without granting Apply', () => {
+  const ui=statusProbeUi();
+  assert.equal(ui.state().statusProbeDisabled,false);
+  const request=ui.statusClick('#ach-status-probe-button');
+  assert.match(request.options.url,/s=status_probe$/);
+  assert.equal(request.options.data.site_id,'7');
+  assert.equal(request.options.data.locale,'en');
+  assert.equal(request.options.data.template,'404');
+  assert.equal(request.options.data.expected_site_key,'demo.test');
+  assert.equal(request.options.data.expected_site_snapshot,probeSnapshot);
+  assert.equal(ui.state().statusProbeDisabled,true);
+  request.respond(statusProbe());
+  assert.match(ui.state().statusProbe,/HTTP Match/);
+  assert.match(ui.state().statusProbe,/HTTP status: 404/);
+  assert.match(ui.state().statusProbe,/body matches site file: Yes/);
+  assert.match(ui.state().statusProbe,/not proof|No Apply permission/);
+  assert.equal(ui.state().statusProbeDisabled,false);
+  ui.statusSetValue('#ach-status-template','502','change');
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.match(ui.state().statusProbe,/not checked/);
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,before,'Cannot probe a 502 through the 404-only endpoint');
+});
+
+test('HTTP mismatch, soft success, and unknown evidence stay distinguishable', () => {
+  const responses=[
+    statusProbe({state:'HTTP Mismatch',http_status:200,http_404_observed:false,
+      body_matches_file:false,body_matches_render:false}),
+    statusProbe({state:'HTTP Mismatch',http_status:404,http_404_observed:true,
+      body_sha256:'b'.repeat(64),body_matches_file:false,body_matches_render:false}),
+    statusProbe({state:'Needs Review',http_status:null,http_404_observed:false,
+      body_sha256:null,body_bytes:null,page_file_sha256:null,
+      body_matches_file:false,body_matches_render:false,reason:'Local HTTP unavailable'})
+  ];
+  for (const response of responses) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(response);
+    assert.match(ui.state().statusProbe,/HTTP Mismatch|Needs Review/);
+    assert.doesNotMatch(ui.state().statusProbe,/Apply ready|verified Nginx config/i);
+  }
+});
+
+test('Untrusted, stale, cross-site, overclaiming HTTP probe responses fail closed', () => {
+  const sha='a'.repeat(64);
+  const invalid=[
+    statusProbe({site_id:8}),statusProbe({status:false}),
+    statusProbe({site_key:'moved.test'}),
+    statusProbe({verified_site_snapshot:JSON.stringify([
+      7,'demo.test','/www/reassigned','1',[['demo.test',80]]
+    ])}),
+    statusProbe({schema:2}),statusProbe({revision:3}),statusProbe({read_only:false}),
+    statusProbe({apply_supported:true}),statusProbe({nginx_runtime_verified:true}),
+    statusProbe({scope:'remote_http'}),statusProbe({body_sha256:'wrong'}),
+    statusProbe({body_bytes:65537}),statusProbe({http_status:200,http_404_observed:true}),
+    statusProbe({state:'HTTP Match',body_matches_file:false}),
+    statusProbe({state:'HTTP Mismatch',http_status:404,
+      http_404_observed:true,body_matches_file:false}),
+    statusProbe({body_matches_render:true,body_sha256:'b'.repeat(64)}),
+    statusProbe({state:'Needs Review',body_sha256:sha,http_status:null}),
+    statusProbe({site_key:'<img onerror=alert(1)>'}),
+    statusProbe({reason:'x'.repeat(400)})
+  ];
+  for (const bad of invalid) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(bad);
+    assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
+  }
+  const ui=statusProbeUi();
+  const pending=ui.statusClick('#ach-status-probe-button');
+  ui.statusSetValue('#ach-status-name','Changed after request','input change');
+  pending.respond(statusProbe());
+  assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
+  assert.doesNotMatch(ui.state().statusProbe,/HTTP Match/);
+});
+
+test('A late site-inventory response cannot unlock an active HTTP probe', () => {
+  const ui=statusProbeUi(true);
+  const laterInventory=ui.loadMoreSites();
+  assert.match(laterInventory.options.url,/s=status_sites$/);
+  const probe=ui.statusClick('#ach-status-probe-button');
+  assert.match(probe.options.url,/s=status_probe$/);
+  assert.equal(ui.state().statusProbeDisabled,true);
+  laterInventory.respond({...page([{
+    ...site(),id:8,name:'another.test',document_root:'/www/another.test',
+    bound_domains:[{name:'another.test',port:80}],canonical_domain_bound:true
+  }]),page:2,has_more:false,purpose:'status_site_selection'});
+  assert.equal(ui.state().statusProbeDisabled,true,
+    'Concurrent inventory reply cannot release the probe form lock');
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,before,'A probe remains single-flight');
+  probe.respond(statusProbe());
+  assert.match(ui.state().statusProbe,/HTTP Match/);
+  assert.equal(ui.state().statusProbeDisabled,false);
+});
+
+test('Native site inventory errors revoke previously selected HTTP probe capability', () => {
+  const ui=statusProbeUi();
+  assert.equal(ui.state().statusProbeDisabled,false);
+  ui.statusClick('#ach-status-sites-retry');
+  assert.equal(ui.state().statusProbeDisabled,true);
+  const invalid=ui.requests.at(-1);
+  assert.match(invalid.options.url,/s=status_sites$/);
+  invalid.respond({status:true, inventory_schema:1});
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.match(ui.state().statusProbe,/not checked/);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,count);
+});
+
+test('Existing native status-file reference is reviewable without false conflict or Apply', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs());
+  const result=statusInspection({
+    state:'Needs Review',
+    reason:'An existing source declaration references the native 404.html page; runtime unverified',
+    error_page_sources:['site VHost']
+  });
+  ui.statusClick('#ach-status-inspect-button').respond(result);
+  assert.match(ui.state().statusInspect,/State: Needs Review/);
+  assert.match(ui.state().statusInspect,/Selected-status error_page source references: site VHost/);
+  assert.doesNotMatch(ui.state().statusInspect,/State: Conflict|Apply ready|HTTP verified/);
 });
 
 test('Invalid, cross-site and routing-overclaim inspection replies fail closed', () => {
