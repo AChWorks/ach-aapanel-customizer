@@ -21,8 +21,8 @@ if os.path.isdir(_PANEL_CLASS_DIR) and _PANEL_CLASS_DIR not in sys.path:
 
 from ach_customizer_activity import ActivityError, append_activity, configured_level, read_activity, record
 from ach_customizer_monitor import (
-    MonitorInputError, _bound_domains_for_sites, get_site_page,
-    inspect_php_fpm_site_impact, preview_php_fpm,
+    MonitorInputError, _bound_domains_for_sites,
+    get_site_page, inspect_php_fpm_site_impact, preview_php_fpm,
 )
 from ach_customizer_hosts import (
     HostsInspectionError, inspect_local_hosts as inspect_hosts_file,
@@ -105,7 +105,7 @@ class ach_customizer_main:
             message = "Unexpected plugin error; inspect Activity using Operation ID"
         response = {"status": False, "stage": stage,
                     "msg": message, "operation_id": operation_id}
-        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_")) else
+        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_")) else
                   "status_pages" if stage.startswith("status_") else
                   "websites" if stage.startswith(("website_", "hosts_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
@@ -224,6 +224,32 @@ class ach_customizer_main:
                                          target="page:" + str(result["page"]), level="DEBUG")
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
+
+    def get_php_versions(self, args):
+        """Primary-admin-only, read-only installed PHP file discovery."""
+        operation_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            # aaPanel may retain an older monitor helper in the panel process
+            # after an in-place ZIP update. Resolve this new symbol only after
+            # authorization so stale code cannot break unrelated endpoints.
+            try:
+                from ach_customizer_monitor import discover_php_fpm_versions
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "PHP discovery module is outdated after plugin update. "
+                    "Restart aaPanel panel service (not server), reopen the "
+                    "plugin and Refresh installed PHP."
+                ) from exc
+            result = discover_php_fpm_versions("/www/server/php")
+            response = {"status": True, "operation_id": operation_id, **result}
+            return self._activity_result(
+                response, "php_fpm", "get_php_versions",
+                target="native-php", level="WARNING" if result["state"] == "Partial" else "DEBUG")
+        except PermissionError as exc:
+            return self._fail("php_versions_authorization", exc, operation_id)
+        except Exception as exc:
+            return self._fail("php_versions_discovery", exc, operation_id)
 
     def inspect_local_hosts(self, args):
         """Full-admin-only, read-only origin-local /etc/hosts diagnosis.

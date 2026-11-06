@@ -65,6 +65,23 @@ const {chromium} = require('playwright');
           throw Error('Layout invariant failed '+JSON.stringify({width,height,name,...x}));
         }
         if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
+        if(name==='php') {
+          const picker=await page.evaluate(()=>{
+            const input=document.querySelector('#ach-php-version'),
+              refresh=document.querySelector('#ach-php-discover'),
+              status=document.querySelector('#ach-php-discovery-status'),
+              viewport=document.documentElement.clientWidth;
+            return {tag:input?.tagName, disabled:input?.disabled,
+              required:input?.required, refreshText:refresh?.textContent?.trim(),
+              status:status?.getAttribute('role'),
+              right:input?.getBoundingClientRect().right, viewport};
+          });
+          if(picker.tag!=='SELECT' || picker.disabled!==true || picker.required!==true ||
+              !picker.refreshText?.includes('Refresh installed PHP') ||
+              picker.status!=='status' || picker.right>picker.viewport+1) {
+            throw Error('Native PHP version picker unsafe or inaccessible '+JSON.stringify(picker));
+          }
+        }
         if(name==='status') {
           // Save/Reset acknowledgement must be visible beside the Save action,
           // not under the 440px preview/diagnostics on a long scroll surface.
@@ -110,7 +127,7 @@ const {chromium} = require('playwright');
               '#ach-panel-status .ach-status-fields';
             const row = document.querySelector(section + ' > div');
             const label = row?.querySelector('label');
-            const input = row?.querySelector('input');
+            const input = row?.querySelector('input, select');
             const rect = x => x?.getBoundingClientRect().toJSON();
             return {label:rect(label),input:rect(input)};
           },name);

@@ -303,10 +303,12 @@
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
-      <p class="ach-note">Read-only file/default comparison. Site-to-pool mapping uses configuration files; it does not prove effective routing or authorize Apply.</p>
+      <p class="ach-note">Read-only PHP-FPM file/default comparison. Conventional aaPanel Nginx site-to-pool file assignments are listed separately; neither file mapping nor this preview verifies effective routing/runtime state or authorizes Apply.</p>
+      <div class="ach-controls"><button id="ach-php-discover" type="button">Refresh installed PHP</button></div>
+      <p id="ach-php-discovery-status" role="status" aria-live="polite">Open PHP-FPM to discover installed versioned services. File presence does not verify running processes or enable Apply.</p>
       <form id="ach-php-form">
         <div class="ach-fields">
-          <div><label for="ach-php-version">PHP version (e.g. 85)</label><input id="ach-php-version" name="php_version" autocomplete="off" inputmode="numeric" pattern="[0-9]{2,3}" placeholder="85" required /></div>
+          <div><label for="ach-php-version">Installed PHP-FPM version</label><select id="ach-php-version" name="php_version" disabled required><option value="">Discover PHP installations first</option></select></div>
           <div><label for="ach-max-children">pm.max_children</label><input id="ach-max-children" name="max_children" type="number" min="1" required /></div>
           <div><label for="ach-start-servers">pm.start_servers</label><input id="ach-start-servers" name="start_servers" type="number" min="1" required /></div>
           <div><label for="ach-min-spare">pm.min_spare_servers</label><input id="ach-min-spare" name="min_spare_servers" type="number" min="1" required /></div>
@@ -445,7 +447,7 @@
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
   // Keep the native dialog mounted. Switching panels does not discard unsaved
   // edits or re-fetch previously accepted read-only data without Refresh.
-  var sectionsLoaded = {overview:false, websites:false, status:false, activity:false};
+  var sectionsLoaded = {overview:false, websites:false, php:false, status:false, activity:false};
   var overviewBusy = false, overviewTicket = 0;
   function fitNativeLayer() {
     // Only resize the aaPanel layer that actually owns this plugin instance.
@@ -525,7 +527,8 @@
     if (root.find('#ach-tab-activity').attr('aria-selected') === 'true') loadActivity();
   }
   function hasPotentialActivity(method) {
-    return method === 'set_control' || method === 'inspect_local_hosts' || method === 'status_save' ||
+    return method === 'set_control' || method === 'inspect_local_hosts' ||
+      method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' ||
       method === 'fpm_apply' || method === 'fpm_rollback';
   }
@@ -1602,6 +1605,80 @@
   root.find('#ach-activity-refresh').on('click', loadActivity);
   root.find('#ach-activity-level').on('change', loadActivity);
   root.find('#ach-activity-module').on('change', loadActivity);
+  var phpInventoryTicket = 0, phpInventoryBusy = false, phpInventory = new Map();
+  function validPhpInventory(r) {
+    if (!r || r.schema !== 1 || r.read_only !== true || r.runtime_verified !== false ||
+        ['Observed','Partial','Needs Review'].indexOf(r.state) < 0 ||
+        typeof r.reason !== 'string' || r.reason.length > 250 ||
+        typeof r.note !== 'string' || r.note.length > 600 ||
+        !Array.isArray(r.versions) || r.versions.length > 32) return false;
+    var seen = new Set(), previous = -1, incomplete = 0;
+    for (var i = 0; i < r.versions.length; i++) {
+      var v = r.versions[i];
+      if (!v || typeof v !== 'object' || Array.isArray(v) ||
+          typeof v.code !== 'string' || !/^[1-9][0-9]{1,2}$/.test(v.code) ||
+          seen.has(v.code) || typeof v.label !== 'string' || v.label.length > 24 ||
+          typeof v.reason !== 'string' || v.reason.length > 250 ||
+          typeof v.binary_present !== 'boolean' || typeof v.config_present !== 'boolean' ||
+          typeof v.preview_candidate !== 'boolean' || v.apply_eligible !== false ||
+          ['File Preview Candidate','Needs Review','Unsupported'].indexOf(v.state) < 0 ||
+          ['none','guarded_php85'].indexOf(v.manual_apply_adapter) < 0) return false;
+      var major = Number(v.code[0]), minor = Number(v.code.slice(1));
+      if (v.label !== 'PHP ' + major + '.' + minor ||
+          major * 100 + minor <= previous ||
+          v.manual_apply_adapter === 'guarded_php85' &&
+            (v.code !== '85' || !v.preview_candidate) ||
+          (v.preview_candidate !== (v.state === 'File Preview Candidate')) ||
+          v.preview_candidate && (!v.binary_present || !v.config_present || major < 8 ||
+            major === 8 && minor < 1)) return false;
+      previous = major * 100 + minor;
+      seen.add(v.code);
+      if (!v.preview_candidate) incomplete++;
+    }
+    return r.state === 'Observed' ? r.versions.length > 0 && incomplete === 0 :
+      r.state === 'Partial' ? r.versions.length > 0 && incomplete > 0 :
+      r.versions.length === 0;
+  }
+  function loadPhpInventory() {
+    var ticket = ++phpInventoryTicket;
+    phpInventoryBusy = true;
+    sectionsLoaded.php = false;
+    var previous = String(root.find('#ach-php-version').val() || '');
+    phpInventory = new Map();
+    root.find('#ach-php-version').empty().val('').prop('disabled', true);
+    $('<option>').val('').text('Select installed PHP').appendTo(root.find('#ach-php-version'));
+    root.find('#ach-php-discover').prop('disabled', true);
+    root.find('#ach-php-discovery-status').text('Discovering native PHP versioned files...');
+    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    invalidatePhpPreview('PHP inventory refreshed: run a new Preview for the selected version.');
+    request('get_php_versions', {}, function (r) {
+      if (ticket !== phpInventoryTicket) return;
+      phpInventoryBusy = false;
+      root.find('#ach-php-discover').prop('disabled', false);
+      if (!validPhpInventory(r)) {
+        root.find('#ach-php-discovery-status').text('PHP installation inventory unavailable or incompatible. Reopen the plugin after backend update; no version was inferred.');
+        msg('PHP discovery API mismatch; no version can be selected.', true);
+        return;
+      }
+      sectionsLoaded.php = true;
+      var selectable = 0;
+      r.versions.forEach(function (v) {
+        var option = $('<option>').val(v.code).text(v.label + ' — ' + v.state +
+          (v.manual_apply_adapter === 'guarded_php85' ? ' (guarded PHP85 adapter)' : ' (no Apply adapter)'));
+        if (!v.preview_candidate) option.prop('disabled', true);
+        option.appendTo(root.find('#ach-php-version'));
+        phpInventory.set(v.code, v);
+        if (v.preview_candidate) selectable++;
+      });
+      root.find('#ach-php-version').val(selectable && phpInventory.get(previous)?.preview_candidate ? previous : '');
+      root.find('#ach-php-version').prop('disabled', !selectable);
+      root.find('#ach-php-discovery-status').text(
+        r.versions.length + ' PHP version(s) observed; ' + selectable +
+        ' file-preview candidate(s). ' + (r.reason ? r.reason + '. ' : '') + r.note
+      );
+    }, function () { return ticket === phpInventoryTicket; });
+  }
+  root.find('#ach-php-discover').on('click', loadPhpInventory);
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     if (['overview','websites','php','status','activity'].indexOf(tab) < 0) return;
@@ -1613,6 +1690,7 @@
     msg('', false);
     if (tab === 'overview' && !sectionsLoaded.overview) overview();
     if (tab === 'websites' && !sectionsLoaded.websites) sites();
+    if (tab === 'php' && !sectionsLoaded.php && !phpInventoryBusy) loadPhpInventory();
     if (tab === 'status') {
       // Preserve unsaved branding and its preview across native tab switches.
       if (!sectionsLoaded.status && !statusReadBusy) statusLoad();
@@ -1863,6 +1941,12 @@
     fpmPrepareTicket++;
     invalidatePhpPreview('Checking current PHP-FPM settings and site impact...');
     var data = phpFields(), snapshot = JSON.stringify(data);
+    if (!phpInventory.get(data.php_version)?.preview_candidate ||
+        String(root.find('#ach-php-version').val() || '') !== data.php_version) {
+      invalidatePhpPreview('Select a discovered, file-preview-capable PHP version first.');
+      msg('PHP version is unavailable or was not selected from the verified inventory.', true);
+      return;
+    }
     var generation = fpmFormGeneration, ticket = ++fpmPreviewTicket;
     var fresh = function () {
       return ticket === fpmPreviewTicket && generation === fpmFormGeneration &&

@@ -25,6 +25,8 @@ The unreleased Customizer UI follows a **real, authenticated inspection of every
 See [the native UI source/evidence contract](docs/aapanel-integration.md#native-aapanel-dialog-ui-unreleased-ui-refinement) and [focused independent-review remediation](docs/evidence/aaPanel-8.0.7-2026-11-04-pr16-review-remediation.md).
 This is an unreleased development change and does not authorize Production use.
 
+The pending [PHP 8.1+ read-only discovery candidate (PR #15)](https://github.com/AChWorks/ach-aapanel-customizer/pull/15), now reconciled with unreleased `0.1.13` source on `main`, detects aaPanel installation-file candidates and offers a bounded native selector for file-only monitoring. It does **not** broaden Manual Apply beyond the guarded PHP 8.5 adapter, claim a running PHP service, or establish native PHP 8.1 installation acceptance. See [the PHP inventory acceptance boundary](docs/aapanel-integration.md#installed-php-inventory-and-read-only-version-selector).
+
 ## Development and installation
 
 **aaPanel development update note:** Replacing a native plugin ZIP may leave an older Python helper loaded in the panel process. In an authorized isolated guest, if the backend reports a module-version mismatch, use **Restart → Restart panel** (not **Restart server**) in aaPanel, reopen the plugin, and verify Overview/Website inventory. A missing newer Hosts helper is now isolated to that diagnostic, instead of preventing unrelated plugin pages from loading. Do not apply this operational procedure to Production without separate approval. [Actual 8.0.7 QEMU evidence](docs/evidence/aaPanel-8.0.7-2026-11-04-native-hosts-qa.md).
