@@ -167,6 +167,51 @@ def _has_directive(text, name):
     return re.search(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?=\s)", text) is not None
 
 
+def _error_page_summary(text, selected):
+    """Classify only bounded, ordinary single-line error_page source tokens.
+
+    This is *not* a context-aware Nginx parser. Even one exact native rule
+    may be in a location scope or overridden by aaPanel; source evidence must
+    never be mistaken for effective routing, ownership or Apply authority.
+    Missing/complex forms are explicitly ambiguous rather than absent.
+    """
+    result = {"native": 0, "different": 0, "other": 0, "ambiguous": 0}
+    total = len(re.findall(r"(?<![A-Za-z0-9_])error_page(?=\s)", text))
+    declarations = re.findall(
+        r"(?m)^[ \t]*error_page[ \t]+([^;{}\r\n]{1,512});[ \t]*$", text
+    )
+    result["ambiguous"] += max(0, total - len(declarations))
+    for declaration in declarations:
+        parts = declaration.split()
+        # Nginx accepts multiple status codes followed by one URI. The
+        # optional '=response' form is deliberately not a native file mapping.
+        if (len(parts) < 2 or len(parts) > 40 or
+                any('"' in p or "'" in p or "\\" in p for p in parts)):
+            result["ambiguous"] += 1
+            continue
+        codes = []
+        rewrite = False
+        valid = True
+        for field in parts[:-1]:
+            if re.fullmatch(r"[3-5][0-9]{2}", field) and not rewrite:
+                codes.append(field)
+            elif re.fullmatch(r"=(?:[2-5][0-9]{2})?", field) and codes and not rewrite:
+                rewrite = True
+            else:
+                valid = False
+                break
+        if not valid or not codes or not parts[-1].strip():
+            result["ambiguous"] += 1
+        elif selected in codes:
+            if not rewrite and parts[-1] == "/" + selected + ".html":
+                result["native"] += 1
+            else:
+                result["different"] += 1
+        else:
+            result["other"] += 1
+    return result
+
+
 def _textual_extension_include(text, key):
     expected = VHOST_ROOT + "/extension/" + key + "/*.conf"
     # A token-boundary textual reference, NOT proof that the directive is
@@ -290,6 +335,9 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         },
         "vhost_sha256": None, "extension_include_textual": False,
         "extensions_scanned": [], "error_page_sources": [],
+        # Text-only bounded classification, not proof of server/location scope.
+        "error_page_summary": {"native": 0, "different": 0,
+                               "other": 0, "ambiguous": 0},
         "note": ("Disk and textual VHost/extension snapshot only. An include may disappear "
                  "during aaPanel regeneration; neither loaded Nginx routes nor HTTP "
                  "response status are verified. Apply and Restore are disabled."),
@@ -330,6 +378,8 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         vhost_text = _active(vhost["data"])
         if _has_directive(vhost_text, "error_page"):
             result["error_page_sources"].append("site VHost")
+            for kind, count in _error_page_summary(vhost_text, template).items():
+                result["error_page_summary"][kind] += count
         result["extension_include_textual"] = _textual_extension_include(vhost_text, key)
 
         extension_path = vhost_root + "/extension/" + key
@@ -355,15 +405,35 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
                     result["extensions_scanned"].append(name)
                     if _has_directive(text, "error_page"):
                         result["error_page_sources"].append("extension/" + name)
+                        for kind, count in _error_page_summary(text, template).items():
+                            result["error_page_summary"][kind] += count
             finally:
                 os.close(extension_fd)
 
-        if result["error_page_sources"]:
-            result["state"] = "Conflict"
-            result["reason"] = "Existing error_page directives require owner and routing review"
-        elif result["page_file_state"] == "Different bytes":
+        if result["page_file_state"] == "Different bytes":
             result["state"] = "Conflict"
             result["reason"] = "Existing site page differs; do not overwrite manually owned content"
+        elif result["error_page_sources"]:
+            # A normal aaPanel VHost contains 404/502 plus a separate SSL 497
+            # mapping. Such declarations alone do NOT prove a conflict. They
+            # also do not establish effective routing, ownership or adoption.
+            summary = result["error_page_summary"]
+            selected_count = summary["native"] + summary["different"]
+            result["state"] = "Needs Review"
+            if summary["ambiguous"]:
+                result["reason"] = "Ambiguous error_page source text; route scope and ownership need review"
+            elif selected_count > 1:
+                result["reason"] = ("Multiple " + template + " error_page declarations observed; "
+                                    "possible scope/target overlap needs review")
+            elif summary["different"]:
+                result["reason"] = ("Existing " + template + " error_page uses a different "
+                                    "target or response; ownership needs review")
+            elif summary["native"]:
+                result["reason"] = ("One native " + template + " error_page /" + template +
+                                    ".html declaration observed; ownership and live routing unverified")
+            else:
+                result["reason"] = ("Only other status error_page declarations observed; "
+                                    "selected routing and ownership unverified")
         elif not result["extension_include_textual"]:
             result["state"] = "Needs Review"
             result["reason"] = "No literal native site-extension include observed in this VHost"
@@ -392,4 +462,6 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         result["extension_include_textual"] = False
         result["extensions_scanned"] = []
         result["error_page_sources"] = []
+        result["error_page_summary"] = {"native": 0, "different": 0,
+                                        "other": 0, "ambiguous": 0}
     return result

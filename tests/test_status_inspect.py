@@ -76,21 +76,81 @@ class SiteSourceTests(unittest.TestCase):
         self.assertEqual(changed["page_file_state"], "Different bytes")
         self.assertEqual(file.read_bytes(), content)
 
-    def test_vhost_and_extension_error_page_conflict_without_reading_external_contents(self):
-        self.set_vhost("  error_page 404 /old-404.html;")
-        r = self.scan()
-        self.assertEqual(r["state"], "Conflict")
-        self.assertEqual(r["error_page_sources"], ["site VHost"])
+    def test_native_404_502_and_497_rules_are_not_false_routing_conflicts(self):
+        self.set_vhost(
+            "  error_page 497 https://$host$request_uri;\n"
+            "  error_page 404 /404.html;\n"
+            "  error_page 502 /502.html;"
+        )
+        before = self.vhost.read_bytes()
+        for page in ('404', '502'):
+            with self.subTest(page=page):
+                r = self.scan(page=page)
+                self.assertEqual(r['state'], 'Needs Review', r)
+                self.assertIn('native', r['reason'].lower())
+                self.assertEqual(r['error_page_sources'], ['site VHost'])
+                self.assertEqual(r['error_page_summary'], {
+                    'native': 1, 'different': 0, 'other': 2, 'ambiguous': 0
+                })
+                self.assertFalse(r['nginx_runtime_verified'])
+                self.assertFalse(r['apply_supported'])
+        self.assertEqual(self.vhost.read_bytes(), before)
+
+    def test_existing_custom_or_multiple_error_rules_need_review_not_proven_conflict(self):
+        cases = (
+            ('error_page 404 /alternate.html;', 'different'),
+            ('error_page 404 /404.html;\nerror_page 404 /alternate.html;', 'multiple'),
+            ('error_page 404 =200 /404.html;', 'different'),
+            ('error_page 497 https://$host$request_uri;', 'other status'),
+            ('error_page 404 /404.html', 'ambiguous'),
+        )
+        for declaration, expected in cases:
+            with self.subTest(declaration=declaration):
+                self.set_vhost('  ' + declaration)
+                r = self.scan()
+                self.assertEqual(r['state'], 'Needs Review', r)
+                self.assertIn(expected, r['reason'].lower())
+                self.assertEqual(r['error_page_sources'], ['site VHost'])
+                self.assertFalse(r['apply_supported'])
+
+    def test_extension_error_rule_is_reported_without_reading_unrelated_contents(self):
         self.set_vhost()
-        extension = self.vhosts / "extension" / self.key
+        extension = self.vhosts / 'extension' / self.key
         extension.mkdir(parents=True)
-        (extension / "site_total.conf").write_text("location /x { return 200; }\n")
-        (extension / "operator.conf").write_text("error_page 502 /custom.html;\n")
-        r = self.scan(page="502")
-        self.assertEqual(r["state"], "Conflict")
-        self.assertEqual(r["error_page_sources"], ["extension/operator.conf"])
-        self.assertEqual(r["extensions_scanned"], ["operator.conf", "site_total.conf"])
-        self.assertFalse(r["nginx_runtime_verified"])
+        (extension / 'site_total.conf').write_text('location /x { return 200; }\n')
+        (extension / 'operator.conf').write_text('error_page 502 /502.html;\n')
+        r = self.scan(page='502')
+        self.assertEqual(r['state'], 'Needs Review', r)
+        self.assertIn('native', r['reason'].lower())
+        self.assertEqual(r['error_page_sources'], ['extension/operator.conf'])
+        self.assertEqual(r['extensions_scanned'], ['operator.conf', 'site_total.conf'])
+        self.assertFalse(r['nginx_runtime_verified'])
+
+    def test_quoted_or_concatenated_error_page_text_never_claims_a_clean_native_rule(self):
+        cases = (
+            'set $marker "error_page 404 /404.html";',
+            'error_page 404 /404.html; error_page 404 /alternate.html;',
+            'error_page 404 /404.html; location /x { error_page 404 /other.html; }',
+        )
+        for line in cases:
+            with self.subTest(line=line):
+                self.set_vhost('  ' + line)
+                r = self.scan()
+                self.assertEqual(r['state'], 'Needs Review')
+                self.assertGreater(r['error_page_summary']['ambiguous'], 0)
+                self.assertIn('ambiguous', r['reason'].lower())
+                self.assertFalse(r['apply_supported'])
+
+    def test_existing_owner_html_is_a_true_content_conflict_even_with_native_error_rules(self):
+        self.set_vhost('  error_page 404 /404.html;')
+        path = self.document_root / '404.html'
+        path.write_bytes(b'<html>operator-owned content</html>')
+        original = path.read_bytes()
+        r = self.scan()
+        self.assertEqual(r['state'], 'Conflict')
+        self.assertIn('site page differs', r['reason'].lower())
+        self.assertEqual(r['error_page_sources'], ['site VHost'])
+        self.assertEqual(path.read_bytes(), original)
 
     def test_comment_does_not_imply_extension_or_error_page(self):
         self.vhost.write_text(

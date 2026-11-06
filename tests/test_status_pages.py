@@ -398,7 +398,17 @@ class EntrypointTests(unittest.TestCase):
                 self.assertEqual(self.plugin.status_save(payload)["stage"],"status_settings")
                 reread=self.plugin.status_preferences({})
                 self.assertEqual(reread["effective"]["brand_name"],"Acme")
-            self.assertEqual(read_preferences(self.tmp.name)["revision"],1)
+                reset=dict(payload,action="reset",expected_revision="1")
+                captured=[]
+                def activity(response, module, action, **kwargs):
+                    captured.append((module, action, kwargs.get("target")))
+                    return response
+                with patch.object(self.plugin,"_activity_result",side_effect=activity):
+                    result=self.plugin.status_save(reset)
+                self.assertTrue(result["status"],result)
+                self.assertEqual(captured, [("status_pages", "status_reset", "global")])
+                self.assertIn("reset", result["message"].lower())
+            self.assertEqual(read_preferences(self.tmp.name)["revision"],2)
 
 
 if __name__ == "__main__":

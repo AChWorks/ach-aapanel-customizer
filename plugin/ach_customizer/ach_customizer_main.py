@@ -532,9 +532,13 @@ class ach_customizer_main:
                 "schema": 1, "revision": state["revision"],
                 "changed": changed, "scope": scope, "site_id": site_id,
                 "source": source, "effective": effective,
-                "message": "Branding preferences saved; no site files or services changed",
+                "message": ("Branding preferences reset" if action == "reset" else
+                            "Branding preferences saved") + "; no site files or services changed",
             }
-            return self._activity_result(response, "status_pages", "status_save", target=("site:" + str(site_id)) if site_id else "global")
+            return self._activity_result(
+                response, "status_pages", "status_reset" if action == "reset" else "status_save",
+                target=("site:" + str(site_id)) if site_id else "global"
+            )
         except PermissionError as exc:
             return self._fail("status_authorization", exc, request_id)
         except Exception as exc:
