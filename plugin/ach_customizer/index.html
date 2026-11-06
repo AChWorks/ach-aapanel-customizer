@@ -303,9 +303,11 @@
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
-      <p class="ach-note">Read-only PHP-FPM file/default comparison. Conventional aaPanel Nginx site-to-pool file assignments are listed separately; neither file mapping nor this preview verifies effective routing/runtime state or authorizes Apply.</p>
+      <p class="ach-note">Installed PHP, master-process/Unix-socket observations and PHP-FPM file/default comparisons are separate read-only evidence. Conventional Nginx site-to-pool file assignments are shown below. No process/source observation proves effective site routing or authorizes a PHP-FPM Apply.</p>
       <div class="ach-controls"><button id="ach-php-discover" type="button">Refresh installed PHP</button></div>
       <p id="ach-php-discovery-status" role="status" aria-live="polite">Open PHP-FPM to discover installed versioned services. File presence does not verify running processes or enable Apply.</p>
+      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP master/socket (read-only)</button></div>
+      <p id="ach-php-runtime-result" class="ach-status-metadata" role="status" aria-live="polite">Select a discovered PHP 8.1+ version for bounded Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
       <form id="ach-php-form">
         <div class="ach-fields">
           <div><label for="ach-php-version">Installed PHP-FPM version</label><select id="ach-php-version" name="php_version" disabled required><option value="">Discover PHP installations first</option></select></div>
@@ -1606,6 +1608,48 @@
   root.find('#ach-activity-level').on('change', loadActivity);
   root.find('#ach-activity-module').on('change', loadActivity);
   var phpInventoryTicket = 0, phpInventoryBusy = false, phpInventory = new Map();
+  var phpRuntimeTicket = 0, phpRuntimeBusy = false;
+  function phpRuntimeLock() {
+    var version = String(root.find('#ach-php-version').val() || '');
+    root.find('#ach-php-runtime-check').prop('disabled',
+      phpRuntimeBusy || phpInventoryBusy || !phpInventory.get(version)?.preview_candidate);
+  }
+  function invalidatePhpRuntime(reason) {
+    ++phpRuntimeTicket;
+    phpRuntimeBusy = false;
+    root.find('#ach-php-runtime-result').text(reason ||
+      'Select installed PHP and Inspect runtime. No process or effective pool state assumed.');
+    phpRuntimeLock();
+  }
+  function validPhpRuntime(r, version) {
+    var path = function (v) {
+      return typeof v === 'string' && v.length <= 200 &&
+        /^\/[A-Za-z0-9_./-]+\.sock$/.test(v) && !v.includes('/../') &&
+        !v.includes('//');
+    };
+    if (!r || r.status !== true || r.schema !== 1 || r.version !== version ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.apply_eligible !== false ||
+        !['Observed','Partial','Needs Review'].includes(r.state) ||
+        !['Matching Master','Not Observed','Needs Review'].includes(r.master_state) ||
+        !['Bound Listener','Not Observed','Missing','Needs Review'].includes(r.socket_state) ||
+        (r.socket_path !== null && !path(r.socket_path)) ||
+        (r.master_pid !== null &&
+         (!Number.isSafeInteger(r.master_pid) || r.master_pid <= 0 || r.master_pid > 4194304)) ||
+        typeof r.reason !== 'string' || r.reason.length > 250 ||
+        typeof r.note !== 'string' || r.note.length > 400) return false;
+    if (r.state === 'Observed') {
+      return r.master_state === 'Matching Master' && r.socket_state === 'Bound Listener' &&
+        r.master_pid !== null && path(r.socket_path) && r.reason === '';
+    }
+    if (r.state === 'Partial') {
+      return r.master_state === 'Matching Master' &&
+        ['Missing','Not Observed'].includes(r.socket_state) &&
+        r.master_pid !== null && path(r.socket_path) && r.reason.length > 0;
+    }
+    return ['Not Observed','Needs Review'].includes(r.master_state) &&
+      r.socket_state === 'Needs Review' && r.master_pid === null && r.reason.length > 0;
+  }
   function validPhpInventory(r) {
     if (!r || r.schema !== 1 || r.read_only !== true || r.runtime_verified !== false ||
         ['Observed','Partial','Needs Review'].indexOf(r.state) < 0 ||
@@ -1645,6 +1689,7 @@
     sectionsLoaded.php = false;
     var previous = String(root.find('#ach-php-version').val() || '');
     phpInventory = new Map();
+    invalidatePhpRuntime('PHP inventory refresh invalidated earlier process/socket evidence.');
     root.find('#ach-php-version').empty().val('').prop('disabled', true);
     $('<option>').val('').text('Select installed PHP').appendTo(root.find('#ach-php-version'));
     root.find('#ach-php-discover').prop('disabled', true);
@@ -1672,6 +1717,7 @@
       });
       root.find('#ach-php-version').val(selectable && phpInventory.get(previous)?.preview_candidate ? previous : '');
       root.find('#ach-php-version').prop('disabled', !selectable);
+      phpRuntimeLock();
       root.find('#ach-php-discovery-status').text(
         r.versions.length + ' PHP version(s) observed; ' + selectable +
         ' file-preview candidate(s). ' + (r.reason ? r.reason + '. ' : '') + r.note
@@ -1679,6 +1725,42 @@
     }, function () { return ticket === phpInventoryTicket; });
   }
   root.find('#ach-php-discover').on('click', loadPhpInventory);
+  root.find('#ach-php-version').on('change', function () {
+    invalidatePhpRuntime('PHP version changed. Inspect the selected version again.');
+  });
+  root.find('#ach-php-runtime-check').on('click', function () {
+    var selected = String(root.find('#ach-php-version').val() || '');
+    if (phpInventoryBusy || phpRuntimeBusy ||
+        !phpInventory.get(selected)?.preview_candidate) return;
+    var ticket = ++phpRuntimeTicket, inventory = phpInventoryTicket;
+    phpRuntimeBusy = true;
+    phpRuntimeLock();
+    root.find('#ach-php-runtime-result').text(
+      'Inspecting exact PHP binary/master process/Unix socket in Linux procfs...');
+    request('inspect_php_runtime', {php_version:selected}, function (r) {
+      if (ticket !== phpRuntimeTicket || inventory !== phpInventoryTicket ||
+          String(root.find('#ach-php-version').val() || '') !== selected) return;
+      phpRuntimeBusy = false;
+      phpRuntimeLock();
+      if (!validPhpRuntime(r, selected)) {
+        root.find('#ach-php-runtime-result').text(
+          'PHP runtime evidence unavailable/incompatible. No running state or Apply eligibility inferred.');
+        return;
+      }
+      root.find('#ach-php-runtime-result').text(
+        'PHP ' + selected + ' — ' + r.state +
+        '\nMaster process: ' + r.master_state +
+        '\nMaster PID: ' + (r.master_pid || 'Unavailable') +
+        '\nUnix socket path: ' + (r.socket_path || 'Unavailable') +
+        '\nSocket listener: ' + r.socket_state +
+        (r.reason ? '\nReason: ' + r.reason : '') +
+        '\n' + r.note +
+        '\nPHP-FPM Apply eligibility: not inferred from this inspection.');
+    }, function () {
+      return ticket === phpRuntimeTicket && inventory === phpInventoryTicket &&
+        String(root.find('#ach-php-version').val() || '') === selected;
+    });
+  });
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     if (['overview','websites','php','status','activity'].indexOf(tab) < 0) return;

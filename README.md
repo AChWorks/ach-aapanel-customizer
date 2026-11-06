@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Status: Unreleased 0.1.13 development candidate under validation — native aaPanel sidebar, Monitor, strictly version-gated PHP 8.5 Manual Apply/Restore, offline Status Pages preview and branding, bounded Activity/Diagnostics, and read-only website/local-hosts inspection.** No supported public release or production deployment is available.
+**Status: Unreleased 0.1.14 development candidate under validation — native aaPanel sidebar, Monitor, strictly version-gated PHP 8.5 Manual Apply/Restore, offline Status Pages preview and branding, bounded Activity/Diagnostics, and read-only website/local-hosts inspection.** No supported public release or production deployment is available.
 
 ## Why
 
@@ -25,7 +25,9 @@ The unreleased Customizer UI follows a **real, authenticated inspection of every
 See [the native UI source/evidence contract](docs/aapanel-integration.md#native-aapanel-dialog-ui-unreleased-ui-refinement) and [focused independent-review remediation](docs/evidence/aaPanel-8.0.7-2026-11-04-pr16-review-remediation.md).
 This is an unreleased development change and does not authorize Production use.
 
-The pending [PHP 8.1+ read-only discovery candidate (PR #15)](https://github.com/AChWorks/ach-aapanel-customizer/pull/15), now reconciled with unreleased `0.1.13` source on `main`, detects aaPanel installation-file candidates and offers a bounded native selector for file-only monitoring. It does **not** broaden Manual Apply beyond the guarded PHP 8.5 adapter, claim a running PHP service, or establish native PHP 8.1 installation acceptance. See [the PHP inventory acceptance boundary](docs/aapanel-integration.md#installed-php-inventory-and-read-only-version-selector).
+The merged-source [PHP 8.1+ read-only discovery (PR #15)](https://github.com/AChWorks/ach-aapanel-customizer/pull/15), now reconciled with unreleased `0.1.13` source on `main`, detects aaPanel installation-file candidates and offers a bounded native selector for file-only monitoring. It does **not** broaden Manual Apply beyond the guarded PHP 8.5 adapter, claim a running PHP service, or establish native PHP 8.1 installation acceptance. See [the PHP inventory acceptance boundary](docs/aapanel-integration.md#installed-php-inventory-and-read-only-version-selector).
+
+**PHP-FPM 8.1+ runtime observation (new 0.1.14 development-only source):** After **Refresh installed PHP** selects a recognized version, **Inspect selected PHP master/socket** performs a separate **read-only, primary-admin-only** Linux procfs check. It matches the exact installed versioned PHP-FPM executable identity with one master process whose title names the exact native PHP-FPM configuration file, verifies the configured 'www' Unix socket path is a real socket, correlates the listener in /proc/net/unix with an open master-process file descriptor, and rechecks source, process start identity and socket bindings before reporting **Observed**. Missing sockets and inaccessible/multiple/unrecognized processes are **Partial** or **Needs Review**; a missing matching master is not proof the service is stopped. The UI invalidates stale responses when the selected PHP version or inventory changes. This shows a point-in-time master/listener relationship, **not effective pool values, worker health, successful PHP HTTP requests, site-to-process proof, or Apply eligibility**. No binaries are executed and no services or files are changed. Only synthetic source/Chromium tests are currently available; installed-native PHP81/PHP85 acceptance remains in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21). See [the exact runtime evidence contract](docs/aapanel-integration.md#native-php-81-read-only-master-and-socket-observation-source-only).
 
 ## Development and installation
 

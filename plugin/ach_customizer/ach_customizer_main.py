@@ -105,7 +105,7 @@ class ach_customizer_main:
             message = "Unexpected plugin error; inspect Activity using Operation ID"
         response = {"status": False, "stage": stage,
                     "msg": message, "operation_id": operation_id}
-        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_")) else
+        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
                   "websites" if stage.startswith(("website_", "hosts_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
@@ -250,6 +250,32 @@ class ach_customizer_main:
             return self._fail("php_versions_authorization", exc, operation_id)
         except Exception as exc:
             return self._fail("php_versions_discovery", exc, operation_id)
+
+    def inspect_php_runtime(self, args):
+        """Read-only selected-version master/socket evidence; never Apply."""
+        operation_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            version = self._argument(args, "php_version")
+            # Lazy import prevents stale aaPanel module caches from taking
+            # down existing PHP discovery/Monitor/Status Pages endpoints.
+            try:
+                from ach_customizer_php_runtime import inspect_php_fpm_runtime
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "PHP runtime inspector not loaded after plugin update; "
+                    "restart aaPanel panel service, reopen and Refresh installed PHP"
+                ) from exc
+            result = inspect_php_fpm_runtime("/www/server/php", version)
+            response = {"status": True, "operation_id": operation_id, **result}
+            return self._activity_result(
+                response, "php_fpm", "inspect_php_runtime",
+                target=str(version)[:16], level="DEBUG" if result["state"] == "Observed" else "WARNING"
+            )
+        except PermissionError as exc:
+            return self._fail("php_runtime_authorization", exc, operation_id)
+        except Exception as exc:
+            return self._fail("php_runtime_inspection", exc, operation_id)
 
     def inspect_local_hosts(self, args):
         """Full-admin-only, read-only origin-local /etc/hosts diagnosis.

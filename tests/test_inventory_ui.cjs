@@ -41,6 +41,7 @@ function loadUi() {
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
     '#ach-php-version', '#ach-php-discover', '#ach-php-discovery-status',
+    '#ach-php-runtime-check', '#ach-php-runtime-result',
     '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-operation-notice', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
@@ -76,6 +77,7 @@ function loadUi() {
   });
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
+  elements.get('#ach-php-runtime-check').props.disabled = true;
   const requests = [];
 
   function selection(nodes) {
@@ -262,6 +264,8 @@ function loadUi() {
       statusCompareExcerpt: elements.get('#ach-status-comparison-excerpt').textContent,
       impactSummary: elements.get('#ach-impact-summary').textContent,
       phpDiscovery: elements.get('#ach-php-discovery-status').textContent,
+      phpRuntime: elements.get('#ach-php-runtime-result').textContent,
+      phpRuntimeDisabled: elements.get('#ach-php-runtime-check').props.disabled,
       phpVersion: elements.get('#ach-php-version').props.value,
       phpVersionDisabled: elements.get('#ach-php-version').props.disabled,
       phpOptions: elements.get('#ach-php-version').children.map(option => ({
@@ -360,7 +364,10 @@ function loadUi() {
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
     openStatus, statusSetValue, statusSetChecked, statusClick, openActivity,
-    openPhp, refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
+    openPhp,
+    inspectPhpRuntime: () => { trigger(elements.get('#ach-php-runtime-check'), 'click'); return requests.at(-1); },
+    selectPhpVersion: v => { elements.get('#ach-php-version').props.value=v; trigger(elements.get('#ach-php-version'), 'change'); },
+    refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
     activityRefresh: () => { trigger(elements.get('#ach-activity-refresh'), 'click'); return requests.at(-1); },
     respond, respondOverview, toggleMonitor, submitPhp,
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
@@ -2388,6 +2395,94 @@ test('Native PHP discovery selects actual PHP 8.1+ file candidates without enabl
   assert.equal(ui.state().fpmPrepareDisabled,true,
     'An 8.1 file mapping must never open the PHP85 Manual Apply gate');
   assert.match(ui.state().fpmPlan,/manual Apply unavailable/);
+});
+
+function phpRuntimeEvidence(overrides={}) {
+  return {
+    status:true,schema:1,version:'81',read_only:true,runtime_verified:false,
+    apply_eligible:false,state:'Observed',
+    master_state:'Matching Master',socket_state:'Bound Listener',
+    master_pid:432,socket_path:'/tmp/php-cgi-81.sock',
+    reason:'',note:'Read-only point-in-time Linux process/socket observation. No Apply permission.',
+    ...overrides
+  };
+}
+
+test('Read-only PHP 8.1 runtime inspection requires a discovered version and preserves no Apply claim', () => {
+  const ui=loadUi();
+  assert.equal(ui.state().phpRuntimeDisabled,true);
+  ui.openPhp().respond(ui.phpVersions());
+  assert.equal(ui.state().phpRuntimeDisabled,true,'No version selected yet');
+  ui.selectPhpVersion('81');
+  assert.equal(ui.state().phpRuntimeDisabled,false);
+  const req=ui.inspectPhpRuntime();
+  assert.match(req.options.url,/s=inspect_php_runtime$/);
+  assert.equal(req.options.data.php_version,'81');
+  assert.equal(Object.keys(req.options.data).length,1);
+  assert.equal(ui.state().phpRuntimeDisabled,true,'No duplicate concurrent runtime reads');
+  req.respond(phpRuntimeEvidence());
+  assert.equal(ui.state().phpRuntimeDisabled,false);
+  assert.match(ui.state().phpRuntime,/PHP 81 — Observed/);
+  assert.match(ui.state().phpRuntime,/Master process: Matching Master/);
+  assert.match(ui.state().phpRuntime,/Master PID: 432/);
+  assert.match(ui.state().phpRuntime,/Socket listener: Bound Listener/);
+  assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
+  assert.equal(ui.state().fpmPrepareDisabled,true,
+    'Runtime process evidence never enables a new PHP81 write adapter');
+});
+
+test('PHP runtime observation discards stale selected-version and inventory-refresh callbacks', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  const first=ui.inspectPhpRuntime();
+  ui.selectPhpVersion('85');
+  first.respond(phpRuntimeEvidence());
+  assert.match(ui.state().phpRuntime,/version changed/);
+  assert.doesNotMatch(ui.state().phpRuntime,/Bound Listener/);
+  const next=ui.inspectPhpRuntime();
+  const refreshing=ui.refreshPhp();
+  next.respond(phpRuntimeEvidence({version:'85'}));
+  assert.match(ui.state().phpRuntime,/inventory refresh invalidated/);
+  refreshing.respond(ui.phpVersions());
+  assert.equal(ui.state().phpVersion,'85');
+  assert.match(ui.state().phpRuntime,/inventory refresh invalidated/);
+  assert.equal(ui.state().phpRuntimeDisabled,false);
+});
+
+test('Invalid PHP runtime replies never masquerade as proven service or Apply permission', () => {
+  for (const tampered of [
+    {runtime_verified:true},{apply_eligible:true},{version:'85'},
+    {state:'Observed',socket_state:'Missing'},
+    {state:'Observed',master_pid:null},
+    {socket_path:'../../etc/passwd'},
+    {socket_path:'/tmp/evil.sock\\n<script>'},
+    {state:'Observed',reason:'source unknown'},
+    {master_state:'unexpected'}, {master_pid:'432'},
+    {note:'x'.repeat(800)}
+  ]) {
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    const request=ui.inspectPhpRuntime();
+    request.respond(phpRuntimeEvidence(tampered));
+    assert.match(ui.state().phpRuntime,/unavailable\/incompatible/,JSON.stringify(tampered));
+    assert.equal(ui.state().phpRuntimeDisabled,false);
+    assert.equal(ui.state().fpmPrepareDisabled,true);
+  }
+  for(const observed of [
+    phpRuntimeEvidence({state:'Partial',socket_state:'Missing',
+      reason:'Current socket is absent'}),
+    phpRuntimeEvidence({state:'Needs Review',master_state:'Not Observed',
+      master_pid:null,socket_state:'Needs Review',reason:'No matching master observed'})
+  ]) {
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    ui.inspectPhpRuntime().respond(observed);
+    assert.match(ui.state().phpRuntime,new RegExp(observed.state));
+    assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
+  }
 });
 
 test('Partial PHP installation inventory disables missing and unsupported versions', () => {
