@@ -1382,7 +1382,7 @@
           '\nVHost SHA-256: ' + (r.vhost_sha256 || 'Not available') +
           '\nExtension include mentioned in VHost text: ' + (r.extension_include_textual ? 'Yes' : 'No') +
           '\nScanned extension files: ' + (r.extensions_scanned.join(', ') || 'None') +
-          '\nPotential error_page declarations: ' + (r.error_page_sources.join(', ') || 'None observed') +
+          '\nSelected-status error_page source references: ' + (r.error_page_sources.join(', ') || 'None observed') +
           '\n' + r.note);
         var comparison = r.comparison;
         root.find('#ach-status-comparison-summary').text(

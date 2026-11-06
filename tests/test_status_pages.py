@@ -406,6 +406,29 @@ class EntrypointTests(unittest.TestCase):
                 self.assertEqual(reread["effective"]["brand_name"],"Acme")
             self.assertEqual(read_preferences(self.tmp.name)["revision"],1)
 
+    def test_branding_save_and_reset_have_distinct_activity_actions(self):
+        from ach_customizer_activity import read_activity
+        flask = types.ModuleType("flask")
+        flask.request = types.SimpleNamespace(method="POST")
+        flask.session = dict(login=True, uid=1)
+        flask.has_request_context = lambda: True
+        payload = dict(customized("QA Brand"), scope="global", site_id="",
+                       branding_action="save", expected_revision="0")
+        with patch.dict(sys.modules, {"public": self._native_public(),
+                                      "flask": flask}):
+            saved = self.plugin.status_save(payload)
+            self.assertTrue(saved["status"], saved)
+            self.assertEqual(saved["revision"], 1)
+            reset = self.plugin.status_save(dict(payload, branding_action="reset",
+                                                 expected_revision="1"))
+            self.assertTrue(reset["status"], reset)
+            self.assertEqual(reset["revision"], 2)
+            self.assertIn("reset", reset["message"].lower())
+        actions = [row["action"] for row in read_activity(self.tmp.name, module="status_pages")]
+        self.assertEqual(actions[:2], ["status_reset", "status_save"])
+        self.assertEqual(read_preferences(self.tmp.name)["revision"], 2)
+
+
 
 if __name__ == "__main__":
     unittest.main()

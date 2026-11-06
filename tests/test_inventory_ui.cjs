@@ -1580,6 +1580,23 @@ test('Native site inventory errors revoke previously selected HTTP probe capabil
   assert.equal(ui.requests.length,count);
 });
 
+test('Existing native status-file reference is reviewable without false conflict or Apply', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs());
+  const result=statusInspection({
+    state:'Needs Review',
+    reason:'An existing source declaration references the native 404.html page; runtime unverified',
+    error_page_sources:['site VHost']
+  });
+  ui.statusClick('#ach-status-inspect-button').respond(result);
+  assert.match(ui.state().statusInspect,/State: Needs Review/);
+  assert.match(ui.state().statusInspect,/Selected-status error_page source references: site VHost/);
+  assert.doesNotMatch(ui.state().statusInspect,/State: Conflict|Apply ready|HTTP verified/);
+});
+
 test('Invalid, cross-site and routing-overclaim inspection replies fail closed', () => {
   for (const bad of [
     statusInspection({site_id:8}),

@@ -186,10 +186,43 @@ def _active(source):
         raise StatusInspectError("Ambiguous Nginx configuration text") from exc
 
 
-def _has_directive(text, name):
-    # This intentionally over-detects quoted references: false conflicts are
-    # safe; claiming an absent routing directive when one exists is not.
-    return re.search(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?=\s)", text) is not None
+def _selected_error_page(text, status):
+    """Classify bounded *textual* references to one selected HTTP status.
+
+    This is not an Nginx scope, inheritance, include-order or runtime parser.
+    Recognize only aaPanel's single literal `error_page 404 /404.html;`
+    style. Malformed/multi-status/embedded/duplicate forms remain uncertain;
+    unrelated statuses (such as the TLS-only 497 redirect) are not conflicts.
+    """
+    references = re.findall(r"(?<![A-Za-z0-9_])error_page(?=\s)", text)
+    declarations = re.findall(
+        r"(?m)^[ \t]*error_page[ \t]+([^;{}\r\n]+);[ \t]*(?=\r?$)",
+        text,
+    )
+    if len(declarations) != len(references):
+        return "ambiguous" if references else None
+    relevant = []
+    for declaration in declarations:
+        arguments = declaration.split()
+        if (len(arguments) < 2 or
+                any(re.fullmatch(r"[0-9]{3}", item) is None
+                    for item in arguments[:-1])):
+            return "ambiguous"
+        codes, target = arguments[:-1], arguments[-1]
+        if status not in codes:
+            continue
+        if len(codes) != 1:
+            return "ambiguous"
+        if target == "/" + status + ".html":
+            relevant.append("native")
+        elif (re.fullmatch(r"/[A-Za-z0-9._/-]+", target)
+              and ".." not in target.split("/")):
+            relevant.append("different")
+        else:
+            return "ambiguous"
+    if len(relevant) > 1:
+        return "ambiguous"
+    return relevant[0] if relevant else None
 
 
 def _textual_extension_include(text, key):
@@ -316,7 +349,9 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         },
         "vhost_sha256": None, "extension_include_textual": False,
         "extensions_scanned": [], "error_page_sources": [],
-        "note": ("Disk and textual VHost/extension snapshot only. An include may disappear "
+        "note": ("Disk and textual VHost/extension snapshot only; error_page sources concern "
+                 "the selected HTTP status or unrecognized syntax, not unrelated statuses. "
+                 "An include may disappear "
                  "during aaPanel regeneration; neither loaded Nginx routes nor HTTP "
                  "response status are verified. Apply and Restore are disabled."),
     }
@@ -354,7 +389,10 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
             return result
         result["vhost_sha256"] = vhost["sha256"]
         vhost_text = _active(vhost["data"])
-        if _has_directive(vhost_text, "error_page"):
+        sources = []
+        selected = _selected_error_page(vhost_text, template)
+        if selected:
+            sources.append(selected)
             result["error_page_sources"].append("site VHost")
         result["extension_include_textual"] = _textual_extension_include(vhost_text, key)
 
@@ -379,17 +417,35 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
                     _remember_source(bindings, extension_path, extension_fd, name, fragment)
                     text = _active(fragment["data"])
                     result["extensions_scanned"].append(name)
-                    if _has_directive(text, "error_page"):
+                    selected = _selected_error_page(text, template)
+                    if selected:
+                        sources.append(selected)
                         result["error_page_sources"].append("extension/" + name)
             finally:
                 os.close(extension_fd)
 
-        if result["error_page_sources"]:
+        if "different" in sources:
             result["state"] = "Conflict"
-            result["reason"] = "Existing error_page directives require owner and routing review"
+            result["reason"] = (
+                "A source declaration for the selected HTTP status points to "
+                "a different page; ownership and routing need review"
+            )
+        elif "ambiguous" in sources or len(sources) > 1:
+            result["state"] = "Needs Review"
+            result["reason"] = (
+                "Multiple or unsupported selected-status error_page declarations; "
+                "Nginx ownership and effective routing are unverified"
+            )
         elif result["page_file_state"] == "Different bytes":
             result["state"] = "Conflict"
             result["reason"] = "Existing site page differs; do not overwrite manually owned content"
+        elif sources:
+            result["state"] = "Needs Review"
+            result["reason"] = (
+                "An existing source declaration references the native " + template +
+                ".html page; no competing selected-status target was detected. "
+                "Actual Nginx scope, ownership and HTTP behavior remain unverified"
+            )
         elif not result["extension_include_textual"]:
             result["state"] = "Needs Review"
             result["reason"] = "No literal native site-extension include observed in this VHost"

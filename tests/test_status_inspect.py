@@ -92,6 +92,44 @@ class SiteSourceTests(unittest.TestCase):
         self.assertEqual(r["extensions_scanned"], ["operator.conf", "site_total.conf"])
         self.assertFalse(r["nginx_runtime_verified"])
 
+    def test_native_status_mapping_is_not_a_duplicate_conflict(self):
+        self.set_vhost(
+            "  error_page 497 https://$host$request_uri;\n"
+            "  error_page 404 /404.html;\n"
+            "  error_page 502 /502.html;")
+        for page in ("404", "502"):
+            with self.subTest(status=page):
+                result = self.scan(page=page)
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertEqual(result["error_page_sources"], ["site VHost"])
+                self.assertIn("existing", result["reason"].lower())
+                self.assertFalse(result["nginx_runtime_verified"])
+                self.assertFalse(result["apply_supported"])
+
+    def test_unrelated_status_497_does_not_change_selected_mapping(self):
+        self.set_vhost("error_page 497 https://$host$request_uri;")
+        self.assertEqual(self.scan()["state"], "Unmanaged")
+        page = b"known existing page"
+        (self.document_root / "404.html").write_bytes(page)
+        matched = self.scan(digest=hashlib.sha256(page).hexdigest())
+        self.assertEqual(matched["state"], "File Match")
+        self.assertEqual(matched["error_page_sources"], [])
+        self.assertFalse(matched["nginx_runtime_verified"])
+
+    def test_unverified_status_syntax_and_duplicates_never_claim_a_match(self):
+        for source in (
+            "error_page 404 =200 /fallback;",
+            "error_page 404 '/404.html';",
+            "error_page 404 /404.html;\nerror_page 404 /404.html;",
+            "set $label 'error_page 404 /404.html';",
+        ):
+            with self.subTest(source=source):
+                self.set_vhost(source)
+                result = self.scan()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertFalse(result["apply_supported"])
+                self.assertFalse(result["nginx_runtime_verified"])
+
     def test_comment_does_not_imply_extension_or_error_page(self):
         self.vhost.write_text(
             "server {\n# include " + str(self.vhosts) +
