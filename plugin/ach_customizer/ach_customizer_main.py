@@ -107,7 +107,7 @@ class ach_customizer_main:
                     "msg": message, "operation_id": operation_id}
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
             response, module, stage, error=diagnostic_error or error)
@@ -386,6 +386,87 @@ class ach_customizer_main:
             return self._fail("hosts_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("hosts_inspection", exc, request_id)
+
+    def inspect_fastcgi_cache(self, args):
+        """Full-primary-admin, read-only native FastCGI source audit.
+
+        The selected site and bound domain snapshot are comparison-only.
+        Neither request-supplied filesystem paths nor suggested domains can
+        determine which site/VHost is inspected. No cache mutation or purge.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_cache_audit import inspect_site_fastcgi_cache
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Cache inspector not loaded after plugin update; restart "
+                    "aaPanel panel service and refresh the native site inventory"
+                ) from exc
+            expected_key = self._argument(args, "expected_site_key")
+            expected_snapshot = self._argument(args, "expected_site_snapshot")
+            if (not isinstance(expected_key, str) or not expected_key or
+                    len(expected_key) > 255 or
+                    not isinstance(expected_snapshot, str) or
+                    not 1 <= len(expected_snapshot) <= 110000):
+                raise MonitorInputError("Refresh the selected native website inventory")
+            try:
+                selected = json.loads(expected_snapshot)
+            except (TypeError, ValueError):
+                raise MonitorInputError("Invalid native website snapshot; refresh inventory") from None
+            if (not isinstance(selected, list) or len(selected) != 5 or
+                    type(selected[0]) is not int or
+                    not isinstance(selected[1], str) or
+                    not isinstance(selected[2], str) or
+                    not isinstance(selected[3], str) or
+                    not isinstance(selected[4], list) or
+                    len(selected[4]) > 100 or
+                    any(not isinstance(item, list) or len(item) != 2 or
+                            not isinstance(item[0], str) or
+                            type(item[1]) is not int for item in selected[4])):
+                raise MonitorInputError("Invalid native site selection; refresh inventory")
+            site_id = self._status_site_id(args)
+            if site_id is None:
+                raise MonitorInputError("Choose a native aaPanel website")
+            import public
+
+            def current_site():
+                record = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(record, dict) or type(record.get("id")) not in
+                        (int, str) or str(record["id"]) != str(site_id)
+                        or not isinstance(record.get("name"), str)
+                        or not record["name"]):
+                    raise MonitorInputError("Native site identity changed")
+                site = {"id": site_id, "name": record["name"],
+                        "path": record.get("path"), "status": record.get("status")}
+                _bound_domains_for_sites(public, [site])
+                return site
+
+            before = current_site()
+            if (before["name"] != expected_key or
+                    native_site_snapshot(before) != selected):
+                raise MonitorInputError(
+                    "Website or bound-domain selection changed; refresh native inventory")
+            result = inspect_site_fastcgi_cache(public, site_id, before["name"])
+            if current_site() != before:
+                raise MonitorInputError(
+                    "Native site or bound domains changed during cache inspection")
+            response = {
+                "status": True, "request_id": request_id, **result,
+            }
+            return self._activity_result(
+                response, "websites", "inspect_fastcgi_cache",
+                target=str(site_id),
+                level="WARNING" if result["state"] != "Source Observed"
+                    or result["findings"] else "DEBUG",
+            )
+        except PermissionError as exc:
+            return self._fail("cache_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("cache_inspection", exc, request_id)
 
     def preview_php_fpm(self, args):
         operation_id = uuid4().hex
