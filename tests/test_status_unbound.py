@@ -30,7 +30,10 @@ class FakeNginx:
 
     def __call__(self, argv, **kwargs):
         if "-T" in argv:
-            # Emulate Nginx's actual -T file-section structure and glob order.
+            # Real nginx -T runs its syntax check first: malformed .conf in
+            # the included glob makes both -T and -t fail before activation.
+            if self.fail_test_when_present and self.test.config.exists():
+                return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"native nginx syntax failure")
             prefix = f"# configuration file {self.test.nginx_conf}:\n"
             prefix += self.test.nginx_conf.read_text() + "\n"
             files = sorted(self.test.vhost.glob("*.conf"))
@@ -267,6 +270,25 @@ class UnboundRouteTests(unittest.TestCase):
         self.assertEqual(error.exception.stage,"conflict")
         self.assertFalse(self.config.exists())
         self.assertFalse(self.html.exists())
+
+    def test_updated_config_template_does_not_block_existing_restore(self):
+        applied=self.apply()
+        old_generator=subject._config
+        with patch.object(subject, "_config",
+                          side_effect=lambda op, root: old_generator(op, root)+b"# revised generator\\n"):
+            # Only the installed generator changed; the managed Nginx
+            # bytes and their persistent approved SHA are still intact.
+            state=self.read()
+            self.assertEqual(state["state"],"Applied")
+            restored=self.call("restore",expected_source=state["source_sha256"],
+                               expected_recovery=state["recovery_id"])
+            self.assertEqual(restored["state"],"Restored")
+            self.assertEqual(self.read()["state"],"Restored")
+            self.assertFalse(self.config.exists())
+            self.assertFalse(self.html.exists())
+            new=self.apply()
+            self.assertEqual(new["state"],"Applied")
+            self.restore(new)
 
     def test_failed_reload_preserves_recoverable_identity_for_explicit_restore(self):
         before=self.read()

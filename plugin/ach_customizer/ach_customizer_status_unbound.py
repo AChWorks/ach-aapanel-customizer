@@ -228,9 +228,6 @@ def manage_unbound(action, html, *, data_fd,
         retired = (_bounded_file(vfd, _retired(record["operation_id"]),
                     limit=8192, permissions=0o600) if record else None)
         source_sha, loaded = _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner)
-        if record and record["config_sha256"] != _sha(_config(record["operation_id"], html_root)):
-            raise UnboundError("drift", "Managed route recovery configuration identity changed",
-                               record["operation_id"])
         if conf is not None and not loaded:
             raise UnboundError("source", "Managed-looking Nginx file is not loaded")
         if action == "recheck":
@@ -283,19 +280,20 @@ def manage_unbound(action, html, *, data_fd,
             try:
                 _write_exclusive(hfd, HTML_NAME, html_bytes, 0o644)
                 _write_exclusive(vfd, CONF_NAME, config, 0o600)
-                renewed, present = _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner)
-                if renewed != source_sha or not present:
-                    raise UnboundError("concurrency", "Nginx routing source changed during Apply", operation_id)
                 try:
+                    # nginx -T also performs syntax validation. Test before
+                    # inspecting loaded source so a rejected new .conf can
+                    # be detached and the normal Restore path stays usable.
                     _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
                 except ExtensionError as syntax:
-                    # Nothing has been reloaded. Do not leave a syntactically
-                    # rejected plugin file in aaPanel's live *.conf glob.
                     if syntax.stage == "syntax" and _bounded_file(
                             vfd, CONF_NAME, limit=8192, permissions=0o600) == config:
                         _rename_noreplace(vfd, CONF_NAME, _retired(operation_id))
                         os.fsync(vfd)
                     raise
+                renewed, present = _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner)
+                if renewed != source_sha or not present:
+                    raise UnboundError("concurrency", "Nginx routing source changed during Apply", operation_id)
                 _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
                 _settled(operation_id, rendered_sha, present=True, probe=probe)
                 if _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner) != (source_sha, True):
@@ -339,7 +337,9 @@ def manage_unbound(action, html, *, data_fd,
             if _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner) != (source_sha, False):
                 raise UnboundError("concurrency", "Nginx source changed after Restore", operation_id)
             if retired is not None or conf is not None:
-                if _bounded_file(vfd, _retired(operation_id), limit=8192, permissions=0o600) != _config(operation_id, html_root):
+                retained = _bounded_file(
+                    vfd, _retired(operation_id), limit=8192, permissions=0o600)
+                if retained is None or _sha(retained) != record["config_sha256"]:
                     raise UnboundError("recovery", "Retained managed route changed", operation_id)
                 os.unlink(_retired(operation_id), dir_fd=vfd)
                 os.fsync(vfd)
