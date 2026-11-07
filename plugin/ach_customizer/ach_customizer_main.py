@@ -275,6 +275,7 @@ class ach_customizer_main:
             result = save_reviewed_baseline(
                 public, directory=_STATE_DIR,
                 expected_revision=self._argument(args, "expected_revision"),
+                expected_monitor_revision=self._argument(args, "expected_monitor_revision"),
                 expected_source_sha256=self._argument(args, "expected_source_sha256"),
                 reviewed=self._argument(args, "reviewed"),
             )

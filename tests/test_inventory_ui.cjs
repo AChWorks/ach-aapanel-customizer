@@ -3234,12 +3234,18 @@ test('Review optional: rapid reentry does not duplicate same pending Status or A
 const nativeSiteForDrift = (id, name) => ({
   id, name, document_root:'/srv/' + id, panel_status:'1', bound_domains:[[name, 80]]
 });
-const siteChangesPayload = (overrides = {}) => ({
-  status:true, schema:1, state:'Baseline Missing', scope:'native_site_records',
-  read_only:true, runtime_verified:false, baseline_revision:0,
-  baseline_sha256:null, source_sha256:'a'.repeat(64), site_count:1, changes:[],
-  note:'aaPanel database only; runtime not verified.', ...overrides
-});
+const siteChangesPayload = (overrides = {}) => {
+  const response = {
+    status:true, schema:1, state:'Baseline Missing', scope:'native_site_records',
+    read_only:true, runtime_verified:false, baseline_revision:0,
+    monitor_revision:0, baseline_sha256:null, source_sha256:'a'.repeat(64),
+    site_count:1, initial_sites:[nativeSiteForDrift(3,'initial.test')], changes:[],
+    note:'aaPanel database only; runtime not verified.', ...overrides
+  };
+  if (!Object.hasOwn(overrides,'initial_sites') && response.baseline_revision !== 0)
+    response.initial_sites=[];
+  return response;
+};
 
 test('Site lifecycle comparison requires reviewed baseline and refuses blind retry', () => {
   const ui=loadUi();
@@ -3248,16 +3254,20 @@ test('Site lifecycle comparison requires reviewed baseline and refuses blind ret
   assert.match(compare.options.url,/s=compare_site_changes$/);
   compare.respond(siteChangesPayload());
   assert.match(ui.state().siteChangesStatus,/Baseline Missing/);
+  assert.deepEqual(ui.state().siteChangesRows,[
+    ['3','Initial','initial.test',
+     'Name: initial.test; root: /srv/3; status: 1; domains/ports: initial.test:80']]);
   assert.equal(ui.state().siteChangesSaveDisabled,true);
   ui.siteChangesApprove(true);
   assert.equal(ui.state().siteChangesSaveDisabled,false);
   const save=ui.siteChangesSave();
   assert.match(save.options.url,/s=save_site_baseline$/);
   assert.equal(save.options.data.expected_revision,0);
+  assert.equal(save.options.data.expected_monitor_revision,0);
   assert.equal(save.options.data.expected_source_sha256,'a'.repeat(64));
   assert.equal(save.options.data.reviewed,'true');
   assert.deepEqual(Object.keys(save.options.data).sort(),
-    ['expected_revision','expected_source_sha256','reviewed']);
+    ['expected_monitor_revision','expected_revision','expected_source_sha256','reviewed']);
   assert.equal(ui.state().siteChangesSaveDisabled,true);
   save.respond({status:true,schema:1,state:'Baseline Saved',changed:true,
     baseline_revision:1,source_sha256:'a'.repeat(64)});
@@ -3275,12 +3285,64 @@ test('Website lifecycle Monitor renders HTML as text and invalidates old approva
     changes:[{id:3,kind:'Changed',fields:['name','bound_domains'],before,after}]
   }));
   assert.deepEqual(ui.state().siteChangesRows,[
-    ['3','Changed','<svg onload=alert(1)>','name, bound_domains']]);
+    ['3','Changed','<svg onload=alert(1)>',
+     'name: old.example.test -> <svg onload=alert(1)>; bound_domains: old.example.test:80 -> <svg onload=alert(1)>:80']]);
   ui.siteChangesApprove(true);
   assert.equal(ui.state().siteChangesSaveDisabled,false);
   ui.refreshSites();
   assert.equal(ui.state().siteChangesSaveDisabled,true);
   assert.deepEqual(ui.state().siteChangesRows,[]);
+});
+
+test('Site lifecycle review exposes actual before/after roots, statuses and bindings', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const previous=nativeSiteForDrift(3,'old.test');
+  const current={...previous,document_root:'/srv/new-root',panel_status:'0',
+    bound_domains:[['private.test',443],['alias.test',80]]};
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    changes:[{id:3,kind:'Changed',
+      fields:['document_root','panel_status','bound_domains'],
+      before:previous,after:current}]
+  }));
+  assert.deepEqual(ui.state().siteChangesRows,[
+    ['3','Changed','old.test',
+     'document_root: /srv/3 -> /srv/new-root; panel_status: 1 -> 0; '+
+     'bound_domains: old.test:80 -> private.test:443, alias.test:80']]);
+  ui.siteChangesApprove(true);
+  const save=ui.siteChangesSave();
+  assert.equal(save.options.data.expected_monitor_revision,0);
+});
+
+test('Initial baseline payload must carry validated actual site records', () => {
+  const bad=[
+    siteChangesPayload({initial_sites:[]}),
+    siteChangesPayload({monitor_revision:'0'}),
+    siteChangesPayload({initial_sites:[nativeSiteForDrift(3,'a'),nativeSiteForDrift(3,'b')],
+      site_count:2}),
+    siteChangesPayload({initial_sites:[nativeSiteForDrift(3,'<img src=x onerror=alert(1)>'),
+      nativeSiteForDrift(1,'x')],site_count:2}),
+    siteChangesPayload({initial_sites:[{...nativeSiteForDrift(3,'a'),bound_domains:[['bad',0]]}]}),
+  ];
+  for(const value of bad) {
+    const ui=loadUi();
+    ui.openSites().respond(page());
+    ui.siteChangesCompare().respond(value);
+    assert.equal(ui.state().siteChangesSaveDisabled,true);
+    assert.deepEqual(ui.state().siteChangesRows,[]);
+  }
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    initial_sites:[nativeSiteForDrift(3,'<img src=x onerror=alert(1)>')]
+  }));
+  assert.match(ui.state().siteChangesRows[0][3],/<img src=x onerror=alert\(1\)>/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  ui.siteChangesApprove(true);
+  assert.equal(ui.state().siteChangesSaveDisabled,false);
+  ui.refreshSites();
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
 });
 
 test('Malformed website lifecycle payload and uncertain save outcome fail closed', () => {

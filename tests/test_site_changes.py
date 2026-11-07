@@ -1,9 +1,11 @@
 """Native site lifecycle baseline: bounded source-only regressions."""
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "plugin" / "ach_customizer"))
 from ach_customizer_site_changes import (
@@ -74,6 +76,7 @@ class SiteChangesTests(unittest.TestCase):
         return save_reviewed_baseline(
             self.panel, directory=self.directory.name,
             expected_revision=preview["baseline_revision"] if revision is None else revision,
+            expected_monitor_revision=preview["monitor_revision"],
             expected_source_sha256=preview["source_sha256"] if digest is None else digest,
             reviewed=reviewed)
 
@@ -157,6 +160,168 @@ class SiteChangesTests(unittest.TestCase):
         with self.assertRaisesRegex((SiteChangesError, RuntimeError), "invalid|Invalid"):
             self.preview()
 
+    def test_strict_native_fields_reject_lossy_records_without_baseline(self):
+        for field, value in (
+            ("path", None), ("path", ""), ("path", 42),
+            ("status", None), ("status", False), ("status", []),
+            ("id", True), ("id", 2.0), ("id", "0003"),
+        ):
+            with self.subTest(field=field, value=value):
+                original = self.panel.sites[0][field]
+                self.panel.sites[0][field] = value
+                try:
+                    with self.assertRaises((SiteChangesError, RuntimeError)):
+                        self.preview()
+                    self.assertFalse(Path(self.directory.name, BASELINE_FILE).exists())
+                finally:
+                    self.panel.sites[0][field] = original
+        # Legitimate integer/string native status representations remain
+        # observable and changing them triggers a comparison.
+        initial = self.preview()
+        self.save(initial)
+        self.panel.sites[0]["status"] = "0"
+        changed = self.preview()
+        self.assertEqual(changed["state"], "Changes Observed")
+        self.assertIn("panel_status", changed["changes"][0]["fields"])
+
+    def test_bounded_domain_pagination_preserves_100_by_24_capacity(self):
+        self.panel.sites = [
+            {"id": i, "name": f"site{i}.test", "path": f"/srv/{i}", "status": 1}
+            for i in range(1, 101)
+        ]
+        for count in (10, 11, 24):
+            with self.subTest(bindings_per_site=count):
+                self.panel.domains = [
+                    {"id": i * 100 + j, "pid": i,
+                     "name": f"alias{j}.site{i}.test", "port": 80 + j}
+                    for i in range(1, 101) for j in range(count)
+                ]
+                observed = self.preview()
+                self.assertEqual(observed["site_count"], 100)
+                records = (observed["initial_sites"] if count == 10 else
+                           [item["after"] for item in observed["changes"]])
+                self.assertEqual(len(records), 100)
+                self.assertEqual(len(records[30]["bound_domains"]), count)
+                self.assertEqual(self.save(observed)["state"], "Baseline Saved")
+                self.assertEqual(self.preview()["state"], "No Changes")
+        self.panel.sites.append(
+            {"id": 101, "name": "overflow.test", "path": "/srv/overflow", "status": 1}
+        )
+        with self.assertRaisesRegex(SiteChangesError, "More than 100"):
+            self.preview()
+
+    def test_domain_id_reused_across_batches_and_midpage_drift_fail_closed(self):
+        self.panel.sites = [
+            {"id": i, "name": f"site{i}.test", "path": f"/srv/{i}", "status": 1}
+            for i in range(1, 22)
+        ]
+        self.panel.domains = [
+            {"id": 10, "pid": 1, "name": "one.test", "port": 80},
+            {"id": 10, "pid": 21, "name": "twentyone.test", "port": 80},
+        ]
+        with self.assertRaisesRegex(SiteChangesError, "duplicated across"):
+            self.preview()
+        self.panel.domains[1]["id"] = 11
+        self.panel.site_queries = 0
+        def change(call):
+            if call == 3:
+                self.panel.domains[1]["name"] = "drift.test"
+        self.panel.on_site_scan = change
+        with self.assertRaisesRegex(SiteChangesError, "changed during inspection"):
+            self.preview()
+
+    def test_monitor_policy_races_and_revision_cas_reject_commit(self):
+        from ach_customizer_state import read_state, set_enabled
+        for key in ("overall", "site_inventory"):
+            with self.subTest(disabled=key):
+                self.panel = Panel()
+                with tempfile.TemporaryDirectory(prefix="ach-site-policy-race-") as directory:
+                    baseline = compare(self.panel, directory=directory)
+                    def toggle(call):
+                        if call == 4:
+                            set_enabled(key, False, directory=directory,
+                                        expected_revision=0)
+                    self.panel.on_site_scan = toggle
+                    with self.assertRaisesRegex(SiteChangesError, "disabled"):
+                        save_reviewed_baseline(
+                            self.panel, directory=directory,
+                            expected_revision=0, expected_monitor_revision=0,
+                            expected_source_sha256=baseline["source_sha256"],
+                            reviewed="true")
+                    self.assertFalse(Path(directory, BASELINE_FILE).exists())
+        self.panel = Panel()
+        preview = self.preview()
+        set_enabled("php_fpm_file_preview", False,
+                    directory=self.directory.name, expected_revision=0)
+        self.assertEqual(read_state(self.directory.name)["revision"], 1)
+        with self.assertRaisesRegex(SiteChangesError, "Monitor revision changed"):
+            self.save(preview)
+        self.assertFalse(Path(self.directory.name, BASELINE_FILE).exists())
+
+    def test_baseline_atomic_faults_and_uncertain_rename_reconciliation(self):
+        import ach_customizer_site_changes as site_changes
+        initial = self.preview()
+        target = Path(self.directory.name, BASELINE_FILE)
+        with patch.object(site_changes.os, "fsync", side_effect=OSError("file fsync fault")):
+            with self.assertRaises(OSError):
+                self.save(initial)
+        self.assertFalse(target.exists())
+        self.assertFalse(list(Path(self.directory.name).glob(".ach_customizer.sites.*.tmp")))
+        with patch.object(site_changes.os, "replace", side_effect=OSError("rename fault")):
+            with self.assertRaises(OSError):
+                self.save(initial)
+        self.assertFalse(target.exists())
+
+        class InterruptedStream:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+            def write(self, data):
+                raise OSError("partial original baseline write")
+        with patch.object(site_changes.os, "fdopen", return_value=InterruptedStream()):
+            with self.assertRaisesRegex(OSError, "partial"):
+                self.save(initial)
+        self.assertFalse(target.exists())
+        self.assertFalse(list(Path(self.directory.name).glob(".ach_customizer.sites.*.tmp")))
+
+        actual_fsync = site_changes.os.fsync
+        counts = 0
+        def after_replace(fd):
+            nonlocal counts
+            counts += 1
+            if counts == 2:
+                raise OSError("directory fsync uncertain")
+            return actual_fsync(fd)
+        with patch.object(site_changes.os, "fsync", side_effect=after_replace):
+            with self.assertRaisesRegex(SiteChangesError, "uncertain"):
+                self.save(initial)
+        self.assertEqual(counts, 2)
+        self.assertEqual(read_baseline(self.directory.name)["revision"], 1)
+        latest = self.preview()
+        self.assertEqual(latest["state"], "No Changes")
+        with self.assertRaisesRegex(SiteChangesError, "revision changed"):
+            self.save(initial)
+        self.assertEqual(self.save(latest)["state"], "Baseline Unchanged")
+        self.assertEqual(read_baseline(self.directory.name)["revision"], 1)
+        self.assertFalse(list(Path(self.directory.name).glob(".ach_customizer.sites.*.tmp")))
+
+    def test_stray_temp_and_hardlinks_cannot_fabricate_recovery(self):
+        root = Path(self.directory.name)
+        stray = root / ".ach_customizer.sites.crashed.tmp"
+        stray.write_text("incomplete staging artifact")
+        stray.chmod(0o600)
+        observed = self.preview()
+        self.assertEqual(observed["state"], "Baseline Missing")
+        self.save(observed)
+        self.assertEqual(stray.read_text(), "incomplete staging artifact")
+        baseline = root / BASELINE_FILE
+        mirror = root / "unexpected-hardlink"
+        os.link(baseline, mirror)
+        with self.assertRaisesRegex(SiteChangesError, "Untrusted"):
+            self.preview()
+        self.assertEqual(mirror.read_bytes(), baseline.read_bytes())
+
     def test_tamper_permissions_and_linked_baseline_fail_closed(self):
         self.save(self.preview())
         target = Path(self.directory.name, BASELINE_FILE)
@@ -234,8 +399,8 @@ class NativeEndpointTests(unittest.TestCase):
         self.assertEqual(refused["stage"], "website_baseline_save")
         self.assertFalse(Path(self.temp.name, BASELINE_FILE).exists())
         saved = self.controller.save_site_baseline({
-            "expected_revision": "0", "expected_source_sha256": value["source_sha256"],
-            "reviewed": "true"
+            "expected_revision": "0", "expected_monitor_revision": "0",
+            "expected_source_sha256": value["source_sha256"], "reviewed": "true"
         })
         self.assertTrue(saved["status"], saved)
         self.assertEqual(saved["baseline_revision"], 1)

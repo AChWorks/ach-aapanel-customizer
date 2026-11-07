@@ -13,10 +13,13 @@ import re
 from uuid import uuid4
 
 from ach_customizer_monitor import get_site_page
-from ach_customizer_state import _exclusive_lock, _open_state_dir, _owned_file
+from ach_customizer_state import (
+    _exclusive_lock, _open_state_dir, _owned_file, _read_at, read_state,
+)
 
 SCHEMA = 1
 MAX_SITES = 100
+SITE_PAGE_SIZE = 20  # <=480 bindings/query at 24/site, under shared 1000-row cap.
 MAX_BINDINGS_PER_SITE = 24
 MAX_SITE_KEY_BYTES = 255
 MAX_DOMAIN_BYTES = 255
@@ -107,12 +110,33 @@ def _validated_sites(sites):
 def _scan(panel_public):
     """Two independent bounded native queries; require an identical snapshot."""
     def one():
-        result = get_site_page(panel_public, page=1, page_size=MAX_SITES)
-        if result.get("has_more") or len(result.get("sites", [])) > MAX_SITES:
-            raise SiteChangesError("More than 100 native sites; baseline is unsupported")
-        normalized = sorted((_normalize(item) for item in result["sites"]),
-                            key=lambda item: item["id"])
-        return _validated_sites(normalized)
+        # Bound each native domain query instead of applying the shared
+        # 1000-row-per-page reader to all 100 sites at once. The lifecycle
+        # capacity is 100 x 24 domain/port records without silent truncation.
+        observed = []
+        seen = set()
+        domain_ids = set()
+        previous = 0
+        for page in range(1, MAX_SITES // SITE_PAGE_SIZE + 1):
+            result = get_site_page(
+                panel_public, page=page, page_size=SITE_PAGE_SIZE,
+                strict_native=True)
+            for item in result["sites"]:
+                for row_id in item.get("_native_domain_row_ids", []):
+                    if row_id in domain_ids:
+                        raise SiteChangesError(
+                            "Native domain record duplicated across site pages")
+                    domain_ids.add(row_id)
+                site = _normalize(item)
+                if site["id"] in seen or site["id"] <= previous:
+                    raise SiteChangesError(
+                        "Native site identity duplicated or changed during pagination")
+                observed.append(site)
+                seen.add(site["id"])
+                previous = site["id"]
+            if not result["has_more"]:
+                return _validated_sites(observed)
+        raise SiteChangesError("More than 100 native sites; baseline is unsupported")
 
     first = one()
     second = one()
@@ -191,9 +215,20 @@ def _differences(before, current):
     return changes
 
 
+def _require_site_monitor(policy):
+    if not policy["enabled"] or not policy["modules"]["site_inventory"]:
+        raise SiteChangesError("Website Monitor disabled during baseline review; Compare again")
+
+
 def compare(panel_public, *, directory):
+    monitor_before = read_state(directory)
+    _require_site_monitor(monitor_before)
     baseline = read_baseline(directory)
     sites, digest = _scan(panel_public)
+    monitor_after = read_state(directory)
+    _require_site_monitor(monitor_after)
+    if monitor_before != monitor_after:
+        raise SiteChangesError("Website Monitor revision changed during comparison; Compare again")
     changes = _differences(baseline["sites"], sites) if baseline["revision"] else []
     state = ("Baseline Missing" if not baseline["revision"] else
              "Changes Observed" if changes else "No Changes")
@@ -201,8 +236,10 @@ def compare(panel_public, *, directory):
         "schema": SCHEMA, "state": state, "scope": "native_site_records",
         "read_only": True, "runtime_verified": False,
         "baseline_revision": baseline["revision"],
+        "monitor_revision": monitor_after["revision"],
         "baseline_sha256": baseline["source_sha256"],
         "source_sha256": digest, "site_count": len(sites),
+        "initial_sites": sites if not baseline["revision"] else [],
         "changes": changes,
         "note": ("aaPanel sites/domain database records only. "
                  "No effective Nginx routing, PHP pool, DNS, content or live runtime verification. "
@@ -243,6 +280,7 @@ def _write(directory_fd, state):
 
 
 def save_reviewed_baseline(panel_public, *, directory, expected_revision,
+                           expected_monitor_revision,
                            expected_source_sha256, reviewed):
     if reviewed != "true" and reviewed is not True:
         raise SiteChangesError("Explicit review confirmation is required")
@@ -252,6 +290,13 @@ def save_reviewed_baseline(panel_public, *, directory, expected_revision,
     revision = int(expected_revision)
     if not 0 <= revision < MAX_REVISION:
         raise SiteChangesError("Expected site baseline revision is out of range")
+    if type(expected_monitor_revision) is not int and (
+            not isinstance(expected_monitor_revision, str) or
+            not re.fullmatch(r"0|[1-9][0-9]{0,9}", expected_monitor_revision)):
+        raise SiteChangesError("Invalid expected Monitor revision")
+    monitor_revision = int(expected_monitor_revision)
+    if not 0 <= monitor_revision <= MAX_REVISION:
+        raise SiteChangesError("Expected Monitor revision is out of range")
     if not isinstance(expected_source_sha256, str) or not SHA_PATTERN.fullmatch(expected_source_sha256):
         raise SiteChangesError("Invalid expected site source fingerprint")
     # Scan before taking the persistent lock, then re-scan under the lock to
@@ -263,12 +308,22 @@ def save_reviewed_baseline(panel_public, *, directory, expected_revision,
     try:
         lock_fd = _exclusive_lock(directory_fd)
         try:
+            policy = _read_at(directory_fd)
+            _require_site_monitor(policy)
+            if policy["revision"] != monitor_revision:
+                raise SiteChangesError("Website Monitor revision changed; Compare again")
             current = _load(directory_fd)
             if current["revision"] != revision:
                 raise SiteChangesError("Site baseline revision changed; Compare again")
             second, current_digest = _scan(panel_public)
             if second != sites or current_digest != digest:
                 raise SiteChangesError("Native sites changed during baseline recording; Compare again")
+            # The same persistent lock serializes Monitor policy updates and
+            # baseline publication. Check immediately before either outcome.
+            final_policy = _read_at(directory_fd)
+            _require_site_monitor(final_policy)
+            if final_policy["revision"] != monitor_revision:
+                raise SiteChangesError("Website Monitor revision changed; Compare again")
             if current["source_sha256"] == digest:
                 return {"schema": SCHEMA, "state": "Baseline Unchanged",
                         "baseline_revision": revision, "source_sha256": digest,

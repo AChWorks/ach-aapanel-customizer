@@ -941,14 +941,24 @@
         r.read_only !== true || r.runtime_verified !== false ||
         !['Baseline Missing', 'Changes Observed', 'No Changes'].includes(r.state) ||
         !Number.isSafeInteger(r.baseline_revision) || r.baseline_revision < 0 ||
+        !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
         !Number.isSafeInteger(r.site_count) || r.site_count < 0 || r.site_count > 100 ||
         !/^[a-f0-9]{64}$/.test(String(r.source_sha256 || '')) ||
-        typeof r.note !== 'string' || !Array.isArray(r.changes) || r.changes.length > 200) return false;
+        typeof r.note !== 'string' ||
+        !Array.isArray(r.initial_sites) || r.initial_sites.length > 100 ||
+        !Array.isArray(r.changes) || r.changes.length > 200) return false;
     if (r.baseline_revision === 0) {
-      if (r.state !== 'Baseline Missing' || r.baseline_sha256 !== null || r.changes.length) return false;
+      if (r.state !== 'Baseline Missing' || r.baseline_sha256 !== null ||
+          r.changes.length || r.initial_sites.length !== r.site_count) return false;
     } else if (!/^[a-f0-9]{64}$/.test(String(r.baseline_sha256 || '')) ||
-               (r.state === 'Baseline Missing') ||
+               r.initial_sites.length || (r.state === 'Baseline Missing') ||
                (r.state === 'No Changes') !== (r.changes.length === 0)) return false;
+    var previousId = 0;
+    for (var i = 0; i < r.initial_sites.length; i++) {
+      var item = r.initial_sites[i];
+      if (!validSiteChangesSite(item, item && item.id) || item.id <= previousId) return false;
+      previousId = item.id;
+    }
     var ids = new Set(), fieldsAllowed = ['name', 'document_root', 'panel_status', 'bound_domains'];
     return r.changes.every(function (entry) {
       if (!entry || !Number.isSafeInteger(entry.id) || entry.id <= 0 ||
@@ -968,6 +978,18 @@
           entry.fields.includes(name);
       });
     });
+  }
+  function siteChangesDetails(site) {
+    return 'Name: ' + site.name + '; root: ' + site.document_root +
+      '; status: ' + site.panel_status + '; domains/ports: ' +
+      (site.bound_domains.map(function (entry) {
+        return entry[0] + ':' + entry[1];
+      }).join(', ') || 'None');
+  }
+  function siteChangesField(site, name) {
+    return name === 'bound_domains' ?
+      site.bound_domains.map(function (entry) { return entry[0] + ':' + entry[1]; }).join(', ') :
+      site[name];
   }
   function siteChangesLock(busy) {
     siteChangesBusy = busy;
@@ -993,13 +1015,29 @@
       }
       siteChangesSnapshot = r;
       var body = root.find('#ach-site-changes-rows').empty();
+      // Initial baseline review includes the actual bounded records, not just
+      // a count/digest. Every value is rendered text-only to prevent markup.
+      r.initial_sites.forEach(function (site) {
+        var tr = $('<tr>');
+        $('<td>').text(site.id).appendTo(tr);
+        $('<td>').text('Initial').appendTo(tr);
+        $('<td>').text(site.name).appendTo(tr);
+        $('<td>').text(siteChangesDetails(site)).appendTo(tr);
+        body.append(tr);
+      });
       r.changes.forEach(function (change) {
         var site = change.after || change.before;
+        var details = change.kind === 'Changed' ?
+          change.fields.map(function (field) {
+            return field + ': ' + siteChangesField(change.before, field) +
+              ' -> ' + siteChangesField(change.after, field);
+          }).join('; ') :
+          ((change.kind === 'Added' ? 'New: ' : 'Removed: ') + siteChangesDetails(site));
         var tr = $('<tr>');
         $('<td>').text(change.id).appendTo(tr);
         $('<td>').text(change.kind).appendTo(tr);
         $('<td>').text(site.name).appendTo(tr);
-        $('<td>').text(change.fields.length ? change.fields.join(', ') : 'New or removed native site').appendTo(tr);
+        $('<td>').text(details).appendTo(tr);
         body.append(tr);
       });
       root.find('#ach-site-changes-status').text(
@@ -1024,6 +1062,7 @@
     siteChangesLock(true);
     request('save_site_baseline', {
       expected_revision:snapshot.baseline_revision,
+      expected_monitor_revision:snapshot.monitor_revision,
       expected_source_sha256:snapshot.source_sha256, reviewed:'true'
     }, function (r) {
       if (ticket !== siteChangesTicket) return;
