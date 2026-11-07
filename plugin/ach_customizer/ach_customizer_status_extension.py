@@ -308,6 +308,104 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
             "ownership", "Exclusive native server include source could not be established")
 
 
+def _reject_50x_vhost_mappings(source):
+    """Recognize error_page statements in the bounded selected native VHost.
+
+    Nginx treats newlines as argument whitespace and # as a comment only
+    outside quoted/escaped tokens. Scan all contexts, including locations;
+    this is deliberately a statement recognizer, NOT an effective-config
+    parser or a rewrite of the native VHost.
+    """
+    if "\x00" in source or len(source) > MAX_VHOST:
+        raise ExtensionError("source", "Uninspectable native Nginx 50x source")
+    tokens = []
+    word = []
+    quote = None
+    escaped = False
+    comment = False
+    in_variable = False
+    dollar = False
+    depth = 0
+
+    def finish_word():
+        if word:
+            tokens.append("".join(word))
+            word.clear()
+
+    def check_statement():
+        if not tokens or tokens[0] != "error_page":
+            return
+        # The final argument is a URI or named location; an optional =code
+        # may precede it. Status code arguments must be literal integers.
+        if len(tokens) < 3:
+            raise ExtensionError("source", "Unclassifiable native Nginx error_page")
+        codes = tokens[1:-1]
+        if any(code in ("500", "503", "504") for code in codes):
+            raise ExtensionError("conflict", "Selected site already owns a 500/503/504 error mapping")
+        if any(not re.fullmatch(r"[0-9]{3}|=[0-9]{3}|=", code) for code in codes):
+            raise ExtensionError("source", "Unclassifiable native Nginx error_page")
+
+    for char in source:
+        if comment:
+            if char == "\n":
+                comment = False
+            continue
+        if escaped:
+            # Nginx unescapes only these characters; unknown escapes retain
+            # the backslash, so they cannot masquerade as numeric statuses.
+            word.append({"t": "\t", "r": "\r", "n": "\n"}.get(char,
+                        char if char in ("'", '"', "\\") else "\\" + char))
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            else:
+                word.append(char)
+            continue
+        if char in ("'", '"') and not word:
+            quote = char
+            continue
+        if char == "#" and not word:
+            comment = True
+            continue
+        if char in " \t\r\n":
+            finish_word()
+            dollar = False
+            continue
+        if in_variable:
+            word.append(char)
+            if char == "}":
+                in_variable = False
+            continue
+        if char == "{" and dollar:
+            in_variable = True
+            word.append(char)
+            dollar = False
+            continue
+        dollar = char == "$"
+        if char in ";{}":
+            finish_word()
+            if char == ";":
+                check_statement()
+            elif char == "{":
+                if tokens and tokens[0] == "error_page":
+                    raise ExtensionError("source", "Unterminated native Nginx error_page")
+                depth += 1
+            else:
+                if tokens or depth == 0:
+                    raise ExtensionError("source", "Ambiguous native Nginx 50x context")
+                depth -= 1
+            tokens.clear()
+            continue
+        word.append(char)
+    if quote or escaped or in_variable or depth or tokens or word:
+        raise ExtensionError("source", "Incomplete or ambiguous native Nginx 50x source")
+
+
 def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
     name = site.get("name")
     if (not isinstance(name, str) or not DOMAIN.fullmatch(name)
@@ -341,15 +439,9 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
             not exact(r"^\s*include\s+" + re.escape(expected_include) + r"\s*;")):
         raise ExtensionError("source", "Native site root, error-page or extension binding is unproven")
     if code == "50x":
-        # Never silently override an operator/native error mapping for any
-        # status this managed extension is about to add. Keep this check
-        # scoped to the literal native VHost; runtime HTTP proof remains
-        # required after the explicit Apply.
-        active_source = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
-        for expression in re.findall(
-                r"(?m)(?:^|[;{}])[ \t]*error_page[ \t]+([^;{}\r\n]+);", active_source):
-            if any(value in {"500", "503", "504"} for value in expression.split()[:-1]):
-                raise ExtensionError("conflict", "Selected site already owns a 500/503/504 error mapping")
+        # Guard all selected native VHost error_page contexts before any
+        # journal, asset, include publication or shared Nginx reload.
+        _reject_50x_vhost_mappings(text)
     native_include = re.search(
         r"(?m)^\s*include\s+" + re.escape(expected_include) + r"\s*;", text)
     before = "\n".join(line.split("#", 1)[0]

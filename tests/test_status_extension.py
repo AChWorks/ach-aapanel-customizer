@@ -700,6 +700,79 @@ class ExtensionTests(unittest.TestCase):
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
         self.vhost.write_text(original)
 
+    def test_50x_multiline_quoted_and_nested_mapping_conflicts_are_preflight_only(self):
+        original = self.vhost.read_text()
+        cases = (
+            # Nginx recognizes newlines inside directive argument lists.
+            "error_page 500\n    /operator-500.html;",
+            "location /special/ {\n    error_page 503\n        /operator-503.html;\n}",
+            "location /special/ { error_page 504\n    /operator-504.html; }",
+            "error_page 503 # comment between Nginx directive tokens\n    /custom-503.html;",
+            "add_header X-Note \"value#part\"; error_page 500 /operator-500.html;",
+            "location /special/ { add_header X-Note 'a;#b';\n"
+            "    error_page 503 504\n    /operator-multi.html; }",
+        )
+        for content in cases:
+            with self.subTest(content=content):
+                self.vhost.write_text(original.replace(
+                    "error_page 502 /502.html;",
+                    "error_page 502 /502.html;\n" + content))
+                with self.assertRaises(extension.ExtensionError) as caught:
+                    self.run_manager(code="50x")
+                self.assertEqual(caught.exception.stage, "conflict")
+                self.assertEqual(self.commands, [], "Must reject before Nginx syntax/reload")
+                self.assertEqual(list(self.state.iterdir()), [], "No recovery journal")
+                self.assertEqual(list(self.ext.iterdir()), [], "No extension publication")
+                self.assertEqual(list(self.public.iterdir()), [], "No HTML publication")
+        self.vhost.write_text(original)
+
+    def test_50x_ignores_actual_comments_and_unrelated_quoted_text(self):
+        original = self.vhost.read_text()
+        harmless = (
+            "# error_page 500 /comment-only.html;",
+            "add_header X-Note 'text # error_page 503 /not-a-rule;';",
+            "add_header X-Hint \"value#part\"; # error_page 504 /hidden.html;",
+            "add_header X-Hint \"value\\\"#part\"; # error_page 500 /hidden.html;",
+            "rewrite ^/special/$ /special.php?token=${request_uri} last;",
+            "error_page 404 /404.html; # 500 503 504 in comment",
+            "location /special/ { # error_page 500 /nested-comment.html;\n"
+            "    add_header X-Note \"error_page 504;\"; }",
+        )
+        for content in harmless:
+            with self.subTest(content=content):
+                self.vhost.write_text(original.replace(
+                    "error_page 502 /502.html;",
+                    "error_page 502 /502.html;\n" + content))
+                self.assertEqual(self.run_manager("recheck", code="50x")["state"], "Unmanaged")
+                self.assertEqual(self.commands, [])
+        self.vhost.write_text(original)
+        applied = self.run_manager(code="50x")
+        self.assertEqual(self.run_manager("recheck", code="50x")["state"], "Applied")
+        self.assertEqual(self.run_manager("restore", code="50x",
+                                          recovery=applied["recovery_id"])["state"],
+                         "Source Restored")
+
+    def test_50x_ambiguous_vhost_cannot_create_a_journal_or_reload(self):
+        original = self.vhost.read_text()
+        cases = (
+            'add_header X-Note "unterminated quote;\nerror_page 500 /cannot-trust.html;',
+            'location /special/ { error_page 503 /unfinished',
+            'add_header X-Note valid; error_page 504',
+            'add_header X-Bad "quoted\\',
+        )
+        for content in cases:
+            with self.subTest(content=content):
+                self.vhost.write_text(original.replace(
+                    "error_page 502 /502.html;",
+                    "error_page 502 /502.html;\n" + content))
+                with self.assertRaises(extension.ExtensionError):
+                    self.run_manager(code="50x")
+                self.assertEqual(self.commands, [])
+                self.assertEqual(list(self.state.iterdir()), [])
+                self.assertEqual(list(self.ext.iterdir()), [])
+                self.assertEqual(list(self.public.iterdir()), [])
+        self.vhost.write_text(original)
+
     def test_50x_requires_native_502_mapping_and_uses_unmodified_site_file(self):
         current = self.vhost.read_text()
         self.vhost.write_text(current.replace("error_page 502 /502.html;", ""))
