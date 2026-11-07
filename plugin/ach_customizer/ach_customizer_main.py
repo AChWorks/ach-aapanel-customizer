@@ -1023,6 +1023,86 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("status_manage_unexpected", exc, request_id)
 
+    def status_defaults(self, args):
+        """Explicit global *new-site source* 404/502/defaultDoc management.
+
+        Does not edit a running website, generated VHost or Nginx route.
+        aaPanel copies the installed sources only for newly created sites.
+        """
+        request_id = uuid4().hex
+        action = self._argument(args, "default_action")
+        template = self._argument(args, "template")
+        try:
+            self._status_primary_admin_post()
+            from ach_customizer_status_defaults import (
+                DefaultSourceError, TEMPLATES, manage_default,
+            )
+            from ach_customizer_state import _open_state_dir, parse_revision
+            from ach_customizer_status_pages import _load_at, _take_lock
+            if (self._argument(args, "scope") != "global" or
+                    self._argument(args, "site_id") not in (None, "")):
+                raise StatusPageError("New-site defaults require global scope, not a website")
+            if action not in ("recheck", "apply", "restore") or template not in TEMPLATES:
+                raise StatusPageError("Select new-site, 404 or 502 default source")
+            locale = self._argument(args, "locale")
+            if locale not in LOCALES:
+                raise StatusPageError("Unsupported new-site default language")
+            if action != "recheck" and self._argument(args, "default_approval") != (
+                    action + "_new_site_default_" + template):
+                raise StatusPageError("Explicit selected new-site default approval required")
+            import public
+            def compatible():
+                return (public.get_webserver() == "nginx" and
+                        str(public.get_panel_version()).strip() == "8.0.7")
+            if not compatible():
+                raise StatusPageError("Native default source adapter requires aaPanel 8.0.7 Nginx")
+            data_fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock = _take_lock(data_fd)
+                try:
+                    state = _load_at(data_fd)
+                    revision = parse_revision(self._argument(args, "expected_revision"))
+                    if revision != state["revision"]:
+                        raise StatusPageError("Global branding revision changed; Recheck first")
+                    effective, _ = select_brand(state)
+                    if self._argument(args, "brand_name") is not None:
+                        effective = self._status_values(args)
+                    rendered = render_page(locale, template, effective)
+                    result = manage_default(
+                        action, template, rendered["html"], data_fd=data_fd,
+                        expected_current=self._argument(args, "expected_current_sha256"),
+                        expected_render=self._argument(args, "expected_render_sha256"),
+                        expected_recovery=self._argument(args, "expected_recovery_id"),
+                    )
+                    if not compatible():
+                        raise DefaultSourceError(
+                            "uncertain", "Panel version changed; Recheck managed default source",
+                            result.get("recovery_id"))
+                finally:
+                    os.close(lock)
+            finally:
+                os.close(data_fd)
+            response = {
+                "status": True, "request_id": request_id, "operation_id": request_id,
+                "default_action": action, "scope": "global",
+                "site_id": None, "locale": locale, "revision": revision,
+                **result,
+            }
+            return self._activity_result(
+                response, "status_pages", "status_default_" + action,
+                target="new-site-default:" + template,
+                level="WARNING" if result["state"] in ("Drift", "Recovery Required")
+                else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("status_default_authorization", exc, request_id)
+        except StatusPageError as exc:
+            return self._fail(
+                "status_default_" + str(getattr(exc, "stage", "preflight")),
+                exc, request_id)
+        except Exception as exc:
+            return self._fail("status_default_unexpected", exc, request_id)
+
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""
         request_id = uuid4().hex
