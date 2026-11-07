@@ -206,6 +206,123 @@ class Site404TransactionTests(unittest.TestCase):
         self.assertIsNone(self.recovery())
         self.assertEqual(self.page.read_bytes(), self.original)
 
+    def test_atomic_backup_publication_failure_matrix_preserves_404(self):
+        # No fault before or at the final no-clobber rename may publish a
+        # partially written original-byte backup.
+        original_create = manager._create_data
+        def truncated_temp(fd, name, content):
+            if ".before." not in name:
+                return original_create(fd, name, content)
+            descriptor = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                                 0o600, dir_fd=fd)
+            try:
+                os.write(descriptor, content[:7])
+            finally:
+                os.close(descriptor)
+            raise OSError("injected interrupted byte write")
+        with patch.object(manager, "_create_data", side_effect=truncated_temp):
+            with self.assertRaisesRegex(manager.StatusManageError, "backup publication failed"):
+                self.run_manager()
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertFalse((self.state / "ach_customizer.site404.9.before").exists())
+        self.assertFalse(list(self.state.glob(".*.before.*.tmp")))
+
+        with patch.object(manager, "_rename_noreplace",
+                          side_effect=FileExistsError("other backup writer")):
+            with self.assertRaisesRegex(manager.StatusManageError, "backup publication failed"):
+                self.run_manager()
+        self.assertFalse((self.state / "ach_customizer.site404.9.before").exists())
+        self.assertFalse(list(self.state.glob(".*.before.*.tmp")))
+        self.assertEqual(self.page.read_bytes(), self.original)
+
+        actual_fsync = manager.os.fsync
+        def fail_initial(fd):
+            raise OSError("backup file fsync interruption")
+        with patch.object(manager.os, "fsync", side_effect=fail_initial):
+            with self.assertRaisesRegex(manager.StatusManageError, "backup publication failed"):
+                self.run_manager()
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertFalse((self.state / "ach_customizer.site404.9.before").exists())
+        self.assertFalse(list(self.state.glob(".*.before.*.tmp")))
+
+    def test_backup_directory_fsync_uncertainty_is_complete_orphan(self):
+        actual = manager.os.fsync
+        counter = 0
+        def uncertain_parent(fd):
+            nonlocal counter
+            counter += 1
+            if counter == 3:
+                raise OSError("post-publication fsync not acknowledged")
+            return actual(fd)
+        with patch.object(manager.os, "fsync", side_effect=uncertain_parent):
+            with self.assertRaises(manager.StatusManageError) as error:
+                self.run_manager()
+        self.assertEqual(error.exception.stage, "backup_uncertain")
+        self.assertIsNone(self.recovery())
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertEqual((self.state / "ach_customizer.site404.9.before").read_bytes(),
+                         self.original)
+        self.assertEqual(self.run_manager("recheck")["state"], "Orphan Backup")
+        self.assertFalse(list(self.state.glob(".*.before.*.tmp")))
+
+    def test_initial_journal_fsync_failures_never_write_site(self):
+        # The original-byte backup is already complete at the journal
+        # boundary. A prepared record may or may not be durably published.
+        actual = manager.os.fsync
+        for stage in (4, 6):
+            with self.subTest(initial_journal_fsync_number=stage):
+                count = 0
+                def fail_at_journal(fd):
+                    nonlocal count
+                    count += 1
+                    if count == stage:
+                        raise OSError("prepared journal interruption")
+                    return actual(fd)
+                with patch.object(manager.os, "fsync", side_effect=fail_at_journal):
+                    with self.assertRaises(manager.StatusManageError) as ctx:
+                        self.run_manager()
+                self.assertEqual(ctx.exception.stage, "journal_prepared")
+                self.assertEqual(self.page.read_bytes(), self.original)
+                self.assertEqual(
+                    (self.state / "ach_customizer.site404.9.before").read_bytes(),
+                    self.original)
+                rechecked = self.run_manager("recheck")
+                self.assertIn(rechecked["state"], ("Orphan Backup", "Recovery Required"))
+                self.assertEqual(self.page.read_bytes(), self.original)
+                # Restore test fixture for next subcase without overwriting a
+                # live website or pretending uncertain durable record success.
+                journal = self.state / "ach_customizer.site404.9.json"
+                if journal.exists():
+                    journal.unlink()
+                self.assertEqual(self.run_manager("recheck")["state"], "Orphan Backup")
+                # This is a disposable fixture; reset the intact original
+                # state to give the next case all backup/journal fsync steps.
+                (self.state / "ach_customizer.site404.9.before").unlink()
+                self.assertEqual(self.run_manager("recheck")["state"], "Unmanaged")
+
+    def test_backup_no_clobber_preserves_existing_bytes(self):
+        permanent = "backup-preserved"
+        temporary = "complete-temp"
+        (self.state / permanent).write_bytes(b"Existing original")
+        (self.state / temporary).write_bytes(b"New original")
+        with self.assertRaises(FileExistsError):
+            manager._rename_noreplace(self.fd, temporary, permanent)
+        self.assertEqual((self.state / permanent).read_bytes(), b"Existing original")
+        self.assertEqual((self.state / temporary).read_bytes(), b"New original")
+
+    def test_noop_apply_requires_journal_vhost_provenance(self):
+        first = self.run_manager()
+        self.vhost.write_text(self.vhost.read_text() +
+                              "# independent VHost regeneration without 404 change\n")
+        newer = hashlib.sha256(self.vhost.read_bytes()).hexdigest()
+        self.assertNotEqual(self.vhost_sha, newer)
+        with self.assertRaises(manager.StatusManageError) as ctx:
+            self.run_manager(expected_current=self.sha, expected_vhost=newer)
+        self.assertEqual(ctx.exception.stage, "recovery")
+        self.assertEqual(self.recovery()["operation_id"], first["recovery_id"])
+        self.assertEqual(self.page.read_bytes(), self.render["html"].encode())
+        self.assertEqual(self.recovery()["source_vhost_sha256"], self.vhost_sha)
+
     def test_orphaned_backup_after_prepared_journal_fault_can_resume_only_with_fresh_apply_proof(self):
         # A successful durable backup followed by a failed initial journal
         # write leaves the site's original bytes untouched. A later explicit
@@ -214,7 +331,7 @@ class Site404TransactionTests(unittest.TestCase):
         original = self.original
         with patch.object(manager, "_save_journal",
                           side_effect=OSError("prepared journal not saved")):
-            with self.assertRaises(OSError):
+            with self.assertRaisesRegex(manager.StatusManageError, "recovery journal not confirmed"):
                 self.run_manager()
         self.assertIsNone(self.recovery())
         backup = self.state / "ach_customizer.site404.9.before"
@@ -237,7 +354,7 @@ class Site404TransactionTests(unittest.TestCase):
     def test_orphaned_backup_with_drift_or_without_fresh_proof_refuses_write(self):
         with patch.object(manager, "_save_journal",
                           side_effect=OSError("prepared journal not saved")):
-            with self.assertRaises(OSError):
+            with self.assertRaisesRegex(manager.StatusManageError, "recovery journal not confirmed"):
                 self.run_manager()
         backup = self.state / "ach_customizer.site404.9.before"
         saved_backup = backup.read_bytes()
@@ -267,7 +384,7 @@ class Site404TransactionTests(unittest.TestCase):
         with patch.object(manager, "_save_journal",
                           side_effect=OSError("no prepared journal persisted")):
             for _ in range(2):
-                with self.assertRaises(OSError):
+                with self.assertRaisesRegex(manager.StatusManageError, "recovery journal not confirmed"):
                     self.run_manager()
                 self.assertEqual(self.page.read_bytes(), self.original)
                 self.assertIsNone(self.recovery())
@@ -278,7 +395,7 @@ class Site404TransactionTests(unittest.TestCase):
     def test_orphan_matching_selected_render_does_not_discard_backup_without_journal(self):
         with patch.object(manager, "_save_journal",
                           side_effect=OSError("prepared write failed")):
-            with self.assertRaises(OSError):
+            with self.assertRaisesRegex(manager.StatusManageError, "recovery journal not confirmed"):
                 self.run_manager()
         # User changes the selected brand so the newly rendered 404 equals
         # the saved existing page. There is no durable transaction to claim.

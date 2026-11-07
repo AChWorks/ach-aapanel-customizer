@@ -8,6 +8,8 @@ updates. Never change vendor VHosts, other sites, PHP, or Nginx services.
 """
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -29,8 +31,10 @@ MAX_JOURNAL = 4096
 
 
 class StatusManageError(StatusPageError):
-    def __init__(self, stage, message):
+    def __init__(self, stage, message, *, recovery_id=None):
         self.stage = stage
+        self.recovery_id = (recovery_id if isinstance(recovery_id, str) and
+                            re.fullmatch(r"[0-9a-f]{32}", recovery_id) else None)
         super().__init__(message)
 
 
@@ -136,6 +140,58 @@ def _create_data(data_fd, name, content):
     finally:
         os.close(fd)
     os.fsync(data_fd)
+
+
+def _rename_noreplace(directory_fd, temporary, permanent):
+    """Linux atomic no-clobber rename; never overwrite existing recovery data.
+
+    The supported aaPanel platform is Linux. If renameat2/RENAME_NOREPLACE is
+    unavailable, reject Apply before touching the site rather than weaken
+    the uniqueness guarantee to a racy existence check.
+    """
+    try:
+        syscall = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as exc:
+        raise OSError(errno.ENOSYS, "Atomic no-clobber publication unavailable") from exc
+    syscall.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                        ctypes.c_char_p, ctypes.c_uint)
+    syscall.restype = ctypes.c_int
+    if syscall(directory_fd, temporary.encode("ascii"), directory_fd,
+               permanent.encode("ascii"), 1) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
+
+
+def _save_original_backup(data_fd, permanent, original):
+    """Durably publish complete original bytes, never a partial final file.
+
+    Crashes before the atomic rename leave only a private ignored staging
+    file. An interrupted directory fsync AFTER rename produces a complete
+    potential orphan; Recheck must reconcile the actual final file.
+    """
+    temporary = "." + permanent + "." + uuid4().hex + ".tmp"
+    published = False
+    try:
+        _create_data(data_fd, temporary, original)
+        if _read_data(data_fd, temporary) != original:
+            raise StatusManageError("backup", "Original backup verification failed")
+        _rename_noreplace(data_fd, temporary, permanent)
+        published = True
+        os.fsync(data_fd)
+    except OSError as exc:
+        if published:
+            raise StatusManageError(
+                "backup_uncertain", "Original backup publication may have committed; "
+                "Recheck the exact site before another Apply") from exc
+        raise StatusManageError(
+            "backup", "Original backup publication failed before site mutation; "
+            "Recheck the exact site") from exc
+    finally:
+        if not published:
+            try:
+                os.unlink(temporary, dir_fd=data_fd)
+            except FileNotFoundError:
+                pass
 
 
 def _save_journal(data_fd, site_id, record):
@@ -354,7 +410,8 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                     "preserve backup and request manual recovery review")
         if record and record["phase"] != "restored":
             if (record["phase"] == "applied" and record["after_sha256"] == sha and
-                    current_sha == sha):
+                    current_sha == sha and
+                    record["source_vhost_sha256"] == expected_vhost):
                 return {"state": "Already Applied", "changed": False, "site_id": site_id,
                         "page_file_sha256": sha, "recovery_id": record["operation_id"],
                         "read_only": False, "mode": "native_existing_404_file"}
@@ -382,7 +439,7 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
             )
         _, backup_name = _names(site_id)
         if record is None and orphan_backup is None:
-            _create_data(data_fd, backup_name, content)
+            _save_original_backup(data_fd, backup_name, content)
         else:
             # A verified matching orphan is reused, not recreated. The next
             # step journals 'prepared' durably before touching the website.
@@ -395,7 +452,14 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
             "phase": "prepared", "operation_id": uuid4().hex,
             "source_vhost_sha256": expected_vhost,
         }
-        _save_journal(data_fd, site_id, transaction)
+        try:
+            _save_journal(data_fd, site_id, transaction)
+        except (OSError, StatusManageError) as exc:
+            # No site mutation has happened. Publication of the prepared
+            # journal may still be uncertain after its own directory fsync.
+            raise StatusManageError(
+                "journal_prepared", "Initial recovery journal not confirmed; "
+                "website remains untouched; Recheck before another Apply") from exc
         try:
             _replace_site(site, content, desired, info, directory)
             verified = _observed(site, locale, sha, html, vhost_root, probe)
@@ -421,7 +485,8 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                 _save_journal(data_fd, site_id, transaction)
             except Exception as recovery_exc:
                 raise StatusManageError(
-                    "uncertain", "404 Apply/rollback outcome uncertain; recovery journal preserved"
+                    "uncertain", "404 Apply/rollback outcome uncertain; recovery journal preserved",
+                    recovery_id=transaction["operation_id"]
                 ) from recovery_exc
             raise StatusManageError(
                 "recovered", "404 Apply failed; original site file and HTTP 404 verified restored"
@@ -434,7 +499,8 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
             # the prepared journal+backup rather than claiming success if
             # final journal persistence or its directory fsync failed.
             raise StatusManageError(
-                "uncertain", "Site 404 changed but final recovery journal confirmation failed; recheck"
+                "uncertain", "Site 404 changed but final recovery journal confirmation failed; recheck",
+                recovery_id=transaction["operation_id"]
             ) from exc
         return {"state": "Applied", "changed": True, "site_id": site_id,
                 "page_file_sha256": sha, "recovery_id": transaction["operation_id"],

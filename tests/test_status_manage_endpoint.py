@@ -128,6 +128,44 @@ class NativeStatusManagementTests(unittest.TestCase):
                          render_page("en", "404")["rendered_sha256"])
         self.assertEqual(call.kwargs["expected_recovery"], "c" * 32)
 
+    def test_apply_activity_records_saved_recovery_id_not_request_id(self):
+        from ach_customizer_activity import read_activity
+        response, _call = self.run_api(self.args())
+        self.assertTrue(response["status"])
+        self.assertNotEqual(response["request_id"], response["recovery_id"])
+        events = read_activity(self.tmp.name, module="status_pages", limit=10)
+        self.assertTrue(events)
+        self.assertEqual(events[0]["operation_id"], response["request_id"])
+        self.assertEqual(events[0]["recovery_id"], response["recovery_id"])
+        self.assertEqual(events[0]["stage"], "complete")
+
+    def test_uncertain_failure_keeps_verified_recovery_identity(self):
+        from ach_customizer_activity import read_activity
+        with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}), \
+             patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings), \
+             patch.object(manager, "manage_site_404", side_effect=manager.StatusManageError(
+                 "uncertain", "An interrupted recovery journal was preserved",
+                 recovery_id="c" * 32)):
+            result = self.plugin.status_manage(self.args())
+        self.assertFalse(result["status"], result)
+        self.assertEqual(result["stage"], "status_manage_uncertain")
+        self.assertTrue(result["recovery_required"])
+        self.assertEqual(result["recovery_id"], "c" * 32)
+        event = read_activity(self.tmp.name, module="status_pages", limit=10)[0]
+        self.assertEqual(event["recovery_id"], "c" * 32)
+        self.assertEqual(event["operation_id"], result["operation_id"])
+
+    def test_backup_failure_reports_controlled_stage_without_false_restore(self):
+        with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}), \
+             patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings), \
+             patch.object(manager, "manage_site_404", side_effect=manager.StatusManageError(
+                 "backup", "Original bytes could not be stored")):
+            result = self.plugin.status_manage(self.args())
+        self.assertFalse(result["status"])
+        self.assertEqual(result["stage"], "status_manage_backup")
+        self.assertNotIn("recovery_required", result)
+        self.assertNotIn("recovery_id", result)
+
     def test_recheck_is_read_only_but_not_an_auth_bypass(self):
         response, call = self.run_api(
             self.args("recheck"),

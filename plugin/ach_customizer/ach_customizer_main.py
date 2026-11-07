@@ -67,7 +67,11 @@ class ach_customizer_main:
             severity = "ERROR" if failed else "WARNING" if needs_review else level
             outcome = ("failed" if failed else "Needs Review" if needs_review else
                        response.get("state", "success"))
-            recovery = response.get("operation_id")
+            # FPM's operation_id is a durable recovery identity. The Status
+            # Pages manager uses a separate recovery_id; its operation_id is
+            # only the request correlation, NEVER the recovery journal ID.
+            recovery = (response.get("recovery_id") if module == "status_pages" else
+                        response.get("operation_id"))
             if (not response.get("request_id") or not isinstance(recovery, str)
                     or re.fullmatch(r"[0-9a-f]{32}", recovery) is None):
                 recovery = ""
@@ -78,7 +82,7 @@ class ach_customizer_main:
                 outcome=outcome,
                 target=target, error_class=type(error).__name__ if error else "",
                 detail=detail,
-                recovery_id=recovery if not failed else "",
+                recovery_id=recovery if (not failed or module == "status_pages") else "",
             )
             persisted = append_activity(_STATE_DIR, entry)
             # None means below verbosity threshold, NOT a persistence failure.
@@ -105,6 +109,11 @@ class ach_customizer_main:
             message = "Unexpected plugin error; inspect Activity using Operation ID"
         response = {"status": False, "stage": stage,
                     "msg": message, "operation_id": operation_id}
+        actual_recovery = getattr(error, "recovery_id", None)
+        if (isinstance(actual_recovery, str) and
+                re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):
+            response["recovery_id"] = actual_recovery
+            response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_")) else
                   "status_pages" if stage.startswith("status_") else
                   "websites" if stage.startswith(("website_", "hosts_")) else
@@ -786,6 +795,14 @@ class ach_customizer_main:
             return self._fail("status_manage_authorization", exc, request_id)
         except StatusPageError as exc:
             step = getattr(exc, "stage", "preflight")
+            cause = exc.__cause__
+            if cause is not None:
+                # Private operational diagnosis retains stage and errno while
+                # avoiding arbitrary filesystem paths, bytes or credentials.
+                logging.getLogger("ach_customizer").warning(
+                    "Status 404 operation failure: stage=%s request_id=%s "
+                    "cause_class=%s errno=%s", step, request_id,
+                    type(cause).__name__, getattr(cause, "errno", None))
             response = self._fail("status_manage_" + str(step), exc, request_id)
             if step in ("uncertain", "postcheck", "recovery"):
                 response["recovery_required"] = True
