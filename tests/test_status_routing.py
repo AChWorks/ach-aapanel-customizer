@@ -17,6 +17,7 @@ class ConfiguredRouteTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.www = self.root / "sites" / "demo.test"
         self.www.mkdir(parents=True)
+        (self.www / "404.html").write_text("original page")
         self.vhosts = self.root / "nginx"
         self.vhosts.mkdir()
         self.conf = self.vhosts / "demo.test.conf"
@@ -50,7 +51,11 @@ class ConfiguredRouteTests(unittest.TestCase):
             dump = self.dump()
         return route.verify_configured_site_404(
             self.site, vhost_root=str(self.vhosts),
-            capture=lambda: dump)
+            capture=lambda: dump,
+            runtime=lambda files: {
+                "native_http80_process_verified": True,
+                "runtime_generation_sha256": "e" * 64,
+            })
 
     def assert_rejects(self, vhost=None, other=None):
         if vhost is not None:
@@ -107,6 +112,59 @@ class ConfiguredRouteTests(unittest.TestCase):
             + str(other_root) + "; }"))
         self.assertTrue(result["configured_static_http_80"])
 
+    def test_indirect_symlink_consumers_cannot_pass_positive_guard(self):
+        other_root = self.root / "sites" / "other.test"
+        other_root.mkdir()
+        conf = ("server { listen 80; server_name other.test; root "
+                + str(other_root) + "; }\n")
+        # The other site's literal root differs, but its 404 is the target.
+        (other_root / "404.html").symlink_to(self.www / "404.html")
+        self.assert_rejects(other=conf)
+        (other_root / "404.html").unlink()
+        deep = other_root / "nested"
+        deep.mkdir()
+        (deep / "surprise").symlink_to(self.www / "404.html")
+        self.assert_rejects(other=conf)
+        (deep / "surprise").unlink()
+        (other_root / "unrelated-link").symlink_to(self.root / "unrelated")
+        self.assert_rejects(other=conf)
+
+    def test_disjoint_external_root_graph_is_bound_to_file_identity(self):
+        other_root = self.root / "sites" / "other.test"
+        other_root.mkdir()
+        (other_root / "404.html").write_text("independent 404")
+        conf = ("server { listen 80; server_name other.test; root "
+                + str(other_root) + "; }\n")
+        first = self.validate(self.dump(conf))
+        self.assertTrue(first["configured_static_http_80"])
+        self.assertEqual(len(first["external_graph_sha256"]), 64)
+        (other_root / "additional.html").write_text("new independent file")
+        second = self.validate(self.dump(conf))
+        self.assertNotEqual(first["external_graph_sha256"],
+                            second["external_graph_sha256"])
+
+    def test_unknown_other_site_routes_fail_closed(self):
+        other_root = self.root / "sites" / "other.test"
+        other_root.mkdir()
+        server = ("server { listen 80; server_name other.test; root "
+                  + str(other_root) + "; ")
+        for extension in (
+                "location / { try_files $uri /index.html; }",
+                "location / { proxy_pass http://127.0.0.1:8080; }",
+                "rewrite ^/ /index.html last;",
+                "fastcgi_pass unix:/tmp/application.sock;",
+                "server { listen 80; server_name third.test; }"):
+            with self.subTest(extension=extension):
+                self.assert_rejects(other=server + extension + " }")
+
+    def test_uninspectable_external_roots_and_aliases_fail_closed(self):
+        other_root = self.root / "sites" / "other.test"
+        # A configured but missing root cannot be established as exclusive.
+        self.assert_rejects(other=("server { root " + str(other_root) + "; }\n"))
+        other_root.mkdir()
+        self.assert_rejects(other=("server { alias " + str(other_root) + "; }\n"))
+        self.assert_rejects(other="server { listen 80; server_name other.test; }\n")
+
     def test_trust_boundaries_require_literal_site_and_binding(self):
         cases = [
             {"bound_domains": [{"name": "demo.test", "port": 443}]},
@@ -122,7 +180,11 @@ class ConfiguredRouteTests(unittest.TestCase):
                 with self.assertRaises(route.RouteGuardError):
                     route.verify_configured_site_404(
                         candidate, vhost_root=str(self.vhosts),
-                        capture=lambda: self.dump())
+                        capture=lambda: self.dump(),
+                        runtime=lambda files: {
+                            "native_http80_process_verified": True,
+                            "runtime_generation_sha256": "e" * 64,
+                        })
 
     def test_dump_source_consistency_and_duplicate_headers(self):
         expected = self.dump()
@@ -148,7 +210,19 @@ class ConfiguredRouteTests(unittest.TestCase):
             self.validate()
 
     def test_unrecognized_configuration_source_must_not_infer_loaded_workers(self):
-        self.assertFalse(self.validate()["loaded_workers_verified"])
+        result = self.validate()
+        self.assertFalse(result["loaded_workers_verified"])
+        self.assertTrue(result["native_http80_process_verified"])
+
+    def test_native_runtime_identity_must_be_positive_and_well_formed(self):
+        for proof in ({}, {"native_http80_process_verified": False,
+                           "runtime_generation_sha256": "e" * 64},
+                      {"native_http80_process_verified": True,
+                       "runtime_generation_sha256": "not-a-sha"}):
+            with self.subTest(proof=proof), self.assertRaises(route.RouteGuardError):
+                route.verify_configured_site_404(
+                    self.site, vhost_root=str(self.vhosts),
+                    capture=lambda: self.dump(), runtime=lambda files: proof)
 
 
 if __name__ == "__main__":

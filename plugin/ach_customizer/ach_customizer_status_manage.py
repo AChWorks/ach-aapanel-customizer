@@ -389,14 +389,14 @@ def _verified_apply_stage(site, record, current_sha):
                 (record["after_sha256"], record["before_sha256"])):
             raise StatusManageError(
                 "recovery", "Private staged bytes do not match a recoverable Apply exchange")
-        return stage["sha256"]
+        return stage["sha256"], metadata
     finally:
         if stage_fd is not None:
             os.close(stage_fd)
         os.close(site_fd)
 
 
-def _retire_verified_apply_stage(site, record, originally_checked_sha):
+def _retire_verified_apply_stage(site, record, originally_checked_stage):
     """Clean up after an explicit and independently verified Restore only."""
     site_fd = _directory(site["path"])
     stage_fd = None
@@ -405,11 +405,19 @@ def _retire_verified_apply_stage(site, record, originally_checked_sha):
                            | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=site_fd)
         name = _staging_name(record["operation_id"], "apply")
         stage = _file_snapshot(stage_fd, name)
-        if stage is None or stage["sha256"] != originally_checked_sha:
-            raise StatusManageError("uncertain", "Private recovery file changed before retirement",
+        info = os.stat(name, dir_fd=stage_fd, follow_symlinks=False)
+        checked_sha, checked_info = originally_checked_stage
+        if (stage is None or stage["sha256"] != checked_sha
+                or not _same_displaced_inode(info, checked_info)):
+            raise StatusManageError("uncertain", "Private recovery inode changed before retirement",
                                     recovery_id=record["operation_id"])
-        if _file_snapshot(site_fd, "404.html")["sha256"] != record["before_sha256"]:
+        current = _file_snapshot(site_fd, "404.html")
+        if current is None or current["sha256"] != record["before_sha256"]:
             raise StatusManageError("uncertain", "Restored page changed before staged-file cleanup",
+                                    recovery_id=record["operation_id"])
+        if not _same_displaced_inode(
+                os.stat(name, dir_fd=stage_fd, follow_symlinks=False), checked_info):
+            raise StatusManageError("uncertain", "Private recovery inode changed at cleanup",
                                     recovery_id=record["operation_id"])
         os.unlink(name, dir_fd=stage_fd)
         os.fsync(stage_fd)
@@ -456,9 +464,15 @@ def _replace_site(site, before, after, expected_info, expected_dir,
                 stream.write(after)
                 stream.flush()
             os.fsync(descriptor)
+            staged_info = os.fstat(descriptor)
         finally:
             os.close(descriptor)
         os.fsync(stage_fd)
+        staged = _file_snapshot(stage_fd, stage_name)
+        staged_now = os.stat(stage_name, dir_fd=stage_fd, follow_symlinks=False)
+        if (staged is None or staged["sha256"] != _sha(after)
+                or not _same_displaced_inode(staged_now, staged_info)):
+            raise StatusManageError("concurrency", "Private candidate inode changed before exchange")
         current = _file_snapshot(site_fd, "404.html")
         latest = os.stat("404.html", dir_fd=site_fd, follow_symlinks=False)
         if (current is None or current["sha256"] != _sha(before) or
@@ -488,23 +502,36 @@ def _replace_site(site, before, after, expected_info, expected_dir,
             and _same_displaced_inode(displaced_info, state))
         installed_matches = (
             installed is not None and installed["sha256"] == _sha(after)
-            and installed_info.st_uid == state.st_uid
-            and installed_info.st_gid == state.st_gid
-            and stat.S_IMODE(installed_info.st_mode) == 0o644)
+            and _same_displaced_inode(installed_info, staged_info))
         if not displaced_matches or not installed_matches:
-            # Exchange back only if the site still contains OUR staged inode;
-            # if another actor replaced it too, do not overwrite their edit.
-            can_reverse = installed_matches
+            # Matching bytes do not prove this is our plugin-staged inode.
+            current_installed = os.stat("404.html", dir_fd=site_fd,
+                                        follow_symlinks=False)
+            can_reverse = (installed_matches and
+                           _same_displaced_inode(current_installed, staged_info))
             if can_reverse:
                 _exchange_site_with_stage(stage_fd, stage_name, site_fd)
                 os.fsync(site_fd)
                 os.fsync(stage_fd)
                 reversed_site = _file_snapshot(site_fd, "404.html")
                 reversed_stage = _file_snapshot(stage_fd, stage_name)
+                reversed_site_info = os.stat("404.html", dir_fd=site_fd,
+                                             follow_symlinks=False)
+                reversed_stage_info = os.stat(stage_name, dir_fd=stage_fd,
+                                              follow_symlinks=False)
                 if (reversed_site is not None and displaced is not None
                         and reversed_site["sha256"] == displaced["sha256"]
+                        and _same_displaced_inode(reversed_site_info, displaced_info)
                         and reversed_stage is not None
-                        and reversed_stage["sha256"] == _sha(after)):
+                        and reversed_stage["sha256"] == _sha(after)
+                        and _same_displaced_inode(reversed_stage_info, staged_info)):
+                    # Verify again immediately before retiring our own inode.
+                    final_stage = os.stat(stage_name, dir_fd=stage_fd,
+                                          follow_symlinks=False)
+                    if not _same_displaced_inode(final_stage, staged_info):
+                        raise StatusManageError(
+                            "uncertain", "Reversed stage inode changed before cleanup",
+                            recovery_id=operation_id)
                     exchanged = False
                     exchange_attempted = False
                     os.unlink(stage_name, dir_fd=stage_fd)
@@ -516,8 +543,13 @@ def _replace_site(site, before, after, expected_info, expected_dir,
                 "uncertain", "Site swap conflict; displaced file retained for recovery",
                 recovery_id=operation_id)
 
-        # The displaced inode has been verified against our durable original
-        # backup; remove only this private, known-original staging entry.
+        # The displaced inode must still be our verified original, not a
+        # same-content independently substituted file.
+        final_displaced = os.stat(stage_name, dir_fd=stage_fd,
+                                  follow_symlinks=False)
+        if not _same_displaced_inode(final_displaced, state):
+            raise StatusManageError("uncertain", "Displaced site inode changed before cleanup",
+                                    recovery_id=operation_id)
         os.unlink(stage_name, dir_fd=stage_fd)
         staged = False
         os.fsync(stage_fd)
@@ -570,7 +602,16 @@ def _observed(site, locale, rendered_sha, rendered_html, vhost_root, probe):
         raise StatusManageError("runtime", "Configured Nginx route changed during HTTP probe") from exc
     if (not isinstance(route.get("nginx_dump_sha256"), str) or
             not SHA256.fullmatch(route["nginx_dump_sha256"]) or
+            not isinstance(route.get("external_graph_sha256"), str) or
+            not SHA256.fullmatch(route["external_graph_sha256"]) or
+            not isinstance(route.get("runtime_generation_sha256"), str) or
+            not SHA256.fullmatch(route["runtime_generation_sha256"]) or
+            route.get("native_http80_process_verified") is not True or
+            route_after.get("native_http80_process_verified") is not True or
+            route_after.get("runtime_generation_sha256") !=
+                route["runtime_generation_sha256"] or
             route_after.get("nginx_dump_sha256") != route["nginx_dump_sha256"] or
+            route_after.get("external_graph_sha256") != route["external_graph_sha256"] or
             route_after.get("vhost_sha256") != route["vhost_sha256"]):
         raise StatusManageError("runtime", "Nginx configuration changed during HTTP verification")
     adoption = observed.get("adoption_preview")

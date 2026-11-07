@@ -54,6 +54,9 @@ class Site404TransactionTests(unittest.TestCase):
                 "configured_static_http_80": True,
                 "loaded_workers_verified": False,
                 "nginx_dump_sha256": "a" * 64,
+                "external_graph_sha256": "b" * 64,
+                "runtime_generation_sha256": "c" * 64,
+                "native_http80_process_verified": True,
                 "vhost_sha256": hashlib.sha256(self.vhost.read_bytes()).hexdigest(),
             })
         self.route_guard.start()
@@ -125,6 +128,36 @@ class Site404TransactionTests(unittest.TestCase):
                         {"expected_render": "2" * 64}):
             with self.subTest(options=options), self.assertRaises(manager.StatusManageError):
                 self.run_manager(**options)
+        self.assertIsNone(self.recovery())
+        self.assertEqual(self.page.read_bytes(), self.original)
+
+    def test_active_runtime_or_external_root_drift_refuses_write(self):
+        baseline = manager.verify_configured_site_404(self.site)
+        for key in ("runtime_generation_sha256", "external_graph_sha256",
+                    "nginx_dump_sha256"):
+            counter = [0]
+            def altered(site, **kwargs):
+                counter[0] += 1
+                evidence = dict(baseline)
+                if counter[0] == 2:
+                    evidence[key] = "f" * 64
+                return evidence
+            with self.subTest(key=key), patch.object(
+                    manager, "verify_configured_site_404", side_effect=altered):
+                with self.assertRaises(manager.StatusManageError) as ctx:
+                    self.run_manager()
+                self.assertEqual(ctx.exception.stage, "runtime")
+                self.assertIsNone(self.recovery())
+                self.assertEqual(self.page.read_bytes(), self.original)
+
+    def test_native_runtime_process_cannot_be_unverified_for_apply(self):
+        baseline = manager.verify_configured_site_404(self.site)
+        baseline["native_http80_process_verified"] = False
+        with patch.object(manager, "verify_configured_site_404",
+                          return_value=baseline):
+            with self.assertRaises(manager.StatusManageError) as ctx:
+                self.run_manager()
+        self.assertEqual(ctx.exception.stage, "runtime")
         self.assertIsNone(self.recovery())
         self.assertEqual(self.page.read_bytes(), self.original)
 
@@ -420,6 +453,92 @@ class Site404TransactionTests(unittest.TestCase):
         self.assertEqual(self.run_manager("recheck")["state"], "Drift")
         with self.assertRaisesRegex(manager.StatusManageError, "recoverable Apply exchange"):
             self.run_manager("restore", expected_recovery=recovery["operation_id"])
+
+    def test_identical_editor_inode_after_first_exchange_must_not_be_reversed(self):
+        original_exchange = manager._exchange_site_with_stage
+        new_inode = []
+        def replace_after_exchange(stage_fd, stage_name, site_fd):
+            original_exchange(stage_fd, stage_name, site_fd)
+            if not new_inode:
+                replacement = self.site_root / "independent-identical.tmp"
+                replacement.write_bytes(self.render["html"].encode("utf-8"))
+                replacement.chmod(0o644)
+                new_inode.append(replacement.stat().st_ino)
+                os.replace(replacement, self.page)
+
+        with patch.object(manager, "_exchange_site_with_stage",
+                          side_effect=replace_after_exchange):
+            with self.assertRaises(manager.StatusManageError) as ctx:
+                self.run_manager()
+        self.assertEqual(ctx.exception.stage, "uncertain")
+        self.assertEqual(self.page.stat().st_ino, new_inode[0])
+        self.assertEqual(self.page.read_bytes(), self.render["html"].encode("utf-8"))
+        recovery = self.recovery()
+        staged = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+            recovery["operation_id"], "apply")
+        self.assertEqual(staged.read_bytes(), self.original)
+        self.assertEqual(recovery["phase"], "prepared")
+
+    def test_two_independent_exchanges_preserve_same_byte_foreign_inode(self):
+        # A -> C before first exchange; B -> B2 (same bytes, new inode)
+        # immediately before reverse. Neither C nor B2 may be discarded.
+        original_exchange = manager._exchange_site_with_stage
+        outsider = b"independent C original site replacement\n"
+        count, editor_inode = [0], []
+        def interleave(stage_fd, stage_name, site_fd):
+            count[0] += 1
+            if count[0] == 1:
+                replacement = self.site_root / "foreign-C.tmp"
+                replacement.write_bytes(outsider)
+                replacement.chmod(0o644)
+                os.replace(replacement, self.page)
+            if count[0] == 2:
+                replacement = self.site_root / "foreign-B2.tmp"
+                replacement.write_bytes(self.render["html"].encode("utf-8"))
+                replacement.chmod(0o644)
+                editor_inode.append(replacement.stat().st_ino)
+                os.replace(replacement, self.page)
+            return original_exchange(stage_fd, stage_name, site_fd)
+
+        with patch.object(manager, "_exchange_site_with_stage", side_effect=interleave):
+            with self.assertRaises(manager.StatusManageError) as ctx:
+                self.run_manager()
+        self.assertEqual(count[0], 2)
+        self.assertEqual(ctx.exception.stage, "uncertain")
+        self.assertEqual(self.page.read_bytes(), outsider)
+        recovery = self.recovery()
+        staged = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+            recovery["operation_id"], "apply")
+        self.assertTrue(staged.exists())
+        self.assertEqual(staged.read_bytes(), self.render["html"].encode("utf-8"))
+        self.assertEqual(staged.stat().st_ino, editor_inode[0])
+        self.assertEqual(self.recovery()["phase"], "prepared")
+        self.assertEqual(self.run_manager("recheck")["state"], "Drift")
+
+    def test_recovery_cleanup_refuses_same_byte_replaced_inode(self):
+        original_exchange = manager._exchange_site_with_stage
+        def exchange_then_lose_reply(stage_fd, stage_name, site_fd):
+            original_exchange(stage_fd, stage_name, site_fd)
+            raise OSError("fault-injected lost exchange acknowledgment")
+
+        with patch.object(manager, "_exchange_site_with_stage",
+                          side_effect=exchange_then_lose_reply):
+            with self.assertRaises(manager.StatusManageError):
+                self.run_manager()
+        recovery = self.recovery()
+        staged = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+            recovery["operation_id"], "apply")
+        checked = manager._verified_apply_stage(self.site, recovery, self.sha)
+        replacement = self.site_root / manager.STAGING_DIRECTORY / "external.tmp"
+        replacement.write_bytes(staged.read_bytes())
+        replacement.chmod(0o644)
+        foreign_inode = replacement.stat().st_ino
+        os.replace(replacement, staged)
+        with self.assertRaises(manager.StatusManageError) as ctx:
+            manager._retire_verified_apply_stage(self.site, recovery, checked)
+        self.assertEqual(ctx.exception.stage, "uncertain")
+        self.assertEqual(staged.stat().st_ino, foreign_inode)
+        self.assertEqual(staged.read_bytes(), self.original)
 
     def test_exchange_lost_acknowledgment_does_not_discard_displaced_inode(self):
         # Simulate a syscall that changed the directory but whose result was
