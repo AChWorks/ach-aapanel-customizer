@@ -77,6 +77,12 @@ function loadUi() {
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
   const requests = [];
+  let allowStatusDiscard = false;
+  const statusConfirmations = [];
+  const browserWindow = {confirm(message) {
+    statusConfirmations.push(message);
+    return allowStatusDiscard;
+  }};
 
   function selection(nodes) {
     return {
@@ -173,7 +179,8 @@ function loadUi() {
     return request;
   };
 
-  vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder }, { timeout: 1000 });
+  vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder,
+    window:browserWindow }, { timeout: 1000 });
 
   function trigger(node, event) {
     assert.equal(typeof node.handlers[event], 'function', event + ' handler missing');
@@ -359,6 +366,12 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
+    statusPermitDiscard: value => { allowStatusDiscard = value; },
+    statusConfirmations: () => statusConfirmations.slice(),
+    statusSelection: () => ({
+      scope:elements.get('#ach-status-scope').props.value,
+      site:elements.get('#ach-status-site-id').props.value
+    }),
     openStatus, statusSetValue, statusSetChecked, statusClick, openActivity,
     openPhp, refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
     activityRefresh: () => { trigger(elements.get('#ach-activity-refresh'), 'click'); return requests.at(-1); },
@@ -2555,8 +2568,85 @@ test('Status Pages unsaved brand values survive native tab switching', () => {
   ui.openStatus();
   assert.equal(ui.requests.length,before,'no unnecessary status_preferences request');
   assert.equal(ui.state().statusName,'Unsaved operator change');
+  const unchanged=ui.requests.length;
+  ui.statusClick('#ach-status-load');
+  assert.equal(ui.requests.length,unchanged,'Dirty Recheck requires explicit discard');
+  assert.equal(ui.state().statusName,'Unsaved operator change');
+  ui.statusPermitDiscard(true);
   ui.statusClick('#ach-status-load').respond(statusPrefs());
   assert.notEqual(ui.state().statusName,'Unsaved operator change');
+});
+
+test('Status Pages scope switch Cancel keeps dirty inputs and original scope', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-name','Working brand','input change');
+  const before=ui.requests.length;
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'Working brand');
+  assert.match(ui.state().statusResult,/Unsaved changes kept/);
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:''});
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.match(ui.requests.at(-1).options.url,/s=status_sites$/);
+});
+
+test('Status Pages dirty site switch restores previous site on Cancel', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const seven={...site(),id:7,name:'seven.test',
+    bound_domains:[{name:'seven.test',port:80}]};
+  const eight={...site(),id:8,name:'eight.test',
+    bound_domains:[{name:'eight.test',port:80}]};
+  ui.requests.at(-1).respond({...page([seven,eight]),purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs(3,'Site override',{
+    ...brand(),brand_name:'Site seven'
+  }));
+  ui.statusSetValue('#ach-status-name','Uncommitted seven','input change');
+  const before=ui.requests.length;
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Uncommitted seven');
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  const load=ui.requests.at(-1);
+  assert.match(load.options.url,/s=status_preferences$/);
+  assert.equal(load.options.data.site_id,'8');
+  load.respond(statusPrefs(4,'Site override',{...brand(),brand_name:'Site eight'}));
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'8'});
+  assert.equal(ui.state().statusName,'Site eight');
+});
+
+test('Status Pages dirty Recheck guarded, clean and reverted values never prompt', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(3));
+  ui.statusSetValue('#ach-status-name','Changed','input change');
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-load');
+  assert.equal(ui.requests.length,before);
+  assert.equal(ui.state().statusName,'Changed');
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  const recheck=ui.statusClick('#ach-status-load');
+  assert.match(recheck.options.url,/s=status_preferences$/);
+  recheck.respond(statusPrefs(4));
+  ui.statusPermitDiscard(false);
+  const withoutDirty=ui.statusClick('#ach-status-load');
+  assert.match(withoutDirty.options.url,/s=status_preferences$/);
+  withoutDirty.respond(statusPrefs(4));
+  const unchanged=ui.statusConfirmations().length;
+  ui.statusSetValue('#ach-status-name','Changed','input change');
+  ui.statusSetValue('#ach-status-name',brand().brand_name,'input change');
+  const reverted=ui.statusClick('#ach-status-load');
+  assert.equal(ui.statusConfirmations().length,unchanged);
+  assert.match(reverted.options.url,/s=status_preferences$/);
 });
 
 test('Native lazy navigation uses per-view loading state, not a global flash', () => {

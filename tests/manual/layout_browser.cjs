@@ -23,8 +23,20 @@ const {chromium} = require('playwright');
       await page.setContent(html, {waitUntil:'domcontentloaded'});
       for(const name of ['overview','websites','status','php','activity']) {
         await page.evaluate((name)=>{
-          document.querySelectorAll('[data-view]').forEach(v=>v.hidden=v.getAttribute('data-view')!==name);
+          // Mirror the shipped tab handler's aria-selected/tabindex/hidden
+          // transition. Geometry from an impossible active-tab state is not
+          // evidence of navigation continuity.
+          document.querySelectorAll('[data-tab]').forEach(tab=>{
+            const active=tab.getAttribute('data-tab')===name;
+            tab.setAttribute('aria-selected',active?'true':'false');
+            tab.setAttribute('tabindex',active?'0':'-1');
+          });
+          document.querySelectorAll('[data-view]').forEach(
+            view=>view.hidden=view.getAttribute('data-view')!==name);
         },name);
+        // Wait for the intentional 120ms sidebar color transition before
+        // comparing computed fills across the newly selected tab.
+        await page.waitForTimeout(160);
         const x = await page.evaluate(()=>{
           const root=document.querySelector('#ach-customizer'), main=document.querySelector('#ach-content'),
             nav=document.querySelector('.ach-sidebar'), body=document.body;
@@ -43,28 +55,64 @@ const {chromium} = require('playwright');
         // The desktop active row must merge with the white content surface
         // without a visible right-side stroke; narrow layouts instead use
         // the existing horizontal bottom-border navigation treatment.
-        if (name === 'overview') {
-          const continuity = await page.evaluate(() => {
-            const side = document.querySelector('.ach-sidebar');
-            const active = side.querySelector('button[aria-selected="true"]');
-            const main = document.querySelector('.ach-main');
-            const root = document.querySelector('#ach-customizer');
-            const note = document.querySelector('.ach-note');
-            return {
-              sideBorder: getComputedStyle(side).borderRightWidth,
-              selectedFill: getComputedStyle(active).backgroundColor,
-              contentFill: getComputedStyle(main).backgroundColor,
-              corner: getComputedStyle(root).borderBottomLeftRadius,
-              noteCorner: getComputedStyle(note).borderTopLeftRadius,
-              sideDirection: getComputedStyle(side).flexDirection,
-            };
-          });
-          if (continuity.corner !== '10px' || continuity.noteCorner !== '8px' ||
-              (width > 720 && (continuity.sideBorder !== '0px' ||
-                continuity.selectedFill !== continuity.contentFill))) {
-            throw Error('Native dialog active-row continuity/corners failed ' +
-              JSON.stringify({width,height,...continuity}));
-          }
+        const continuity = await page.evaluate(() => {
+          const side = document.querySelector('.ach-sidebar');
+          const buttons = Array.from(side.querySelectorAll('button[data-tab]'));
+          const active = side.querySelector('button[aria-selected="true"]');
+          const inactive = buttons.filter(button=>button!==active);
+          const main = document.querySelector('.ach-main');
+          const root = document.querySelector('#ach-customizer');
+          const note = document.querySelector('.ach-note');
+          const visible = Array.from(document.querySelectorAll('[data-view]'))
+            .filter(view=>!view.hidden).map(view=>view.getAttribute('data-view'));
+          // Keyboard focus must scroll the horizontal nav into view on
+          // narrow screens; suppressing scroll creates a false clipping alarm.
+          active?.focus();
+          active?.scrollIntoView({block:'nearest',inline:'nearest'});
+          const sideBounds=side.getBoundingClientRect();
+          const focused=active?.getBoundingClientRect();
+          const focusCss=active&&getComputedStyle(active);
+          return {
+            sideBorder:getComputedStyle(side).borderRightWidth,
+            selectedFill:active&&getComputedStyle(active).backgroundColor,
+            contentFill:getComputedStyle(main).backgroundColor,
+            activeTab:active?.getAttribute('data-tab'),
+            selectedCount:buttons.filter(button=>button.getAttribute('aria-selected')==='true').length,
+            activeTabindex:active?.getAttribute('tabindex'),
+            inactiveStates:inactive.every(button=>button.getAttribute('aria-selected')==='false' &&
+              button.getAttribute('tabindex')==='-1'),
+            visible,
+            corner:getComputedStyle(root).borderBottomLeftRadius,
+            noteCorner:getComputedStyle(note).borderTopLeftRadius,
+            selectedBorder:focusCss?.borderBottomColor,
+            inactiveBorder:getComputedStyle(inactive[0]).borderBottomColor,
+            selectedBorderWidth:focusCss?.borderBottomWidth,
+            focused:document.activeElement===active,
+            focusVisible:active?.matches(':focus-visible'),
+            outlineStyle:focusCss?.outlineStyle,
+            outlineWidth:focusCss?.outlineWidth,
+            outlineOffset:focusCss?.outlineOffset,
+            focusRect:focused&&[focused.left,focused.right,focused.top,focused.bottom],
+            navRect:[sideBounds.left,sideBounds.right,sideBounds.top,sideBounds.bottom],
+            navScroll:[side.scrollLeft,side.scrollWidth,side.clientWidth],
+            focusWithinNav:!!focused && focused.left>=sideBounds.left-1 &&
+              focused.right<=sideBounds.right+1 &&
+              focused.top>=sideBounds.top-1 && focused.bottom<=sideBounds.bottom+1,
+          };
+        });
+        if (continuity.activeTab!==name || continuity.selectedCount!==1 ||
+            continuity.activeTabindex!=='0' || !continuity.inactiveStates ||
+            continuity.visible.length!==1 || continuity.visible[0]!==name ||
+            continuity.corner!=='10px' || continuity.noteCorner!=='8px' ||
+            !continuity.focused || !continuity.focusWithinNav ||
+            (continuity.focusVisible && (continuity.outlineStyle==='none' ||
+              continuity.outlineWidth==='0px')) ||
+            (width>720 && (continuity.sideBorder!=='0px' ||
+              continuity.selectedFill!==continuity.contentFill)) ||
+            (width<=720 && (continuity.selectedBorder===continuity.inactiveBorder ||
+              continuity.selectedBorderWidth!=='3px'))) {
+          throw Error('Native dialog active-tab continuity/focus/corners failed '+
+            JSON.stringify({width,height,name,...continuity}));
         }
         // Verify reusable control geometry in the actual rendered plugin DOM.
         // This detects aaPanel-style drift even if the parent layer still fits.
@@ -290,12 +338,16 @@ const {chromium} = require('playwright');
         const main=document.getElementById('ach-content');
         const rect=layer.getBoundingClientRect();
         const m=main.getBoundingClientRect();
+        const content=layer.querySelector('.layui-layer-content');
         return {right:rect.right,left:rect.left,top:rect.top,bottom:rect.bottom,
+          layerCorner:getComputedStyle(layer).borderTopLeftRadius,
+          contentCorner:getComputedStyle(content).borderBottomLeftRadius,
           mainHeight:m.height,rootHeight:document.getElementById('ach-customizer').getBoundingClientRect().height,
           mainOverflow:getComputedStyle(main).overflowY,
           direction:document.querySelector('.ach-sidebar').getAttribute('aria-orientation')};
       });
       if (info.left < 0 || info.top < 0 || info.right > width+1 || info.bottom > height+1 ||
+          info.layerCorner !== '10px' || info.contentCorner !== '10px' ||
           info.mainHeight < 120 || info.mainOverflow !== 'auto' ||
           info.direction !== (width <= 720 ? 'horizontal' : 'vertical')) {
         throw Error('Simulated native layer invariant failed '+
@@ -321,11 +373,14 @@ const {chromium} = require('playwright');
         const bound=layer.getBoundingClientRect();
         const contentBound=content.getBoundingClientRect();
         return {left:bound.left,top:bound.top,right:bound.right,bottom:bound.bottom,
+          layerCorner:getComputedStyle(layer).borderTopLeftRadius,
+          contentCorner:getComputedStyle(content).borderBottomLeftRadius,
           contentBottom:contentBound.bottom,mainOverflow:getComputedStyle(main).overflowY,
           rootHeight:document.querySelector('#ach-customizer').getBoundingClientRect().height,
           cssSupported:CSS.supports('selector(.layui-layer:has(#ach-customizer))')};
       });
-      if (!actual.cssSupported || actual.left<8 || actual.top<8 ||
+      if (!actual.cssSupported || actual.layerCorner!=='10px' ||
+          actual.contentCorner!=='10px' || actual.left<8 || actual.top<8 ||
           actual.right>width-8 || actual.bottom>height-8 ||
           actual.contentBottom>height-8 || actual.rootHeight<170 ||
           actual.mainOverflow!=='auto') {
