@@ -83,6 +83,12 @@ function loadUi() {
   elements.get('#ach-php-version').props.disabled = true;
   elements.get('#ach-php-runtime-check').props.disabled = true;
   const requests = [];
+  let allowStatusDiscard = false;
+  const statusConfirmations = [];
+  const browserWindow = {confirm(message) {
+    statusConfirmations.push(message);
+    return allowStatusDiscard;
+  }};
 
   function selection(nodes) {
     return {
@@ -179,7 +185,8 @@ function loadUi() {
     return request;
   };
 
-  vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder }, { timeout: 1000 });
+  vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder,
+    window:browserWindow }, { timeout: 1000 });
 
   function trigger(node, event) {
     assert.equal(typeof node.handlers[event], 'function', event + ' handler missing');
@@ -377,6 +384,12 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
+    statusPermitDiscard: value => { allowStatusDiscard = value; },
+    statusConfirmations: () => statusConfirmations.slice(),
+    statusSelection: () => ({
+      scope:elements.get('#ach-status-scope').props.value,
+      site:elements.get('#ach-status-site-id').props.value
+    }),
     openStatus, statusSetValue, statusSetChecked, statusClick, openActivity,
     openPhp,
     inspectPhpRuntime: () => { trigger(elements.get('#ach-php-runtime-check'), 'click'); return requests.at(-1); },
@@ -412,6 +425,7 @@ function loadUi() {
     })),
     statusSiteInfo: () => elements.get('#ach-status-sites-state').textContent,
     statusSiteDisabled: () => elements.get('#ach-status-site-id').props.disabled,
+    statusFieldDisabled: (selector = '#ach-status-name') => elements.get(selector).props.disabled,
     loadMoreSites: () => {
       trigger(elements.get('#ach-status-sites-more'), 'click');
       return requests.at(-1);
@@ -1079,6 +1093,16 @@ function statusPrefs(revision = 2, source = 'Global default', effective = brand(
 }
 
 
+function loadNativeStatusSiteSelection(ui, id='7') {
+  const request = ui.requests.at(-1);
+  assert.match(request.options.url,/s=status_sites$/);
+  const native = {...site(),id:Number(id),name:'demo.test',
+    document_root:'/www/demo.test',
+    bound_domains:[{name:'demo.test',port:80}],canonical_domain_bound:true};
+  request.respond({...page([native]),purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id',id,'change');
+}
+
 const hostsInspection = (overrides={}) => ({
   status:true,schema:1,site_id:7,site_key:'site.test',
   read_only:true,fix_supported:false,resolver_verified:false,
@@ -1463,7 +1487,7 @@ test('Status Pages site override is explicit and reset needs confirmation', () =
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
   assert.equal(ui.state().statusSaveDisabled,true,'Missing site ID must block mutations');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   const load=ui.requests.at(-1);
   assert.match(load.options.url,/s=status_preferences$/);
   assert.equal(load.options.data.site_id,'7');
@@ -1595,7 +1619,7 @@ test('Site inspection is scoped, read-only, renders a bounded disk/source diagno
   assert.equal(ui.state().statusInspectDisabled,true, 'Global scope cannot inspect a site');
   ui.statusSetValue('#ach-status-scope','site','change');
   assert.equal(ui.state().statusInspectDisabled,true, 'Site ID is required');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs(7));
   assert.equal(ui.state().statusInspectDisabled,false);
   ui.statusSetValue('#ach-status-site-id','8');
@@ -1780,7 +1804,7 @@ test('Existing native status-file reference is reviewable without false conflict
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const result=statusInspection({
     state:'Needs Review',
@@ -1816,7 +1840,7 @@ test('Invalid, cross-site and routing-overclaim inspection replies fail closed',
     const ui=loadUi();
     ui.openStatus().respond(statusPrefs());
     ui.statusSetValue('#ach-status-scope','site','change');
-    ui.statusSetValue('#ach-status-site-id','7','change');
+    loadNativeStatusSiteSelection(ui,'7');
     ui.requests.at(-1).respond(statusPrefs());
     ui.statusClick('#ach-status-inspect-button').respond(bad);
     assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
@@ -1828,7 +1852,7 @@ test('Backend inspection failure does not display previous disk-match evidence',
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
     state:'File Match',page_file_state:'Same bytes',
@@ -1868,7 +1892,7 @@ test('Site 404/502 compare shows untrusted on-disk HTML strictly as text, never 
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const dangerous='<img src=x onerror=alert(1)>';
   const diff='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-'+dangerous+'\\n+<h1>Safe preview</h1>';
@@ -1907,7 +1931,7 @@ test('Branding field changes while a compare request is in flight reject its old
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const req=ui.statusClick('#ach-status-inspect-button');
   assert.equal(req.options.data.brand_name,'ACh');
@@ -1940,7 +1964,7 @@ test('Malformed, mismatched or enormous compare responses cannot display stale d
     const ui=loadUi();
     ui.openStatus().respond(statusPrefs());
     ui.statusSetValue('#ach-status-scope','site','change');
-    ui.statusSetValue('#ach-status-site-id','7','change');
+    loadNativeStatusSiteSelection(ui,'7');
     ui.requests.at(-1).respond(statusPrefs());
     ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
       state:'Conflict',page_file_state:'Different bytes',
@@ -1957,7 +1981,7 @@ test('UTF-8 byte limit rejects multibyte excerpts that fit UTF-16 and per-line l
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const marker='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n';
   const manyArabic=Array.from({length:12},()=>'-'+'پ'.repeat(300)).join('\n');
@@ -2001,7 +2025,7 @@ test('Diff validation rejects oversized line counts and malformed unified header
     const ui=loadUi();
     ui.openStatus().respond(statusPrefs());
     ui.statusSetValue('#ach-status-scope','site','change');
-    ui.statusSetValue('#ach-status-site-id','7','change');
+    loadNativeStatusSiteSelection(ui,'7');
     ui.requests.at(-1).respond(statusPrefs());
     ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
       state:'Conflict',page_file_state:'Different bytes',
@@ -2017,7 +2041,7 @@ test('A valid Persian diff still renders, then stale content disappears on inval
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const valid='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-درخواست‌ها ID-404\n+به‌روزرسانی‌شده ID-404';
   const response=statusInspection({
@@ -2049,6 +2073,10 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /function fitNativeLayer/);
   assert.match(html, /--ach-green:#20a53a/);
   assert.match(html, /--ach-sidebar-bg:#f0f0f1/);
+  assert.match(html, /\.ach-sidebar \{[^}]*border-right:0/);
+  assert.match(html, /\.ach-main \{[^}]*background:var\(--ach-surface\)/);
+  assert.match(html, /\.ach-workspace \{[^}]*border-radius:0 0 10px 10px/);
+  assert.match(html, /\.layui-layer:has\(#ach-customizer\) \{[^}]*border-radius:10px/);
   assert.doesNotMatch(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
@@ -2935,8 +2963,255 @@ test('Status Pages unsaved brand values survive native tab switching', () => {
   ui.openStatus();
   assert.equal(ui.requests.length,before,'no unnecessary status_preferences request');
   assert.equal(ui.state().statusName,'Unsaved operator change');
+  const unchanged=ui.requests.length;
+  ui.statusClick('#ach-status-load');
+  assert.equal(ui.requests.length,unchanged,'Dirty Recheck requires explicit discard');
+  assert.equal(ui.state().statusName,'Unsaved operator change');
+  ui.statusPermitDiscard(true);
   ui.statusClick('#ach-status-load').respond(statusPrefs());
   assert.notEqual(ui.state().statusName,'Unsaved operator change');
+});
+
+test('Status Pages scope switch Cancel keeps dirty inputs and original scope', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-name','Working brand','input change');
+  const before=ui.requests.length;
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'Working brand');
+  assert.match(ui.state().statusResult,/Unsaved changes kept/);
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:''});
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.match(ui.requests.at(-1).options.url,/s=status_sites$/);
+});
+
+test('Status Pages dirty site switch restores previous site on Cancel', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const seven={...site(),id:7,name:'seven.test',
+    bound_domains:[{name:'seven.test',port:80}]};
+  const eight={...site(),id:8,name:'eight.test',
+    bound_domains:[{name:'eight.test',port:80}]};
+  ui.requests.at(-1).respond({...page([seven,eight]),purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs(3,'Site override',{
+    ...brand(),brand_name:'Site seven'
+  }));
+  ui.statusSetValue('#ach-status-name','Uncommitted seven','input change');
+  const before=ui.requests.length;
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Uncommitted seven');
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  const load=ui.requests.at(-1);
+  assert.match(load.options.url,/s=status_preferences$/);
+  assert.equal(load.options.data.site_id,'8');
+  load.respond(statusPrefs(4,'Site override',{...brand(),brand_name:'Site eight'}));
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'8'});
+  assert.equal(ui.state().statusName,'Site eight');
+});
+
+test('Status Pages dirty Recheck guarded, clean and reverted values never prompt', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(3));
+  ui.statusSetValue('#ach-status-name','Changed','input change');
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-load');
+  assert.equal(ui.requests.length,before);
+  assert.equal(ui.state().statusName,'Changed');
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  const recheck=ui.statusClick('#ach-status-load');
+  assert.match(recheck.options.url,/s=status_preferences$/);
+  recheck.respond(statusPrefs(4));
+  ui.statusPermitDiscard(false);
+  const withoutDirty=ui.statusClick('#ach-status-load');
+  assert.match(withoutDirty.options.url,/s=status_preferences$/);
+  withoutDirty.respond(statusPrefs(4));
+  const unchanged=ui.statusConfirmations().length;
+  ui.statusSetValue('#ach-status-name','Changed','input change');
+  ui.statusSetValue('#ach-status-name',brand().brand_name,'input change');
+  const reverted=ui.statusClick('#ach-status-load');
+  assert.equal(ui.statusConfirmations().length,unchanged);
+  assert.match(reverted.options.url,/s=status_preferences$/);
+});
+
+function statusSiteDraftFixture(ui, selectedId=7) {
+  const seven = {...site(), id:selectedId, name:'seven.test',
+    bound_domains:[{name:'seven.test',port:80}]};
+  const eight = {...site(), id:8, name:'eight.test',
+    bound_domains:[{name:'eight.test',port:80}]};
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.requests.at(-1).respond({...page([seven,eight].sort((a,b)=>a.id-b.id)),purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id',String(selectedId),'change');
+  ui.requests.at(-1).respond(statusPrefs(3,'Site override',
+    {...brand(),brand_name:'Saved seven'}));
+  ui.statusSetValue('#ach-status-name','Dirty seven','input change');
+  return {seven,eight};
+}
+
+test('Reviewed R1: dirty site remains selected through a successful native site-list refresh', () => {
+  const ui=loadUi();
+  const {seven,eight}=statusSiteDraftFixture(ui);
+  const prompts=ui.statusConfirmations().length;
+  assert.equal(ui.statusFieldDisabled(),false);
+  assert.equal(ui.state().statusSaveDisabled,false);
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  assert.match(refresh.options.url,/s=status_sites$/);
+  assert.equal(ui.statusSiteDisabled(),true,'Unverified selector must be temporarily frozen');
+  assert.equal(ui.state().statusSaveDisabled,true,'Refreshing list is not authorization to Save');
+  assert.equal(ui.statusFieldDisabled(),false,'Editable draft must remain available');
+  assert.equal(ui.state().statusName,'Dirty seven');
+  refresh.respond({...page([seven,eight]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.equal(ui.statusConfirmations().length,prompts,'No modal for no-loss refresh');
+  const save=ui.statusClick('#ach-status-save');
+  assert.match(save.options.url,/s=status_save$/);
+  assert.equal(save.options.data.site_id,'7');
+  assert.equal(save.options.data.brand_name,'Dirty seven');
+});
+
+test('Reviewed R1: vanished site preserves draft and explicit Cancel restores lost option', () => {
+  const ui=loadUi();
+  const {eight}=statusSiteDraftFixture(ui);
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  refresh.respond({...page([eight]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.statusFieldDisabled(),false);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.equal(ui.state().statusInspectDisabled,true);
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.match(ui.statusSiteInfo(),/no longer in refreshed inventory/);
+  assert.deepEqual(ui.statusSiteChoices().map(v=>v.id),['','8','7']);
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-save');
+  ui.statusClick('#ach-status-preview-button');
+  assert.equal(ui.requests.length,before,'A ghost site must not authorize operations');
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  const next=ui.requests.at(-1);
+  assert.equal(ui.requests.length,before+1);
+  assert.match(next.options.url,/s=status_preferences$/);
+  next.respond(statusPrefs(4,'Site override',{...brand(),brand_name:'Saved eight'}));
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'8'});
+  assert.equal(ui.state().statusName,'Saved eight');
+  assert.equal(ui.state().statusSaveDisabled,false);
+});
+
+test('Reviewed R1: dirty selection found on later inventory page re-enables Save only after discovery', () => {
+  const ui=loadUi();
+  const {seven}=statusSiteDraftFixture(ui,70);
+  const otherSites=Array.from({length:25},(_,i) => ({
+    ...site(),id:i+1,name:'batch'+(i+1)+'.test',
+    document_root:'/www/batch'+(i+1)+'.test',
+    bound_domains:[{name:'batch'+(i+1)+'.test',port:80}],
+    canonical_domain_bound:true
+  }));
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  refresh.respond({...page(otherSites),purpose:'status_site_selection',has_more:true});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'70'});
+  assert.match(ui.statusSiteInfo(),/Load more websites/);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  const next=ui.loadMoreSites();
+  assert.equal(next.options.data.page,2);
+  next.respond({...page([seven]),page:2,purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'70'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.equal(ui.statusConfirmations().length,0);
+  assert.equal(ui.statusSiteChoices().filter(v=>v.id==='70').length,1);
+});
+
+test('Reviewed R1: failed or stale inventory does not erase draft or authorize stale Save', () => {
+  const ui=loadUi();
+  const {seven}=statusSiteDraftFixture(ui);
+  const first=ui.statusClick('#ach-status-sites-retry');
+  const newest=ui.statusClick('#ach-status-sites-retry');
+  assert.equal(newest,first,'Pending retry must not start concurrent inventory reads');
+  first.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.equal(ui.state().statusSaveDisabled,false);
+  const second=ui.statusClick('#ach-status-sites-retry');
+  second.respond({status:true,inventory_schema:999});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(),/inventory unavailable/);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-save');
+  assert.equal(ui.requests.length,count);
+  const recovery=ui.statusClick('#ach-status-sites-retry');
+  recovery.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.equal(ui.state().statusName,'Dirty seven');
+});
+
+test('Reviewed R1: delayed site-list response cannot replace a newly accepted global draft', () => {
+  const ui=loadUi();
+  const {seven}=statusSiteDraftFixture(ui);
+  const stale=ui.statusClick('#ach-status-sites-retry');
+  assert.equal(ui.state().statusName,'Dirty seven');
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-scope','global','change');
+  const global=ui.requests.at(-1);
+  assert.notEqual(global,stale);
+  assert.match(global.options.url,/s=status_preferences$/);
+  global.respond(statusPrefs(11,'Global default',
+    {...brand(),brand_name:'New global'}));
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'New global');
+  stale.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'New global');
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.deepEqual(ui.statusSiteChoices().map(x=>x.id),['']);
+  assert.equal(ui.statusConfirmations().length,1);
+});
+
+test('Reviewed R1: no unsaved branding can be entered before a valid loaded baseline', () => {
+  const ui=loadUi();
+  const initial=ui.openStatus();
+  assert.equal(ui.statusFieldDisabled(),true);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  initial.respond(statusPrefs());
+  assert.equal(ui.statusFieldDisabled(),false);
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.statusFieldDisabled(),true);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  const list=ui.requests.at(-1);
+  const seven={...site(),id:7,name:'seven.test',
+    bound_domains:[{name:'seven.test',port:80}]};
+  list.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.equal(ui.statusFieldDisabled(),true);
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  const preference=ui.requests.at(-1);
+  assert.match(preference.options.url,/s=status_preferences$/);
+  assert.equal(ui.statusFieldDisabled(),true);
+  preference.respond({status:false,stage:'preferences_read'});
+  assert.equal(ui.statusFieldDisabled(),true);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  ui.statusClick('#ach-status-load').respond(statusPrefs(8,'Site override',
+    {...brand(),brand_name:'Seven'}));
+  assert.equal(ui.statusFieldDisabled(),false);
+  assert.equal(ui.state().statusSaveDisabled,false);
 });
 
 test('Native lazy navigation uses per-view loading state, not a global flash', () => {

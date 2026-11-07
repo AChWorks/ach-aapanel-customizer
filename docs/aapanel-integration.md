@@ -507,7 +507,9 @@ The bounded source inspector reads without following symbolic links on any path 
 
 **Remaining verification boundary:** Source unit/UI tests prove fixture and deployed-script behavior; the non-production native QA above exercises the installed backend and existing site files in a fresh Python process. Real authenticated browser session/CSRF, VHost regeneration timing for this exact candidate, cross-version support, and effective Nginx error-page routing remain unverified. No public release or Production deployment is authorized.
 
-### Explicit bounded site 404 HTTP/80 evidence (separate unmerged source candidate)
+### Explicit bounded site 404 HTTP/80 evidence (source-integrated, unreleased)
+
+**Current integration:** The bounded HTTP/80 source is integrated in main v0.1.13 via PR #20. Any older 'candidate/unmerged' wording in the source-bound evidence below describes its historical verification stage, not current GitHub integration. Exact-source installed-native QA is still pending; no public release or Production deployment is authorized.
 
 After selecting a native website and an English/Persian 404 template, the primary administrator may explicitly choose **Check live HTTP/80 site 404**. The endpoint binds the explicit action to the **exact validated site selection last loaded in the native inventory** (site ID, name, document root, status, and sorted domain/port bindings). The browser-supplied snapshot is only a comparison precondition, never a network destination or filesystem path. Any rename, reassignment, rebinding, stopped site, or missing record before the request produces a refresh-required error **without opening the HTTP connection**. Native site and domain bindings are also rechecked after the request; the UI independently compares the returned verified identity to its own selected inventory record. Nginx must be the configured aaPanel web engine, and the selected source HTML/hash is resolved offline. The preflight refuses missing, symlinked, unreadable, changed or empty page sources.
 
