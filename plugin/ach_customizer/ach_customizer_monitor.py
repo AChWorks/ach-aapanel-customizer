@@ -895,9 +895,9 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         "version": version,
         "matched_sites": [],
         "unresolved_sites": [],
-        # A file-only native route is not permission to reload a shared FPM
-        # service. Only the separately proven legacy/conventional shape is
-        # currently write-eligible; extensions and wpfastcgi are read-only.
+        # A complete, verified native site/socket inventory can support the
+        # separate, explicitly approved PHP 8.5 shared-service manual writer.
+        # File attribution never authorizes an action by itself.
         "manual_apply_eligible": False,
         "site_count": 0,
         "other_php_sites_count": 0,
@@ -918,7 +918,6 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         native_standard = "enable-php-" + version + ".conf"
         dependencies = _verified_native_php_include(nginx_dir, native_standard, socket)
         checked_snippets = {native_standard}
-        native_unverified_write_shape = False
         # Native DB is the authority for website IDs. Refuse partial sets:
         # missing later pages would create an unsafe shared-resource claim.
         rows = (
@@ -972,11 +971,8 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     dependencies.append({"kind": "native_rewrite", "id": site_id,
                                          "signature": rewrite_signature})
                 if has_extension:
-                    native_unverified_write_shape = True
                     dependencies.append({"kind": "native_extension", "id": site_id,
                                          "signature": _native_extension_fingerprint(extension)})
-                if php_name.endswith("-wpfastcgi.conf"):
-                    native_unverified_write_shape = True
                 if php_name not in checked_snippets:
                     if assigned == "00":
                         if php_name != "enable-php-00.conf":
@@ -1030,10 +1026,13 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 dependencies, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")).hexdigest()
             result["state"] = "File Mapping"
-            result["manual_apply_eligible"] = not native_unverified_write_shape
-            if native_unverified_write_shape:
-                result["note"] += (" Native extension/wpcache layouts are mapped read-only; "
-                                   "shared-service Apply/Restore needs separate clone-based native QA.")
+            # Both native forms are already checked: extension/*.conf must contain
+            # inert logging only, and wpfastcgi must have exactly the selected
+            # [www] Unix socket with no hidden upstream. Do not reject ordinary
+            # aaPanel sites merely for using these validated native features.
+            # The only implemented manual writer is PHP 8.5; other versions
+            # retain discovery support but must never appear write-eligible.
+            result["manual_apply_eligible"] = (version == "85" and bool(result["matched_sites"]))
     except (OSError, UnicodeError, MonitorInputError, ValueError) as exc:
         # A global DB/schema/socket error invalidates *all* partial matches.
         # Only per-site unsupported VHosts keep already proven file links.

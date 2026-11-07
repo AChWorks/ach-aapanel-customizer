@@ -808,12 +808,12 @@ test('Native PHP preview shows two shared file-linked websites safely without im
   assert.equal(result.errorClass, false);
 });
 
-test('Native extension or WordPress cache mapping is visible but cannot enable Manual Apply', () => {
+test('Explicitly ineligible PHP file mapping remains visible but cannot enable Manual Apply', () => {
   const ui = loadUi();
   const request = ui.submitPhp();
   request.respond(phpPreview(phpImpact({
     manual_apply_eligible: false,
-    note: 'Native extension/wpcache mapping is read-only; Apply/Restore requires clone QA.'
+    note: 'Native assignment remains ineligible until its route is fully verified.'
   })));
   const state = ui.state();
   assert.match(state.impactSummary, /File mapping: 2 site\(s\)/);
