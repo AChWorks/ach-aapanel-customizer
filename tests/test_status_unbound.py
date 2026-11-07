@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1] / "plugin" / "ach_customizer"
 sys.path.insert(0, str(ROOT))
 
 import ach_customizer_status_unbound as subject
+import ach_customizer_status_extension as publisher
 import ach_customizer_main as backend
 from ach_customizer_status_pages import render_page
 from ach_customizer_state import _open_state_dir
@@ -191,26 +192,61 @@ class UnboundRouteTests(unittest.TestCase):
         self.assertEqual(self.html.read_bytes(),before)
         self.assertTrue(self.config.exists())
 
-    def test_partial_apply_prepared_with_no_files_is_restorable(self):
-        initial = self.read()
-        original_writer = subject._write_exclusive
-        def broken(directory,name,payload,mode):
-            if name==subject.HTML_NAME:raise OSError(5,"controlled early write failure")
-            return original_writer(directory,name,payload,mode)
-        with patch.object(subject,"_write_exclusive",side_effect=broken):
-            with self.assertRaises(subject.UnboundError) as err:
-                self.call("apply",expected_source=initial["source_sha256"],
-                          expected_render=initial["rendered_sha256"],
-                          expected_v4=200,expected_v6=200)
-        self.assertEqual(err.exception.stage,"uncertain")
-        state=self.read()
-        self.assertEqual(state["state"],"Recovery Required")
-        self.assertIsNotNone(state["recovery_id"])
-        returned=self.call("restore",expected_source=state["source_sha256"],
-                           expected_recovery=state["recovery_id"])
-        self.assertEqual(returned["state"],"Restored")
-        self.assertFalse(self.config.exists())
-        self.assertFalse(self.html.exists())
+    def test_interrupted_staging_never_publishes_incomplete_final_paths(self):
+        # Exercise actual staged writes *after* stage inode creation and
+        # rejected renames, for both the HTML asset and active Nginx config.
+        original_site = self.base_default.read_bytes()
+        for mode in ("partial_write", "pre_rename"):
+            for final_name in (subject.HTML_NAME, subject.CONF_NAME):
+                with self.subTest(mode=mode, final=final_name):
+                    initial = self.read()
+                    original_writer = publisher._write_exclusive
+                    original_rename = publisher._rename_noreplace
+
+                    def interrupted_writer(fd, name, payload, permissions):
+                        if mode == "partial_write" and name.startswith("." + final_name + ".") and name.endswith(".stage"):
+                            staged_fd = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                                                permissions, dir_fd=fd)
+                            try:
+                                os.write(staged_fd, payload[:7])
+                            finally:
+                                os.close(staged_fd)
+                            raise OSError(5, "simulated post-creation write failure")
+                        return original_writer(fd, name, payload, permissions)
+
+                    def interrupted_rename(fd, before, after):
+                        if mode == "pre_rename" and after == final_name and before.endswith(".stage"):
+                            raise OSError(5, "simulated pre-publication rename failure")
+                        return original_rename(fd, before, after)
+
+                    with patch.object(publisher, "_write_exclusive", side_effect=interrupted_writer), \
+                         patch.object(publisher, "_rename_noreplace", side_effect=interrupted_rename):
+                        with self.assertRaises(subject.UnboundError) as err:
+                            self.call("apply", expected_source=initial["source_sha256"],
+                                      expected_render=initial["rendered_sha256"],
+                                      expected_v4=200, expected_v6=200)
+                    self.assertEqual(err.exception.stage, "uncertain")
+                    self.assertFalse(self.config.exists(), "No incomplete config in Nginx include glob")
+                    self.assertEqual(len(list(self.vhost.glob("*.conf"))), 1)
+                    self.assertEqual(self.base_default.read_bytes(), original_site)
+                    if self.html.exists():
+                        self.assertEqual(subject._sha(self.html.read_bytes()),
+                                         initial["rendered_sha256"],
+                                         "Published HTML is complete and hash-matched")
+                    stage_root = self.vhost if final_name == subject.CONF_NAME else self.www
+                    staged = stage_root / ("." + final_name + "." + err.exception.recovery_id + ".stage")
+                    self.assertTrue(staged.is_file(), "Interrupted content remains only in an inactive stage")
+                    self.assertEqual(self.runner([str(self.base / "fake-nginx"), "-t"]).returncode, 0)
+                    state = self.read()
+                    self.assertEqual(state["state"], "Recovery Required")
+                    self.assertEqual(state["recovery_id"], err.exception.recovery_id)
+                    restored = self.call("restore", expected_source=state["source_sha256"],
+                                         expected_recovery=state["recovery_id"])
+                    self.assertEqual(restored["state"], "Restored")
+                    self.assertEqual(self.read()["state"], "Restored")
+                    self.assertFalse(self.config.exists())
+                    self.assertFalse(self.html.exists())
+                    self.assertEqual(self.base_default.read_bytes(), original_site)
 
     def test_syntax_failure_after_publish_recovery_does_not_need_valid_preflight(self):
         initial=self.read()
@@ -270,6 +306,49 @@ class UnboundRouteTests(unittest.TestCase):
         self.assertEqual(error.exception.stage,"conflict")
         self.assertFalse(self.config.exists())
         self.assertFalse(self.html.exists())
+
+    def test_valid_http_default_syntax_variants_conflict_before_mutation(self):
+        foreign = self.vhost / "foreign.conf"
+        variants = (
+            "server {\n listen 80 default_server;\n server_name collision.invalid;\n}\n",
+            "server { listen 80 default_server; server_name collision.invalid; }\n",
+            "server {\n listen\t80 default_server;\n}\n",
+            "server {\n listen\n 80 default_server;\n}\n",
+            "server { listen 0.0.0.0:80 default_server; }\n",
+            "server { listen [::]:80 default_server; }\n",
+            "server { listen 443; listen 80 default_server; }\n",
+            "server { listen 443; listen [::]:80 default_server; }\n",
+        )
+        for content in variants:
+            with self.subTest(content=content):
+                foreign.write_text(content)
+                foreign.chmod(0o600)
+                with self.assertRaises(subject.UnboundError) as err:
+                    self.read()
+                self.assertEqual(err.exception.stage, "conflict")
+                with self.assertRaises(subject.UnboundError) as err:
+                    self.call("apply", expected_source="0" * 64,
+                              expected_render="0" * 64, expected_v4=200, expected_v6=200)
+                self.assertEqual(err.exception.stage, "conflict")
+                self.assertEqual(list(self.data.iterdir()), [])
+                self.assertFalse(self.config.exists())
+                self.assertFalse(self.html.exists())
+        foreign.unlink()
+
+    def test_unrelated_address_components_and_https_defaults_not_http_conflicts(self):
+        foreign = self.vhost / "foreign-https.conf"
+        for content in (
+            "server { listen 192.168.80.1:443 default_server; }\n",
+            "server { listen [2001:db8:80::1]:443 default_server; }\n",
+            "server { listen 0.0.0.0:8080 default_server; }\n",
+            "# listen 80 default_server;\nserver { listen 443 default_server; }\n",
+        ):
+            with self.subTest(content=content):
+                foreign.write_text(content)
+                foreign.chmod(0o600)
+                self.assertEqual(self.read()["state"], "Source Ready")
+                self.assertEqual(list(self.data.iterdir()), [])
+        foreign.unlink()
 
     def test_updated_config_template_does_not_block_existing_restore(self):
         applied=self.apply()

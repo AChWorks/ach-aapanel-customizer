@@ -18,7 +18,7 @@ from uuid import uuid4
 from ach_customizer_status_inspect import _directory, VHOST_ROOT
 from ach_customizer_status_extension import (
     ExtensionError, _bounded_file, _owned_dir, _write_exclusive,
-    _rename_noreplace, _nginx, NGINX, NGINX_CONF, MAX_HTML,
+    _publish_complete, _rename_noreplace, _nginx, NGINX, NGINX_CONF, MAX_HTML,
 )
 from ach_customizer_status_pages import StatusPageError
 
@@ -92,6 +92,27 @@ def _record_write(data_fd, record):
     os.fsync(data_fd)
 
 
+def _http_port_80(listener):
+    """Identify a listen address's port, not a coincidental IP component."""
+    if listener.startswith("unix:"):
+        return False
+    if listener.startswith("["):
+        end = listener.find("]")
+        if end < 0:
+            return False
+        suffix = listener[end + 1:]
+        if not suffix:
+            return True  # IPv6 address without an explicit port defaults to 80.
+        if not suffix.startswith(":"):
+            return False
+        port = suffix[1:]
+    elif ":" in listener:
+        port = listener.rsplit(":", 1)[1]
+    else:
+        port = listener if listener.isdecimal() else "80"
+    return port.isdecimal() and int(port) == 80
+
+
 def _source(nginx, nginx_conf, vhost_root, conf_name, runner=None):
     """Check *loaded* Nginx source and refuse another HTTP default owner.
 
@@ -130,15 +151,14 @@ def _source(nginx, nginx_conf, vhost_root, conf_name, runner=None):
         else:
             kept.append(heading + "\n" + data)
     normalized = "".join(kept)
-    # No other listen 80/[::]:80 default_server may already exist. Reject
-    # unfamiliar active 80 default statements instead of taking over.
-    for line in normalized.splitlines():
-        directive = line.strip()
-        if not directive.startswith("listen ") or ";" not in directive:
-            continue
-        value = directive.partition(";")[0].split()
-        if ("default_server" in value and
-                any(re.search(r"(?<!\d)80(?!\d)", item) for item in value[1:])):
+    # nginx -T has already validated the config. Recognize bounded listen
+    # directives even in inline server blocks or with tab whitespace, while
+    # ignoring comments and matching only the listener's actual port.
+    uncommented = re.sub(r"(?m)#[^\r\n]*", "", normalized)
+    for match in re.finditer(r"(?:(?<=^)|(?<=[;{}]))\s*listen\s+([^;{}]+);",
+                             uncommented, re.MULTILINE):
+        parts = match.group(1).split()
+        if parts and "default_server" in parts[1:] and _http_port_80(parts[0]):
             raise UnboundError("conflict", "Another Nginx HTTP default_server already exists")
     return _sha(normalized.encode("utf-8")), owned_found
 
@@ -278,8 +298,10 @@ def manage_unbound(action, html, *, data_fd,
             }
             _record_write(data_fd, journal)
             try:
-                _write_exclusive(hfd, HTML_NAME, html_bytes, 0o644)
-                _write_exclusive(vfd, CONF_NAME, config, 0o600)
+                # The staged names never enter the active *.conf glob.
+                # Publish complete bytes atomically (asset before config).
+                _publish_complete(hfd, HTML_NAME, html_bytes, 0o644, operation_id)
+                _publish_complete(vfd, CONF_NAME, config, 0o600, operation_id)
                 try:
                     # nginx -T also performs syntax validation. Test before
                     # inspecting loaded source so a rejected new .conf can
