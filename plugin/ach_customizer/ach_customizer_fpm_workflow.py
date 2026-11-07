@@ -78,6 +78,9 @@ def _default_runtime_hooks(config_root, version, desired=None):
             or service.stat().st_uid != 0 or binary.stat().st_mode & 0o022
             or service.stat().st_mode & 0o022):
         raise recovery.FpmApplyError("fpm_compatibility", "Unsupported FPM binary/service ownership")
+    # The same exact source-to-hook contract applies before Apply, and again
+    # before invoking recovery hooks; neither may trust an unrelated socket.
+    recovery.require_native_runtime_paths(config_root, version)
     expected = recovery.expected_pool_values(desired) if desired is not None else None
 
     def validate():
@@ -266,6 +269,14 @@ class ManualFpmWorkflow:
                   "Reinstall the plugin or use an authorized supervised recovery "
                   "procedure after inspecting current sites, FPM bytes and service health.")
         plan = {"version": version, "source": str(Path(self.config_root) / version / "etc/php-fpm.conf")}
+        # Keep the saved operation visible even if a later aaPanel/source
+        # change makes automatic restoration unsafe.
+        try:
+            recovery.require_native_runtime_paths(self.config_root, version)
+        except recovery.FpmApplyError as exc:
+            return {**status, "safe_rollback_file_match": False,
+                    "impact_reason": str(exc), "shared_impact": None,
+                    "manual_recovery": manual}
         try:
             observed = self._lookup_impact(panel, plan)
         except Exception:
@@ -329,6 +340,7 @@ class ManualFpmWorkflow:
         validate, activate, verify = self.hooks_factory(version, None)
 
         def prewrite_check():
+            recovery.require_native_runtime_paths(self.config_root, version)
             latest = self._recovery_details(self._environment(version), version)
             if (latest.get("safe_rollback_file_match") is not True
                     or latest.get("recovery_decision_sha256") != expected_decision

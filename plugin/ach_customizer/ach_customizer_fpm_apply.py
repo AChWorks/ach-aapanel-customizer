@@ -212,6 +212,56 @@ def _plan_bytes(before, desired):
     return "".join(output).encode("utf-8")
 
 
+
+def require_native_runtime_paths(config_root, version, source=None):
+    """PHP81 writer accepts only the exact runtime layout its hooks verify.
+
+    A source-derived site file map alone can admit a different socket. Check
+    the actual root-owned FPM config before Prepare and under the Apply lock.
+    PHP85 is deliberately unchanged for existing recovery compatibility.
+    """
+    if version != "81":
+        return
+    if source is None:
+        fd_dir = _dir(Path(config_root) / version / "etc")
+        try:
+            source, _ = _read(fd_dir, "php-fpm.conf")
+        finally:
+            os.close(fd_dir)
+    if len(source) > MAX_BYTES or b"\x00" in source or b"\r" in source:
+        raise FpmApplyError("compatibility", "Unsupported PHP 8.1 runtime source")
+    try:
+        content = source.decode("utf-8")
+    except UnicodeError as exc:
+        raise FpmApplyError("compatibility", "PHP 8.1 runtime source is not UTF-8") from exc
+    expected = {
+        ("global", "pid"): str(Path(config_root) / version / "var/run/php-fpm.pid"),
+        ("www", "listen"): "/tmp/php-cgi-81.sock",
+    }
+    found = {key: [] for key in expected}
+    section = None
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith((";", "#")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            continue
+        if "=" not in line:
+            continue
+        key, value = (item.strip() for item in line.split("=", 1))
+        field = (section, key.lower())
+        if field in found:
+            found[field].append(value)
+    for field, expected_value in expected.items():
+        if (len(found[field]) != 1 or not re.fullmatch(
+                re.escape(expected_value) + r"(?:[ \t]+[;#][^\r\n]*)?",
+                found[field][0])):
+            raise FpmApplyError(
+                "compatibility",
+                "PHP 8.1 [global] pid and [www] socket must match the verified native service layout"
+            )
+
 def _plan(config_root, version, desired):
     if version not in SUPPORTED_VERSIONS:
         raise FpmApplyError("compatibility", "Only verified PHP 8.1 and PHP 8.5 pools support Manual Apply")
@@ -220,6 +270,7 @@ def _plan(config_root, version, desired):
     fd_dir = _dir(folder)
     try:
         before, st = _read(fd_dir, "php-fpm.conf")
+        require_native_runtime_paths(config_root, version, before)
         preview = preview_php_fpm(config_root, version, desired)
         if (preview.get("state") not in ("File Match", "File Drift")
                 or preview.get("source") != str(folder / "php-fpm.conf")):

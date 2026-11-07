@@ -48,7 +48,7 @@ function loadUi() {
     '#ach-php-topology-rows', '#ach-php-topology-summary',
     '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-operation-notice', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
-    '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
+    '#ach-fpm-recovery-version', '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
     '#ach-fpm-recovery-impact', '#ach-fpm-restore-rows',
     '#ach-fpm-rollback-controls', '#ach-fpm-rollback-approval', '#ach-fpm-rollback',
     '#ach-status-template', '#ach-status-locale', '#ach-status-scope', '#ach-status-site-id',
@@ -90,6 +90,7 @@ function loadUi() {
   });
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
+  elements.get('#ach-fpm-recovery-version').props.value = '85';
   elements.get('#ach-php-runtime-check').props.disabled = true;
   const requests = [];
   let allowStatusDiscard = false;
@@ -429,6 +430,10 @@ function loadUi() {
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
     inspectFpmRecovery: () => fpmTrigger('#ach-fpm-check-recovery'),
+    selectRecoveryVersion: v => {
+      elements.get('#ach-fpm-recovery-version').props.value=v;
+      trigger(elements.get('#ach-fpm-recovery-version'), 'change');
+    },
     approveFpmRollback: checked => fpmApproval('#ach-fpm-rollback-approval', checked),
     rollbackFpm: () => fpmTrigger('#ach-fpm-rollback'),
     changePhp,
@@ -2943,6 +2948,7 @@ test('Verified PHP81 adapter uses version-bound Prepare, Apply and saved recover
   assert.equal(apply.options.data.approved_scope,'PHP81-www-shared-service');
   apply.respond(appliedResult({...plan81}));
   assert.match(ui.state().fpmPlan,/Applied/);
+  ui.selectRecoveryVersion('81');
   const recovery=ui.inspectFpmRecovery();
   assert.equal(recovery.options.data.php_version,'81');
   recovery.respond(recoveryPreview({
@@ -2963,6 +2969,7 @@ test('PHP81 recovery rejects PHP85 evidence and selection changes revoke approva
   inventory.versions[0].manual_apply_adapter='guarded_php81';
   ui.openPhp().respond(inventory);
   ui.selectPhpVersion('81');
+  ui.selectRecoveryVersion('81');
   const recovery=ui.inspectFpmRecovery();
   assert.equal(recovery.options.data.php_version,'81');
   recovery.respond(recoveryPreview());
@@ -2978,6 +2985,68 @@ test('PHP81 recovery rejects PHP85 evidence and selection changes revoke approva
   const count=ui.requests.length;
   ui.rollbackFpm();
   assert.equal(ui.requests.length,count);
+});
+
+test('PHP81 saved recovery is inspectable when PHP inventory fails, without authorizing blind Restore', () => {
+  const ui=loadUi();
+  const inventory=ui.openPhp();
+  inventory.reject(null,'timeout');
+  assert.equal(ui.state().phpVersionDisabled,true);
+  ui.selectRecoveryVersion('81');
+  const first=ui.inspectFpmRecovery();
+  assert.match(first.options.url,/s=fpm_recovery$/);
+  assert.equal(first.options.data.php_version,'81');
+  first.respond(recoveryPreview({
+    version:'81', safe_rollback_file_match:false,
+    shared_impact:null, impact_reason:'Native site routing unavailable',
+    manual_recovery:'Retain journal; operator-guided reconciliation required.'
+  }));
+  assert.match(ui.state().fpmRecovery,/Recovery state: Applied/);
+  assert.match(ui.state().fpmRecovery,/operation: d{32}/);
+  assert.match(ui.state().fpmRecoveryImpact,/operator-guided reconciliation/);
+  assert.equal(ui.state().fpmRollbackHidden,true);
+  const pending=ui.requests.length;
+  ui.rollbackFpm();
+  assert.equal(ui.requests.length,pending,'An incomplete source cannot authorize restoration');
+
+  // A later native site inspection may safely restore the approved operation.
+  ui.inspectFpmRecovery().respond(recoveryPreview({
+    version:'81',shared_impact:phpImpact({version:'81'})
+  }));
+  assert.equal(ui.state().fpmRollbackHidden,false);
+  ui.approveFpmRollback(true);
+  const rollback=ui.rollbackFpm();
+  assert.equal(rollback.options.data.php_version,'81');
+  assert.equal(rollback.options.data.approved_scope,'PHP81-www-shared-service');
+  rollback.respond(rolledBackResult({version:'81'}));
+  assert.match(ui.state().fpmRecovery,/Rolled Back/);
+});
+
+test('Independent PHP81/85 saved recovery remains usable after invalid inventory and rejects stale responses', () => {
+  const ui=loadUi();
+  const discovered=ui.openPhp();
+  const invalid=ui.phpVersions();
+  invalid.versions[0].manual_apply_adapter='guarded_php99';
+  discovered.respond(invalid);
+  assert.equal(ui.state().phpVersionDisabled,true);
+  ui.selectRecoveryVersion('81');
+  const old=ui.inspectFpmRecovery();
+  assert.equal(old.options.data.php_version,'81');
+  ui.selectRecoveryVersion('85');
+  old.respond(recoveryPreview({
+    version:'81',shared_impact:phpImpact({version:'81'})
+  }));
+  assert.equal(ui.state().fpmRollbackHidden,true);
+  const historic=ui.inspectFpmRecovery();
+  assert.equal(historic.options.data.php_version,'85');
+  historic.respond(recoveryPreview());
+  assert.equal(ui.state().fpmRollbackHidden,false);
+  ui.approveFpmRollback(true);
+  ui.selectRecoveryVersion('81');
+  assert.equal(ui.state().fpmRollbackHidden,true);
+  const before=ui.requests.length;
+  ui.rollbackFpm();
+  assert.equal(ui.requests.length,before);
 });
 
 test('Native PHP discovery selects actual PHP 8.1+ file candidates without enabling Apply', () => {

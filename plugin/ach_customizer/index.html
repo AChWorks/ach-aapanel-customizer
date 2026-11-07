@@ -369,6 +369,13 @@
           <div class="ach-controls"><button id="ach-fpm-commit" type="button" class="btn btn-danger" disabled>Apply shared PHP-FPM change</button></div>
         </div>
         <hr />
+        <div class="ach-fields">
+          <div><label for="ach-fpm-recovery-version">Saved recovery service (independent of PHP inventory)</label>
+            <select id="ach-fpm-recovery-version">
+              <option value="85" selected>PHP 8.5</option>
+              <option value="81">PHP 8.1</option>
+            </select></div>
+        </div>
         <button id="ach-fpm-check-recovery" type="button">Inspect selected PHP recovery</button>
         <p id="ach-fpm-recovery-status" role="status" aria-live="polite">Recovery status not loaded.</p>
         <p id="ach-fpm-recovery-impact" role="status" aria-live="polite">Current affected sites not inspected.</p>
@@ -2927,11 +2934,15 @@
     fpmBusy = value;
     root.find('#ach-fpm-prepare').prop('disabled', value || !phpPreviewEligible);
     root.find('#ach-fpm-commit').prop('disabled', value || !fpmPlan || root.find('#ach-fpm-approval').prop('checked') !== true);
-    // The original PHP85 recovery must remain inspectable even when native
-    // inventory is unavailable (e.g. after an aaPanel upgrade).
+    // Recovery inspection is independent of native PHP inventory, including
+    // after an aaPanel upgrade or a failed discovery call.
+    var recoveryVersion = String(root.find('#ach-fpm-recovery-version').val() || '');
+    root.find('#ach-fpm-recovery-version').prop('disabled', value);
     root.find('#ach-fpm-check-recovery').prop('disabled',
-      value || !['','81','85'].includes(String(root.find('#ach-php-version').val() || '')));
-    root.find('#ach-fpm-rollback').prop('disabled', value || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true);
+      value || !['81','85'].includes(recoveryVersion));
+    root.find('#ach-fpm-rollback').prop('disabled', value || !fpmRecovery ||
+      fpmRecovery.version !== recoveryVersion ||
+      root.find('#ach-fpm-rollback-approval').prop('checked') !== true);
   }
   function validFpmPlan(r, version) {
     if (!['81','85'].includes(version) ||
@@ -3038,15 +3049,19 @@
         '. Inspect saved recovery before any subsequent change.');
     });
   });
+  root.find('#ach-fpm-recovery-version').on('change', function () {
+    resetRecovery();
+    root.find('#ach-fpm-recovery-status').text(
+      'Recovery version changed. Inspect the saved operation again.');
+    fpmLock(fpmBusy);
+  });
   root.find('#ach-fpm-check-recovery').on('click', function () {
-    var version = String(root.find('#ach-php-version').val() || '85');
-    if (fpmBusy || !['81','85'].includes(version) ||
-        (version === '81' &&
-         phpInventory.get(version)?.manual_apply_adapter !== 'guarded_php81')) return;
+    var version = String(root.find('#ach-fpm-recovery-version').val() || '');
+    if (fpmBusy || !['81','85'].includes(version)) return;
     resetRecovery(); fpmLock(true);
     request('fpm_recovery', {php_version:version}, function (r) {
       fpmLock(false);
-      if (version !== String(root.find('#ach-php-version').val() || '85')) return;
+      if (version !== String(root.find('#ach-fpm-recovery-version').val() || '')) return;
       if (!r) {
         root.find('#ach-fpm-recovery-status').text('Recovery unavailable; investigate the error before any further Apply.');
         return;
@@ -3083,7 +3098,9 @@
         );
       } else {
         root.find('#ach-fpm-recovery-impact').text(
-          r.impact_reason || r.manual_recovery || 'Current site mapping not verified.'
+          [r.impact_reason, r.manual_recovery].filter(function (value) {
+            return typeof value === 'string' && value.trim();
+          }).join(' ') || 'Current site mapping not verified.'
         );
       }
       if (safe) {
@@ -3104,7 +3121,7 @@
   root.find('#ach-fpm-rollback').on('click', function () {
     if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
     var op = fpmRecovery.operation_id, current = fpmRecovery;
-    if (current.version !== String(root.find('#ach-php-version').val() || '85')) {
+    if (current.version !== String(root.find('#ach-fpm-recovery-version').val() || '')) {
       resetRecovery();
       return;
     }

@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-07",
+  "review_prior_candidate": {
+    "head": "5147e88503ea4a844593183bebc792b9ff7edaff",
+    "tree": "9330bc0d26f561cc89058be11dbd1f8f14f151a6",
+    "base": "0aff8a6576648d8e4964ae775ce60cfa1e460f1b",
+    "verdict": "COMPLETE / CHANGES_REQUIRED",
+    "required_findings": 2
+  },
+  "remediation": {
+    "REQUIRED-01": "PHP81 native [global] pid and [www] listen must match the exact version-specific PID/socket used by native runtime hooks; deny nonconventional, duplicate and wrong-socket configurations before journal creation, replacement or reload. Recheck for automatic/explicit recovery. PHP85 source/recovery compatibility unchanged.",
+    "REQUIRED-02": "Standalone operator-selectable PHP81/PHP85 saved recovery version independent of get_php_versions, including failed/incomplete inventory. Preserve operation identity and actionable manual-recovery guidance; guard Restore on fresh, version-consistent impact, config hashes and explicit approval.",
+    "scope": "Existing PR #33 remediation only; no generic PHP-FPM parser, no production or release."
+  },
+  "source_tests": {
+    "python_tests_pass": 451,
+    "javascript_tests_pass": 208,
+    "git_diff_check": "PASS"
+  },
+  "exact_plugin_package": {
+    "version": "0.1.17-unreleased",
+    "sha256": "197c7f9030fedb845f463591cc7e3f8b26b8853b3844bb070d4b3a6256597d0f",
+    "members": 46,
+    "native_package_member_hashes": "46/46 PASS",
+    "test_server_path": "/srv/ai-workspace/ach-aapanel-rebuild-20261105/artifacts/ach_customizer_0117_php81_r1.zip"
+  },
+  "isolated_native_qa": {
+    "environment": "Existing managed QEMU Debian 12 + aaPanel 8.0.7 + Nginx + PHP 8.1.35/PHP85",
+    "owner": "Test Server For AI / ach-aapanel-managed-qa",
+    "native_install_driver": "artifacts/qa_0117_native_install_r1.py",
+    "native_install_driver_sha256": "44f4eca7d5685377b39c94d0f0f2ed2ca7ebced62c099cf1c9bf0fa4b1f6e7b3",
+    "pre_mutation_negative_driver": "artifacts/qa_0117_php81_negative_r1.py",
+    "negative_driver_sha256": "252061fe1be528de4b065b825960b35655a567b7be3c90d6a351e8766fd0c138",
+    "positive_native_driver": "artifacts/qa_0117_php81_native_r1.py",
+    "positive_driver_sha256": "613441e27e60302670af600fc130680d606d3e50c0af87796638cbd5a3c5617e",
+    "negative_checks": [
+      "Alternate PHP81 Unix listen socket rejected by Prepare before mutation despite conventional socket still present",
+      "Alternate PHP81 global master PID path rejected before mutation",
+      "Neither rejected source produced a recovery journal, replaced source or reloaded FPM; baseline config, socket and master PID preserved"
+    ],
+    "positive_checks": [
+      "Native plugin ZIP import (46/46 installed hashes)",
+      "Native aaPanel PHP81 website ID9 creation; PHP 8.1.35 served via HTTP 200",
+      "One matched PHP81 site, three other-version site assignments, zero unresolved",
+      "Synthetic secondary/temporary-admin POST denied; wrong-scope and stale-revision Apply denied",
+      "Real PHP81 shared-pool Apply and version-specific reload succeeded",
+      "Explicit PHP81 exact original SHA Restore succeeded",
+      "Post-real-reload injected failure automatically restored exact original config and removed journal",
+      "PHP85 config and three existing WordPress VHost hashes and HTTP outcomes unchanged",
+      "Nginx syntax validation passed"
+    ],
+    "php81_config_baseline_sha256": "c7b5b98974336652b6a7bfbd4e0fd2ce28eb64cf8d0b45fe11d78beb5df5f214",
+    "php81_applied_config_sha256": "f3e2de594cf36742da43541bcc1222a728633124b3dcf6bec49df602bc41e253",
+    "initial_native_run_observation": "First complete-flow attempt returned transient 404 immediately after native AddSite despite correct VHost/source. Diagnostic recheck returned PHP81 HTTP 200. Native AddSite can complete before Nginx has activated the site; updated QA driver observes readiness within bounded 15 seconds without forcing a reload. Cold-restored and reran the full exact-package test from baseline, PASS.",
+    "browser_auth_scope": "Native workflow used synthetic Flask primary-admin POST, not actual browser/CSRF or real secondary account UI."
+  },
+  "cold_restore": {
+    "state": "PASS",
+    "protected_snapshot": "rescue/pre-status-extension-20261107.qcow2",
+    "protected_snapshot_sha256_before_after": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "restored_vm_plugin_version": "0.1.12",
+    "restored_package_hashes": "39/39 PASS",
+    "original_wordpress_http_statuses": [
+      200,
+      200,
+      200
+    ],
+    "nginx_syntax": "PASS",
+    "php81_service": "running",
+    "php85_service": "running",
+    "disposable_test_site": "absent",
+    "active_guest": "running",
+    "disposed_test_overlays": "first attempted and successful R1 test overlays removed only after verified clean restore",
+    "qa_artifacts_retained": "Exact ZIP and install/negative/positive QA scripts retained in Test Server task artifacts"
+  },
+  "known_limits": [
+    "Static exact-path compatibility guard rejects nonconventional PHP81 sources by design; no generic runtime identity parser.",
+    "Saved Recovery remains read-only/reports manual guidance when current source/impact is incompatible, but automatic Restore is not authorized.",
+    "Native browser/CSRF and user-account flows not yet verified.",
+    "Broader Phase B accepted native lifecycle remains open in Issue #21.",
+    "No Merge, Release or Production deployment; independent exact corrected candidate delta re-review required."
+  ]
+}

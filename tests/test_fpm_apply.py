@@ -344,7 +344,7 @@ class TestFpmManualApply(unittest.TestCase):
         php81 = self.root / "php" / "81" / "etc"
         php81.mkdir(parents=True)
         config81 = php81 / "php-fpm.conf"
-        base81 = BASELINE.replace(b"/tmp/test-fpm.sock", b"/tmp/php-cgi-81.sock")
+        base81 = BASELINE.replace(b"/tmp/test-fpm.sock", b"/tmp/php-cgi-81.sock").replace(b"/tmp/fpm-test.pid", str(self.root / "php" / "81" / "var/run/php-fpm.pid").encode())
         config81.write_bytes(base81)
         config81.chmod(0o644)
         plan81 = manual.preview(self.root / "php", "81", DESIRED)
@@ -399,11 +399,72 @@ class TestFpmManualApply(unittest.TestCase):
         self.assertEqual(manual.recovery_status(
             self.root / "php", self.data, "85")["state"], "No Recovery")
 
+    def test_php81_rejects_nonconventional_pid_or_socket_before_backup_or_reload(self):
+        php81 = self.root / "php" / "81" / "etc"
+        php81.mkdir(parents=True)
+        source = php81 / "php-fpm.conf"
+        standard = (BASELINE.replace(
+            b"/tmp/test-fpm.sock", b"/tmp/php-cgi-81.sock"
+        ).replace(
+            b"/tmp/fpm-test.pid",
+            str(self.root / "php" / "81" / "var/run/php-fpm.pid").encode()
+        ))
+        source.write_bytes(standard)
+        source.chmod(0o644)
+        approved = manual.preview(self.root / "php", "81", DESIRED)
+        self.assertEqual(approved["version"], "81")
+        for wrong in (
+            standard.replace(b"/tmp/php-cgi-81.sock", b"/tmp/other-81.sock"),
+            standard.replace(b"var/run/php-fpm.pid", b"var/run/custom.pid"),
+            standard.replace(b"listen = /tmp/php-cgi-81.sock",
+                             b"listen = /tmp/other-81.sock\nlisten = /tmp/php-cgi-81.sock"),
+            standard.replace(b"pid = ", b"pid = /tmp/another.pid\npid = "),
+            standard.replace(b"/tmp/php-cgi-81.sock", b"/tmp/other-81.sock # /tmp/php-cgi-81.sock"),
+        ):
+            with self.subTest(wrong=wrong[-80:]):
+                source.write_bytes(wrong)
+                with self.assertRaisesRegex(manual.FpmApplyError, "native service layout"):
+                    manual.preview(self.root / "php", "81", DESIRED)
+                with self.assertRaisesRegex(manual.FpmApplyError, "native service layout"):
+                    manual.apply(
+                        self.root / "php", self.data, "81", DESIRED,
+                        expected_before=approved["before_sha256"],
+                        expected_after=approved["after_sha256"],
+                        validate=self.hooks()[0], activate=self.hooks()[1],
+                        verify=self.hooks()[2],
+                        verify_restored=self.hooks()[2],
+                    )
+                self.assertEqual(self.events, [], "Runtime hooks ran before layout compatibility")
+                self.assertEqual(source.read_bytes(), wrong)
+                journal, snapshot = manual._recovery_names("81")
+                self.assertFalse((self.data / journal).exists())
+                self.assertFalse((self.data / snapshot).exists())
+        source.write_bytes(standard)
+        self.assertEqual(manual.preview(self.root / "php", "81", DESIRED),
+                         approved)
+
+    def test_php81_conventional_runtime_paths_allow_native_comments_only(self):
+        root = self.root / "php"
+        standard = (
+            b"[global]\n" +
+            ("pid = " + str(root / "81/var/run/php-fpm.pid")).encode() +
+            b" ; native service\n"
+            b"[www]\nlisten = /tmp/php-cgi-81.sock # native socket\n"
+        )
+        manual.require_native_runtime_paths(root, "81", standard)
+        invalid_sources = (
+            standard.replace(b"pid = ", b"pid = /tmp/unrelated.pid\npid = ", 1),
+            standard.replace(b"listen = ", b"listen = /tmp/other.sock\nlisten = ", 1),
+        )
+        for invalid in invalid_sources:
+            with self.assertRaises(manual.FpmApplyError):
+                manual.require_native_runtime_paths(root, "81", invalid)
+
     def test_php81_runtime_failure_restores_exact_original_and_does_not_touch_php85(self):
         php81 = self.root / "php" / "81" / "etc"
         php81.mkdir(parents=True)
         config81 = php81 / "php-fpm.conf"
-        before = BASELINE.replace(b"/tmp/test-fpm.sock", b"/tmp/php-cgi-81.sock")
+        before = BASELINE.replace(b"/tmp/test-fpm.sock", b"/tmp/php-cgi-81.sock").replace(b"/tmp/fpm-test.pid", str(self.root / "php" / "81" / "var/run/php-fpm.pid").encode())
         config81.write_bytes(before)
         config81.chmod(0o644)
         plan = manual.preview(self.root / "php", "81", DESIRED)
