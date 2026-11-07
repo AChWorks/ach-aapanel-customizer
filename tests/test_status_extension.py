@@ -72,7 +72,7 @@ class ExtensionTests(unittest.TestCase):
             expected_current=kw.get(
                 "current", self.before if kw.get("code", self.code) == "404"
                 else hashlib.sha256(b"").hexdigest()),
-            expected_vhost=kw.get("vhost", hashlib.sha256(self.vhost.read_bytes()).hexdigest()),
+            expected_vhost=(kw["vhost"] if "vhost" in kw else hashlib.sha256(self.vhost.read_bytes()).hexdigest()),
             expected_render=kw.get("render", self.after),
             expected_recovery=kw.get("recovery"),
             data_fd=self.data_fd, vhost_root=str(self.vhost_root),
@@ -110,6 +110,62 @@ class ExtensionTests(unittest.TestCase):
                 self.assertFalse((self.ext / extension._include_name(7, code)).exists())
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
         self.assertEqual(sum("reload" in cmd for cmd in self.commands), 4)
+
+    def test_native_stop_start_retains_recovery_record(self):
+        applied = self.run_manager()
+        op = applied["recovery_id"]
+        self.site["status"] = "0"
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager("restore", recovery=op)
+        stopped = self.run_manager("recheck")
+        self.assertEqual(stopped["state"], "Suspended")
+        self.assertEqual(stopped["recovery_id"], op)
+        self.assertEqual(stopped["journal_phase"], "applied")
+        self.assertEqual(stopped["verification_scope"], "saved_journal_only")
+        self.assertFalse(stopped["runtime_verified"])
+        self.assertFalse(stopped["changed"])
+        self.site["status"] = "1"
+        self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+        self.assertEqual(self.run_manager("restore", recovery=op)["state"], "Restored")
+
+    def test_regenerated_vhost_keeps_inspectable_saved_recovery(self):
+        applied = self.run_manager()
+        original = self.vhost.read_bytes()
+        self.vhost.write_bytes(original.replace(
+            b"error_page 404 /404.html;", b"error_page 404 /changed.html;"))
+        observed = self.run_manager("recheck")
+        self.assertEqual(observed["state"], "Needs Review")
+        self.assertEqual(observed["recovery_id"], applied["recovery_id"])
+        self.assertEqual(observed["journal_phase"], "applied")
+        self.assertEqual(observed["verification_scope"], "saved_journal_only")
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager("restore", recovery=applied["recovery_id"])
+        self.vhost.write_bytes(original)
+        self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+        self.assertEqual(
+            self.run_manager("restore", recovery=applied["recovery_id"])["state"], "Restored")
+
+    def test_temporarily_missing_vhost_retains_saved_recovery_visibility(self):
+        applied = self.run_manager()
+        backup = self.vhost.read_bytes()
+        old_vhost_sha = hashlib.sha256(backup).hexdigest()
+        self.vhost.unlink()
+        inspected = self.run_manager("recheck", vhost=old_vhost_sha)
+        self.assertEqual(inspected["state"], "Needs Review")
+        self.assertEqual(inspected["verification_scope"], "saved_journal_only")
+        self.assertEqual(inspected["recovery_id"], applied["recovery_id"])
+        with self.assertRaises((extension.ExtensionError, OSError)):
+            self.run_manager("restore", recovery=applied["recovery_id"],
+                             vhost=old_vhost_sha)
+        self.vhost.write_bytes(backup)
+        self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+        self.assertEqual(self.run_manager("restore", recovery=applied["recovery_id"])["state"], "Restored")
+
+    def test_stopped_unmanaged_site_cannot_invent_recovery(self):
+        self.site["status"] = "0"
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager("recheck")
+        self.assertEqual(list(self.state.iterdir()), [])
 
     def test_rejects_stale_hash_and_unknown_root_and_unsafe_owner(self):
         for options in ({"current": "0" * 64}, {"vhost": "0" * 64},
