@@ -165,6 +165,67 @@ class ConfiguredRouteTests(unittest.TestCase):
         self.assert_rejects(other=("server { alias " + str(other_root) + "; }\n"))
         self.assert_rejects(other="server { listen 80; server_name other.test; }\n")
 
+    def test_external_tree_rejects_uncoordinated_directory_writer(self):
+        other = self.root / "sites" / "writer.test"
+        other.mkdir()
+        conf = "server { listen 80; server_name writer.test; root " + str(other) + "; }"
+        self.assertTrue(self.validate(self.dump(conf))["configured_static_http_80"])
+        other.chmod(0o777)
+        self.assert_rejects(other=conf)
+
+    def test_external_tree_enumeration_is_bounded_before_sort(self):
+        other = self.root / "sites" / "large.test"
+        other.mkdir()
+        conf = "server { listen 80; server_name large.test; root " + str(other) + "; }"
+        for idx in range(route.MAX_EXTERNAL_ENTRIES):
+            (other / ("f" + str(idx))).touch()
+        self.assertTrue(self.validate(self.dump(conf))["configured_static_http_80"])
+        (other / "overflow").touch()
+        self.assert_rejects(other=conf)
+
+    def test_external_scan_never_materializes_unbounded_iterator(self):
+        from unittest.mock import patch
+        other = self.root / "sites" / "iterator.test"
+        other.mkdir()
+        conf = "server { listen 80; server_name iterator.test; root " + str(other) + "; }"
+        consumed = [0]
+        class Endless:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def __iter__(self):
+                while True:
+                    consumed[0] += 1
+                    yield type("DirEnt", (), {"name": "entry" + str(consumed[0])})()
+
+        with patch.object(route.os, "scandir", return_value=Endless()):
+            self.assert_rejects(other=conf)
+        self.assertEqual(consumed[0], route.MAX_EXTERNAL_ENTRIES + 1)
+
+    def test_external_roots_share_one_aggregate_entry_budget(self):
+        roots = []
+        for index in range(2):
+            root = self.root / "sites" / ("external" + str(index) + ".test")
+            root.mkdir()
+            roots.append(root)
+            for idx in range(1 + route.MAX_EXTERNAL_ENTRIES // 2):
+                (root / ("f" + str(idx))).touch()
+        conf = "".join(
+            "server { listen 80; server_name external" + str(idx)
+            + ".test; root " + str(root) + "; }\n"
+            for idx, root in enumerate(roots))
+        self.assert_rejects(other=conf)
+
+    def test_nested_external_directory_depth_is_bounded(self):
+        root = self.root / "sites" / "deep.test"
+        root.mkdir()
+        conf = "server { listen 80; server_name deep.test; root " + str(root) + "; }"
+        for idx in range(route.MAX_EXTERNAL_DEPTH + 1):
+            root = root / ("depth" + str(idx))
+            root.mkdir()
+        self.assert_rejects(other=conf)
+
     def test_trust_boundaries_require_literal_site_and_binding(self):
         cases = [
             {"bound_domains": [{"name": "demo.test", "port": 443}]},

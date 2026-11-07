@@ -45,6 +45,8 @@ def _canonical_path(value):
 MAX_EXTERNAL_ENTRIES = 2048
 MAX_EXTERNAL_DIRECTORIES = 128
 MAX_EXTERNAL_DEPTH = 12
+MAX_EXTERNAL_ROOTS = 64
+EXTERNAL_SCAN_DEADLINE = 2.5
 
 
 def _external_path_consumer(config, document_root):
@@ -75,34 +77,46 @@ def _external_path_consumer(config, document_root):
     return roots
 
 
-def _scan_external_root(path, selected_root, selected_file, digest):
+def _scan_external_root(path, selected_root, selected_file, digest, budget):
     """Reject unresolvable, aliased, or shared filesystem resources.
 
     Only a bounded tree without ANY symlinks can be proven separate here.
     No symlink directories are followed; each opened directory is checked
     against its pre-open inode. Source graph changes invalidate HTTP evidence.
     """
-    entries = 0
-    directories = 0
+    def check_budget():
+        if time.monotonic() > budget["deadline"]:
+            raise RouteGuardError("Other-site filesystem inspection exceeded deadline")
 
     def walk(fd, relative, depth):
-        nonlocal entries, directories
-        directories += 1
-        if directories > MAX_EXTERNAL_DIRECTORIES or depth > MAX_EXTERNAL_DEPTH:
+        check_budget()
+        budget["directories"] += 1
+        if budget["directories"] > MAX_EXTERNAL_DIRECTORIES or depth > MAX_EXTERNAL_DEPTH:
             raise RouteGuardError("Other-site filesystem graph exceeds inspection bounds")
         metadata = os.fstat(fd)
+        # Every directory must exclude uncoordinated web/application writers.
+        # Rechecking hashes does not prevent a writable directory introducing
+        # a symlink between the final inspection and the file swap.
+        if (metadata.st_uid != os.geteuid() or metadata.st_mode & 0o022):
+            raise RouteGuardError("Other-site directory permits an independent writer")
         if (metadata.st_dev, metadata.st_ino) == selected_root:
             raise RouteGuardError("Other-site path resolves to selected document root")
         digest.update(repr((path, relative, metadata.st_dev, metadata.st_ino,
                             metadata.st_mode, metadata.st_ctime_ns)).encode())
+        children = []
         with os.scandir(fd) as stream:
-            children = sorted(stream, key=lambda entry: entry.name)
-        for entry in children:
-            entries += 1
-            if entries > MAX_EXTERNAL_ENTRIES:
-                raise RouteGuardError("Other-site filesystem graph exceeds inspection bounds")
-            info = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
-            digest.update(repr((relative, entry.name, info.st_dev, info.st_ino,
+            for entry in stream:
+                budget["entries"] += 1
+                check_budget()
+                if budget["entries"] > MAX_EXTERNAL_ENTRIES:
+                    raise RouteGuardError("Other-site filesystem graph exceeds inspection bounds")
+                children.append(entry.name)
+        # Only the already-bounded names are sorted; never materialize an
+        # unlimited directory iterator before checking the budget.
+        for name in sorted(children):
+            check_budget()
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            digest.update(repr((relative, name, info.st_dev, info.st_ino,
                                 info.st_mode, info.st_size, info.st_mtime_ns,
                                 info.st_ctime_ns)).encode())
             if stat.S_ISLNK(info.st_mode):
@@ -110,13 +124,13 @@ def _scan_external_root(path, selected_root, selected_file, digest):
             if (info.st_dev, info.st_ino) == selected_file:
                 raise RouteGuardError("Other-site resource shares selected 404 inode")
             if stat.S_ISDIR(info.st_mode):
-                child = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY
                                 | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
                 try:
                     opened = os.fstat(child)
                     if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
                         raise RouteGuardError("Other-site directory changed during scan")
-                    walk(child, relative + "/" + entry.name, depth + 1)
+                    walk(child, relative + "/" + name, depth + 1)
                 finally:
                     os.close(child)
             elif not stat.S_ISREG(info.st_mode):
@@ -428,9 +442,13 @@ def verify_configured_site_404(site, *, vhost_root=VHOST_ROOT, capture=None,
                      + re.escape(name) + r"\b", uncommented):
             raise RouteGuardError("Another Nginx source binds the selected host")
         other_roots.update(_external_path_consumer(uncommented, root))
+    if len(other_roots) > MAX_EXTERNAL_ROOTS:
+        raise RouteGuardError("Too many other-site roots for safe ownership inspection")
     graph = hashlib.sha256()
+    budget = {"entries": 0, "directories": 0,
+              "deadline": time.monotonic() + EXTERNAL_SCAN_DEADLINE}
     for other_root in sorted(other_roots):
-        _scan_external_root(other_root, selected_root, selected_file, graph)
+        _scan_external_root(other_root, selected_root, selected_file, graph, budget)
     observed_runtime = (runtime or _native_live_http80)(files)
     if (not isinstance(observed_runtime, dict) or
             observed_runtime.get("native_http80_process_verified") is not True or

@@ -601,6 +601,8 @@
           if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
             msg(incompatible ? 'PHP-FPM operation response incompatible or incomplete. Inspect saved recovery before retrying.' :
               (response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
+              (typeof response.recovery_id === 'string' && /^[0-9a-f]{32}$/.test(response.recovery_id) ?
+                ' (Recovery ID: ' + response.recovery_id + '; Recheck before Restore)' : '') +
               (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
               (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
           }

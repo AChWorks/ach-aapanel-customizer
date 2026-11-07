@@ -52,7 +52,9 @@ class Site404TransactionTests(unittest.TestCase):
             manager, "verify_configured_site_404",
             side_effect=lambda site, **kwargs: {
                 "configured_static_http_80": True,
-                "loaded_workers_verified": False,
+                # Synthetic positive loaded-route evidence for transaction
+                # tests only; production route adapter never asserts this.
+                "loaded_workers_verified": True,
                 "nginx_dump_sha256": "a" * 64,
                 "external_graph_sha256": "b" * 64,
                 "runtime_generation_sha256": "c" * 64,
@@ -149,6 +151,25 @@ class Site404TransactionTests(unittest.TestCase):
                 self.assertEqual(ctx.exception.stage, "runtime")
                 self.assertIsNone(self.recovery())
                 self.assertEqual(self.page.read_bytes(), self.original)
+
+    def test_unattested_nginx_worker_generation_blocks_real_writes(self):
+        synthetic = manager.verify_configured_site_404(self.site)
+        unattested = dict(synthetic, loaded_workers_verified=False)
+        with patch.object(manager, "verify_configured_site_404", return_value=unattested):
+            with self.assertRaises(manager.StatusManageError) as error:
+                self.run_manager()
+            self.assertEqual(error.exception.stage, "runtime")
+            self.assertIn("not attested", str(error.exception))
+            self.assertIsNone(self.recovery())
+            self.assertEqual(self.page.read_bytes(), self.original)
+        applied = self.run_manager()
+        with patch.object(manager, "verify_configured_site_404", return_value=unattested):
+            self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+            with self.assertRaises(manager.StatusManageError) as error:
+                self.run_manager("restore", expected_recovery=applied["recovery_id"])
+            self.assertEqual(error.exception.stage, "runtime")
+            self.assertEqual(self.page.read_bytes(), self.render["html"].encode())
+            self.assertEqual(self.recovery()["phase"], "applied")
 
     def test_native_runtime_process_cannot_be_unverified_for_apply(self):
         baseline = manager.verify_configured_site_404(self.site)
@@ -372,6 +393,114 @@ class Site404TransactionTests(unittest.TestCase):
         self.assertIsNone(self.recovery())
         self.assertFalse((self.state / "ach_customizer.site404.9.before").exists())
 
+    def test_original_fd_open_across_apply_remains_accessible_by_retained_inode(self):
+        # An uncoordinated privileged writer opened the original inode before
+        # Apply. Its later write must not be lost when the live name is swapped.
+        descriptor = os.open(self.page, os.O_RDWR)
+        try:
+            original_inode = os.fstat(descriptor).st_ino
+            result = self.run_manager()
+            self.assertEqual(result["state"], "Applied")
+            retained = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+                result["recovery_id"], "apply").replace(".tmp", ".retained")
+            self.assertEqual(retained.stat().st_ino, original_inode)
+            with os.fdopen(os.dup(descriptor), "r+b") as stream:
+                stream.seek(0)
+                stream.write(b"external editor from retained descriptor")
+                stream.truncate()
+                stream.flush()
+            self.assertEqual(retained.read_bytes(), b"external editor from retained descriptor")
+            self.assertEqual(self.page.read_bytes(), self.render["html"].encode())
+            self.assertEqual(
+                (self.state / "ach_customizer.site404.9.before").read_bytes(),
+                self.original)
+        finally:
+            os.close(descriptor)
+
+    def test_open_descriptor_write_immediately_before_retention_not_lost(self):
+        descriptor = os.open(self.page, os.O_RDWR)
+        retained = manager._retain_displaced
+        try:
+            def interposed_retention(stage_fd, name):
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                os.write(descriptor, b"external mutation before retention")
+                os.ftruncate(descriptor, len(b"external mutation before retention"))
+                return retained(stage_fd, name)
+            with patch.object(manager, "_retain_displaced", side_effect=interposed_retention):
+                outcome = self.run_manager()
+            self.assertEqual(outcome["state"], "Applied")
+            record = self.recovery()
+            private = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+                record["operation_id"], "apply").replace(".tmp", ".retained")
+            self.assertTrue(private.exists())
+            self.assertEqual(private.read_bytes(), b"external mutation before retention")
+            self.assertEqual(self.recovery()["phase"], "applied")
+        finally:
+            os.close(descriptor)
+
+    def test_post_apply_same_bytes_independent_inode_replacement_blocks_restore(self):
+        applied = self.run_manager()
+        before = self.page.stat()
+        foreign = self.site_root / "same-bytes-foreign.tmp"
+        foreign.write_bytes(self.page.read_bytes())
+        foreign.chmod(0o644)
+        foreign_inode = foreign.stat().st_ino
+        os.replace(foreign, self.page)
+        self.assertNotEqual(before.st_ino, foreign_inode)
+        self.assertEqual(self.run_manager("recheck")["state"], "Drift")
+        with self.assertRaises(manager.StatusManageError) as error:
+            self.run_manager("restore", expected_recovery=applied["recovery_id"])
+        self.assertEqual(error.exception.stage, "concurrency")
+        self.assertEqual(self.page.stat().st_ino, foreign_inode)
+        self.assertEqual(self.recovery()["phase"], "applied")
+
+    def test_post_restore_same_byte_foreign_inode_cannot_be_reapplied(self):
+        applied = self.run_manager()
+        self.run_manager("restore", expected_recovery=applied["recovery_id"])
+        previous = self.page.stat()
+        foreign = self.site_root / "replaced-after-restore.tmp"
+        foreign.write_bytes(self.original)
+        foreign.chmod(0o644)
+        os.replace(foreign, self.page)
+        self.assertNotEqual(previous.st_ino, self.page.stat().st_ino)
+        self.assertEqual(self.run_manager("recheck")["state"], "Drift")
+        with self.assertRaises(manager.StatusManageError) as error:
+            self.run_manager()
+        self.assertEqual(error.exception.stage, "recovery")
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertEqual(self.recovery()["phase"], "restored")
+
+    def test_completed_restore_retains_displaced_applied_inode(self):
+        applied = self.run_manager()
+        applied_inode = self.page.stat().st_ino
+        restored = self.run_manager("restore", expected_recovery=applied["recovery_id"])
+        self.assertEqual(restored["state"], "Restored")
+        private = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+            applied["recovery_id"], "restore").replace(".tmp", ".retained")
+        self.assertTrue(private.exists())
+        self.assertEqual(private.stat().st_ino, applied_inode)
+        self.assertEqual(private.read_bytes(), self.render["html"].encode())
+        self.assertEqual(self.page.read_bytes(), self.original)
+
+    def test_recovered_interrupted_swap_keeps_apply_inode_as_retained(self):
+        original_exchange = manager._exchange_site_with_stage
+        def swap_then_error(stage_fd, name, site_fd):
+            original_exchange(stage_fd, name, site_fd)
+            raise OSError("lost operation acknowledgement")
+        with patch.object(manager, "_exchange_site_with_stage", side_effect=swap_then_error):
+            with self.assertRaises(manager.StatusManageError):
+                self.run_manager()
+        journal = self.recovery()
+        self.assertEqual(journal["schema"], 2)
+        self.assertTrue(manager._applied_inode_matches(journal, self.page.stat()))
+        operation = journal["operation_id"]
+        done = self.run_manager("restore", expected_recovery=operation)
+        self.assertEqual(done["state"], "Restored")
+        retained = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+            operation, "apply").replace(".tmp", ".retained")
+        self.assertTrue(retained.exists())
+        self.assertEqual(retained.read_bytes(), self.original)
+
     def test_exchange_failure_before_swap_rechecks_and_restores_original(self):
         # Kernel exchange unavailable or failed before doing anything: leave
         # private staged proposed bytes, require explicit recovery, never
@@ -581,7 +710,9 @@ class Site404TransactionTests(unittest.TestCase):
         self.assertEqual(done["state"], "Applied")
         staging = self.site_root / manager.STAGING_DIRECTORY
         self.assertEqual(staging.stat().st_mode & 0o777, 0o700)
-        self.assertEqual(list(staging.iterdir()), [])
+        retained = list(staging.glob("*.retained"))
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), self.original)
         self.assertTrue(self.other_file.exists())
 
     def test_backup_no_clobber_preserves_existing_bytes(self):
@@ -724,7 +855,8 @@ class Site404TransactionTests(unittest.TestCase):
             with self.assertRaises(manager.StatusManageError) as error:
                 self.run_manager()
         self.assertEqual(error.exception.stage, "uncertain")
-        self.assertEqual(stages, ["prepared", "applied"])
+        # Initial prepared journal, durable candidate-inode binding, then applied.
+        self.assertEqual(stages, ["prepared", "prepared", "applied"])
         self.assertEqual(self.recovery()["phase"], "prepared")
         self.assertEqual(self.page.read_bytes(), self.render["html"].encode())
         rechecked = self.run_manager("recheck")

@@ -1728,6 +1728,25 @@ test('Status 404 Apply rejects stale evidence and forged positive acknowledgemen
   assert.equal(ui.requests.length,before);
 });
 
+test('Uncertain Status write exposes validated recovery ID without authorizing Restore', () => {
+  for (const recovery of ['e'.repeat(32), 'not-a-recovery-id']) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+    ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+    const apply=ui.statusClick('#ach-status-manage-apply');
+    apply.respond({status:false,stage:'uncertain',msg:'Site exchange unconfirmed',
+      operation_id:'d'.repeat(32),recovery_id:recovery});
+    assert.match(ui.state().error,/Site exchange unconfirmed/);
+    if (recovery.length===32) {
+      assert.match(ui.state().error,/Recovery ID: e{32}; Recheck before Restore/);
+    } else {
+      assert.doesNotMatch(ui.state().error,/Recovery ID:/);
+    }
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+    assert.equal(ui.state().statusManageRecheckDisabled,false);
+  }
+});
+
 test('Status 404 writes return explicit uncertainty, preserving Recheck as recovery path', () => {
   const ui=statusProbeUi();
   ui.statusClick('#ach-status-probe-button').respond(native404Proposal());

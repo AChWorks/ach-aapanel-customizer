@@ -28,6 +28,8 @@ from ach_customizer_status_pages import StatusPageError
 STATE_PREFIX = "ach_customizer.site404."
 WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 MAX_JOURNAL = 4096
+INODE_FIELDS = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
+                "st_size", "st_mtime_ns")
 
 
 class StatusManageError(StatusPageError):
@@ -48,6 +50,27 @@ def _same_file_metadata(first, second):
     fields = ("st_dev", "st_ino", "st_size", "st_mode", "st_uid",
               "st_gid", "st_nlink", "st_mtime_ns", "st_ctime_ns")
     return all(getattr(first, field) == getattr(second, field) for field in fields)
+
+
+def _inode_reference(info):
+    # A rename can change ctime, so persist stable inode identity/metadata.
+    return [getattr(info, field) for field in INODE_FIELDS]
+
+
+def _is_inode_reference(value):
+    return (type(value) is list and len(value) == len(INODE_FIELDS)
+            and all(type(number) is int and number >= 0 for number in value)
+            and value[1] > 0)
+
+
+def _applied_inode_matches(record, info):
+    return (_is_inode_reference(record.get("applied_inode"))
+            and record["applied_inode"] == _inode_reference(info))
+
+
+def _restored_inode_matches(record, info):
+    return (_is_inode_reference(record.get("restored_inode"))
+            and record["restored_inode"] == _inode_reference(info))
 
 
 def _names(site_id):
@@ -111,10 +134,13 @@ def _json_record(data_fd, site_id):
         record = json.loads(raw.decode("utf-8"))
     except (UnicodeError, ValueError) as exc:
         raise StatusManageError("recovery", "Unreadable site recovery journal") from exc
-    expected = {"schema", "site_id", "site_key", "document_root", "before_sha256",
-                "after_sha256", "phase", "operation_id", "source_vhost_sha256"}
-    if (not isinstance(record, dict) or set(record) != expected or
-            record["schema"] != 1 or record["site_id"] != site_id or
+    base = {"schema", "site_id", "site_key", "document_root", "before_sha256",
+            "after_sha256", "phase", "operation_id", "source_vhost_sha256"}
+    if (not isinstance(record, dict) or
+            record.get("schema") not in (1, 2) or
+            set(record) != (base | {"applied_inode", "restored_inode"}
+                            if record["schema"] == 2 else base) or
+            record["site_id"] != site_id or
             record["phase"] not in ("prepared", "applied", "restored") or
             any(not isinstance(record[key], str) or not SHA256.fullmatch(record[key])
                 for key in ("before_sha256", "after_sha256", "source_vhost_sha256")) or
@@ -123,6 +149,19 @@ def _json_record(data_fd, site_id):
             not isinstance(record["site_key"], str) or
             not isinstance(record["document_root"], str)):
         raise StatusManageError("recovery", "Invalid site recovery journal")
+    if record["schema"] == 1:
+        # An older unpublished development journal has no inode authority.
+        # Preserve its evidence for read-only diagnosis, never adopt an
+        # equal-byte replacement as proof of writer provenance.
+        record["applied_inode"] = None
+        record["restored_inode"] = None
+    elif any(record[field] is not None and not _is_inode_reference(record[field])
+             for field in ("applied_inode", "restored_inode")):
+        raise StatusManageError("recovery", "Invalid site inode provenance")
+    if (record["schema"] == 2 and
+            ((record["phase"] == "applied" and record["applied_inode"] is None)
+             or (record["phase"] == "restored" and record["restored_inode"] is None))):
+        raise StatusManageError("recovery", "Completed journal lacks durable inode provenance")
     original = _read_data(data_fd, backup)
     if original is None or _sha(original) != record["before_sha256"]:
         raise StatusManageError("recovery", "Site backup missing or checksum mismatch")
@@ -326,6 +365,23 @@ def _staging_name(operation_id, phase):
     return ".site404." + operation_id + "." + phase + ".tmp"
 
 
+def _retain_displaced(stage_fd, stage_name):
+    """Never unlink an inode once it might have been publicly accessible.
+
+    Another root-authorized editor can retain a writable descriptor while an
+    atomic exchange moves the original into private staging. Rename to a
+    no-clobber, private retained entry; an arbitrary late write to that inode
+    remains recoverable by pathname. Do not auto-prune retained inodes.
+    """
+    if not re.fullmatch(r"\.site404\.[0-9a-f]{32}\.(?:apply|rollback|restore)\.tmp",
+                        stage_name):
+        raise StatusManageError("recovery", "Invalid displaced inode name")
+    retained = stage_name[:-4] + ".retained"
+    _rename_noreplace(stage_fd, stage_name, retained)
+    os.fsync(stage_fd)
+    return retained
+
+
 def _staging_present(site, operation_id):
     # Called only for an existing validated journal. Never delete, silently
     # adopt or overwrite a crash-left displaced inode.
@@ -419,8 +475,7 @@ def _retire_verified_apply_stage(site, record, originally_checked_stage):
                 os.stat(name, dir_fd=stage_fd, follow_symlinks=False), checked_info):
             raise StatusManageError("uncertain", "Private recovery inode changed at cleanup",
                                     recovery_id=record["operation_id"])
-        os.unlink(name, dir_fd=stage_fd)
-        os.fsync(stage_fd)
+        _retain_displaced(stage_fd, name)
     finally:
         if stage_fd is not None:
             os.close(stage_fd)
@@ -428,7 +483,7 @@ def _retire_verified_apply_stage(site, record, originally_checked_stage):
 
 
 def _replace_site(site, before, after, expected_info, expected_dir,
-                  *, operation_id=None, phase="apply"):
+                  *, operation_id=None, phase="apply", candidate_ready=None):
     """Swap only the existing checked 404, retaining the displaced old inode.
 
     Atomic exchange allows us to detect a replacement by an independent
@@ -473,6 +528,10 @@ def _replace_site(site, before, after, expected_info, expected_dir,
         if (staged is None or staged["sha256"] != _sha(after)
                 or not _same_displaced_inode(staged_now, staged_info)):
             raise StatusManageError("concurrency", "Private candidate inode changed before exchange")
+        # Persist this inode identity while still in private staging and
+        # BEFORE any exchange can place it at the public pathname.
+        if candidate_ready is not None:
+            candidate_ready(_inode_reference(staged_info))
         current = _file_snapshot(site_fd, "404.html")
         latest = os.stat("404.html", dir_fd=site_fd, follow_symlinks=False)
         if (current is None or current["sha256"] != _sha(before) or
@@ -534,11 +593,10 @@ def _replace_site(site, before, after, expected_info, expected_dir,
                             recovery_id=operation_id)
                     exchanged = False
                     exchange_attempted = False
-                    os.unlink(stage_name, dir_fd=stage_fd)
+                    _retain_displaced(stage_fd, stage_name)
                     staged = False
-                    os.fsync(stage_fd)
                     raise StatusManageError(
-                        "concurrency", "An independent site edit won the race; it was preserved")
+                        "concurrency", "An independent site edit won the race; its inode was retained")
             raise StatusManageError(
                 "uncertain", "Site swap conflict; displaced file retained for recovery",
                 recovery_id=operation_id)
@@ -550,9 +608,8 @@ def _replace_site(site, before, after, expected_info, expected_dir,
         if not _same_displaced_inode(final_displaced, state):
             raise StatusManageError("uncertain", "Displaced site inode changed before cleanup",
                                     recovery_id=operation_id)
-        os.unlink(stage_name, dir_fd=stage_fd)
+        _retain_displaced(stage_fd, stage_name)
         staged = False
-        os.fsync(stage_fd)
         rebound = _directory(site["path"])
         try:
             if ((os.fstat(rebound).st_dev, os.fstat(rebound).st_ino) !=
@@ -584,12 +641,19 @@ def _replace_site(site, before, after, expected_info, expected_dir,
         os.close(site_fd)
 
 
-def _observed(site, locale, rendered_sha, rendered_html, vhost_root, probe):
+def _observed(site, locale, rendered_sha, rendered_html, vhost_root, probe,
+              *, authorize_write=False):
     try:
         route = verify_configured_site_404(site, vhost_root=vhost_root)
     except (RouteGuardError, OSError, ValueError) as exc:
         raise StatusManageError("runtime", "Native configured 404 route is unproven: "
                                 + str(exc)[:140]) from exc
+    # Process provenance and source age do not attest the actual loaded
+    # Nginx configuration. Until a verified activation protocol exists,
+    # all real writes must fail closed, while read-only Recheck remains usable.
+    if authorize_write and route.get("loaded_workers_verified") is not True:
+        raise StatusManageError(
+            "runtime", "Active Nginx route generation is not attested; site change refused")
     fn = probe or probe_site_404
     observed = fn(site, locale=locale, rendered_sha256=rendered_sha,
                   rendered_html=rendered_html, vhost_root=vhost_root)
@@ -612,11 +676,12 @@ def _observed(site, locale, rendered_sha, rendered_html, vhost_root, probe):
                 route["runtime_generation_sha256"] or
             route_after.get("nginx_dump_sha256") != route["nginx_dump_sha256"] or
             route_after.get("external_graph_sha256") != route["external_graph_sha256"] or
-            route_after.get("vhost_sha256") != route["vhost_sha256"]):
+            route_after.get("vhost_sha256") != route["vhost_sha256"] or
+            (authorize_write and route_after.get("loaded_workers_verified") is not True)):
         raise StatusManageError("runtime", "Nginx configuration changed during HTTP verification")
     adoption = observed.get("adoption_preview")
     if (route.get("configured_static_http_80") is not True or
-            route.get("loaded_workers_verified") is not False or
+            route.get("loaded_workers_verified") not in (True, False) or
             route.get("vhost_sha256") != observed.get("adoption_preview", {}).get("vhost_sha256")):
         raise StatusManageError("runtime", "Current configured site source does not match HTTP evidence")
     if (observed.get("state") != "HTTP Match" or
@@ -679,7 +744,15 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                          record["before_sha256"], record["after_sha256"])
                      or record["phase"] == "applied" and current_sha == record["before_sha256"]
                  ) else "Drift")
-        if record and record["phase"] != "prepared" and not staged_recovery:
+        if (record and
+                ((record["phase"] in ("prepared", "applied")
+                  and current_sha == record["after_sha256"]
+                  and not _applied_inode_matches(record, info))
+                 or (record["phase"] == "restored"
+                     and current_sha == record["before_sha256"]
+                     and not _restored_inode_matches(record, info)))):
+            state = "Drift"
+        elif record and record["phase"] != "prepared" and not staged_recovery:
             goal = record["after_sha256"] if record["phase"] == "applied" else record["before_sha256"]
             if current_sha == goal:
                 try:
@@ -709,7 +782,8 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                 or not isinstance(expected_vhost, str) or not SHA256.fullmatch(expected_vhost)
                 or expected_current != current_sha or expected_render != sha):
             raise StatusManageError("concurrency", "Preview/current 404 hashes changed; refresh proof")
-        observation = _observed(site, locale, sha, html, vhost_root, probe)
+        observation = _observed(site, locale, sha, html, vhost_root, probe,
+                                authorize_write=True)
         if (observation["body_sha256"] != expected_current or
                 observation["adoption_preview"].get("vhost_sha256") != expected_vhost):
             raise StatusManageError("concurrency", "Observed 404/VHost differs from approved preview")
@@ -722,9 +796,12 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                 raise StatusManageError(
                     "recovery", "Proposed 404 already matches an unjournaled backup; "
                     "preserve backup and request manual recovery review")
+        if record and record["phase"] == "restored" and not _restored_inode_matches(record, info):
+            raise StatusManageError(
+                "recovery", "Previously restored inode changed independently; review before Apply")
         if record and record["phase"] != "restored":
             if (record["phase"] == "applied" and record["after_sha256"] == sha and
-                    current_sha == sha and
+                    current_sha == sha and _applied_inode_matches(record, info) and
                     record["source_vhost_sha256"] == expected_vhost):
                 return {"state": "Already Applied", "changed": False, "site_id": site_id,
                         "page_file_sha256": sha, "recovery_id": record["operation_id"],
@@ -760,7 +837,8 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
             if _read_data(data_fd, backup_name) != content:
                 raise StatusManageError("recovery", "Saved original bytes changed")
         transaction = {
-            "schema": 1, "site_id": site_id,
+            "schema": 2, "site_id": site_id, "applied_inode": None,
+            "restored_inode": None,
             "site_key": site["name"], "document_root": site["path"],
             "before_sha256": current_sha, "after_sha256": sha,
             "phase": "prepared", "operation_id": uuid4().hex,
@@ -774,9 +852,14 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
             raise StatusManageError(
                 "journal_prepared", "Initial recovery journal not confirmed; "
                 "website remains untouched; Recheck before another Apply") from exc
+        def capture_applied_inode(reference):
+            transaction["applied_inode"] = reference
+            _save_journal(data_fd, site_id, transaction)
+
         try:
             _replace_site(site, content, desired, info, directory,
-                          operation_id=transaction["operation_id"], phase="apply")
+                          operation_id=transaction["operation_id"], phase="apply",
+                          candidate_ready=capture_applied_inode)
             verified = _observed(site, locale, sha, html, vhost_root, probe)
             if (verified["body_sha256"] != sha or
                     verified["adoption_preview"].get("vhost_sha256") != expected_vhost):
@@ -794,6 +877,9 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                 actual, actual_info, actual_directory = _site_bytes(
                     site, site_root_prefix=site_root_prefix)
                 if actual == desired:
+                    if not _applied_inode_matches(transaction, actual_info):
+                        raise StatusManageError(
+                            "recovery", "Applied page inode was replaced during failed Apply")
                     _replace_site(site, desired, content, actual_info, actual_directory,
                                   operation_id=transaction["operation_id"], phase="rollback")
                 elif actual != content:
@@ -802,6 +888,11 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
                 if (restored["body_sha256"] != current_sha or
                         restored["adoption_preview"].get("vhost_sha256") != expected_vhost):
                     raise StatusManageError("recovery", "Rollback HTTP/VHost verification failed")
+                restored_bytes, restored_info, _ = _site_bytes(
+                    site, site_root_prefix=site_root_prefix)
+                if restored_bytes != content:
+                    raise StatusManageError("recovery", "Recovered inode differs from baseline")
+                transaction["restored_inode"] = _inode_reference(restored_info)
                 transaction["phase"] = "restored"
                 _save_journal(data_fd, site_id, transaction)
             except Exception as recovery_exc:
@@ -840,7 +931,15 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
     before = _read_data(data_fd, _names(site_id)[1])
     if current_sha not in (record["before_sha256"], record["after_sha256"]):
         raise StatusManageError("concurrency", "Site 404 no longer matches saved Apply; refuse overwrite")
+    if record["schema"] != 2:
+        raise StatusManageError("recovery", "Legacy journal has no trusted inode provenance")
+    if (current_sha == record["after_sha256"]
+            and not _applied_inode_matches(record, info)):
+        raise StatusManageError(
+            "concurrency", "Applied inode changed independently; refuse even matching bytes")
     if record["phase"] == "restored":
+        if not _restored_inode_matches(record, info):
+            raise StatusManageError("concurrency", "Restored inode was replaced independently")
         if recovered_stage_sha is not None:
             raise StatusManageError("recovery", "Restored journal has unexpected recovery staging")
         if current_sha != record["before_sha256"]:
@@ -857,7 +956,8 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
     # present and their HTTP 404 path still serves them.
     changed = current_sha == record["after_sha256"]
     if changed:
-        observed_before = _observed(site, locale, sha, html, vhost_root, probe)
+        observed_before = _observed(site, locale, sha, html, vhost_root, probe,
+                                    authorize_write=True)
         if (observed_before["body_sha256"] != current_sha or
                 observed_before["adoption_preview"].get("vhost_sha256") !=
                 record["source_vhost_sha256"]):
@@ -877,6 +977,13 @@ def manage_site_404(action, site, *, locale, html, expected_current=None,
     # still match the earlier read; otherwise preserve it as uncertain.
     if recovered_stage_sha is not None:
         _retire_verified_apply_stage(site, record, recovered_stage_sha)
+    final_bytes, final_info, _ = _site_bytes(
+        site, site_root_prefix=site_root_prefix)
+    if final_bytes != before:
+        raise StatusManageError(
+            "uncertain", "Restored file inode changed before recovery journal",
+            recovery_id=record["operation_id"])
+    record["restored_inode"] = _inode_reference(final_info)
     record["phase"] = "restored"
     _save_journal(data_fd, site_id, record)
     return {"state": "Restored", "changed": changed, "site_id": site_id,
