@@ -64,9 +64,12 @@ class NativeSiteFileTests(unittest.TestCase):
         return (404, self.sha(self.files["404"].read_bytes()), None)
 
     def operate(self, action="recheck", *, code="404", **fields):
+        current_sha = fields.get("expected_current")
+        if current_sha is None:
+            current_sha = (self.sha(self.files[code].read_bytes())
+                           if self.files[code].exists() else "0" * 64)
         expected = {
-            "expected_current": (self.sha(self.files[code].read_bytes())
-                                 if self.files[code].exists() else "0" * 64),
+            "expected_current": current_sha,
             "expected_vhost": self.sha(self.original_vhost),
             "expected_render": self.sha(self.proposed.encode()),
             "expected_recovery": None,
@@ -121,6 +124,169 @@ class NativeSiteFileTests(unittest.TestCase):
                 self.assertEqual(self.files["404"].read_bytes(), b"original 404")
                 self.assertEqual(list(self.state.iterdir()), [])
         self.vhost.write_bytes(self.original_vhost)
+
+    def test_journal_mode_contract_all_supported_modes_are_recoverable(self):
+        """No allowed source mode may produce an unreadable recovery journal."""
+        from ach_customizer_status_site_file import _supported_mode, _record_read
+
+        path = self.files["502"]
+        initial = path.read_bytes()
+        original_uid, original_gid = path.stat().st_uid, path.stat().st_gid
+        modes = [mode for mode in range(0o400, 0o756) if _supported_mode(mode)]
+        self.assertIn(0o400, modes)
+        self.assertIn(0o440, modes)
+        self.assertIn(0o640, modes)
+        self.assertIn(0o644, modes)
+        self.assertIn(0o755, modes)
+        self.assertGreater(len(modes), 40)
+        for mode in modes:
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                before = self.sha(initial)
+                applied = self.operate("apply", code="502", expected_current=before)
+                self.assertEqual(applied["state"], "Applied")
+                recorded = _record_read(self.fd, self.site, "502")
+                self.assertEqual(recorded["mode"], mode)
+                self.assertEqual(recorded["before_sha"], before)
+                self.assertEqual(recorded["op"], applied["recovery_id"])
+                self.assertEqual(self.operate(code="502")["state"], "Applied")
+                self.assertEqual(
+                    (path.stat().st_uid, path.stat().st_gid, path.stat().st_mode & 0o7777),
+                    (original_uid, original_gid, mode))
+                restored = self.operate(
+                    "restore", code="502", expected_recovery=applied["recovery_id"])
+                self.assertEqual(restored["state"], "Source Restored")
+                self.assertEqual(path.read_bytes(), initial)
+                self.assertEqual(
+                    (path.stat().st_uid, path.stat().st_gid, path.stat().st_mode & 0o7777),
+                    (original_uid, original_gid, mode))
+                self.assertEqual(self.operate(code="502")["state"], "Source Restored")
+                # Every mode is an independent original native installation.
+                # Clear only this disposable fixture's saved journal/backup,
+                # never bypass drift protection inside the application.
+                for artifact in self.state.iterdir():
+                    self.assertTrue(artifact.name.startswith(
+                        "ach_customizer.site_file."))
+                    artifact.unlink()
+        self.assertFalse(any("reload" in cmd for cmd in self.commands))
+
+    def test_404_nondefault_safe_mode_keeps_http_proof_and_exact_restore(self):
+        path = self.files["404"]
+        path.chmod(0o440)
+        before = path.read_bytes()
+        applied = self.operate("apply")
+        self.assertEqual(applied["state"], "Applied")
+        self.assertTrue(applied["runtime_verified"])
+        self.assertEqual(path.stat().st_mode & 0o7777, 0o440)
+        self.assertEqual(self.operate()["state"], "Applied")
+        restored = self.operate("restore", expected_recovery=applied["recovery_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertTrue(restored["runtime_verified"])
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(path.stat().st_mode & 0o7777, 0o440)
+
+    def test_special_and_low_modes_rejected_before_journal_and_write(self):
+        from ach_customizer_status_site_file import _supported_mode
+        for code in ("404", "502"):
+            path = self.files[code]
+            initial = path.read_bytes()
+            for mode in (0o4755, 0o2644, 0o200, 0o300):
+                with self.subTest(code=code, mode=oct(mode)):
+                    self.assertFalse(_supported_mode(mode))
+                    path.chmod(mode)
+                    try:
+                        with self.assertRaises((ExtensionError, PermissionError)):
+                            self.operate("apply", code=code,
+                                         expected_current=self.sha(initial))
+                    finally:
+                        path.chmod(0o644)
+                    self.assertEqual(path.read_bytes(), initial)
+                    self.assertFalse(list(self.state.iterdir()))
+        self.assertEqual(self.commands, [])
+
+    def test_native_server_context_with_php_include_and_nested_locations(self):
+        native = """# aaPanel native VHost, with misleading { } inside this comment
+server
+{
+    listen 80;
+    server_name demo.invalid;
+    root __ROOT__;
+    error_page 404 /404.html;
+    error_page 502 /502.html;
+    include enable-php-85.conf;
+    include /www/server/panel/vhost/rewrite/demo.invalid.conf;
+    add_header X-Safe "braces { } are data";
+    location ~ \\.well-known{ allow all; }
+    if ( $uri ~ "^/\\.well-known/.*\\.php$" ) { return 403; }
+}
+""".replace("__ROOT__", str(self.root_site))
+        self.vhost.write_text(native)
+        vhost_sha = self.sha(self.vhost.read_bytes())
+        for code in ("404", "502"):
+            with self.subTest(code=code):
+                self.assertEqual(manager._source(self.site, code, str(self.vhost_root)),
+                                 vhost_sha)
+                applied = self.operate("apply", code=code, expected_vhost=vhost_sha)
+                self.assertEqual(applied["state"], "Applied")
+                self.assertEqual(self.operate(code=code)["state"], "Applied")
+                restored = self.operate("restore", code=code,
+                                        expected_recovery=applied["recovery_id"])
+                self.assertEqual(restored["state"],
+                                 "Restored" if code == "404" else "Source Restored")
+        self.assertFalse(any("reload" in cmd for cmd in self.commands))
+
+    def test_nested_only_error_page_never_authorizes_502_source_or_write(self):
+        self.vhost.write_bytes(self.original_vhost.replace(
+            b"error_page 502 /502.html;\n",
+            b"location /special/ {\n error_page 502 /502.html;\n}\n"))
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        from unittest.mock import patch
+        with patch.object(manager, "VHOST_ROOT", str(self.vhost_root)):
+            with self.assertRaises(ExtensionError):
+                manager.preview_site_file_502(
+                    self.site, locale="en",
+                    rendered_sha256=self.sha(self.proposed.encode()),
+                    rendered_html=self.proposed)
+        with self.assertRaises(ExtensionError):
+            self.operate("apply", code="502",
+                         expected_vhost=self.sha(self.vhost.read_bytes()))
+        self.assertEqual(self.files["502"].read_bytes(), b"original 502")
+        self.assertEqual(self.commands, [])
+        self.assertFalse(list(self.state.iterdir()))
+
+    def test_nested_only_404_mapping_rejected_before_http_preflight(self):
+        self.vhost.write_bytes(self.original_vhost.replace(
+            b"error_page 404 /404.html;\n",
+            b"location /private/ {\n error_page 404 /404.html;\n}\n"))
+        with self.assertRaises(ExtensionError):
+            self.operate("apply", code="404",
+                         expected_vhost=self.sha(self.vhost.read_bytes()))
+        self.assertEqual(self.commands, [])
+        self.assertEqual(self.files["404"].read_bytes(), b"original 404")
+        self.assertFalse(list(self.state.iterdir()))
+
+    def test_nested_only_root_or_ambiguous_context_never_authorizes_502(self):
+        before = self.original_vhost
+        root_line = ("root " + str(self.root_site) + ";\n").encode()
+        for modified in (
+            before.replace(root_line, b"").replace(
+                b"include enable-php-85.conf;\n",
+                b"include enable-php-85.conf;\nlocation /special/ {\n " +
+                root_line + b"}\n"),
+            before.replace(b"error_page 502 /502.html;\n",
+                           b"location /special/ { error_page 502 /502.html; }\n"),
+            before.removesuffix(b"}\n"),
+            before + b"server { root /tmp/foreign; }\n",
+        ):
+            with self.subTest(source=modified[:100]):
+                self.vhost.write_bytes(modified)
+                with self.assertRaises(ExtensionError):
+                    self.operate("apply", code="502",
+                                 expected_vhost=self.sha(modified))
+                self.assertFalse(list(self.state.iterdir()))
+                self.assertEqual(self.files["502"].read_bytes(), b"original 502")
+        self.assertEqual(self.commands, [])
 
     def test_wrong_hashes_and_missing_file_never_mutate(self):
         for field in ("expected_current", "expected_vhost", "expected_render"):

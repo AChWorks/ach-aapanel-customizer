@@ -28,6 +28,87 @@ STAT_FIELDS = ("st_dev", "st_ino", "st_size", "st_mtime_ns",
                "st_ctime_ns", "st_uid", "st_gid", "st_mode", "st_nlink")
 
 
+def _supported_mode(mode):
+    """One permission contract shared by file eligibility and saved recovery."""
+    return type(mode) is int and 0o400 <= mode <= 0o755 and not mode & 0o022
+
+
+def _server_directives(source):
+    """Extract only direct directives from one bounded native server block.
+
+    This is intentionally NOT an effective Nginx parser: unrelated nested
+    location/if directives are skipped, while unknown block layouts and
+    ambiguous delimiters fail closed. Quotes, escapes and comments must not
+    be mistaken for context boundaries.
+    """
+    depth = 0
+    servers = 0
+    statement = []
+    direct = []
+    quote = None
+    escaped = False
+    comment = False
+    if "\x00" in source:
+        raise ExtensionError("source", "Native site VHost contains invalid text")
+    for char in source:
+        if comment:
+            if char == "\n":
+                comment = False
+                statement.append("\n")
+            continue
+        if escaped:
+            statement.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            statement.append(char)
+            escaped = True
+            continue
+        if quote:
+            statement.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+            statement.append(char)
+            continue
+        if char == "#":
+            comment = True
+            continue
+        if char == "{":
+            header = "".join(statement).strip()
+            if depth == 0:
+                if header != "server" or servers != 0:
+                    raise ExtensionError("source", "Native VHost is not one top-level server block")
+                servers += 1
+            elif not re.match(r"^(?:location\s+|if\s*\(|limit_except\s+)", header):
+                raise ExtensionError("source", "Unsupported nested native Nginx context")
+            depth += 1
+            if depth > 8:
+                raise ExtensionError("source", "Native VHost nesting is too deep")
+            statement.clear()
+            continue
+        if char == "}":
+            if depth == 0 or "".join(statement).strip():
+                raise ExtensionError("source", "Unbalanced or ambiguous native VHost context")
+            depth -= 1
+            statement.clear()
+            continue
+        if char == ";":
+            directive = " ".join("".join(statement).split())
+            if depth == 0 or not directive:
+                raise ExtensionError("source", "Unexpected native VHost directive")
+            if depth == 1:
+                direct.append(directive)
+            statement.clear()
+            continue
+        statement.append(char)
+    if quote or escaped or depth != 0 or servers != 1 or "".join(statement).strip():
+        raise ExtensionError("source", "Incomplete or ambiguous native VHost context")
+    return direct
+
+
 def _record_name(site_id, code):
     return "ach_customizer.site_file." + str(site_id) + "." + code + ".json"
 
@@ -60,7 +141,7 @@ def _record_read(fd, site, code):
             entry["backup"] != _backup_name(site["id"], code, entry["op"]) or
             any(type(entry[key]) is not int or entry[key] < 0
                 for key in ("uid", "gid", "mode")) or
-            not 0o400 <= entry["mode"] <= 0o755 or entry["mode"] & 0o022):
+            not _supported_mode(entry["mode"])):
         raise ExtensionError("recovery", "Site-file journal identity or schema is invalid")
     return entry
 
@@ -98,14 +179,18 @@ def _source(site, code, vhost_root):
         raise ExtensionError("source", "Native website VHost is missing")
     value = raw.decode("utf-8", "replace")
     active = "\n".join(line.split("#", 1)[0] for line in value.splitlines())
-    # Native file mode is deliberately unavailable when the VHost has an
-    # extension include, a second selected error-page route, or a local
-    # location that can shadow the standard page URI.
-    if (len(re.findall(r"(?m)^\s*server\s*\{", active)) != 1
+    direct = _server_directives(value)
+    server_text = "\n".join(line + ";" for line in direct)
+    # The required native root, host and selected status mapping MUST belong
+    # to the server context, not merely appear in a nested location/if block.
+    # Preserve the existing whole-source duplicate and extension checks.
+    if (sum(line.startswith("server_name ") for line in direct) != 1
+            or "server_name " + name not in direct
+            or sum(line.startswith("root ") for line in direct) != 1
+            or "root " + root not in direct
+            or _selected_error_page(server_text, code) != "native"
             or len(re.findall(r"(?m)^\s*server_name\s+", active)) != 1
             or len(re.findall(r"(?m)^\s*root\s+", active)) != 1
-            or len(re.findall(r"(?m)^\s*root\s+" + re.escape(root) + r"\s*;", active)) != 1
-            or len(re.findall(r"(?m)^\s*server_name\s+" + re.escape(name) + r"\s*;", active)) != 1
             or _selected_error_page(active, code) != "native"
             or re.search(r"\binclude\s+[^;]*?/extension/", active)
             or re.search(r"\blocation\s*=\s*/" + code + r"\.html\b", active)):
@@ -139,8 +224,8 @@ def _file(fd, filename):
         parent = os.fstat(fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or
                 before.st_uid not in (parent.st_uid, 0) or
-                before.st_mode & 0o022 or not 0 < before.st_size <= MAX_HTML or
-                os.listxattr(handle)):
+                not _supported_mode(stat.S_IMODE(before.st_mode)) or
+                not 0 < before.st_size <= MAX_HTML or os.listxattr(handle)):
             raise ExtensionError("ownership", "Selected site status file is not an exclusive, safe regular file")
         raw = os.read(handle, MAX_HTML + 1)
         after = os.fstat(handle)

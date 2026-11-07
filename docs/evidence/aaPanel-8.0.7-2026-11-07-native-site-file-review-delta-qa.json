@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "date": "2026-11-07",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "pull_request": 35,
+  "issue_acceptance": [
+    10,
+    21
+  ],
+  "previously_reviewed": {
+    "head": "c8ec27280cfb3bc118f9b7ebba67bf03927b0828",
+    "tree": "24ff68962fd411ee5db691b05acabc4ad9241138",
+    "verdict": "COMPLETE / CHANGES_REQUIRED",
+    "required": [
+      "REQUIRED-01 source file accepted permission mode disagrees with journal validation",
+      "REQUIRED-02 Nginx VHost textual matching confuses nested location root/error_page with selected server context"
+    ]
+  },
+  "corrections": {
+    "required_01": "Use one _supported_mode predicate for bounded native site-file eligibility and durable saved journal. Reject special-bit and low mode before creating backup, recovery journal, or replacing original; preserve exact uid/gid/mode for each supported mode.",
+    "required_02": "Bounded native VHost context scanner recognizes one top-level server, skips nested location/if directives for server-level root/server_name/error_page identity, respects quotes/comments/escapes, rejects ambiguous/unsupported contexts; retains previous full-source duplicate and extension include exclusion. No general Nginx parser.",
+    "unchanged": "Primary admin POST and exact mode-specific approval; existing Nginx extension delivery, no Nginx reload for native-file mode, real HTTP404 status/body, source-only 502, Stop/Start saved-only recovery."
+  },
+  "validation": {
+    "dev_unit_python": {
+      "count": 473,
+      "failed": 0,
+      "result": "PASS",
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p 'test_*.py' -q"
+    },
+    "dev_ui_javascript": {
+      "count": 214,
+      "failed": 0,
+      "result": "PASS"
+    },
+    "supported_modes_exhaustive": 64,
+    "mode_examples": "0o400, 0o440, 0o640, 0o644, 0o755: journal load, Apply/Recheck/Restore and exact uid/gid/mode preserving 502; 0o440 also HTTP404",
+    "unsupported_examples": [
+      "0o4755 special owner setuid",
+      "0o2644 setgid",
+      "0o200 low mode",
+      "0o300 low mode"
+    ],
+    "source_fixtures": "Native server newline brace form with PHP include, real nested location and quoted braces; nested-only 404/502 and nested-only root and ambiguous/unbalanced contexts denied before mutation",
+    "embedded_js_parse": "PASS",
+    "shell_syntax": "PASS",
+    "python_compileall": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "package": {
+    "version": "0.1.19 UNRELEASED",
+    "name": "ach_customizer_0119_pr35_review_delta.zip",
+    "sha256": "cf7559e404de39d9fd36741b7c2d085598d802ebdf3340a0742151ae33006c3a",
+    "files": 47,
+    "deterministic_rebuild": "PASS",
+    "native_install": "panelPlugin.update_zip + panelPlugin.input_zip",
+    "installed_hashes": "47/47 PASS"
+  },
+  "native": {
+    "location": "Test Server For AI isolated QEMU /srv/ai-workspace/ach-aapanel-rebuild-20261105",
+    "environment": "Debian12 aaPanel8.0.7 Nginx PHP8.1 and PHP8.5; synthetic Flask primary admin POST, NOT authenticated browser/CSRF",
+    "driver": "artifacts/qa_0119_review_delta_native.py",
+    "driver_sha256": "1446ba628f860fc7c4c2a74afc7997b26a1d9279ecbb9f02302eda1dfd4777c2",
+    "installer": "artifacts/qa_0119_pr35_delta_install.py",
+    "installer_sha256": "a59682971b0ad5d6fb308e394e1d90acf9fee04385fcd6b93694945c962e9ddc",
+    "new_site": "ach-file-0119.invalid native PHP ID9, no Nginx extension include",
+    "assertions": [
+      "All three original WordPress websites HTTP200 at test start.",
+      "Native ZIP installed 47/47 matching exact package SHA256.",
+      "Special source modes 04755, 02644 and low mode 0200 rejected before 502 Apply, no recovery journal.",
+      "502 error_page only in location denied source preview and Apply.",
+      "Native document root only in location denied source preview and Apply.",
+      "Original VHost restored byte-exact after negative QA without reload.",
+      "Full 404 EN actual HTTP404/body sha and 502 FA source-only Apply/Recheck passed.",
+      "Wrong delivery/approval rejected.",
+      "Native SiteStop saved-only Suspended rechecks; writes denied.",
+      "Native SiteStart fresh applied Recheck passed.",
+      "Deliberate native VHost drift read-only Needs Review and Restore denial.",
+      "Exact original 404/502 bytes and ownership/mode restored.",
+      "Original three WordPress HTTP200 with unchanged VHost SHA; Nginx syntax passes."
+    ]
+  },
+  "guest_restore": {
+    "status": "PASS",
+    "method": "Cold-stop disposable candidate QEMU overlay; restore intact pre-test active overlay; start guest, verify original runtime; delete only the separately created disposable test overlay.",
+    "plugin": "0.1.12 original",
+    "installed_files": "39/39 SHA256 PASS",
+    "word_press_http": "3/3 HTTP200",
+    "native_test_site": "absent",
+    "native_test_vhost": "absent",
+    "nginx_syntax": "PASS",
+    "protected_snapshot": "rescue/pre-status-extension-20261107.qcow2",
+    "protected_snapshot_sha256": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "protected_snapshot_unchanged": true,
+    "retained": "Existing qa-0119-native-site-file-before.qcow2 preserved because comparison proved it contains non-golden data; not safely disposable."
+  },
+  "gate": {
+    "review": "Independent exact-delta re-review of corrected HEAD/TREE required; previous CHANGES_REQUIRED is not approval",
+    "merge": "Requires fresh explicit Owner permission after APPROVE",
+    "release": "No stable release or Production deployment",
+    "open_items": "Issues #10 and #21 remain open: stopped-site real HTTP503, unknown-host HTTPS/443, generic 50x, real browser/CSRF and native lifecycle."
+  }
+}
