@@ -10,7 +10,7 @@ from unittest.mock import patch
 PACKAGE = Path(__file__).resolve().parents[1] / "plugin" / "ach_customizer"
 sys.path.insert(0, str(PACKAGE))
 import ach_customizer_main as backend
-import ach_customizer_status_manage as manager
+import ach_customizer_status_extension as manager
 from ach_customizer_status_pages import render_page
 
 
@@ -85,8 +85,8 @@ class NativeStatusManagementTests(unittest.TestCase):
         values = {
             "site_action": action, "scope": "site",
             "site_id": "7", "template": "404", "locale": "en",
-            "site_approval": "apply_exact_site_404" if action == "apply"
-                             else "restore_exact_site_404" if action == "restore" else "",
+            "site_approval": "apply_exact_site_404_reload" if action == "apply"
+                             else "restore_exact_site_404_reload" if action == "restore" else "",
             "expected_revision": "0",
             "expected_site_key": "demo.test",
             "expected_site_snapshot": json.dumps([
@@ -107,10 +107,10 @@ class NativeStatusManagementTests(unittest.TestCase):
             manager_result = {"state": "Applied", "changed": True,
                               "site_id": 7, "page_file_sha256": "a" * 64,
                               "recovery_id": "c" * 32,
-                              "read_only": False, "mode": "native_existing_404_file"}
+                              "read_only": False, "mode": "native_status_extension"}
         with patch.dict(sys.modules, {"public": self.public(), "flask": flask}), \
              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings), \
-             patch.object(manager, "manage_site_404", return_value=manager_result) as applied:
+             patch.object(manager, "manage_site_extension", return_value=manager_result) as applied:
             return self.plugin.status_manage(args), applied.call_args
 
     def test_apply_enforces_primary_admin_native_identity_and_hash_contract(self):
@@ -143,7 +143,7 @@ class NativeStatusManagementTests(unittest.TestCase):
         from ach_customizer_activity import read_activity
         with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}), \
              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings), \
-             patch.object(manager, "manage_site_404", side_effect=manager.StatusManageError(
+             patch.object(manager, "manage_site_extension", side_effect=manager.ExtensionError(
                  "uncertain", "An interrupted recovery journal was preserved",
                  recovery_id="c" * 32)):
             result = self.plugin.status_manage(self.args())
@@ -158,7 +158,7 @@ class NativeStatusManagementTests(unittest.TestCase):
     def test_backup_failure_reports_controlled_stage_without_false_restore(self):
         with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}), \
              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings), \
-             patch.object(manager, "manage_site_404", side_effect=manager.StatusManageError(
+             patch.object(manager, "manage_site_extension", side_effect=manager.ExtensionError(
                  "backup", "Original bytes could not be stored")):
             result = self.plugin.status_manage(self.args())
         self.assertFalse(result["status"])
@@ -174,7 +174,7 @@ class NativeStatusManagementTests(unittest.TestCase):
                             "rendered_sha256": "b" * 64,
                             "before_sha256": None, "after_sha256": None,
                             "recovery_id": None, "read_only": True,
-                            "mode": "native_existing_404_file"})
+                            "mode": "native_status_extension"})
         self.assertTrue(response["status"])
         self.assertEqual(call.args[0], "recheck")
 
@@ -187,7 +187,7 @@ class NativeStatusManagementTests(unittest.TestCase):
                             "rendered_sha256": "b" * 64,
                             "before_sha256": "a" * 64,
                             "after_sha256": None, "recovery_id": None,
-                            "read_only": True, "mode": "native_existing_404_file"})
+                            "read_only": True, "mode": "native_status_extension"})
         self.assertTrue(response["status"], response)
         self.assertEqual(response["state"], "Orphan Backup")
         self.assertIsNone(response["recovery_id"])
@@ -252,9 +252,9 @@ class NativeStatusManagementTests(unittest.TestCase):
             return {
                 "state": "Applied", "changed": True, "site_id": 7,
                 "page_file_sha256": "a" * 64, "recovery_id": "c" * 32,
-                "read_only": False, "mode": "native_existing_404_file"
+                "read_only": False, "mode": "native_status_extension"
             }
-        with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}),              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings),              patch.object(manager, "manage_site_404", side_effect=changed_after_mutation):
+        with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}),              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings),              patch.object(manager, "manage_site_extension", side_effect=changed_after_mutation):
             response = self.plugin.status_manage(self.args())
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "status_manage_uncertain")
@@ -264,7 +264,7 @@ class NativeStatusManagementTests(unittest.TestCase):
     def test_backend_failure_does_not_hide_recovery_required_stage(self):
         with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}), \
              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings), \
-             patch.object(manager, "manage_site_404", side_effect=manager.StatusManageError(
+             patch.object(manager, "manage_site_extension", side_effect=manager.ExtensionError(
                  "uncertain", "404 transaction uncertain; journal preserved")):
             result = self.plugin.status_manage(self.args())
         self.assertFalse(result["status"])

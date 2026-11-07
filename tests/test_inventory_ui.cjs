@@ -1540,11 +1540,13 @@ test('Explicit live 404 probe reports HTTP/body evidence without granting Apply'
   assert.match(ui.state().statusProbe,/not proof|No Apply permission/);
   assert.equal(ui.state().statusProbeDisabled,false);
   ui.statusSetValue('#ach-status-template','502','change');
-  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.equal(ui.state().statusProbeDisabled,false);
   assert.match(ui.state().statusProbe,/not checked/);
-  const before=ui.requests.length;
-  ui.statusClick('#ach-status-probe-button');
-  assert.equal(ui.requests.length,before,'Cannot probe a 502 through the 404-only endpoint');
+  const source=ui.statusClick('#ach-status-probe-button');
+  assert.match(source.options.url,/s=status_probe$/);
+  assert.equal(source.options.data.template,'502');
+  source.respond(statusProbe({template:'502',state:'Needs Review'}));
+  assert.match(ui.state().statusProbe,/unconfirmed|incompatible/);
 });
 
 const managed404Original='b'.repeat(64);
@@ -1569,7 +1571,7 @@ function manage404Response(action,fields={}) {
   return {
     status:true,schema:1,site_id:7,site_action:action,
     verified_site_snapshot:probeSnapshot,locale:'en',template:'404',
-    revision:2,mode:'native_existing_404_file',
+    revision:2,mode:'native_status_extension',
     request_id:'d'.repeat(32),operation_id:'d'.repeat(32),
     read_only:action==='recheck',changed:action!=='recheck',
     state:action==='apply'?'Applied':action==='restore'?'Restored':'Applied',
@@ -1600,7 +1602,7 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   assert.equal(apply.options.data.site_action,'apply');
   assert.equal(apply.options.data.scope,'site');
   assert.equal(apply.options.data.site_id,'7');
-  assert.equal(apply.options.data.site_approval,'apply_exact_site_404');
+  assert.equal(apply.options.data.site_approval,'apply_exact_site_404_reload');
   assert.equal(apply.options.data.expected_site_snapshot,probeSnapshot);
   assert.equal(apply.options.data.expected_page_sha256,managed404Original);
   assert.equal(apply.options.data.expected_vhost_sha256,managed404Vhost);
@@ -1624,10 +1626,45 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   const restore=ui.statusClick('#ach-status-manage-restore');
   assert.equal(restore.options.data.site_action,'restore');
   assert.equal(restore.options.data.expected_recovery_id,managed404Recovery);
-  assert.equal(restore.options.data.site_approval,'restore_exact_site_404');
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_404_reload');
   restore.respond(manage404Response('restore'));
   assert.match(ui.state().statusManage,/Restored/);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Native 502 source-only preview gates extension Apply and Restore with Nginx reload approval', () => {
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-template','502','change');
+  ui.statusClick('#ach-status-probe-button').respond(statusProbe({
+    template:'502',state:'Source Ready',scope:'native_vhost_source_only',
+    page_file_sha256:managed404Original,body_sha256:null,http_status:null,
+    body_bytes:null,body_matches_file:false,body_matches_render:false,
+    http_404_observed:false,body_matches_file:false,
+    adoption_preview:{
+      schema:1,state:'Source Ready',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,
+      requires_adoption:false,requires_backup:false,
+      ownership_verified:false,recovery_verified:false,
+      apply_supported:false,reason:'Explicit reload required'
+    }
+  }));
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  const request=ui.statusClick('#ach-status-manage-apply');
+  assert.equal(request.options.data.template,'502');
+  assert.equal(request.options.data.site_approval,'apply_exact_site_502_reload');
+  request.respond(manage404Response('apply',{template:'502'}));
+  assert.match(ui.state().statusManage,/Applied/);
+  const recheck=ui.statusClick('#ach-status-manage-recheck');
+  recheck.respond(manage404Response('recheck',{template:'502',changed:false}));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(restore.options.data.template,'502');
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_502_reload');
+  restore.respond(manage404Response('restore',{template:'502'}));
+  assert.match(ui.state().statusManage,/Restored/);
 });
 
 test('Status 404 Restore confirms an interrupted earlier rollback without a second file write', () => {
