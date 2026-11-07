@@ -33,6 +33,10 @@ class ExtensionTests(unittest.TestCase):
             "root " + str(self.site_root) + ";\n"
             "error_page 404 /404.html;\nerror_page 502 /502.html;\n"
             "include " + str(self.ext) + "/*.conf;\n}\n")
+        self.nginx_conf = self.root / "nginx.conf"
+        self.nginx_conf.write_text(
+            "events { worker_connections 100; }\n"
+            "http {\n include " + str(self.vhost_root) + "/*.conf;\n}\n")
         self.site = {"id": 7, "name": "demo.invalid", "path": str(self.site_root),
                      "status": "1",
                      "bound_domains": [{"name": "demo.invalid", "port": 80},
@@ -73,7 +77,7 @@ class ExtensionTests(unittest.TestCase):
             expected_recovery=kw.get("recovery"),
             data_fd=self.data_fd, vhost_root=str(self.vhost_root),
             public_root=str(self.public / ".pages"),
-            nginx="/usr/sbin/nginx", nginx_conf="/tmp/test-nginx.conf",
+            nginx="/usr/sbin/nginx", nginx_conf=str(self.nginx_conf),
             runner=self.runner, probe=self.probe)
 
     def test_apply_recheck_restore_for_404_and_502(self):
@@ -91,8 +95,12 @@ class ExtensionTests(unittest.TestCase):
                 self.assertNotIn(str(self.site_root) + "/" + code + ".html", content)
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
                 restored = self.run_manager("restore", recovery=applied["recovery_id"])
-                self.assertEqual(restored["state"], "Restored")
-                self.assertEqual(self.run_manager("recheck")["state"], "Restored")
+                expected_state = "Restored" if code == "404" else "Source Restored"
+                self.assertEqual(restored["state"], expected_state)
+                self.assertEqual(self.run_manager("recheck")["state"], expected_state)
+                if code == "502":
+                    self.assertFalse(restored["runtime_verified"])
+                    self.assertEqual(restored["verification_scope"], "source_and_nonce_only")
                 self.assertFalse((self.ext / extension._include_name(7, code)).exists())
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
         self.assertEqual(sum("reload" in cmd for cmd in self.commands), 4)
@@ -224,6 +232,350 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(retained.read_text(), "foreign entry")
         self.assertTrue((self.ext / extension._include_name(7, "404")).exists())
         self.assertEqual(record["phase"], "applied")
+
+    def test_indirect_selected_vhost_import_from_other_scope_fails_closed(self):
+        # Even if the canonical VHost is reachable only once, importing it
+        # inside another server is not the native top-level ownership path.
+        other = self.vhost_root / "other.invalid.conf"
+        other.write_text(
+            "server {\nserver_name other.invalid;\n"
+            "include " + str(self.vhost) + ";\n}\n")
+        self.nginx_conf.write_text(
+            "http { include " + str(other) + "; }\n")
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager()
+        self.assertEqual(err.exception.stage, "ownership")
+        self.assertFalse(list(self.state.iterdir()))
+
+    def test_empty_native_rewrite_include_is_valid_source(self):
+        rewrite = self.root / "empty-rewrite.conf"
+        rewrite.write_bytes(b"")
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "error_page 502 /502.html;\n",
+            "error_page 502 /502.html;\ninclude " + str(rewrite) + ";\n"))
+        applied = self.run_manager()
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(self.run_manager("restore",
+                         recovery=applied["recovery_id"])["state"], "Restored")
+
+    def test_partial_stage_fsync_failure_preserves_prepared_journal(self):
+        from unittest.mock import patch
+        original = extension.os.fsync
+        injected = [False]
+        def reject_stage(fd):
+            try:
+                name = os.readlink("/proc/self/fd/" + str(fd))
+            except OSError:
+                name = ""
+            if ".conf." in name and name.endswith(".stage") and not injected[0]:
+                injected[0] = True
+                raise OSError(5, "simulated staged-file fsync failure")
+            return original(fd)
+        with patch.object(extension.os, "fsync", side_effect=reject_stage):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertTrue(injected[0])
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertEqual(self.run_manager("recheck")["state"], "Recovery Required")
+        self.assertFalse((self.ext / extension._include_name(7, "404")).exists())
+        self.assertEqual(
+            self.run_manager("restore", recovery=err.exception.recovery_id)["state"],
+            "Restored")
+
+    def test_concurrent_foreign_conf_before_publication_is_preserved(self):
+        from unittest.mock import patch
+        original = extension._rename_noreplace
+        def competitor(fd, before, after):
+            if after.endswith(".conf"):
+                descriptor = os.open(
+                    after, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600,
+                    dir_fd=fd)
+                try:
+                    os.write(descriptor, b"foreign operator owned config")
+                finally:
+                    os.close(descriptor)
+            return original(fd, before, after)
+        with patch.object(extension, "_rename_noreplace", side_effect=competitor):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        candidate = self.ext / extension._include_name(7, "404")
+        self.assertEqual(candidate.read_bytes(), b"foreign operator owned config")
+        self.assertFalse(any("-s" in args for args in self.commands))
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager("restore", recovery=err.exception.recovery_id)
+        self.assertEqual(candidate.read_bytes(), b"foreign operator owned config")
+
+    def test_502_old_nonce_remains_visible_after_restore_is_uncertain(self):
+        from unittest.mock import patch
+        applied = self.run_manager(code="502")
+        original = self.probe
+        def old_worker(site, code, operation):
+            if code == "502" and operation is not None:
+                return (502, self.after, operation)
+            return original(site, code, operation)
+        self.probe = old_worker
+        counter = [0]
+        def tick():
+            counter[0] += 10
+            return counter[0]
+        with patch.object(extension.time, "monotonic", side_effect=tick):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager("restore", code="502",
+                                 recovery=applied["recovery_id"])
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertEqual(err.exception.recovery_id, applied["recovery_id"])
+        self.probe = original
+        self.assertEqual(self.run_manager("restore", code="502",
+                         recovery=applied["recovery_id"])["state"], "Source Restored")
+
+    def test_502_uninspectable_symlink_cannot_be_treated_as_absent(self):
+        untrusted = self.site_root / "502.html"
+        untrusted.symlink_to(self.other)
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager(code="502")
+        self.assertEqual(err.exception.stage, "source")
+        self.assertFalse(list(self.state.iterdir()))
+        self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
+
+    def test_new_other_site_import_after_reload_is_not_positive_apply(self):
+        another = self.vhost_root / "other.invalid.conf"
+        original_runner = self.runner
+        def inject_on_reload(args, **kwargs):
+            if "-s" in args and "reload" in args:
+                another.write_text(
+                    "server {\nserver_name other.invalid;\n"
+                    "include " + str(self.vhost_root / "extension") + "/*/*.conf;\n}\n")
+            return original_runner(args, **kwargs)
+        self.runner = inject_on_reload
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertTrue(err.exception.recovery_id)
+        journal = json.loads(
+            (self.state / extension._record_name(7, "404")).read_text())
+        self.assertEqual(journal["phase"], "prepared")
+        another.unlink()
+        self.runner = original_runner
+        self.assertEqual(self.run_manager("restore",
+                         recovery=err.exception.recovery_id)["state"], "Restored")
+
+    def test_broad_wildcard_import_into_non_target_is_rejected_before_write(self):
+        other = self.vhost_root / "other.invalid.conf"
+        other.write_text(
+            "server {\nserver_name other.invalid;\n"
+            "include " + str(self.vhost_root / "extension") + "/*/*.conf;\n}\n")
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager()
+        self.assertEqual(err.exception.stage, "ownership")
+        self.assertFalse(list(self.state.iterdir()))
+        self.assertFalse(any("-s" in cmd for cmd in self.commands))
+
+    def test_indirect_non_target_include_is_rejected_before_write(self):
+        other = self.vhost_root / "other.invalid.conf"
+        shared = self.root / "shared-routes.conf"
+        shared.write_text(
+            "include " + str(self.ext) + "/*.conf;\n")
+        other.write_text(
+            "server {\nserver_name other.invalid;\n"
+            "include " + str(shared) + ";\n}\n")
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager()
+        self.assertEqual(err.exception.stage, "ownership")
+        self.assertFalse(list(self.state.iterdir()))
+
+    def test_duplicate_selected_vhost_import_is_rejected(self):
+        extra = self.vhost_root / "extra.invalid.conf"
+        extra.write_text("include " + str(self.vhost) + ";\n")
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager()
+        self.assertEqual(err.exception.stage, "ownership")
+        self.assertFalse(list(self.state.iterdir()))
+
+    def test_unproven_or_unreadable_nginx_include_graph_fails_closed(self):
+        self.nginx_conf.write_text(
+            "http {\n include " + str(self.vhost_root) + "/not-loaded/*.conf;\n}\n")
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager()
+        self.assertEqual(err.exception.stage, "ownership")
+        self.assertFalse(list(self.state.iterdir()))
+
+    def test_partial_live_conf_write_is_inert_and_recoverable(self):
+        from unittest.mock import patch
+        original = extension._write_exclusive
+        partial = []
+        def fail_stage(fd, name, payload, mode):
+            if ".conf." in name and name.endswith(".stage"):
+                descriptor = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                                     0o600, dir_fd=fd)
+                try:
+                    os.write(descriptor, payload[:13])
+                finally:
+                    os.close(descriptor)
+                partial.append(name)
+                raise OSError(5, "simulated partial staged write")
+            return original(fd, name, payload, mode)
+        with patch.object(extension, "_write_exclusive", side_effect=fail_stage):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertTrue(err.exception.recovery_id)
+        self.assertEqual(len(partial), 1)
+        self.assertFalse((self.ext / extension._include_name(7, "404")).exists())
+        self.assertTrue((self.ext / partial[0]).exists())
+        self.assertFalse(partial[0].endswith(".conf"))
+        self.assertFalse(any("-s" in args for args in self.commands))
+        snapshot = self.run_manager("recheck")
+        self.assertEqual(snapshot["state"], "Recovery Required")
+        self.assertEqual(snapshot["recovery_id"], err.exception.recovery_id)
+        result = self.run_manager("restore", recovery=snapshot["recovery_id"])
+        self.assertEqual(result["state"], "Restored")
+        self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
+
+    def test_failed_asset_publication_is_inert_and_restorable(self):
+        from unittest.mock import patch
+        original = extension._write_exclusive
+        def fail_asset(fd, name, payload, mode):
+            if ".html." in name and name.endswith(".stage"):
+                raise OSError(5, "simulated asset staging fsync failure")
+            return original(fd, name, payload, mode)
+        with patch.object(extension, "_write_exclusive", side_effect=fail_asset):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertFalse((self.ext / extension._include_name(7, "404")).exists())
+        self.assertFalse(any("-s" in args for args in self.commands))
+        self.assertEqual(self.run_manager("recheck")["state"], "Recovery Required")
+        self.assertEqual(
+            self.run_manager("restore", recovery=err.exception.recovery_id)["state"],
+            "Restored")
+
+    def test_lost_directory_fsync_after_atomic_conf_publication(self):
+        from unittest.mock import patch
+        original_fsync = extension.os.fsync
+        target = self.ext.stat()
+        calls = [0]
+        def fail_after_rename(fd):
+            info = os.fstat(fd)
+            if (info.st_dev, info.st_ino) == (target.st_dev, target.st_ino):
+                calls[0] += 1
+                if calls[0] == 2:
+                    raise OSError(5, "simulated post-publication fsync loss")
+            return original_fsync(fd)
+        with patch.object(extension.os, "fsync", side_effect=fail_after_rename):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertEqual(calls[0], 2)
+        self.assertTrue((self.ext / extension._include_name(7, "404")).exists())
+        self.assertEqual(self.run_manager("recheck")["state"], "Recovery Required")
+        self.assertEqual(
+            self.run_manager("restore", recovery=err.exception.recovery_id)["state"],
+            "Restored")
+
+    def test_atomic_publish_ack_loss_does_not_retry_blindly(self):
+        from unittest.mock import patch
+        original = extension._rename_noreplace
+        def lost_ack(fd, before, after):
+            original(fd, before, after)
+            if after.endswith(".conf"):
+                raise OSError(5, "simulated lost rename acknowledgement")
+        with patch.object(extension, "_rename_noreplace", side_effect=lost_ack):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertTrue((self.ext / extension._include_name(7, "404")).exists())
+        self.assertEqual(self.run_manager("recheck")["state"], "Recovery Required")
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager()
+        self.assertEqual(
+            self.run_manager("restore", recovery=err.exception.recovery_id)["state"],
+            "Restored")
+
+    def test_final_apply_journal_failure_retains_real_recovery_identity(self):
+        from unittest.mock import patch
+        original = extension._record_save
+        def failed_final(fd, site_id, code, record):
+            if record["phase"] == "applied":
+                raise OSError(5, "simulated final journal failure")
+            return original(fd, site_id, code, record)
+        with patch.object(extension, "_record_save", side_effect=failed_final):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        record = self.run_manager("recheck")
+        self.assertEqual(record["state"], "Recovery Required")
+        self.assertEqual(err.exception.recovery_id, record["recovery_id"])
+        self.assertEqual(self.run_manager("restore", recovery=record["recovery_id"])["state"],
+                         "Restored")
+
+    def test_final_apply_journal_fsync_acknowledgement_loss(self):
+        from unittest.mock import patch
+        original = extension._record_save
+        def stored_then_lost(fd, site_id, code, record):
+            result = original(fd, site_id, code, record)
+            if record["phase"] == "applied":
+                raise OSError(5, "simulated commit acknowledgement loss")
+            return result
+        with patch.object(extension, "_record_save", side_effect=stored_then_lost):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager()
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+        self.assertEqual(err.exception.recovery_id,
+                         self.run_manager("recheck")["recovery_id"])
+        self.assertEqual(self.run_manager("restore",
+                         recovery=err.exception.recovery_id)["state"], "Restored")
+
+    def test_final_restore_journal_failure_is_uncertain_and_resumable(self):
+        from unittest.mock import patch
+        applied = self.run_manager()
+        original = extension._record_save
+        def failed_final(fd, site_id, code, record):
+            if record["phase"] == "restored":
+                raise OSError(5, "simulated final restored journal loss")
+            return original(fd, site_id, code, record)
+        with patch.object(extension, "_record_save", side_effect=failed_final):
+            with self.assertRaises(extension.ExtensionError) as err:
+                self.run_manager("restore", recovery=applied["recovery_id"])
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertEqual(err.exception.recovery_id, applied["recovery_id"])
+        self.assertEqual(self.run_manager("recheck")["state"], "Recovery Required")
+        self.assertEqual(self.run_manager("restore",
+                         recovery=applied["recovery_id"])["state"], "Restored")
+
+    def test_502_no_nonce_cannot_prove_previous_real_502(self):
+        for wrong_status in (404, 200, 500):
+            with self.subTest(wrong_status=wrong_status):
+                applied = self.run_manager(code="502")
+                base_probe = self.probe
+                def after_no_status(site, code, operation):
+                    active = (self.ext / extension._include_name(site["id"], code)).exists()
+                    if code == "502" and operation is not None and not active:
+                        return (wrong_status, hashlib.sha256(b"other status").hexdigest(), None)
+                    return base_probe(site, code, operation)
+                self.probe = after_no_status
+                result = self.run_manager("restore", code="502",
+                                          recovery=applied["recovery_id"])
+                self.assertEqual(result["state"], "Source Restored")
+                self.assertFalse(result["runtime_verified"])
+                self.assertEqual(result["page_file_sha256"], hashlib.sha256(b"").hexdigest())
+                self.assertEqual(self.run_manager("recheck", code="502")["state"],
+                                 "Source Restored")
+                self.probe = base_probe
+
+    def test_502_source_drift_rejects_full_restore_claim(self):
+        applied = self.run_manager(code="502")
+        original_502 = self.site_root / "502.html"
+        original_502.write_bytes(b"independently edited existing 502 page")
+        with self.assertRaises(extension.ExtensionError) as err:
+            self.run_manager("restore", code="502", recovery=applied["recovery_id"])
+        self.assertEqual(err.exception.stage, "uncertain")
+        self.assertEqual(self.run_manager("recheck", code="502")["state"],
+                         "Recovery Required")
+        original_502.unlink()
+        self.assertEqual(self.run_manager("restore", code="502",
+                         recovery=applied["recovery_id"])["state"], "Source Restored")
 
     def test_no_document_root_write(self):
         (self.site_root / "404.html").write_bytes(b"operator owned")

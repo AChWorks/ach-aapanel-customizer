@@ -1785,7 +1785,7 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   assert.equal(ui.state().statusManageRecheckDisabled,true);
   apply.respond(manage404Response('apply'));
   assert.match(ui.state().statusManage,/Applied/);
-  assert.match(ui.state().statusManage,/confirmed file change/);
+  assert.match(ui.state().statusManage,/confirmed managed extension change/);
   assert.equal(ui.state().statusManageApplyDisabled,true);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
   const recheck=ui.statusClick('#ach-status-manage-recheck');
@@ -1837,8 +1837,12 @@ test('Native 502 source-only preview gates extension Apply and Restore with Ngin
   const restore=ui.statusClick('#ach-status-manage-restore');
   assert.equal(restore.options.data.template,'502');
   assert.equal(restore.options.data.site_approval,'restore_exact_site_502_reload');
-  restore.respond(manage404Response('restore',{template:'502'}));
-  assert.match(ui.state().statusManage,/Restored/);
+  restore.respond(manage404Response('restore',{template:'502',
+    state:'Source Restored',runtime_verified:false,
+    verification_scope:'source_and_nonce_only'}));
+  assert.match(ui.state().statusManage,/Source Restored/);
+  assert.match(ui.state().statusManage,/original 502 response NOT verified/);
+  assert.match(ui.state().statusManage,/502.html SOURCE SHA-256/);
 });
 
 test('Status 404 Restore confirms an interrupted earlier rollback without a second file write', () => {
@@ -1851,7 +1855,7 @@ test('Status 404 Restore confirms an interrupted earlier rollback without a seco
   const restore=ui.statusClick('#ach-status-manage-restore');
   assert.match(restore.options.url,/s=status_manage$/);
   restore.respond(manage404Response('restore',{changed:false,state:'Restored'}));
-  assert.match(ui.state().statusManage,/Restored — no file change/);
+  assert.match(ui.state().statusManage,/Restored — no managed extension change/);
   assert.doesNotMatch(ui.state().statusManage,/unconfirmed/);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
 });

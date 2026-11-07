@@ -2032,8 +2032,11 @@
         (r.recovery_id !== null && !token(r.recovery_id)) ||
         r.read_only !== (action === 'recheck')) return false;
     if (action === 'recheck') {
-      if (!['Unmanaged','Restored','Applied','Recovery Required','Drift','Needs Review',
+      if (!['Unmanaged','Restored','Source Restored','Applied','Recovery Required','Drift','Needs Review',
              'Orphan Backup','Orphan Drift'].includes(r.state) ||
+          (r.state === 'Source Restored' &&
+           (r.template !== '502' || r.runtime_verified !== false ||
+            r.verification_scope !== 'source_and_nonce_only')) ||
           r.changed !== false || !hash(r.rendered_sha256)) return false;
       if (r.state === 'Unmanaged') {
         return r.recovery_id === null && r.before_sha256 === null &&
@@ -2048,15 +2051,19 @@
       }
       return token(r.recovery_id) && hash(r.before_sha256) &&
         hash(r.after_sha256) &&
-        (r.state !== 'Restored' || r.page_file_sha256 === r.before_sha256) &&
+        (!['Restored','Source Restored'].includes(r.state) ||
+         r.page_file_sha256 === r.before_sha256) &&
         (r.state !== 'Applied' || r.page_file_sha256 === r.after_sha256);
     }
     return action === 'apply' ?
       ['Applied','Already Applied','Already Current'].includes(r.state) &&
       r.changed === (r.state === 'Applied') &&
       (r.state === 'Already Current' || token(r.recovery_id)) :
-      ['Restored','Already Restored'].includes(r.state) &&
-      (r.state === 'Restored' || r.changed === false) && token(r.recovery_id);
+      ['Restored','Source Restored','Already Restored'].includes(r.state) &&
+      (r.state !== 'Source Restored' ||
+       (r.template === '502' && r.runtime_verified === false &&
+        r.verification_scope === 'source_and_nonce_only')) &&
+      (r.state !== 'Already Restored' || r.changed === false) && token(r.recovery_id);
   }
   function manageStatusRequest(action) {
     var scope = statusScope(), site = selectedProbeSite(scope);
@@ -2124,7 +2131,9 @@
           };
         }
         root.find('#ach-status-manage-result').text(
-          r.state + (r.changed ? ' — confirmed file change' : ' — no file change') +
+          r.state + (r.changed ? ' — confirmed managed extension change' : ' — no managed extension change') +
+          (r.state === 'Source Restored' ?
+            ' — original 502 response NOT verified; source and retired operation nonce checked' : '') +
           (action === 'recheck' && r.state === 'Applied' &&
            r.rendered_sha256 !== r.after_sha256 ?
             ' — saved page differs from current selected branding/template' : '') +
@@ -2133,8 +2142,13 @@
           (action === 'recheck' && r.state === 'Orphan Drift' ?
             ' — current site 404 differs from an unjournaled backup. No automatic overwrite or Restore is allowed; manual investigation is required.' : '') +
           '\nWebsite ID: ' + r.site_id +
-          '\nCurrent ' + template + ' status SHA-256: ' + r.page_file_sha256 +
-          '\nPrevious HTTP baseline SHA-256: ' + (r.before_sha256 || recovery?.before_sha256 || 'None stored') +
+          '\n' + (template === '502' && r.state === 'Source Restored' ?
+            'Current restored 502.html SOURCE SHA-256: ' :
+            'Current ' + template + ' status SHA-256: ') + r.page_file_sha256 +
+          '\n' + (template === '502' ?
+            'Previous site 502.html SOURCE SHA-256 (not an observed HTTP 502): ' :
+            'Previous HTTP 404 baseline SHA-256: ') +
+          (r.before_sha256 || recovery?.before_sha256 || 'None stored') +
           '\nRecovery ID: ' + (r.recovery_id || 'None') +
           '\nOperation ID: ' + r.operation_id +
           '\nOnly this selected site\'s plugin-owned status extension was targeted. Nginx is shared; the guarded Apply/Restore performs a service reload. Independently validate non-target health.');

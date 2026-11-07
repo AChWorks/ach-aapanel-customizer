@@ -57,7 +57,8 @@ def _owned_dir(fd, mode=None):
     return info
 
 
-def _bounded_file(fd, name, *, limit=MAX_VHOST, permissions=None):
+def _bounded_file(fd, name, *, limit=MAX_VHOST, permissions=None,
+                  allow_empty=False):
     try:
         descriptor = os.open(name, READ_FLAGS, dir_fd=fd)
     except FileNotFoundError:
@@ -67,7 +68,8 @@ def _bounded_file(fd, name, *, limit=MAX_VHOST, permissions=None):
         if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
                 or before.st_uid != os.geteuid() or before.st_mode & 0o022
                 or (permissions is not None and stat.S_IMODE(before.st_mode) != permissions)
-                or before.st_size < 1 or before.st_size > limit
+                or before.st_size < (0 if allow_empty else 1)
+                or before.st_size > limit
                 or os.listxattr(descriptor)):
             raise ExtensionError("ownership", "Untrusted file in managed native source")
         payload = os.read(descriptor, limit + 1)
@@ -108,6 +110,31 @@ def _rename_noreplace(fd, before, after):
     if call(fd, before.encode("ascii"), fd, after.encode("ascii"), 1) != 0:
         code = ctypes.get_errno()
         raise OSError(code, os.strerror(code))
+
+
+
+def _publish_complete(fd, name, payload, mode, op):
+    """Stage, hash-check and atomically publish an owned file without clobber.
+
+    The unique nonmatching .stage filename is NEVER a live Nginx *.conf.
+    If write, fsync, rename or directory sync fails, retain the prepared
+    journal and stage for an explicitly supervised reconciliation.
+    """
+    staging = "." + name + "." + op + ".stage"
+    try:
+        _write_exclusive(fd, staging, payload, mode)
+        staged = _bounded_file(fd, staging, limit=max(MAX_HTML, len(payload)),
+                               permissions=mode)
+        if staged != payload:
+            raise ExtensionError("publication", "Staged status content differs from proposal")
+        _rename_noreplace(fd, staging, name)
+        os.fsync(fd)
+    except Exception as exc:
+        raise ExtensionError(
+            "uncertain",
+            "Status publication not confirmed; Recheck before a new Apply or Restore",
+            recovery_id=op,
+        ) from exc
 
 
 def _record_name(site_id, code):
@@ -158,7 +185,123 @@ def _record_save(fd, site_id, code, record):
             os.unlink(temporary, dir_fd=fd)
 
 
-def _source(site, code, vhost_root):
+
+def _include_graph_guard(site, code, vhost_root, nginx_conf):
+    """Bounded native include-ownership proof, not a general Nginx parser.
+
+    Follow file-scope include edges from the actual primary nginx.conf.
+    The proposed snippet may be reached ONLY from its own native VHost's
+    exact, server-scoped extension/*.conf edge. Unknown graph/indirection,
+    nonliteral source or multi-consumer graph fails closed before any write.
+    """
+    import glob
+    import fnmatch
+
+    site_conf = os.path.join(vhost_root, site["name"] + ".conf")
+    exact_mask = vhost_root + "/extension/" + site["name"] + "/*.conf"
+    proposed = vhost_root + "/extension/" + site["name"] + "/" + _include_name(site["id"], code)
+    conf_dir = os.path.dirname(nginx_conf)
+    if (not os.path.isabs(nginx_conf) or not os.path.isabs(vhost_root)
+            or ".." in nginx_conf.split("/") or ".." in vhost_root.split("/")):
+        raise ExtensionError("source", "Native Nginx include root is not canonical")
+
+    def matches(pattern, path):
+        lhs, rhs = pattern.split("/"), path.split("/")
+        return len(lhs) == len(rhs) and all(
+            fnmatch.fnmatchcase(item, pattern_part)
+            for item, pattern_part in zip(rhs, lhs)
+        )
+
+    scanned = 0
+    imported = 0
+    selected_vhost_count = 0
+    visiting = set()
+    total_bytes = 0
+
+    def walk(path, depth):
+        nonlocal scanned, imported, selected_vhost_count, total_bytes
+        if depth > 12 or scanned >= 128 or path in visiting:
+            raise ExtensionError("source", "Native Nginx include graph is cyclic or too large")
+        if (not os.path.isabs(path) or ".." in path.split("/")
+                or os.path.realpath(path) != path):
+            raise ExtensionError("source", "Nginx include graph has an unresolved source path")
+        directory = _directory(os.path.dirname(path))
+        try:
+            _owned_dir(directory)
+            raw = _bounded_file(directory, os.path.basename(path), limit=MAX_VHOST,
+                                allow_empty=True)
+        finally:
+            os.close(directory)
+        if raw is None:
+            raise ExtensionError("source", "Nginx include graph source disappeared")
+        scanned += 1
+        total_bytes += len(raw)
+        if total_bytes > 2 * 1024 * 1024:
+            raise ExtensionError("source", "Nginx include graph exceeds bounded read limit")
+        if path == site_conf:
+            selected_vhost_count += 1
+        active = "\n".join(line.split("#", 1)[0] for line in raw.decode("utf8", "replace").splitlines())
+        expressions = re.findall(
+            r"(?<![A-Za-z0-9_])include\s+([^\s;{}]{1,512})\s*;", active
+        )
+        if len(expressions) != len(re.findall(r"\binclude\s+", active)):
+            raise ExtensionError("source", "Unrecognized Nginx include syntax")
+        visiting.add(path)
+        try:
+            for expression in expressions:
+                mask = (expression if expression.startswith("/") else
+                        conf_dir + "/" + expression)
+                if (os.path.normpath(mask) != mask or
+                        ".." in mask.split("/") or "//" in mask or
+                        "**" in mask or len(mask) > 1024):
+                    raise ExtensionError("source", "Unverifiable Nginx include mask")
+                if any(char in mask for char in "*?["):
+                    # This is the supported aaPanel include-ownership
+                    # contract. No unknown wildcard can import a future
+                    # plugin-owned filename through an alias/symlink or a
+                    # broader mask before that file even exists.
+                    if path == nginx_conf:
+                        allowed = (vhost_root + "/*.conf",
+                                   vhost_root + "/tcp/*.conf")
+                    elif (path.startswith(vhost_root + "/") and
+                          path.endswith(".conf") and
+                          "/" not in path[len(vhost_root) + 1:]):
+                        allowed = (vhost_root + "/extension/" +
+                                   path.rsplit("/", 1)[-1][:-5] + "/*.conf",)
+                    else:
+                        allowed = ()
+                    parent = os.path.dirname(mask)
+                    if (mask not in allowed or
+                            os.path.realpath(parent) != parent or
+                            not os.path.isdir(parent)):
+                        raise ExtensionError(
+                            "ownership", "Unsupported native Nginx wildcard include")
+                if matches(mask, proposed):
+                    if path != site_conf or mask != exact_mask:
+                        raise ExtensionError(
+                            "ownership", "A second Nginx source can import the selected extension")
+                    imported += 1
+                candidates = glob.glob(mask)
+                if len(candidates) > 128:
+                    raise ExtensionError("source", "Nginx include wildcard is too broad")
+                for child in sorted(candidates):
+                    if (child == site_conf and
+                            (path != nginx_conf or mask != vhost_root + "/*.conf")):
+                        raise ExtensionError(
+                            "ownership", "Selected native VHost is imported from an ambiguous scope")
+                    if not os.path.isfile(child) or os.path.islink(child):
+                        raise ExtensionError("source", "Untrusted or nonregular Nginx included source")
+                    walk(child, depth + 1)
+        finally:
+            visiting.remove(path)
+
+    walk(nginx_conf, 0)
+    if imported != 1 or selected_vhost_count != 1:
+        raise ExtensionError(
+            "ownership", "Exclusive native server include source could not be established")
+
+
+def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
     name = site.get("name")
     if (not isinstance(name, str) or not DOMAIN.fullmatch(name)
             or code not in CODES or site.get("status") not in ("1", 1)
@@ -179,7 +322,9 @@ def _source(site, code, vhost_root):
     def exact(expr):
         return len(re.findall(expr, text, re.M)) == 1
     document_root = site.get("path")
-    if (not isinstance(document_root, str) or
+    if (len(re.findall(r"(?m)^\s*server\s*\{", text)) != 1 or
+            len(re.findall(r"(?m)^\s*server_name\s+", text)) != 1 or
+            not isinstance(document_root, str) or
             not re.fullmatch(r"/[a-zA-Z0-9/_.-]{1,1023}", document_root) or
             ".." in document_root.split("/") or "//" in document_root or
             not exact(r"^\s*root\s+" + re.escape(document_root) + r"\s*;") or
@@ -187,7 +332,16 @@ def _source(site, code, vhost_root):
             not exact(r"^\s*error_page\s+" + code + r"\s+/" + code + r"\.html\s*;") or
             not exact(r"^\s*include\s+" + re.escape(expected_include) + r"\s*;")):
         raise ExtensionError("source", "Native site root, error-page or extension binding is unproven")
-    # One site's include must never be shared by another native website.
+    native_include = re.search(
+        r"(?m)^\s*include\s+" + re.escape(expected_include) + r"\s*;", text)
+    before = "\n".join(line.split("#", 1)[0]
+                        for line in text[:native_include.start()].splitlines())
+    if before.count("{") - before.count("}") != 1:
+        raise ExtensionError("source", "Status extension must be included at server scope")
+    # Before preparing any owned content, prove the selected server is
+    # the only reachable consumer in the bounded effective native include graph.
+    _include_graph_guard(site, code, vhost_root, nginx_conf)
+    # Also fail on parked native VHost sources which could become active later.
     directory = _directory(vhost_root)
     try:
         entries = []
@@ -405,11 +559,15 @@ def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
         rendered_sha256=rendered_sha256, rendered_html=rendered_html,
         vhost_root=vhost_root, source_fingerprint=True)
     current = inspected.get("page_file_sha256")
-    if not isinstance(current, str) or HASH.fullmatch(current) is None:
+    if inspected.get("page_file_state") == "Absent":
         current = _sha(b"")
-        note = "Existing site 502.html is missing or unreadable. The plugin never overwrites it."
-    else:
+        note = "Site 502.html is absent. No previous HTTP 502 response was induced."
+    elif (inspected.get("page_file_state") in ("Same bytes", "Different bytes")
+          and isinstance(current, str) and HASH.fullmatch(current)):
         note = "Existing site 502.html is read-only. No live 502 response was induced."
+    else:
+        raise ExtensionError(
+            "source", "Site 502.html is uninspectable; source-only approval is unsafe")
     return {
         "schema": 1, "site_id": site["id"], "site_key": site["name"],
         "template": "502", "locale": locale,
@@ -433,6 +591,23 @@ def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
     }
 
 
+
+def _previous_502_source(site, vhost_root, html):
+    """Source fingerprint only: never infer a preexisting live HTTP 502."""
+    from ach_customizer_status_inspect import inspect_site_files
+    inspected = inspect_site_files(
+        site, locale="en", template="502", rendered_sha256=_sha(html.encode("utf8")),
+        rendered_html=html, vhost_root=vhost_root, source_fingerprint=True,
+    )
+    current = inspected.get("page_file_sha256")
+    if inspected.get("page_file_state") == "Absent":
+        return _sha(b"")
+    if (inspected.get("page_file_state") in ("Same bytes", "Different bytes")
+            and isinstance(current, str) and HASH.fullmatch(current)):
+        return current
+    raise ExtensionError("source", "Previous site 502.html could not be inspected safely")
+
+
 def manage_site_extension(action, site, *, code, html, expected_current,
                           expected_vhost, expected_render, expected_recovery,
                           data_fd, vhost_root=VHOST_ROOT, public_root=PUBLIC_ROOT,
@@ -449,7 +624,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
     if not 0 < len(html_bytes) <= MAX_HTML:
         raise ExtensionError("input", "Rendered HTML exceeds bounded size")
     _owned_dir(data_fd)
-    source_sha, ext_path = _source(site, code, vhost_root)
+    source_sha, ext_path = _source(site, code, vhost_root, nginx_conf)
     site_id = site["id"]
     include_name = _include_name(site_id, code)
     ext_fd = _directory(ext_path)
@@ -482,9 +657,15 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                         state = "Needs Review"
             if record and record["phase"] == "restored" and current_config is None:
                 try:
-                    _status, _body, proof = (probe or _probe)(site, code, record["op"])
-                    state = "Restored" if proof != record["op"] else "Needs Review"
-                except (ExtensionError, OSError):
+                    status, body, proof = (probe or _probe)(site, code, record["op"])
+                    source_ok = (code == "404" or
+                                 _previous_502_source(site, vhost_root, html) ==
+                                 record["before_sha"])
+                    old_404 = code != "404" or (
+                        status == 404 and body == record["before_sha"])
+                    state = ("Restored" if code == "404" else "Source Restored") if (
+                        proof != record["op"] and source_ok and old_404) else "Needs Review"
+                except (ExtensionError, OSError, StatusPageError):
                     state = "Needs Review"
             if record is None and current_config is None:
                 try:
@@ -500,7 +681,10 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                     "before_sha256": record["before_sha"] if record else None,
                     "after_sha256": record["after_sha"] if record else None,
                     "recovery_id": record["op"] if record else None,
-                    "read_only": True, "mode": "native_status_extension"}
+                    "read_only": True, "mode": "native_status_extension",
+                    "runtime_verified": state == "Restored" and code == "404",
+                    "verification_scope": ("source_and_nonce_only" if code == "502"
+                                           else "http404_body")}
 
         # A syntax error in an unrelated Nginx VHost must never be turned
         # into an authorization to change this site; no change on failure.
@@ -515,13 +699,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
             if code == "404" and (prior_status != 404 or prior_sha != expected_current):
                 raise ExtensionError("concurrency", "Live existing HTTP 404 differs from approval")
             if code == "502":
-                from ach_customizer_status_inspect import inspect_site_files
-                source_file = inspect_site_files(
-                    site, locale="en", template="502",
-                    rendered_sha256=expected_sha, rendered_html=html,
-                    vhost_root=vhost_root, source_fingerprint=True)
-                current_file_sha = source_file.get("page_file_sha256") or _sha(b"")
-                if current_file_sha != expected_current:
+                if _previous_502_source(site, vhost_root, html) != expected_current:
                     raise ExtensionError(
                         "concurrency", "Existing 502 file differs from approved source preview")
             op = uuid4().hex
@@ -530,7 +708,8 @@ def manage_site_extension(action, site, *, code, html, expected_current,
             record = {
                 "schema": 1, "site_id": site_id, "site_name": site["name"],
                 "code": code, "op": op, "phase": "prepared",
-                "vhost_sha": source_sha, "before_sha": prior_sha,
+                "vhost_sha": source_sha,
+                "before_sha": (prior_sha if code == "404" else expected_current),
                 "after_sha": expected_sha, "include_sha": _sha(include_bytes),
                 "asset_path": asset_path,
             }
@@ -542,18 +721,17 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 if prior is not None and prior != html_bytes:
                     raise ExtensionError("ownership", "Published status asset has changed")
                 if prior is None:
-                    _write_exclusive(asset_dir, asset_name, html_bytes, 0o644)
+                    _publish_complete(asset_dir, asset_name, html_bytes, 0o644, op)
             finally:
                 os.close(asset_dir)
-            try:
-                _write_exclusive(ext_fd, include_name, include_bytes, 0o600)
-            except FileExistsError as exc:
-                raise ExtensionError("concurrency", "Status extension include appeared independently") from exc
+            # Publish only a complete, hash-verified .conf. Incomplete
+            # writes remain as inert .stage files outside the native mask.
+            _publish_complete(ext_fd, include_name, include_bytes, 0o600, op)
             # Validate syntax before attempting any daemon reload. If new
             # syntax cannot load, retire this plugin-owned snippet without
             # deleting its inode; the Nginx service was never signaled.
             try:
-                if _source(site, code, vhost_root)[0] != source_sha:
+                if _source(site, code, vhost_root, nginx_conf)[0] != source_sha:
                     raise ExtensionError("concurrency", "Native site changed before activation")
                 _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
             except Exception as exc:
@@ -572,6 +750,11 @@ def manage_site_extension(action, site, *, code, html, expected_current,
             try:
                 _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
                 _verified(site, code, op, expected_sha, probe=probe)
+                # The selected-site response alone cannot prove that a
+                # concurrent Nginx config edit did not add a second consumer.
+                if _source(site, code, vhost_root, nginx_conf)[0] != source_sha:
+                    raise ExtensionError(
+                        "concurrency", "Native Nginx include graph changed after activation")
             except Exception as exc:
                 # The configuration may already have activated. Preserve it
                 # and the prepared journal: never blindly retry a reload.
@@ -579,7 +762,14 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                                      "Activation unconfirmed; Recheck exact recovery before Restore",
                                      recovery_id=op) from exc
             record["phase"] = "applied"
-            _record_save(data_fd, site_id, code, record)
+            try:
+                _record_save(data_fd, site_id, code, record)
+            except Exception as exc:
+                raise ExtensionError(
+                    "uncertain",
+                    "Nginx Apply completed but final recovery journal is unconfirmed; Recheck",
+                    recovery_id=op,
+                ) from exc
             return {"state": "Applied", "changed": True, "site_id": site_id,
                     "page_file_sha256": expected_sha, "recovery_id": op,
                     "read_only": False, "mode": "native_status_extension"}
@@ -590,11 +780,17 @@ def manage_site_extension(action, site, *, code, html, expected_current,
         retained = _retained_name(site_id, code, record["op"])
         retained_bytes = _bounded_file(ext_fd, retained, limit=8192, permissions=0o600)
         if current_config is None:
-            if retained_bytes is None or _sha(retained_bytes) != record["include_sha"]:
+            if retained_bytes is None:
+                if record["phase"] != "prepared":
+                    raise ExtensionError("recovery", "Missing or altered retained status include")
+                # A prepared publication may have failed BEFORE creation of
+                # the active .conf (e.g. staged write/fsync failure). There
+                # is no managed pathname to move. The explicit Restore
+                # still reloads and checks that the operation nonce is gone.
+            elif _sha(retained_bytes) != record["include_sha"]:
                 raise ExtensionError("recovery", "Missing or altered retained status include")
-            # This covers syntax-failed Apply (never reloaded), interrupted
-            # Restore (removed on disk but still active), and a reload whose
-            # successful activation was not acknowledged.
+            # This also covers syntax-failed Apply, interrupted Restore and
+            # an unacknowledged but successful reload.
         else:
             if (_sha(current_config) != record["include_sha"]
                     or retained_bytes is not None):
@@ -612,13 +808,30 @@ def manage_site_extension(action, site, *, code, html, expected_current,
             _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
             _verified_absent(site, code, record["op"], record["before_sha"],
                              probe=probe)
+            if (_source(site, code, vhost_root, nginx_conf)[0] != record["vhost_sha"]
+                    or (code == "502" and
+                        _previous_502_source(site, vhost_root, html) !=
+                        record["before_sha"])):
+                raise ExtensionError(
+                    "concurrency", "Native 502 file or Nginx source drifted during Restore")
         except Exception as exc:
             raise ExtensionError("uncertain", "Restore not confirmed; retained include and journal preserved",
                                  recovery_id=record["op"]) from exc
         record["phase"] = "restored"
-        _record_save(data_fd, site_id, code, record)
-        return {"state": "Restored", "changed": True, "site_id": site_id,
+        try:
+            _record_save(data_fd, site_id, code, record)
+        except Exception as exc:
+            raise ExtensionError(
+                "uncertain",
+                "Nginx Restore completed but final recovery journal is unconfirmed; Recheck",
+                recovery_id=record["op"],
+            ) from exc
+        return {"state": ("Restored" if code == "404" else "Source Restored"),
+                "changed": True, "site_id": site_id,
                 "page_file_sha256": record["before_sha"], "recovery_id": record["op"],
-                "read_only": False, "mode": "native_status_extension"}
+                "read_only": False, "mode": "native_status_extension",
+                "runtime_verified": code == "404",
+                "verification_scope": ("http404_body" if code == "404"
+                                       else "source_and_nonce_only")}
     finally:
         os.close(ext_fd)
