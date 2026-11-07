@@ -20,7 +20,7 @@ import subprocess
 import time
 from uuid import uuid4
 
-from ach_customizer_status_inspect import _directory, VHOST_ROOT, READ_FLAGS
+from ach_customizer_status_inspect import _directory, VHOST_ROOT, READ_FLAGS, StatusInspectError
 from ach_customizer_status_pages import StatusPageError
 from ach_customizer_status_probe import _DeadlineSocket, _remaining
 
@@ -608,6 +608,39 @@ def _previous_502_source(site, vhost_root, html):
     raise ExtensionError("source", "Previous site 502.html could not be inspected safely")
 
 
+def _saved_recovery_unavailable(site, code, html_bytes, data_fd, *, stopped):
+    """Read an exact saved operation when native routing cannot be verified.
+
+    The journal is evidence, NOT a current page SHA or Nginx permission.
+    No VHost, service or plugin-owned extension is altered or reloaded.
+    """
+    record = _record_load(data_fd, site["id"], code)
+    if record is None:
+        raise ExtensionError("recovery", "No saved status operation; native site source is unavailable")
+    if record["site_name"] != site["name"]:
+        raise ExtensionError("identity", "Saved operation belongs to a different native site")
+    return {
+        "state": "Suspended" if stopped else "Needs Review",
+        "changed": False, "site_id": site["id"],
+        "page_file_sha256": (record["before_sha"] if record["phase"] == "restored"
+                             else record["after_sha"]),
+        "rendered_sha256": _sha(html_bytes),
+        "before_sha256": record["before_sha"],
+        "after_sha256": record["after_sha"],
+        "recovery_id": record["op"],
+        "journal_phase": record["phase"],
+        "read_only": True, "mode": "native_status_extension",
+        "runtime_verified": False, "verification_scope": "saved_journal_only",
+        "note": ("Native website is stopped; the saved recovery is visible, "
+                 "but the service and current status page are NOT verified. "
+                 "Start the site, refresh the site inventory, and Recheck before Restore."
+                 if stopped else
+                 "Native status VHost/source changed; the saved recovery remains "
+                 "visible, but the current status page is NOT verified. "
+                 "Reconcile source and Recheck before Restore."),
+    }
+
+
 def manage_site_extension(action, site, *, code, html, expected_current,
                           expected_vhost, expected_render, expected_recovery,
                           data_fd, vhost_root=VHOST_ROOT, public_root=PUBLIC_ROOT,
@@ -624,7 +657,18 @@ def manage_site_extension(action, site, *, code, html, expected_current,
     if not 0 < len(html_bytes) <= MAX_HTML:
         raise ExtensionError("input", "Rendered HTML exceeds bounded size")
     _owned_dir(data_fd)
-    source_sha, ext_path = _source(site, code, vhost_root, nginx_conf)
+    # A native Stop may rewrite the VHost and comment its extension includes.
+    # Preserve read-only recovery access without weakening Apply/Restore.
+    if action == "recheck" and site.get("status") in ("0", 0):
+        return _saved_recovery_unavailable(
+            site, code, html_bytes, data_fd, stopped=True)
+    try:
+        source_sha, ext_path = _source(site, code, vhost_root, nginx_conf)
+    except (ExtensionError, OSError, StatusInspectError):
+        if action != "recheck":
+            raise
+        return _saved_recovery_unavailable(
+            site, code, html_bytes, data_fd, stopped=False)
     site_id = site["id"]
     include_name = _include_name(site_id, code)
     ext_fd = _directory(ext_path)
@@ -634,6 +678,9 @@ def manage_site_extension(action, site, *, code, html, expected_current,
         current_config = _bounded_file(ext_fd, include_name, limit=8192, permissions=0o600)
         if record and (record["site_name"] != site["name"]
                        or record["vhost_sha"] != source_sha):
+            if (action == "recheck" and record["site_name"] == site["name"]):
+                return _saved_recovery_unavailable(
+                    site, code, html_bytes, data_fd, stopped=False)
             raise ExtensionError("identity", "Site or VHost changed; retain recovery for review")
         expected_sha = _sha(html_bytes)
         if action == "recheck":

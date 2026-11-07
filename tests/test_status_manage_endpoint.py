@@ -199,6 +199,35 @@ class NativeStatusManagementTests(unittest.TestCase):
                             row["outcome"] == "Orphan Backup"
                             for row in rows), rows)
 
+    def test_stopped_site_allows_recheck_but_never_mutating_actions(self):
+        self.site["status"] = "0"
+        stopped_snapshot = json.dumps([
+            7, "demo.test", "/www/demo.test", "0", [["demo.test", 80]]
+        ], separators=(",", ":"))
+        journal = {
+            "state": "Suspended", "changed": False,
+            "site_id": 7, "page_file_sha256": "a" * 64,
+            "rendered_sha256": "b" * 64,
+            "before_sha256": "b" * 64,
+            "after_sha256": "a" * 64,
+            "recovery_id": "c" * 32,
+            "read_only": True, "mode": "native_status_extension",
+            "journal_phase": "applied", "runtime_verified": False,
+            "verification_scope": "saved_journal_only",
+            "note": "Native website is stopped; restore requires recheck after Start.",
+        }
+        response, call = self.run_api(
+            self.args("recheck", expected_site_snapshot=stopped_snapshot),
+            manager_result=journal)
+        self.assertTrue(response["status"], response)
+        self.assertEqual(response["state"], "Suspended")
+        self.assertEqual(call.args[0], "recheck")
+        for action in ("apply", "restore"):
+            response, call = self.run_api(
+                self.args(action, expected_site_snapshot=stopped_snapshot))
+            self.assertFalse(response["status"], response)
+            self.assertIsNone(call)
+
     def test_denied_sessions_and_missing_approval_never_reach_manager(self):
         for args, flask in (
             (self.args(), self.flask(uid=2)),

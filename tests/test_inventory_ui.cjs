@@ -1695,13 +1695,13 @@ function statusProbe(overrides={}) {
     ...overrides
   };
 }
-function statusProbeUi(hasMore=false) {
+function statusProbeUi(hasMore=false, panelStatus='1') {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
   const inventory = ui.requests.at(-1);
   assert.match(inventory.options.url,/s=status_sites$/);
-  const selected={...site(),id:7,name:'demo.test',
+  const selected={...site(),id:7,name:'demo.test',panel_status:panelStatus,
     document_root:'/www/demo.test',bound_domains:[{name:'demo.test',port:80}],
     canonical_domain_bound:true};
   const remaining=hasMore ? Array.from({length:24},(_,i) => ({
@@ -1822,6 +1822,57 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   assert.equal(restore.options.data.site_approval,'restore_exact_site_404_reload');
   restore.respond(manage404Response('restore'));
   assert.match(ui.state().statusManage,/Restored/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Stopped website keeps read-only journal Recheck without HTTP probes or Restore', () => {
+  const ui=statusProbeUi(false,'0');
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.equal(ui.state().statusManageRecheckDisabled,false);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  const check=ui.statusClick('#ach-status-manage-recheck');
+  assert.equal(check.options.data.site_action,'recheck');
+  assert.equal(check.options.data.site_approval,'');
+  const stoppedSnapshot=JSON.stringify([7,'demo.test','/www/demo.test','0',[['demo.test',80]]]);
+  assert.equal(check.options.data.expected_site_snapshot,stoppedSnapshot);
+  check.respond(manage404Response('recheck',{
+    verified_site_snapshot:stoppedSnapshot,
+    state:'Suspended',changed:false,
+    journal_phase:'applied',verification_scope:'saved_journal_only',
+    runtime_verified:false,
+    note:'Native website is stopped; Start, refresh and Recheck before Restore.'
+  }));
+  assert.match(ui.state().statusManage,/Suspended/);
+  assert.match(ui.state().statusManage,/saved journal ONLY/);
+  assert.match(ui.state().statusManage,/NOT current HTTP/);
+  assert.match(ui.state().statusManage,/Saved phase: applied/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-manage-restore');
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,count);
+});
+
+test('Source-drift journal is visible but malformed or unverified states cannot authorize Restore', () => {
+  const ui=statusProbeUi();
+  const check=ui.statusClick('#ach-status-manage-recheck');
+  check.respond(manage404Response('recheck',{
+    state:'Needs Review',changed:false,
+    journal_phase:'applied',verification_scope:'saved_journal_only',
+    runtime_verified:false,
+    note:'Native VHost changed; reconcile source and Recheck before Restore.'
+  }));
+  assert.match(ui.state().statusManage,/saved journal ONLY/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  const forged=ui.statusClick('#ach-status-manage-recheck');
+  forged.respond(manage404Response('recheck',{
+    state:'Suspended',changed:false,
+    journal_phase:'applied',verification_scope:'http404_body',
+    runtime_verified:true,note:'Forged verification'
+  }));
+  assert.match(ui.state().statusManage,/incomplete or incompatible/);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
 });
 

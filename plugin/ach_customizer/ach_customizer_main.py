@@ -943,8 +943,11 @@ class ach_customizer_main:
 
             if action != "recheck":
                 unique_native_root()
-            if str(before.get("status")) != "1":
-                raise StatusPageError("Selected website is stopped")
+            # Stopped websites may still need their saved recovery ID.
+            # Only a read-only Recheck is allowed; neither write path may
+            # bypass the native running-site and current-route contract.
+            if str(before.get("status")) != "1" and action != "recheck":
+                raise StatusPageError("Selected website is stopped; only recovery Recheck is available")
 
             state_fd = _open_state_dir(_STATE_DIR)
             try:
@@ -1001,7 +1004,8 @@ class ach_customizer_main:
                 response, "status_pages", "status_" + action,
                 target="site:" + str(site_id),
                 level="WARNING" if result["state"] in (
-                    "Drift", "Recovery Required", "Needs Review", "Orphan Backup", "Orphan Drift"
+                    "Drift", "Recovery Required", "Needs Review", "Suspended",
+                    "Orphan Backup", "Orphan Drift"
                 ) else "INFO",
             )
         except PermissionError as exc:

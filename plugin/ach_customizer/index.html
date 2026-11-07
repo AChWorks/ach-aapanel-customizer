@@ -443,7 +443,7 @@
       <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">404 adoption preflight not checked. No change authorized.</p>
       <div class="ach-note" aria-label="Guarded website status extension management">
         <strong>Website 404/502 — guarded Nginx extension Apply / Restore</strong>
-        <p>aaPanel 8.0.7 + Nginx only. Changes a plugin-owned website extension and immutable HTML asset, not existing document-root 404.html or 502.html or aaPanel VHost. <strong>Apply and Restore each reload the shared Nginx service, affecting all sites.</strong> Source syntax and actual selected-site error response must be verified. Unsupported or uncertain changes require Recheck, not automatic retry.</p>
+        <p>aaPanel 8.0.7 + Nginx only. Changes a plugin-owned website extension and immutable HTML asset, not existing document-root 404.html or 502.html or aaPanel VHost. <strong>Apply and Restore each reload the shared Nginx service, affecting all sites.</strong> Source syntax and actual selected-site error response must be verified. Unsupported or uncertain changes require Recheck, not automatic retry. A stopped site or changed native VHost can only show a <strong>saved recovery journal</strong> on Recheck; Start/reconcile the site and refresh the inventory before live verification or Restore.</p>
         <div class="ach-controls">
           <button id="ach-status-manage-recheck" type="button" disabled>Recheck selected site status</button>
         </div>
@@ -1526,13 +1526,15 @@
       scope.scope === 'site' && selected &&
       statusLoadedScope === scope.scope + ':' + scope.site_id &&
       (template === '404' || template === '502');
-    root.find('#ach-status-probe-button').prop('disabled', !selectedReady);
+    var siteRunning = selectedReady && String(selected.panel_status) === '1';
+    root.find('#ach-status-probe-button').prop('disabled', !siteRunning);
+    // A stopped site must retain a read-only recovery inspection path.
     root.find('#ach-status-manage-recheck').prop('disabled', !selectedReady);
     root.find('#ach-status-manage-apply').prop('disabled',
-      !selectedReady || !sameStatusSelection(statusProbeEvidence) ||
+      !siteRunning || !sameStatusSelection(statusProbeEvidence) ||
       root.find('#ach-status-manage-apply-approve').prop('checked') !== true);
     root.find('#ach-status-manage-restore').prop('disabled',
-      !selectedReady || !sameStatusSelection(statusManageEvidence) ||
+      !siteRunning || !sameStatusSelection(statusManageEvidence) ||
       !['Applied','Recovery Required'].includes(statusManageEvidence.state) ||
       root.find('#ach-status-manage-restore-approve').prop('checked') !== true);
     var defaultReady = !busy && !!actionable && scope.scope === 'global' &&
@@ -2017,6 +2019,7 @@
     var template = root.find('#ach-status-template').val();
     var selectedSite = selectedProbeSite(scope);
     if (statusBusy || statusRevision === null || !scope || !selectedSite ||
+        String(selectedSite.panel_status) !== '1' ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
         !['404','502'].includes(template)) return;
     var selectedSnapshot = nativeHostsSnapshot(selectedSite);
@@ -2101,11 +2104,21 @@
         r.read_only !== (action === 'recheck')) return false;
     if (action === 'recheck') {
       if (!['Unmanaged','Restored','Source Restored','Applied','Recovery Required','Drift','Needs Review',
-             'Orphan Backup','Orphan Drift'].includes(r.state) ||
+             'Suspended','Orphan Backup','Orphan Drift'].includes(r.state) ||
           (r.state === 'Source Restored' &&
            (r.template !== '502' || r.runtime_verified !== false ||
             r.verification_scope !== 'source_and_nonce_only')) ||
           r.changed !== false || !hash(r.rendered_sha256)) return false;
+      if (r.state === 'Suspended' || r.verification_scope === 'saved_journal_only') {
+        return ['Suspended','Needs Review'].includes(r.state) &&
+          r.verification_scope === 'saved_journal_only' &&
+          r.runtime_verified === false &&
+          ['prepared','applied','restored'].includes(r.journal_phase) &&
+          typeof r.note === 'string' && r.note.length > 0 &&
+          token(r.recovery_id) && hash(r.before_sha256) && hash(r.after_sha256) &&
+          r.page_file_sha256 === (r.journal_phase === 'restored' ?
+            r.before_sha256 : r.after_sha256);
+      }
       if (r.state === 'Unmanaged') {
         return r.recovery_id === null && r.before_sha256 === null &&
           r.after_sha256 === null;
@@ -2138,7 +2151,8 @@
     var template = root.find('#ach-status-template').val();
     if (statusBusy || statusRevision === null || !scope || !site ||
         statusLoadedScope !== 'site:' + scope.site_id ||
-        !['404','502'].includes(template)) return;
+        !['404','502'].includes(template) ||
+        (action !== 'recheck' && String(site.panel_status) !== '1')) return;
     var proposal = statusProbeEvidence, recovery = statusManageEvidence;
     if (action === 'apply' &&
         (!sameStatusSelection(proposal) ||
@@ -2202,6 +2216,8 @@
           r.state + (r.changed ? ' — confirmed managed extension change' : ' — no managed extension change') +
           (r.state === 'Source Restored' ?
             ' — original 502 response NOT verified; source and retired operation nonce checked' : '') +
+          (r.verification_scope === 'saved_journal_only' ?
+            ' — saved journal ONLY; current Nginx/HTTP state NOT verified; no Apply/Restore permitted' : '') +
           (action === 'recheck' && r.state === 'Applied' &&
            r.rendered_sha256 !== r.after_sha256 ?
             ' — saved page differs from current selected branding/template' : '') +
@@ -2210,9 +2226,13 @@
           (action === 'recheck' && r.state === 'Orphan Drift' ?
             ' — current site 404 differs from an unjournaled backup. No automatic overwrite or Restore is allowed; manual investigation is required.' : '') +
           '\nWebsite ID: ' + r.site_id +
-          '\n' + (template === '502' && r.state === 'Source Restored' ?
-            'Current restored 502.html SOURCE SHA-256: ' :
-            'Current ' + template + ' status SHA-256: ') + r.page_file_sha256 +
+          '\n' + (r.verification_scope === 'saved_journal_only' ?
+            'Saved ' + template + ' journal SHA-256 (NOT current HTTP): ' :
+            template === '502' && r.state === 'Source Restored' ?
+              'Current restored 502.html SOURCE SHA-256: ' :
+              'Current ' + template + ' status SHA-256: ') + r.page_file_sha256 +
+          (r.verification_scope === 'saved_journal_only' ?
+            '\nSaved phase: ' + r.journal_phase + '\n' + r.note : '') +
           '\n' + (template === '502' ?
             'Previous site 502.html SOURCE SHA-256 (not an observed HTTP 502): ' :
             'Previous HTTP 404 baseline SHA-256: ') +

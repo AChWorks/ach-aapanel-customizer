@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-07",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "source_base": "9fad4c35193426f564742b956d76b98962399e78",
+  "candidate_version": "0.1.18-unreleased",
+  "scope": "Read-only saved status extension recovery visibility on native stopped sites and incompatible VHost source; manual Apply/Restore still require verified running target",
+  "source_validation": {
+    "python_tests_passed": 456,
+    "javascript_tests_passed": 210,
+    "git_diff_check": "PASS"
+  },
+  "native_qa": {
+    "provider": "Test Server For AI",
+    "workspace": "/srv/ai-workspace/ach-aapanel-rebuild-20261105",
+    "guest": "ach-aapanel-managed-qa",
+    "platform": "Debian 12 / aaPanel 8.0.7 / Nginx / PHP 8.1 and 8.5 / 3 WordPress",
+    "package": "artifacts/ach_customizer_0118_status_lifecycle_candidate.zip",
+    "package_sha256": "5d7e24aab19613658cd953f4f4325a685dec627eca12fb9d29c100adf84769af",
+    "native_import": "panelPlugin.update_zip + panelPlugin.input_zip",
+    "installed_hashes": "46/46 PASS",
+    "installer": "artifacts/qa_0118_install_candidate.py",
+    "installer_sha256": "f9b92be0827206fd3383732d3598a05c2eb21f761c939ae7b48df30705a02b85",
+    "accepted_driver": "artifacts/qa_0118_native_status_lifecycle_wp1.py",
+    "accepted_driver_sha256": "2c776453d3bf3078795c1f061e2f57d6b8a51a0279ea3e873bccd5c0f76d553a",
+    "positive_checks": [
+      "Verified existing native WordPress site ID6 has eligible Nginx extension include",
+      "Plugin-owned 404 and 502 both applied, actual HTTP status/body hash and operation nonce PASS",
+      "Native SiteStop changed root to shared stop directory and commented native includes",
+      "Stopped site returned /index.html HTTP 200 with exact native stop-file hash after worker readiness",
+      "For each managed status, stopped Recheck exposed saved operation ID, phase applied and saved SHA while reporting no live verification",
+      "Both native primary-admin Apply and Restore denied while stopped; journals and configuration unchanged by Recheck",
+      "Native SiteStart restored the exact initial VHost bytes; after Nginx worker readiness both 404 and 502 returned Applied with exact status/body/proof",
+      "Deliberate benign VHost source edit resulted in Needs Review with saved operation and explicit denial of Restore; journals unchanged",
+      "After restoring exact VHost bytes, 404 exact Restore and 502 Source Restored passed",
+      "WP1, WP2 and WP3 HTTP 200 and exact VHost hashes, original WP1 status source files and global stop HTML hashes unchanged; Nginx syntax PASS"
+    ],
+    "negative_discovery": "Brand-new native PHP site ID9 lacked an extension/<site>/*.conf include/directory. Guarded source preflight rejected Apply before mutation; feature does not patch vendor-generated VHost.",
+    "readiness": "Real aaPanel SiteStop/SiteStart return before all Nginx worker generations settle. Candidate test driver uses bounded independent HTTP status, body and nonce readiness, not extra reloads. Initial transient old HTTP200/Drift observations did not indicate permanent failure.",
+    "test_authority": "Existing isolated disposable QEMU overlay, synthetic Flask primary-admin POST; NOT real browser/CSRF."
+  },
+  "cold_restore": {
+    "result": "PASS",
+    "protected_backing": "rescue/pre-status-extension-20261107.qcow2",
+    "protected_backing_sha256_unchanged": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "installed_baseline_plugin": "0.1.12",
+    "original_package_hashes": "39/39 PASS",
+    "wordpress_http_statuses": [
+      200,
+      200,
+      200
+    ],
+    "nginx_syntax": "PASS",
+    "php81": "running",
+    "php85": "running",
+    "guest": "running",
+    "disposable_test_site_and_status_snippets": "absent",
+    "task_disposable_qcow2_overlays": "removed after verified recovery"
+  },
+  "remaining": {
+    "site_stopped_status": "Native aaPanel stopped homepage still HTTP200, NOT 503. This package does not change it.",
+    "new_sites": "Newly created sites without native extension include remain guarded-Apply ineligible.",
+    "other_status": "Unknown HTTPS/443 Host and generic 50x active routing remain unsupported.",
+    "qa": "Real authenticated aaPanel browser/CSRF/secondary accounts and complete lifecycle acceptance remain open in Issue #21.",
+    "delivery": "No Merge, Stable Release or Production deployment."
+  }
+}
