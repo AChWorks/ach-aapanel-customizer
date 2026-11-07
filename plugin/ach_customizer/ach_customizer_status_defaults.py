@@ -194,17 +194,17 @@ def manage_default(action, template, html, *,
             if current_sha == proposed_sha:
                 return _response("Already Current", template, target, current_sha,
                                  proposed_sha, None, False, False)
+            previous_backup = None
             if record is not None:
                 if current_sha != record["before_sha256"]:
                     raise DefaultSourceError("concurrency", "Previously restored default has drifted")
-                # Only a previously fully restored operation can be retired.
                 old = _bounded_file(data_fd, record["backup"], limit=MAX_SOURCE,
                                     permissions=0o600)
                 if old is not None and _sha(old) != record["before_sha256"]:
                     raise DefaultSourceError("recovery", "Previous backup has changed")
-                if old is not None:
-                    os.unlink(record["backup"], dir_fd=data_fd)
-                    os.fsync(data_fd)
+                # Never retire the previous recovery evidence before the
+                # replacement operation has been committed successfully.
+                previous_backup = record["backup"] if old is not None else None
             op = uuid4().hex
             record = {"schema": 1, "template": template, "operation_id": op,
                       "phase": "prepared", "before_sha256": current_sha,
@@ -220,6 +220,15 @@ def manage_default(action, template, html, *,
                 raise DefaultSourceError(
                     "uncertain", "New-site default Apply unconfirmed; Recheck recovery before retry",
                     op) from exc
+            if previous_backup is not None:
+                try:
+                    os.unlink(previous_backup, dir_fd=data_fd)
+                    os.fsync(data_fd)
+                except OSError:
+                    # Cleanup is not part of an already confirmed Apply.
+                    # Keeping an obsolete, safely named backup is preferable
+                    # to reporting a false write failure and blind retries.
+                    pass
             return _response("Applied", template, target, proposed_sha, proposed_sha,
                              record, True, False)
 

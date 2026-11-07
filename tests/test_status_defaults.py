@@ -152,6 +152,40 @@ class NewSiteSourceTests(unittest.TestCase):
                          "Restored")
         self.assertEqual(self.call("recheck")["state"],"Restored")
 
+    def test_restored_backup_is_preserved_if_next_apply_preparation_fails(self):
+        applied = self.apply()
+        self.call("restore", expected_recovery=applied["recovery_id"])
+        old_name = defaults._backup_name("404", applied["recovery_id"])
+        old_backup = self.data / old_name
+        self.assertEqual(old_backup.read_bytes(), self.originals["404"])
+        original_writer = defaults._record_write
+
+        def failed_new_prepared(fd, template, record):
+            if record["phase"] == "prepared":
+                raise OSError(5, "simulated new journal disk failure")
+            return original_writer(fd, template, record)
+
+        with patch.object(defaults, "_record_write", side_effect=failed_new_prepared):
+            with self.assertRaises(defaults.DefaultSourceError) as error:
+                self.apply()
+        self.assertEqual(error.exception.stage, "uncertain")
+        self.assertEqual(old_backup.read_bytes(), self.originals["404"])
+        self.assertEqual((self.src / "404.html").read_bytes(), self.originals["404"])
+        # An uncommitted new backup is an orphan, not license to overwrite the
+        # still-restored existing source or discard a previous verified backup.
+        self.assertEqual(self.call("recheck")["state"], "Restored")
+
+    def test_reapplication_removes_only_obsolete_restored_backup_after_success(self):
+        first = self.apply()
+        self.call("restore", expected_recovery=first["recovery_id"])
+        name = defaults._backup_name("404", first["recovery_id"])
+        self.assertTrue((self.data / name).is_file())
+        second = self.apply()
+        self.assertNotEqual(first["recovery_id"], second["recovery_id"])
+        self.assertFalse((self.data / name).exists())
+        self.assertEqual(self.call("recheck")["state"], "Applied")
+        self.call("restore", expected_recovery=second["recovery_id"])
+
     def test_restore_resumes_preexisting_identical_staging(self):
         applied = self.apply()
         stage = self.src / (".404.html." + applied["recovery_id"] + ".stage")
