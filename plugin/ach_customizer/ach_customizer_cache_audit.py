@@ -106,7 +106,7 @@ def _merge_directives(*sources):
     return result
 
 
-def _site_source(site_key, vhost_root, nginx_root, rewrite_root):
+def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
     if not isinstance(site_key, str) or not SITE_KEY.fullmatch(site_key):
         raise CacheAuditError("Unsupported native website VHost key")
     vhost_path = Path(vhost_root) / (site_key + ".conf")
@@ -154,7 +154,8 @@ def _site_source(site_key, vhost_root, nginx_root, rewrite_root):
         sources.append(text)
         fingerprints.append(("rewrite", site_key, sig))
     if has_extension:
-        sig = _native_extension_fingerprint(extension)
+        sig = _native_extension_fingerprint(
+            extension, site_id=site_id, site_key=site_key)
         fingerprints.append(("extension", site_key, sig))
     return _merge_directives(*sources), fingerprints, version
 
@@ -290,7 +291,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                 Path(nginx_root) / "nginx.conf")
             global_zones = _global_zones(global_text)
             selected_directives, selected_files, _ = _site_source(
-                site_key, vhost_root, nginx_root, rewrite_root)
+                site_id, site_key, vhost_root, nginx_root, rewrite_root)
             zone_state, zone = _cache_zone(selected_directives)
             peers = []
             unresolved = 0
@@ -300,7 +301,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                     continue
                 try:
                     peer_directives, files, _ = _site_source(
-                        key, vhost_root, nginx_root, rewrite_root)
+                        ident, key, vhost_root, nginx_root, rewrite_root)
                     _, peer_zone = _cache_zone(peer_directives)
                 except (CacheAuditError, MonitorInputError, OSError, UnicodeError, ValueError):
                     unresolved += 1

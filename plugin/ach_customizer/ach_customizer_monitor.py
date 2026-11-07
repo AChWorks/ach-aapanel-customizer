@@ -768,13 +768,62 @@ def _verified_native_php_include(nginx_dir, name, socket):
     return dependencies
 
 
-def _native_extension_fingerprint(directory):
+def _verified_owned_status_extension(directory, site_id, site_key, name, text):
+    """Accept only the exact status writer's owned Nginx source and journal.
+
+    A managed location is not a generic permission for routing directives.
+    Reuse the status writer's canonical generator, on-disk file ownership and
+    durable recovery record, including a prepared-but-published operation.
+    """
+    import os
+
+    from ach_customizer_state import DATA_DIR, StateError, _open_state_dir
+    from ach_customizer_status_extension import (
+        ExtensionError, PUBLIC_ROOT, _asset_path, _bounded_file,
+        _directory, _include, _owned_dir, _record_load,
+    )
+
+    code = name.rsplit("_", 1)[-1][:-5]
+    if (type(site_id) is not int or not 1 <= site_id <= 2147483647
+            or Path(directory).name != site_key or code not in ("404", "502")
+            or name != "ach_customizer_" + str(site_id) + "_" + code + ".conf"):
+        raise MonitorInputError("Native Status Pages extension identity needs review")
+    try:
+        state_fd = _open_state_dir(DATA_DIR)
+        try:
+            record = _record_load(state_fd, site_id, code)
+        finally:
+            os.close(state_fd)
+        if (not record or record["site_name"] != site_key
+                or record["phase"] not in ("prepared", "applied")
+                or record["asset_path"] != _asset_path(
+                    PUBLIC_ROOT, site_id, code, record["after_sha"])):
+            raise MonitorInputError("Native Status Pages recovery ownership needs review")
+        expected = _include(code, record["asset_path"], record["op"])
+        if (record["include_sha"] != hashlib.sha256(expected).hexdigest()
+                or text.encode("utf-8") != expected):
+            raise MonitorInputError("Native Status Pages extension content needs review")
+        extension_fd = _directory(str(directory))
+        try:
+            _owned_dir(extension_fd)
+            if _bounded_file(extension_fd, name, permissions=0o600) != expected:
+                raise MonitorInputError("Native Status Pages file identity needs review")
+        finally:
+            os.close(extension_fd)
+    except (ExtensionError, StateError) as exc:
+        raise MonitorInputError("Native Status Pages ownership needs review") from exc
+    # Its verified operation and source are part of the shared-impact digest.
+    # A concurrent journal or file change also invalidates the next scan.
+    return record
+
+
+def _native_extension_fingerprint(directory, *, site_id=None, site_key=None):
     """Read a single native per-site '*.conf' glob without following links.
 
-    Accept only inert native logging overlays. Arbitrary extension fragments
-    may change request handling or PHP routing, so they must remain unresolved.
-    Two anchored full snapshots detect directory entry/content changes during
-    inspection; the digest is rechecked by Prepare/Apply before any write.
+    Accept inert native logging overlays or the exact verified, plugin-owned
+    Status Pages 404/502 source. All other routing remains unresolved. Two
+    anchored snapshots include file identities, bytes and recovery ownership.
+    The digest is rechecked before an approved FPM Apply/Rollback.
     """
     import os
     import stat
@@ -817,12 +866,18 @@ def _native_extension_fingerprint(directory):
                 text, signature = _bounded_file_text(
                     directory / name, MAX_NGINX_SITE_BYTES, with_fingerprint=True,
                 )
-                active = _active_nginx_text(text)
-                for line in active.splitlines():
-                    if (line.strip() and not re.fullmatch(
-                            r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)):
-                        raise MonitorInputError("Native extension has unverified routing or directives")
-                files.append({"name": name, "signature": signature})
+                if name.startswith("ach_customizer_"):
+                    journal = _verified_owned_status_extension(
+                        directory, site_id, site_key, name, text)
+                    files.append({"name": name, "signature": signature,
+                                  "status_journal": journal})
+                else:
+                    active = _active_nginx_text(text)
+                    for line in active.splitlines():
+                        if (line.strip() and not re.fullmatch(
+                                r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)):
+                            raise MonitorInputError("Native extension has unverified routing or directives")
+                    files.append({"name": name, "signature": signature})
             after = os.fstat(fd)
             if any(getattr(before, field) != getattr(after, field) for field in identities):
                 raise MonitorInputError("Native extension changed during inspection")
@@ -903,7 +958,7 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         "other_php_sites_count": 0,
         **({"other_sites": []} if include_other_sites else {}),
         "reason": "",
-        "note": ("Verified native Nginx VHost/PHP includes, inert site extension glob and [www] Unix-socket FILE attribution only; "
+        "note": ("Verified native Nginx VHost/PHP includes, inert or owned Status Pages site extensions and [www] Unix-socket FILE attribution only; "
                  "not proof of effective routing, PHP worker state, or a complete impact boundary for Apply."),
     }
     try:
@@ -972,7 +1027,8 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                                          "signature": rewrite_signature})
                 if has_extension:
                     dependencies.append({"kind": "native_extension", "id": site_id,
-                                         "signature": _native_extension_fingerprint(extension)})
+                                         "signature": _native_extension_fingerprint(
+                                             extension, site_id=site_id, site_key=name)})
                 if php_name not in checked_snippets:
                     if assigned == "00":
                         if php_name != "enable-php-00.conf":
@@ -1026,8 +1082,8 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 dependencies, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")).hexdigest()
             result["state"] = "File Mapping"
-            # Both native forms are already checked: extension/*.conf must contain
-            # inert logging only, and wpfastcgi must have exactly the selected
+            # Both native forms are checked: extension/*.conf contains inert logging
+            # or an exact owned Status Pages snippet; wpfastcgi has the selected
             # [www] Unix socket with no hidden upstream. Do not reject ordinary
             # aaPanel sites merely for using these validated native features.
             # The only implemented manual writer is PHP 8.5; other versions
