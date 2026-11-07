@@ -1081,6 +1081,12 @@
       return current[key] === statusSavedBrand[key];
     });
   }
+  function statusTrustedSelection(scope) {
+    // A stale inventory is never authority for site-scoped actions. Retain
+    // the operator's draft, but require a freshly validated native site row.
+    return !!scope && (scope.scope === 'global' ||
+      (!statusSitesBusy && selectedProbeSite(scope) !== null));
+  }
   function statusMayDiscardEdits() {
     if (!statusSavedBrand || statusBrandMatchesSaved()) return true;
     if (typeof window === 'undefined' || typeof window.confirm !== 'function')
@@ -1106,20 +1112,27 @@
       'disabled', busy || statusSitesBusy);
     root.find('#ach-status-load').prop('disabled', busy);
     root.find('#ach-status-scope, #ach-status-template, #ach-status-locale').prop('disabled', busy);
-    root.find('#ach-status-site-id').prop('disabled', busy ||
+    root.find('#ach-status-site-id').prop('disabled',
+      busy || statusSitesBusy || !statusSitesTrusted ||
       root.find('#ach-status-scope').val() !== 'site');
-    root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer').prop('disabled', busy);
-    root.find('#ach-status-preview-button, #ach-status-save').prop(
-      'disabled', busy || statusRevision === null);
-    root.find('#ach-status-reset').prop('disabled',
-      busy || statusRevision === null ||
-      root.find('#ach-status-reset-approve').prop('checked') !== true);
     var scope = statusScope(), template = root.find('#ach-status-template').val();
-    root.find('#ach-status-inspect-button').prop('disabled', busy || statusRevision === null ||
+    // Without a validated saved baseline, no untracked editable draft is
+    // possible. During an inventory refresh, existing drafts stay editable,
+    // but Save/Reset/Preview are gated on fresh site membership.
+    var editable = statusRevision !== null && !!statusSavedBrand &&
+      !!scope && statusLoadedScope === scope.scope + ':' + scope.site_id;
+    var actionable = editable && statusTrustedSelection(scope);
+    root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer').prop('disabled', busy || !editable);
+    root.find('#ach-status-preview-button, #ach-status-save').prop(
+      'disabled', busy || !actionable);
+    root.find('#ach-status-reset').prop('disabled',
+      busy || !actionable ||
+      root.find('#ach-status-reset-approve').prop('checked') !== true);
+    root.find('#ach-status-inspect-button').prop('disabled', busy || !actionable ||
       !scope || scope.scope !== 'site' ||
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
       (template !== '404' && template !== '502'));
-    root.find('#ach-status-probe-button').prop('disabled', busy || statusRevision === null ||
+    root.find('#ach-status-probe-button').prop('disabled', busy || !actionable ||
       !scope || scope.scope !== 'site' ||
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
       !selectedProbeSite(scope) || template !== '404');
@@ -1181,19 +1194,19 @@
     });
   }
   function loadStatusSites(reset) {
-    if (root.find('#ach-status-scope').val() !== 'site') return;
+    if (root.find('#ach-status-scope').val() !== 'site' || statusSitesBusy) return;
     if (reset) {
       // Invalidate every older response, even after site -> global -> site.
+      // Never remove the selected option here: a dirty site draft must remain
+      // recoverable if a refresh fails, excludes the site or is still paged.
       statusSitesTicket += 1;
       statusSites = []; statusSitePage = 1; statusSitesMore = true;
       statusSitesBusy = false; statusSitesTrusted = false;
       statusClearPreview();
-      statusLock(statusBusy);
-      root.find('#ach-status-site-id').empty().prop('disabled', true);
-      $('<option>').val('').text('Loading websites...').appendTo(root.find('#ach-status-site-id'));
     }
     if (statusSitesBusy || !statusSitesMore) return;
     statusSitesBusy = true;
+    statusLock(statusBusy);
     root.find('#ach-status-sites-more, #ach-status-sites-retry').prop('disabled', true);
     root.find('#ach-status-sites-state').text('Loading website inventory...');
     var expectedPage = statusSitePage, ticket = statusSitesTicket;
@@ -1227,18 +1240,37 @@
       }
       statusSites = statusSites.concat(newSites);
       statusSitesTrusted = true;
-      var select = root.find('#ach-status-site-id'), selected = select.val();
+      var select = root.find('#ach-status-site-id'), selected = select.val() || '';
       select.empty();
       $('<option>').val('').text('Choose a website...').appendTo(select);
       statusSites.forEach(function (site) {
         $('<option>').val(String(site.id)).text(site.name + ' (ID ' + site.id + ')').appendTo(select);
       });
-      select.val(statusSites.some(function (site) { return String(site.id) === selected; }) ? selected : '');
-      select.prop('disabled', false);
       statusSitePage += 1;
       statusSitesMore = r.has_more;
+      var found = statusSites.some(function (site) { return String(site.id) === selected; });
+      if (selected && !found) {
+        // Keep the prior selected value in the actual DOM so Cancel can
+        // restore it even when an edited site's inventory row disappeared.
+        // This placeholder is NOT a validated native site for any operation.
+        $('<option>').val(selected).text(
+          'Previously selected site ID ' + selected +
+          (statusSitesMore ? ' (load more to verify)' : ' (no longer in inventory)')
+        ).appendTo(select);
+      }
+      select.val(selected);
       root.find('#ach-status-sites-more').prop('hidden', !statusSitesMore).prop('disabled', !statusSitesMore);
-      root.find('#ach-status-sites-state').text(statusSites.length + ' website(s) loaded' + (statusSitesMore ? '; more available.' : '.'));
+      root.find('#ach-status-sites-state').text(
+        statusSites.length + ' website(s) loaded' +
+        (statusSitesMore ? '; more available.' : '.') +
+        (selected && !found ?
+          ' Selected site ID ' + selected +
+          (statusSitesMore ? ' is not yet verified; draft preserved. ' :
+            ' is no longer in refreshed inventory; draft preserved. ') +
+          (statusSitesMore ? 'Load more websites to check it.' :
+            'Save unavailable. Copy your draft or explicitly select another site.') :
+          '')
+      );
       statusLock(statusBusy);
     });
   }
@@ -1255,7 +1287,7 @@
       statusSitesTicket += 1;
       statusSitesBusy = false; statusSitesMore = false;
       statusSites = []; statusSitePage = 1; statusSitesTrusted = false;
-      root.find('#ach-status-site-id').empty();
+      root.find('#ach-status-site-id').empty().val('');
       $('<option>').val('').text('Select website scope first').appendTo(root.find('#ach-status-site-id'));
       root.find('#ach-status-sites-state').text('Choose website scope to load current site options.');
     }
@@ -1286,7 +1318,10 @@
   root.find('#ach-status-preview-button').on('click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
-    if (!scope) { statusNotice('Select a native site ID.', 'error'); return; }
+    if (!scope || !statusTrustedSelection(scope)) {
+      statusNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
+      return;
+    }
     statusClearPreview();
     var ticket = statusTicket, selectedBrand = statusFields();
     statusLock(true);
@@ -1400,7 +1435,8 @@
     var scope = statusScope();
     var template = root.find('#ach-status-template').val();
     var locale = root.find('#ach-status-locale').val();
-    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'site' ||
+    if (statusBusy || statusRevision === null || !statusTrustedSelection(scope) ||
+        scope.scope !== 'site' ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
         (template !== '404' && template !== '502')) return;
     var ticket = statusTicket, submittedBrand = statusFields();
@@ -1530,7 +1566,10 @@
   root.find('#ach-status-save').on('click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
-    if (!scope) { statusNotice('Select a native site ID.', 'error'); return; }
+    if (!scope || !statusTrustedSelection(scope)) {
+      statusNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
+      return;
+    }
     var priorRevision = statusRevision, submitted = statusFields();
     statusNotice('Saving ' + scope.scope + ' branding preferences...');
     statusLock(true);
@@ -1565,7 +1604,7 @@
     if (statusBusy || statusRevision === null ||
         root.find('#ach-status-reset-approve').prop('checked') !== true) return;
     var scope = statusScope();
-    if (!scope) return;
+    if (!statusTrustedSelection(scope)) return;
     var priorRevision = statusRevision;
     statusNotice('Resetting ' + scope.scope + ' branding preferences...');
     statusLock(true);
