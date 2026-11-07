@@ -1,7 +1,9 @@
-"""Native aaPanel-owned Nginx extension error pages (404 and 502).
+"""Native aaPanel-owned Nginx extension error pages (404, 502 and generic 50x).
 
 No document-root file is modified. A site-specific, root-owned include routes
-the existing error_page URI to an immutable, plugin-owned HTML asset. The
+the existing error_page URI to an immutable, plugin-owned HTML asset.
+Generic 50x adds only Nginx-served 500/503/504 mappings while retaining the
+native /502.html route. It does NOT intercept application-generated responses. The
 operator explicitly authorizes one Nginx configuration reload; an independent
 loopback error response must prove the selected site, status, content and
 operation nonce. Every ambiguous activation retains recovery evidence.
@@ -27,7 +29,12 @@ from ach_customizer_status_probe import _DeadlineSocket, _remaining
 NGINX = "/www/server/nginx/sbin/nginx"
 NGINX_CONF = "/www/server/nginx/conf/nginx.conf"
 PUBLIC_ROOT = "/www/server/nginx/.ach-customizer-status"
-CODES = ("404", "502")
+CODES = ("404", "502", "50x")
+FIFTY_CODES = ("500", "502", "503", "504")
+
+
+def _expected_status(code):
+    return 500 if code == "50x" else int(code)
 DOMAIN = re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,252})\Z")
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 TOKEN = re.compile(r"[0-9a-f]{32}\Z")
@@ -329,9 +336,20 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
             ".." in document_root.split("/") or "//" in document_root or
             not exact(r"^\s*root\s+" + re.escape(document_root) + r"\s*;") or
             not exact(r"^\s*server_name\s+" + re.escape(name) + r"\s*;") or
-            not exact(r"^\s*error_page\s+" + code + r"\s+/" + code + r"\.html\s*;") or
+            not exact(r"^\s*error_page\s+" + ("502" if code == "50x" else code) +
+                      r"\s+/" + ("502" if code == "50x" else code) + r"\.html\s*;") or
             not exact(r"^\s*include\s+" + re.escape(expected_include) + r"\s*;")):
         raise ExtensionError("source", "Native site root, error-page or extension binding is unproven")
+    if code == "50x":
+        # Never silently override an operator/native error mapping for any
+        # status this managed extension is about to add. Keep this check
+        # scoped to the literal native VHost; runtime HTTP proof remains
+        # required after the explicit Apply.
+        active_source = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        for expression in re.findall(
+                r"(?m)(?:^|[;{}])[ \t]*error_page[ \t]+([^;{}\r\n]+);", active_source):
+            if any(value in {"500", "503", "504"} for value in expression.split()[:-1]):
+                raise ExtensionError("conflict", "Selected site already owns a 500/503/504 error mapping")
     native_include = re.search(
         r"(?m)^\s*include\s+" + re.escape(expected_include) + r"\s*;", text)
     before = "\n".join(line.split("#", 1)[0]
@@ -381,10 +399,38 @@ def _asset_path(public_root, site_id, code, after_sha):
 
 
 def _include(code, asset_path, op):
-    # Only static validated material is interpolated. Confined to the exact
-    # URI already targeted by aaPanel's server-scope error_page directive.
+    # ACh-managed paths are intentionally independent of site files and
+    # only affect Nginx-served errors for the explicitly selected VHost.
     if not TOKEN.fullmatch(op) or not HASH.fullmatch(asset_path.rsplit("-", 1)[-1][:-5]):
         raise ExtensionError("input", "Invalid plugin asset identity")
+    if code == "50x":
+        # Native aaPanel already maps 502 -> /502.html. Do not duplicate that
+        # status mapping: provide its exact URI and add only missing 50x codes.
+        route = "/.__ach_customizer_50x_" + op + ".html"
+        output = [
+            "error_page 500 503 504 " + route + ";",
+            "location = " + route + " {",
+            "    internal;",
+            "    alias " + asset_path + ";",
+            "    default_type text/html;",
+            "    add_header X-ACh-Status-Proof " + op + " always;",
+            "}",
+            "location = /502.html {",
+            "    internal;",
+            "    alias " + asset_path + ";",
+            "    default_type text/html;",
+            "    add_header X-ACh-Status-Proof " + op + " always;",
+            "}",
+        ]
+        for status in FIFTY_CODES:
+            output.extend((
+                "location = /.__ach_customizer_proof_" + op + "_" + status + " {",
+                "    allow 127.0.0.1;",
+                "    deny all;",
+                "    try_files /.__ach_customizer_never_exists_" + op + " =" + status + ";",
+                "}",
+            ))
+        return ("\n".join(output) + "\n").encode("ascii")
     probe_path = "/.__ach_customizer_proof_" + op
     return (
         "location = /" + code + ".html {\n"
@@ -459,11 +505,32 @@ def _nginx(action, *, nginx=NGINX, conf=NGINX_CONF, runner=None):
         raise ExtensionError("activation", "Native Nginx operation unavailable") from exc
 
 
-def _probe(site, code, op, *, port=80):
+def _assess_50x(observations, op):
+    if (len(observations) == len(FIFTY_CODES) and
+            all(result[0] == int(status) and result[2] == op
+                for result, status in zip(observations, FIFTY_CODES)) and
+            len({result[1] for result in observations}) == 1):
+        return (500, observations[0][1], op)
+    # Never claim an old generation has vanished if even one code retains it.
+    return (0, None, op if any(result[2] == op for result in observations) else None)
+
+
+def _probe(site, code, op, *, port=80, proof_status=None):
+    # The multi-status probe proves *each* native Nginx error status, body,
+    # and generation nonce through independent fresh HTTP requests.
+    if code == "50x":
+        if op is None:
+            return _probe(site, "502", None, port=port)
+        observations = [
+            _probe(site, status, op, port=port, proof_status=status)
+            for status in FIFTY_CODES
+        ]
+        return _assess_50x(observations, op)
     host = site["name"]
     if not DOMAIN.fullmatch(host) or (op is not None and not TOKEN.fullmatch(op)):
         raise ExtensionError("identity", "Invalid internal status probe identity")
-    path = ("/.__ach_customizer_proof_" + op if op else
+    path = ("/.__ach_customizer_proof_" + op +
+            ("_" + proof_status if proof_status else "") if op else
             "/.__ach_customizer_probe_" + uuid4().hex + ".css")
     deadline = time.monotonic() + 2.5
     conn = None
@@ -512,7 +579,7 @@ def _verified(site, code, op, sha, *, probe=None):
     consecutive = 0
     while True:
         result = fn(site, code, op)
-        if result == (int(code), sha, op):
+        if result == (_expected_status(code), sha, op):
             consecutive += 1
             if consecutive >= 3:
                 return result
@@ -546,14 +613,16 @@ def _verified_absent(site, code, op, baseline_sha, *, probe=None):
 
 
 def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
-                     vhost_root=VHOST_ROOT):
+                     vhost_root=VHOST_ROOT, template="502"):
     """Read-only native 502 source preview; NOT a synthetic live 502 claim.
 
     The subsequently authorized Apply must prove an actual 502 response with
     the chosen immutable HTML and a fresh operation nonce before success.
     """
     from ach_customizer_status_inspect import inspect_site_files
-    source_sha, _ = _source(site, "502", vhost_root)
+    if template not in ("502", "50x"):
+        raise ExtensionError("input", "Unsupported Nginx source preview")
+    source_sha, _ = _source(site, template, vhost_root)
     inspected = inspect_site_files(
         site, locale=locale, template="502",
         rendered_sha256=rendered_sha256, rendered_html=rendered_html,
@@ -568,10 +637,13 @@ def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
     else:
         raise ExtensionError(
             "source", "Site 502.html is uninspectable; source-only approval is unsafe")
+    if template == "50x":
+        note += " Generic 50x uses this 502 source as its Restore baseline; no 500/503/504 was induced."
     return {
         "schema": 1, "site_id": site["id"], "site_key": site["name"],
-        "template": "502", "locale": locale,
-        "state": "Source Ready", "reason": "Native 502 extension source is eligible for explicit guarded activation",
+        "template": template, "locale": locale,
+        "state": "Source Ready", "reason": ("Native 50x source is eligible for guarded Nginx error routing"
+             if template == "50x" else "Native 502 extension source is eligible for explicit guarded activation"),
         "read_only": True, "apply_supported": False,
         "nginx_runtime_verified": False, "scope": "native_vhost_source_only",
         "http_status": None, "http_404_observed": False, "body_sha256": None,
@@ -590,6 +662,13 @@ def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
         },
     }
 
+
+def preview_site_50x(site, *, locale, rendered_sha256, rendered_html,
+                     vhost_root=VHOST_ROOT):
+    """Source-only preflight; real Nginx 50x proof follows explicit Apply."""
+    return preview_site_502(
+        site, locale=locale, rendered_sha256=rendered_sha256,
+        rendered_html=rendered_html, vhost_root=vhost_root, template="50x")
 
 
 def _previous_502_source(site, vhost_root, html):
@@ -698,7 +777,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 elif _sha(current_config) == record["include_sha"]:
                     try:
                         if (probe or _probe)(site, code, record["op"]) == (
-                                int(code), record["after_sha"], record["op"]):
+                                _expected_status(code), record["after_sha"], record["op"]):
                             state = "Applied"
                     except (ExtensionError, OSError):
                         state = "Needs Review"
@@ -715,10 +794,13 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 except (ExtensionError, OSError, StatusPageError):
                     state = "Needs Review"
             if record is None and current_config is None:
-                try:
-                    _status, current_sha, _proof = (probe or _probe)(site, code, None)
-                except (ExtensionError, OSError):
-                    current_sha = expected_sha
+                if code == "50x":
+                    current_sha = _previous_502_source(site, vhost_root, html)
+                else:
+                    try:
+                        _status, current_sha, _proof = (probe or _probe)(site, code, None)
+                    except (ExtensionError, OSError):
+                        current_sha = expected_sha
             else:
                 current_sha = (record["before_sha"] if record and
                                state in ("Restored", "Source Restored")
@@ -730,13 +812,21 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                     "after_sha256": record["after_sha"] if record else None,
                     "recovery_id": record["op"] if record else None,
                     "read_only": True, "mode": "native_status_extension",
-                    "runtime_verified": state == "Restored" and code == "404",
-                    "verification_scope": ("source_and_nonce_only" if code == "502"
-                                           else "http404_body")}
+                    "verification_scope": ("http50x_body" if code == "50x" and state == "Applied"
+                                           else "source_and_nonce_only" if code != "404"
+                                           else "http404_body"),
+                    "runtime_verified": state == "Applied" if code == "50x" else state == "Restored" and code == "404"}
 
         # A syntax error in an unrelated Nginx VHost must never be turned
         # into an authorization to change this site; no change on failure.
         _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
+        if action == "apply" and code in ("502", "50x"):
+            # Both modes own /502.html; only one may be active on a site.
+            other = "502" if code == "50x" else "50x"
+            competing = _bounded_file(
+                ext_fd, _include_name(site_id, other), limit=8192, permissions=0o600)
+            if competing is not None:
+                raise ExtensionError("conflict", "Another active status mode owns native /502.html")
         if action == "apply":
             if (current_config is not None or record and record["phase"] != "restored"):
                 raise ExtensionError("concurrency", "Existing status extension is managed or requires recovery")
@@ -746,7 +836,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
             prior_status, prior_sha, _prior_proof = (probe or _probe)(site, code, None)
             if code == "404" and (prior_status != 404 or prior_sha != expected_current):
                 raise ExtensionError("concurrency", "Live existing HTTP 404 differs from approval")
-            if code == "502":
+            if code in ("502", "50x"):
                 if _previous_502_source(site, vhost_root, html) != expected_current:
                     raise ExtensionError(
                         "concurrency", "Existing 502 file differs from approved source preview")
@@ -820,7 +910,11 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 ) from exc
             return {"state": "Applied", "changed": True, "site_id": site_id,
                     "page_file_sha256": expected_sha, "recovery_id": op,
-                    "read_only": False, "mode": "native_status_extension"}
+                    "read_only": False, "mode": "native_status_extension",
+                    "runtime_verified": code == "50x",
+                    "verification_scope": "http50x_body" if code == "50x" else
+                                          "http404_body" if code == "404" else
+                                          "source_and_nonce_only"}
 
         if (record is None or expected_recovery != record["op"] or
                 record["phase"] not in ("applied", "prepared")):
@@ -845,7 +939,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 raise ExtensionError("recovery", "Status extension was independently modified")
             if record["phase"] == "applied":
                 observed = (probe or _probe)(site, code, record["op"])
-                if observed != (int(code), record["after_sha"], record["op"]):
+                if observed != (_expected_status(code), record["after_sha"], record["op"]):
                     raise ExtensionError("concurrency", "Applied route no longer matches journal")
             _rename_noreplace(ext_fd, include_name, retained)
             os.fsync(ext_fd)
@@ -857,7 +951,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
             _verified_absent(site, code, record["op"], record["before_sha"],
                              probe=probe)
             if (_source(site, code, vhost_root, nginx_conf)[0] != record["vhost_sha"]
-                    or (code == "502" and
+                    or (code in ("502", "50x") and
                         _previous_502_source(site, vhost_root, html) !=
                         record["before_sha"])):
                 raise ExtensionError(
