@@ -1148,8 +1148,13 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         self._native_qa_shapes()
         got = self.inspect()
         self.assertEqual(got['state'], 'File Mapping', got)
-        self.assertIs(got['manual_apply_eligible'], False)
+        self.assertIs(got['manual_apply_eligible'], True)
         self.assertEqual([s['id'] for s in got['matched_sites']], [3, 6])
+        # The ordinary WordPress FastCGI and inert aaPanel site logging
+        # overlays are now supported by the existing PHP 8.5 shared writer.
+        # The complete immutable file dependency chain still participates in
+        # the preview/Apply conflict identity.
+        self.assertEqual(got['unresolved_sites'], [])
         self.assertEqual(got['other_php_sites_count'], 1)
         self.assertRegex(got['dependency_sha256'], '^[0-9a-f]{64}$')
         self.assertIn('not proof of effective routing', got['note'])
@@ -1164,6 +1169,7 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         overlay.write_text('access_log off;\ninclude /tmp/hidden.conf;\n')
         bad = self.inspect()
         self.assertEqual(bad['state'], 'Needs Review')
+        self.assertIs(bad['manual_apply_eligible'], False)
         self.assertEqual([s['id'] for s in bad['unresolved_sites']], [3])
         self.assertNotIn('dependency_sha256', bad)
         overlay.write_text('access_log off;\n')
@@ -1205,7 +1211,7 @@ class SharedPHPFileImpactTests(unittest.TestCase):
                 'test fixture\n', encoding='utf-8')
         accepted = self.inspect()
         self.assertEqual(accepted['state'], 'File Mapping', accepted)
-        self.assertIs(accepted['manual_apply_eligible'], False)
+        self.assertIs(accepted['manual_apply_eligible'], True)
         self.assertIn('dependency_sha256', accepted)
 
         (extension / 'one-more.txt').write_text('over limit\n', encoding='utf-8')
