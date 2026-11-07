@@ -805,9 +805,10 @@ class ach_customizer_main:
             if site_id is None:
                 raise StatusPageError("Select an existing native website for an HTTP 404 probe")
             expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
-            if (self._argument(args, "template") != "404" or
+            template = self._argument(args, "template")
+            if (template not in ("404", "502") or
                     self._argument(args, "locale") not in LOCALES):
-                raise StatusPageError("HTTP probe supports only English/Persian site 404")
+                raise StatusPageError("Select an English/Persian site 404 or 502")
             import public
             if public.get_webserver() != "nginx":
                 raise StatusPageError("Only native Nginx HTTP/80 can be probed")
@@ -832,12 +833,20 @@ class ach_customizer_main:
             if self._argument(args, "brand_name") is not None:
                 effective = self._status_values(args)
                 source = "Unsaved probe selection"
-            rendered = render_page(self._argument(args, "locale"), "404", effective)
-            observed = probe_site_404(
-                before, locale=self._argument(args, "locale"),
-                rendered_sha256=rendered["rendered_sha256"],
-                rendered_html=rendered["html"],
-            )
+            rendered = render_page(self._argument(args, "locale"), template, effective)
+            if template == "404":
+                observed = probe_site_404(
+                    before, locale=self._argument(args, "locale"),
+                    rendered_sha256=rendered["rendered_sha256"],
+                    rendered_html=rendered["html"],
+                )
+            else:
+                from ach_customizer_status_extension import preview_site_502
+                observed = preview_site_502(
+                    before, locale=self._argument(args, "locale"),
+                    rendered_sha256=rendered["rendered_sha256"],
+                    rendered_html=rendered["html"],
+                )
             if (native_record() != before or public.get_webserver() != "nginx"
                     or read_preferences(_STATE_DIR) != preferences):
                 raise StatusPageError(
@@ -852,7 +861,7 @@ class ach_customizer_main:
             return self._activity_result(
                 response, "status_pages", "status_probe",
                 target="site:" + str(site_id),
-                level="INFO" if observed["state"] == "HTTP Match" else "WARNING",
+                level="INFO" if observed["state"] in ("HTTP Match", "Source Ready") else "WARNING",
             )
         except PermissionError as exc:
             return self._fail("status_authorization", exc, request_id)
@@ -860,12 +869,11 @@ class ach_customizer_main:
             return self._fail("status_probe", exc, request_id)
 
     def status_manage(self, args):
-        """Strictly gated existing-404-file Apply/Recheck/Restore (Nginx 8.0.7).
+        """Guarded site-specific 404/502 Nginx extension Apply/Recheck/Restore.
 
-        The existing source-only probe cannot grant this action. Independently
-        validate primary-admin POST, selected native site identity, installed
-        Nginx version and source/runtime evidence under the Status Pages lock.
-        No vendor/VHost/extension file or service is ever modified here.
+        Explicit primary-administrator approval is required for a global
+        Nginx reload. Never change an existing site HTML file or vendor VHost.
+        The separately owned status extension must be proved by real HTTP.
         """
         request_id = uuid4().hex
         site_id = None
@@ -875,29 +883,32 @@ class ach_customizer_main:
             if action not in ("apply", "restore", "recheck"):
                 raise StatusPageError("Unsupported status file operation")
             if self._argument(args, "scope") != "site":
-                raise StatusPageError("Only explicitly selected website scope supports file-only 404")
+                raise StatusPageError("Only explicitly selected website scope supports status extensions")
             site_id = self._status_site_id(args)
-            if site_id is None or self._argument(args, "template") != "404":
-                raise StatusPageError("Select an existing website and the 404 template")
+            code = self._argument(args, "template")
+            if site_id is None or code not in ("404", "502"):
+                raise StatusPageError("Select a website and the 404 or 502 template")
             locale = self._argument(args, "locale")
             if locale not in LOCALES:
                 raise StatusPageError("Unsupported Status Pages locale")
-            if action == "apply" and self._argument(args, "site_approval") != "apply_exact_site_404":
-                raise StatusPageError("Explicit site 404 replacement approval required")
-            if action == "restore" and self._argument(args, "site_approval") != "restore_exact_site_404":
-                raise StatusPageError("Explicit saved 404 recovery approval required")
+            if action == "apply" and self._argument(args, "site_approval") != (
+                    "apply_exact_site_" + code + "_reload"):
+                raise StatusPageError("Explicit site-specific status extension and Nginx reload approval required")
+            if action == "restore" and self._argument(args, "site_approval") != (
+                    "restore_exact_site_" + code + "_reload"):
+                raise StatusPageError("Explicit saved status recovery and Nginx reload approval required")
             expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
             from ach_customizer_state import _open_state_dir, parse_revision
             from ach_customizer_status_pages import _load_at, _take_lock
             try:
-                from ach_customizer_status_manage import manage_site_404, StatusManageError
+                from ach_customizer_status_extension import manage_site_extension, ExtensionError
             except ImportError as exc:
                 raise StatusPageError(
-                    "Site 404 manager not loaded after plugin update; restart panel and reopen"
+                    "Status extension manager not loaded after plugin update; restart panel and reopen"
                 ) from exc
             import public
             if public.get_webserver() != "nginx" or str(public.get_panel_version()).strip() != "8.0.7":
-                raise StatusPageError("File-only 404 adapter verified only for aaPanel 8.0.7 Nginx")
+                raise StatusPageError("Native status extension adapter requires aaPanel 8.0.7 Nginx")
 
             def native_record():
                 record = public.M("sites").where("id=?", (site_id,)).field(
@@ -946,13 +957,13 @@ class ach_customizer_main:
                     effective, _source = select_brand(state, site_id)
                     if self._argument(args, "brand_name") is not None:
                         effective = self._status_values(args)
-                    rendered = render_page(locale, "404", effective)
+                    rendered = render_page(locale, code, effective)
                     if native_record() != before:
                         raise StatusPageError("Native website changed during 404 preflight")
                     if action != "recheck":
                         unique_native_root()
-                    result = manage_site_404(
-                        action, before, locale=locale, html=rendered["html"],
+                    result = manage_site_extension(
+                        action, before, code=code, html=rendered["html"],
                         expected_current=self._argument(args, "expected_page_sha256"),
                         expected_vhost=self._argument(args, "expected_vhost_sha256"),
                         expected_render=self._argument(args, "expected_render_sha256"),
@@ -969,16 +980,16 @@ class ach_customizer_main:
                                 "Native site or webserver changed during 404 operation"
                             )
                     except StatusPageError as exc:
-                        raise StatusManageError(
+                        raise ExtensionError(
                             "uncertain",
-                            "Native target changed; inspect saved 404 recovery before retrying",
+                            "Native target changed; inspect saved status recovery before retrying",
                         ) from exc
                     response = {
                         "status": True, "request_id": request_id,
                         "operation_id": request_id, "schema": 1,
                         "site_action": action, "revision": revision,
                         "verified_site_snapshot": serialized,
-                        "locale": locale, "template": "404",
+                        "locale": locale, "template": code,
                         **result,
                     }
                 finally:
@@ -1001,7 +1012,7 @@ class ach_customizer_main:
                 # Private operational diagnosis retains stage and errno while
                 # avoiding arbitrary filesystem paths, bytes or credentials.
                 logging.getLogger("ach_customizer").warning(
-                    "Status 404 operation failure: stage=%s request_id=%s "
+                    "Native Status extension failure: stage=%s request_id=%s "
                     "cause_class=%s errno=%s", step, request_id,
                     type(cause).__name__, getattr(cause, "errno", None))
             response = self._fail("status_manage_" + str(step), exc, request_id)

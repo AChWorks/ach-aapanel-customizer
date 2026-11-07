@@ -430,20 +430,20 @@
       <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
       <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
       <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
-      <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check live HTTP/80 site 404 (read-only)</button></div>
-      <p class="ach-note">HTTP probe makes one explicit GET for a random nonexistent path through 127.0.0.1:80 with the selected website's native, bound Host. It cannot prove HTTPS, Cloudflare, other routes, or safe Apply. The request may appear in website access logs.</p>
+      <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check selected 404/502 source (read-only)</button></div>
+      <p class="ach-note">404: explicit loopback HTTP/80 GET plus source inspection. 502: configured-source inspection only (no artificial production 502). Neither authorizes Apply without the separate confirmed extension operation. The native proof request may appear in access logs.</p>
       <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Live HTTP/80 404 not checked.</p>
       <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">404 adoption preflight not checked. No change authorized.</p>
-      <div class="ach-note" aria-label="Guarded existing-file 404 management">
-        <strong>Existing site 404 file — guarded Manual Apply / Restore</strong>
-        <p>aaPanel 8.0.7 + Nginx only. A live 404 must already serve the exact native document-root 404.html. The plugin never creates an absent page, edits VHost/extension rules or reloads Nginx. Files with conflicting ownership, paths or routes cannot be adopted. This is not 502/panel-global management.</p>
+      <div class="ach-note" aria-label="Guarded website status extension management">
+        <strong>Website 404/502 — guarded Nginx extension Apply / Restore</strong>
+        <p>aaPanel 8.0.7 + Nginx only. Changes a plugin-owned website extension and immutable HTML asset, not existing document-root 404.html or 502.html or aaPanel VHost. <strong>Apply and Restore each reload the shared Nginx service, affecting all sites.</strong> Source syntax and actual selected-site error response must be verified. Unsupported or uncertain changes require Recheck, not automatic retry.</p>
         <div class="ach-controls">
-          <button id="ach-status-manage-recheck" type="button" disabled>Recheck managed 404</button>
+          <button id="ach-status-manage-recheck" type="button" disabled>Recheck selected site status</button>
         </div>
-        <label><input id="ach-status-manage-apply-approve" type="checkbox" /> I approve replacing only the selected site's existing 404.html after a verified recoverable backup.</label>
-        <div class="ach-controls"><button id="ach-status-manage-apply" type="button" class="btn btn-danger" disabled>Apply selected 404 page to this site</button></div>
-        <label><input id="ach-status-manage-restore-approve" type="checkbox" /> I reviewed the saved recovery identity and approve restoring exactly this site's original 404.html.</label>
-        <div class="ach-controls"><button id="ach-status-manage-restore" type="button" class="btn btn-warning" disabled>Restore saved site 404</button></div>
+        <label><input id="ach-status-manage-apply-approve" type="checkbox" /> I approve installing this site's plugin-owned status extension and reloading Nginx globally after validation.</label>
+        <div class="ach-controls"><button id="ach-status-manage-apply" type="button" class="btn btn-danger" disabled>Apply selected status page and reload Nginx</button></div>
+        <label><input id="ach-status-manage-restore-approve" type="checkbox" /> I reviewed this site's recovery identity and approve removing its managed extension and reloading Nginx globally.</label>
+        <div class="ach-controls"><button id="ach-status-manage-restore" type="button" class="btn btn-warning" disabled>Restore selected site status and reload Nginx</button></div>
         <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site 404 recovery before Restore. An uncertain write must not be blindly repeated.</p>
       </div>
       <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
@@ -654,6 +654,8 @@
           if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
             msg(incompatible ? 'PHP-FPM operation response incompatible or incomplete. Inspect saved recovery before retrying.' :
               (response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
+              (typeof response.recovery_id === 'string' && /^[0-9a-f]{32}$/.test(response.recovery_id) ?
+                ' (Recovery ID: ' + response.recovery_id + '; Recheck before Restore)' : '') +
               (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
               (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
           }
@@ -1449,7 +1451,7 @@
       evidence.scope === scope.site_id &&
       evidence.snapshot === nativeHostsSnapshot(site) &&
       evidence.locale === root.find('#ach-status-locale').val() &&
-      root.find('#ach-status-template').val() === '404' &&
+      evidence.template === root.find('#ach-status-template').val() &&
       evidence.brand === JSON.stringify(statusFields());
   }
   function statusLock(busy) {
@@ -1481,8 +1483,10 @@
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
       (template !== '404' && template !== '502'));
     var selected = selectedProbeSite(scope);
-    var selectedReady = !busy && !!actionable && scope &&
-      scope.scope === 'site' && selected && template === '404';
+    var selectedReady = !busy && !!actionable && statusRevision !== null && scope &&
+      scope.scope === 'site' && selected &&
+      statusLoadedScope === scope.scope + ':' + scope.site_id &&
+      (template === '404' || template === '502');
     root.find('#ach-status-probe-button').prop('disabled', !selectedReady);
     root.find('#ach-status-manage-recheck').prop('disabled', !selectedReady);
     root.find('#ach-status-manage-apply').prop('disabled',
@@ -1499,7 +1503,7 @@
     root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
       .prop('checked', false);
     root.find('#ach-status-manage-result').text(
-      'Recheck saved 404 recovery before Restore. An uncertain write must not be blindly repeated.');
+      'Recheck saved status recovery before Restore. Never repeat an uncertain Nginx reload blindly.');
     root.find('#ach-status-iframe').prop('srcdoc', '');
     root.find('#ach-status-sha').text('');
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
@@ -1888,13 +1892,33 @@
   function validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot) {
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
+    if (root.find('#ach-status-template').val() === '502') {
+      var plan = r && r.adoption_preview;
+      return r && r.status === true && r.schema === 1 && r.template === '502' &&
+        r.state === 'Source Ready' && r.scope === 'native_vhost_source_only' &&
+        r.read_only === true && r.apply_supported === false &&
+        r.nginx_runtime_verified === false && r.http_status === null &&
+        r.body_sha256 === null && !r.body_matches_file && !r.body_matches_render &&
+        r.site_id === Number(scope.site_id) && selectedSite &&
+        r.site_key === selectedSite.name && r.verified_site_snapshot === selectedSnapshot &&
+        r.locale === locale && r.revision === statusRevision &&
+        hash(r.page_file_sha256) && hash(r.rendered_sha256) &&
+        plan && plan.schema === 1 && plan.state === 'Source Ready' &&
+        plan.route_source_state === 'Native VHost' &&
+        plan.apply_supported === false && plan.ownership_verified === false &&
+        plan.recovery_verified === false && hash(plan.vhost_sha256) &&
+        plan.current_sha256 === r.page_file_sha256 &&
+        plan.proposed_sha256 === r.rendered_sha256 &&
+        typeof r.reason === 'string' && r.reason.length <= 240 &&
+        typeof r.note === 'string' && r.note.length <= 600;
+    }
     return r && r.schema === 1 && r.status === true &&
       r.read_only === true && r.apply_supported === false &&
       r.nginx_runtime_verified === false && r.scope === 'loopback_http_80' &&
       r.site_id === Number(scope.site_id) && Number.isSafeInteger(r.site_id) &&
       selectedSite && r.site_key === selectedSite.name &&
       r.verified_site_snapshot === selectedSnapshot &&
-      r.template === '404' && r.locale === locale &&
+      r.template === root.find('#ach-status-template').val() && r.locale === locale &&
       ['HTTP Match','HTTP Mismatch','Needs Review'].includes(r.state) &&
       typeof r.site_key === 'string' && /^[A-Za-z0-9.-]{3,253}$/.test(r.site_key) &&
       typeof r.reason === 'string' && r.reason.length <= 240 &&
@@ -1922,21 +1946,24 @@
   }
   root.find('#ach-status-probe-button').on('click', function () {
     var scope = statusScope(), locale = root.find('#ach-status-locale').val();
+    var template = root.find('#ach-status-template').val();
     var selectedSite = selectedProbeSite(scope);
     if (statusBusy || statusRevision === null || !scope || !selectedSite ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
-        root.find('#ach-status-template').val() !== '404') return;
+        !['404','502'].includes(template)) return;
     var selectedSnapshot = nativeHostsSnapshot(selectedSite);
     var ticket = statusTicket, submittedBrand = statusFields();
     statusProbeEvidence = null;
     statusManageEvidence = null;
     root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
       .prop('checked', false);
-    root.find('#ach-status-probe-result').text('Checking local HTTP/80 404; website/config files are not changed...');
-    root.find('#ach-status-adoption-result').text('Checking read-only 404 source/adoption prerequisites...');
+    root.find('#ach-status-probe-result').text(template === '404' ?
+      'Checking local HTTP/80 404 and native site source (read-only)...' :
+      'Inspecting native 502 source (read-only; no error is induced)...');
+    root.find('#ach-status-adoption-result').text('Checking native status extension source prerequisites...');
     statusLock(true);
     request('status_probe', Object.assign({}, scope, submittedBrand, {
-      template:'404', locale:locale,
+      template:template, locale:locale,
       expected_site_key:selectedSite.name,
       expected_site_snapshot:selectedSnapshot
     }), function (r) {
@@ -1948,7 +1975,7 @@
         statusLoadedScope === scope.scope + ':' + scope.site_id &&
         selectedProbeSite(scope) === selectedSite &&
         nativeHostsSnapshot(selectedSite) === selectedSnapshot &&
-        root.find('#ach-status-template').val() === '404' &&
+        root.find('#ach-status-template').val() === template &&
         root.find('#ach-status-locale').val() === locale;
       if (!sameSelection || !validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot)) {
         root.find('#ach-status-probe-result').text(
@@ -1965,25 +1992,26 @@
           '\nHTTP body matches selected render: ' + (r.body_matches_render ? 'Yes' : 'No') +
           '\n' + r.note);
         var adoption = r.adoption_preview;
-        if (r.state === 'HTTP Match' && adoption &&
-            adoption.route_source_state === 'Native VHost' &&
-            /^[0-9a-f]{64}$/.test(adoption.vhost_sha256 || '') &&
-            r.page_file_sha256 !== r.rendered_sha256) {
+        if (((template === '404' && r.state === 'HTTP Match' &&
+               r.page_file_sha256 !== r.rendered_sha256) ||
+              (template === '502' && r.state === 'Source Ready')) &&
+            adoption && adoption.route_source_state === 'Native VHost' &&
+            /^[0-9a-f]{64}$/.test(adoption.vhost_sha256 || '')) {
           statusProbeEvidence = {
             ticket:ticket, revision:statusRevision, scope:scope.site_id,
-            snapshot:selectedSnapshot, locale:locale,
+            snapshot:selectedSnapshot, locale:locale, template:template,
             brand:JSON.stringify(submittedBrand),
             current:r.page_file_sha256, proposed:r.rendered_sha256,
             vhost:adoption.vhost_sha256
           };
         }
         root.find('#ach-status-adoption-result').text(adoption ?
-          'Read-only 404 adoption preflight: ' + adoption.state + ' — ' + adoption.reason +
+          'Read-only ' + template + ' preflight: ' + adoption.state + ' — ' + adoption.reason +
           '\nTextual route provenance: ' + adoption.route_source_state +
           '\nExisting file SHA-256: ' + (adoption.current_sha256 || 'Unavailable') +
           '\nProposed SHA-256: ' + adoption.proposed_sha256 +
           '\nExplicit adoption and backup required: ' + (adoption.requires_backup ? 'Yes' : 'Not inferred') +
-          '\nThe read-only probe cannot authorize a write. A separate guarded file-only action revalidates every condition.' :
+          '\nNo write is authorized by this preview. Explicit approval triggers a guarded extension update and shared Nginx reload.' :
           'This backend supplied no adoption preflight. No Apply/Restore permission.');
       }
       statusLock(false);
@@ -1997,7 +2025,8 @@
         !Number.isSafeInteger(r.site_id) || r.site_id <= 0 ||
         r.verified_site_snapshot !== snapshot || r.revision !== revision ||
         r.locale !== root.find('#ach-status-locale').val() ||
-        r.template !== '404' || r.mode !== 'native_existing_404_file' ||
+        r.template !== root.find('#ach-status-template').val() ||
+        r.mode !== 'native_status_extension' ||
         !token(r.request_id) || r.operation_id !== r.request_id ||
         typeof r.changed !== 'boolean' || !hash(r.page_file_sha256) ||
         (r.recovery_id !== null && !token(r.recovery_id)) ||
@@ -2031,9 +2060,10 @@
   }
   function manageStatusRequest(action) {
     var scope = statusScope(), site = selectedProbeSite(scope);
+    var template = root.find('#ach-status-template').val();
     if (statusBusy || statusRevision === null || !scope || !site ||
         statusLoadedScope !== 'site:' + scope.site_id ||
-        root.find('#ach-status-template').val() !== '404') return;
+        !['404','502'].includes(template)) return;
     var proposal = statusProbeEvidence, recovery = statusManageEvidence;
     if (action === 'apply' &&
         (!sameStatusSelection(proposal) ||
@@ -2050,20 +2080,20 @@
     root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
       .prop('checked', false);
     root.find('#ach-status-manage-result').text(
-      action === 'recheck' ? 'Reading existing 404 recovery and current source...' :
-      action === 'apply' ? 'Preparing root-owned backup and validating site 404 before a file-only change...' :
-      'Checking exact recorded recovery ID before restoring this site 404...');
+      action === 'recheck' ? 'Reading ' + template + ' status recovery and current source...' :
+      action === 'apply' ? 'Validating native status source and preparing guarded Nginx extension...' :
+      'Checking saved ' + template + ' recovery identity before a guarded Nginx reload...');
     statusLock(true);
     request('status_manage', Object.assign({}, scope, brand, {
-      site_action:action, template:'404', locale:locale,
+      site_action:action, template:template, locale:locale,
       expected_revision:String(revision),
       expected_site_key:site.name, expected_site_snapshot:snapshot,
       expected_page_sha256:proposal ? proposal.current : '',
       expected_vhost_sha256:proposal ? proposal.vhost : '',
       expected_render_sha256:proposal ? proposal.proposed : '',
       expected_recovery_id:recovery ? recovery.recovery_id : '',
-      site_approval:action === 'apply' ? 'apply_exact_site_404' :
-        action === 'restore' ? 'restore_exact_site_404' : ''
+      site_approval:action === 'apply' ? 'apply_exact_site_' + template + '_reload' :
+        action === 'restore' ? 'restore_exact_site_' + template + '_reload' : ''
     }), function (r) {
       if (ticket !== statusTicket) return;
       var same = site === selectedProbeSite(statusScope()) &&
@@ -2071,7 +2101,7 @@
         nativeHostsSnapshot(site) === snapshot &&
         JSON.stringify(statusFields()) === JSON.stringify(brand) &&
         root.find('#ach-status-locale').val() === locale &&
-        root.find('#ach-status-template').val() === '404';
+        root.find('#ach-status-template').val() === template;
       if (!same || !validStatusManage(r, action, scope.site_id, snapshot, revision) ||
           (action === 'apply' && r &&
             (r.page_file_sha256 !== proposal.proposed ||
@@ -2087,7 +2117,8 @@
         if (action === 'recheck' && r.recovery_id) {
           statusManageEvidence = {
             ticket:ticket, revision:revision, scope:scope.site_id,
-            snapshot:snapshot, locale:locale, brand:JSON.stringify(brand),
+            snapshot:snapshot, locale:locale, template:template,
+            brand:JSON.stringify(brand),
             state:r.state, recovery_id:r.recovery_id,
             before_sha256:r.before_sha256, after_sha256:r.after_sha256
           };
@@ -2102,11 +2133,11 @@
           (action === 'recheck' && r.state === 'Orphan Drift' ?
             ' — current site 404 differs from an unjournaled backup. No automatic overwrite or Restore is allowed; manual investigation is required.' : '') +
           '\nWebsite ID: ' + r.site_id +
-          '\nCurrent 404 SHA-256: ' + r.page_file_sha256 +
-          '\nOriginal SHA-256: ' + (r.before_sha256 || recovery?.before_sha256 || 'None stored') +
+          '\nCurrent ' + template + ' status SHA-256: ' + r.page_file_sha256 +
+          '\nPrevious HTTP baseline SHA-256: ' + (r.before_sha256 || recovery?.before_sha256 || 'None stored') +
           '\nRecovery ID: ' + (r.recovery_id || 'None') +
           '\nOperation ID: ' + r.operation_id +
-          '\nOnly the selected existing 404.html file is in scope; no Nginx configuration reload or edit was requested. Non-target runtime checks remain part of native QA.');
+          '\nOnly this selected site\'s plugin-owned status extension was targeted. Nginx is shared; the guarded Apply/Restore performs a service reload. Independently validate non-target health.');
         if (action !== 'recheck') {
           root.find('#ach-status-probe-result').text(
             'Prior HTTP evidence invalidated by the write. Run a fresh 404 probe if needed.');
