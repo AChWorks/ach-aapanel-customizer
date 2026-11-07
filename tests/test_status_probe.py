@@ -121,6 +121,23 @@ class HTTPProofTests(unittest.TestCase):
         self.assertFalse(result["apply_supported"])
         self.assertFalse(result["nginx_runtime_verified"])
         self.assertTrue(result["read_only"])
+        self.assertEqual(result["adoption_preview"]["state"], "Needs Review")
+        self.assertFalse(result["adoption_preview"]["apply_supported"])
+        self.assertEqual(result["adoption_preview"]["route_source_state"], "None")
+
+    def test_native_vhost_route_and_matching_http_are_still_not_apply_authorization(self):
+        self.vhost.write_text("server { listen 80; server_name demo.test;\n"
+                              "error_page 404 /404.html;\n}\n")
+        result = self.scan()
+        preview = result["adoption_preview"]
+        self.assertEqual(result["state"], "HTTP Match")
+        self.assertEqual(preview["state"], "Matches Preview")
+        self.assertEqual(preview["route_source_state"], "Native VHost")
+        self.assertEqual(preview["current_sha256"], result["body_sha256"])
+        self.assertFalse(preview["requires_backup"])
+        self.assertFalse(preview["ownership_verified"])
+        self.assertFalse(preview["recovery_verified"])
+        self.assertFalse(preview["apply_supported"])
 
     def test_redirect_and_soft_404_do_not_claim_matching_or_follow_redirect(self):
         for code in (200, 302, 500, 502):
@@ -152,6 +169,15 @@ class HTTPProofTests(unittest.TestCase):
         self.assertTrue(result["body_matches_file"])
         self.assertFalse(result["body_matches_render"])
         self.assertEqual(result["page_file_sha256"], hashlib.sha256(other).hexdigest())
+        self.assertEqual(result["adoption_preview"]["state"], "Needs Review")
+        self.vhost.write_text("server { listen 80; server_name demo.test;\n"
+                              "error_page 404 /404.html;\n}\n")
+        matched = self.scan()
+        self.assertEqual(matched["adoption_preview"]["state"], "Backup Required")
+        self.assertTrue(matched["adoption_preview"]["requires_backup"])
+        self.assertFalse(matched["adoption_preview"]["ownership_verified"])
+        self.assertFalse(matched["adoption_preview"]["recovery_verified"])
+        self.assertFalse(matched["adoption_preview"]["apply_supported"])
 
     def test_oversized_or_encoded_response_never_claims_verified(self):
         self.payload = b"x" * (probe.MAX_BODY_BYTES + 1)

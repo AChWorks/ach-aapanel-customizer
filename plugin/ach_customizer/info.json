@@ -1,7 +1,7 @@
 {
   "title": "ACh aaPanel Customizer",
   "name": "ach_customizer",
-  "ps": "Native Monitor, PHP 8.1+ read-only runtime/socket mapping, guarded PHP 8.5 Manual Apply, read-only FastCGI cache audit, reviewed website change baseline, offline Status Pages and local-only HTTP 404 verification; no Status Pages Apply or auto-enforcement",
+  "ps": "Native Monitor, PHP 8.1+ runtime/socket read-only, PHP 8.5 guarded Manual Apply, FastCGI source audit, site lifecycle baseline, Status Pages preview and experimental guarded existing-file 404 transaction; no auto-enforcement",
   "versions": "0.1.14",
   "checks": "/www/server/panel/plugin/ach_customizer",
   "author": "AChWorks",
