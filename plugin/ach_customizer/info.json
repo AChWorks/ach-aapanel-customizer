@@ -1,7 +1,7 @@
 {
   "title": "ACh aaPanel Customizer",
   "name": "ach_customizer",
-  "ps": "Native Monitor, PHP 8.1+ read-only installation discovery, guarded PHP 8.5 Manual Apply, offline Status Pages and limited guarded existing-file 404 transaction; no generic Status Pages routing Apply",
+  "ps": "Native Monitor, PHP 8.1+ discovery, guarded PHP 8.5 Apply/Restore, offline Status Pages and explicit site 404/502 Nginx extension Apply/Restore with reload; no global/default status Apply",
   "versions": "0.1.14",
   "checks": "/www/server/panel/plugin/ach_customizer",
   "author": "AChWorks",

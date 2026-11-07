@@ -100,6 +100,7 @@ class PackageContractTests(unittest.TestCase):
             'entry.st_mode & 0o022',
         ):
             self.assertIn(requirement, helper)
+        self.assertIn('Status Pages extensions, Nginx assets and recovery journals are preserved', shell)
         self.assertNotIn('rm -rf', shell)
         self.assertNotIn('rm -f', shell)
         self.assertNotIn('rmtree(', helper)

@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Status: Unreleased 0.1.14 development candidate under source validation — native aaPanel sidebar, Monitor, version-gated PHP 8.5 Manual Apply/Restore, Status Pages offline preview/branding and narrowly guarded existing-site 404-file Apply/Recheck/Restore, bounded Activity/Diagnostics, and read-only website/local-hosts inspection.** No supported public release or production deployment is available.
+**Status: Unreleased 0.1.14 development candidate — native aaPanel sidebar, Monitor, version-gated PHP 8.5 Manual Apply/Restore, offline Status Pages preview/branding and guarded native site 404/502 extension Apply/Recheck/Restore with explicit Nginx reload, bounded Activity/Diagnostics and read-only website/local-hosts inspection.** No supported public release or production deployment is available.
 
 ## Why
 
