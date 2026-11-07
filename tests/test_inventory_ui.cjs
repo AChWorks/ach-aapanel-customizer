@@ -1820,7 +1820,7 @@ test('Read-only 404 adoption preview preserves observed content conflicts and de
   ui.statusClick('#ach-status-probe-button').respond(observed);
   assert.match(ui.state().statusProbe,/HTTP Match/);
   assert.match(ui.state().statusAdoption,/Backup Required/);
-  assert.match(ui.state().statusAdoption,/read-only probe cannot authorize a write/);
+  assert.match(ui.state().statusAdoption,/No write is authorized by this preview/);
   ui.statusSetValue('#ach-status-name','Changed during observation','input change');
   assert.match(ui.state().statusAdoption,/not checked/);
 });
@@ -1853,7 +1853,7 @@ test('Tampered 404 adoption preflight never authorizes Apply or a trusted result
     statusProbe({adoption_preview:base})
   );
   assert.match(ui.state().statusAdoption,/Matches Preview/);
-  assert.match(ui.state().statusAdoption,/read-only probe cannot authorize a write/);
+  assert.match(ui.state().statusAdoption,/No write is authorized by this preview/);
 });
 
 test('HTTP mismatch, soft success, and unknown evidence stay distinguishable', () => {
