@@ -1103,6 +1103,96 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("status_default_unexpected", exc, request_id)
 
+    def status_unbound(self, args):
+        """Explicit global HTTP/80 unbound Nginx route (never TLS or site stop)."""
+        request_id = uuid4().hex
+        action = self._argument(args, "unbound_action")
+        try:
+            self._status_primary_admin_post()
+            if (self._argument(args, "scope") != "global" or
+                    self._argument(args, "site_id") not in (None, "") or
+                    self._argument(args, "template") != "unbound" or
+                    action not in ("recheck", "apply", "restore")):
+                raise StatusPageError("Select global/unbound and Recheck, Apply or Restore")
+            locale = self._argument(args, "locale")
+            if locale not in LOCALES:
+                raise StatusPageError("Unsupported unbound page language")
+            if (action != "recheck" and
+                    self._argument(args, "unbound_approval") !=
+                    action + "_global_http_unbound_reload"):
+                raise StatusPageError("Explicit global HTTP/80 Nginx reload approval required")
+            import public
+            def compatible():
+                return (public.get_webserver() == "nginx" and
+                        str(public.get_panel_version()).strip() == "8.0.7")
+            if not compatible():
+                raise StatusPageError("HTTP unbound manager requires aaPanel 8.0.7 Nginx")
+            from ach_customizer_state import _open_state_dir, parse_revision
+            from ach_customizer_status_pages import _load_at, _take_lock
+            try:
+                from ach_customizer_status_unbound import manage_unbound, UnboundError
+            except ImportError as exc:
+                raise StatusPageError(
+                    "Unbound status manager was not loaded after update; restart the panel"
+                ) from exc
+
+            def status_arg(name):
+                value = self._argument(args, name)
+                return int(value) if (isinstance(value, str) and
+                                      re.fullmatch(r"[1-5][0-9]{2}", value)) else None
+
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock = _take_lock(fd)
+                try:
+                    state = _load_at(fd)
+                    revision = parse_revision(self._argument(args, "expected_revision"))
+                    if revision != state["revision"]:
+                        raise StatusPageError("Global branding revision changed; Recheck")
+                    effective, _ = select_brand(state)
+                    if self._argument(args, "brand_name") is not None:
+                        effective = self._status_values(args)
+                    rendered = render_page(locale, "unbound", effective)
+                    result = manage_unbound(
+                        action, rendered["html"], data_fd=fd,
+                        expected_source=self._argument(args, "expected_source_sha256"),
+                        expected_render=self._argument(args, "expected_render_sha256"),
+                        expected_recovery=self._argument(args, "expected_recovery_id"),
+                        expected_v4=status_arg("expected_ipv4_status"),
+                        expected_v6=status_arg("expected_ipv6_status"),
+                    )
+                    if not compatible():
+                        raise UnboundError(
+                            "uncertain", "aaPanel/Nginx changed during HTTP unbound management",
+                            result.get("recovery_id"),
+                        )
+                finally:
+                    os.close(lock)
+            finally:
+                os.close(fd)
+            response = {
+                "status": True, "request_id": request_id,
+                "operation_id": request_id, "unbound_action": action,
+                "scope": "global", "site_id": None, "template": "unbound",
+                "locale": locale, "revision": revision, **result,
+            }
+            return self._activity_result(
+                response, "status_pages", "status_unbound_" + action,
+                target="global-http:80", level="WARNING" if result["state"] in (
+                    "Conflict", "Drift", "Needs Review", "Recovery Required"
+                ) else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("status_unbound_authorization", exc, request_id)
+        except StatusPageError as exc:
+            stage = getattr(exc, "stage", "preflight")
+            response = self._fail("status_unbound_" + str(stage), exc, request_id)
+            if stage in ("uncertain", "postcheck", "recovery"):
+                response["recovery_required"] = True
+            return response
+        except Exception as exc:
+            return self._fail("status_unbound_unexpected", exc, request_id)
+
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""
         request_id = uuid4().hex

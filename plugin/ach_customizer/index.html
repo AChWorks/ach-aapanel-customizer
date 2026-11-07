@@ -380,8 +380,8 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
-      <h4>Status Pages · Preview / Site 404/502 / New-site defaults</h4>
-      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 Apply/Restore uses a verified plugin-owned extension and shared Nginx reload. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. Global catch-all, stopped and unbound routing are not yet supported.</p>
+      <h4>Status Pages · Preview / Site 404/502 / New-site defaults / Unbound HTTP</h4>
+      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 Apply/Restore uses a verified plugin-owned extension and shared Nginx reload. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. HTTP/80 unbound-domain routing is available behind a separate guarded global Apply/Restore. HTTPS/default TLS, stopped sites and generic 50x routing remain unsupported.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -456,6 +456,16 @@
         <div class="ach-controls"><button id="ach-status-default-restore" type="button" class="btn btn-warning" disabled>Restore previous default source</button></div>
         <p id="ach-status-default-result" role="status" aria-live="polite">Choose global scope and a supported template, then Recheck. No active site is modified.</p>
       </div>
+      <div class="ach-note" aria-label="HTTP unbound default-server management">
+        <strong>Unknown domains · global HTTP/80 catch-all (IPv4 + IPv6)</strong>
+        <p>aaPanel 8.0.7 Nginx only. Select <code>unbound</code> and global branding above. A guarded plugin-owned <code>default_server</code> serves the chosen static HTML with real HTTP 404 for unmatched Host headers. This requires an explicitly approved <strong>global Nginx reload</strong>. It does not change named websites, HTTPS/443, stopped sites, or aaPanel's new-site sources. Recheck first; conflicting default servers are unsupported.</p>
+        <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" disabled>Recheck HTTP unbound routing</button></div>
+        <label><input id="ach-status-unbound-apply-approve" type="checkbox" /> I approve the exact global HTTP/80 default-server and shared Nginx reload.</label>
+        <div class="ach-controls"><button id="ach-status-unbound-apply" type="button" class="btn btn-danger" disabled>Apply unbound HTTP 404</button></div>
+        <label><input id="ach-status-unbound-restore-approve" type="checkbox" /> I reviewed the recovery ID and approve restoring the previous HTTP routing and reloading Nginx.</label>
+        <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" class="btn btn-warning" disabled>Restore previous HTTP default routing</button></div>
+        <p id="ach-status-unbound-result" role="status" aria-live="polite">Select global/unbound and Recheck. HTTP/80 only; no TLS/443 changes.</p>
+      </div>
       <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
       <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
@@ -507,7 +517,7 @@
 
   // Transaction evidence is bound to one native-site/brand/locale snapshot.
   // It is revoked on any edit, site change, refresh, or attempted write.
-  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null;
+  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null, statusUnboundEvidence = null;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
@@ -1525,11 +1535,24 @@
     root.find('#ach-status-default-restore').prop('disabled',
       !defaultMatches || !['Applied','Recovery Required'].includes(statusDefaultEvidence.state) ||
       root.find('#ach-status-default-restore-approve').prop('checked') !== true);
+    var unboundReady = !busy && !!actionable && scope.scope === 'global' &&
+      template === 'unbound';
+    var unboundMatches = unboundReady && sameDefaultSelection(statusUnboundEvidence);
+    root.find('#ach-status-unbound-recheck').prop('disabled', !unboundReady);
+    root.find('#ach-status-unbound-apply').prop('disabled',
+      !unboundMatches || !['Source Ready','Restored'].includes(statusUnboundEvidence.state) ||
+      root.find('#ach-status-unbound-apply-approve').prop('checked') !== true);
+    root.find('#ach-status-unbound-restore').prop('disabled',
+      !unboundMatches || !['Applied','Recovery Required'].includes(statusUnboundEvidence.state) ||
+      root.find('#ach-status-unbound-restore-approve').prop('checked') !== true);
   }
   function statusClearPreview() {
     statusProbeEvidence = null;
     statusManageEvidence = null;
     statusDefaultEvidence = null;
+    statusUnboundEvidence = null;
+    root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve').prop('checked', false);
+    root.find('#ach-status-unbound-result').text('Recheck global HTTP/80 routing before Apply/Restore; HTTPS is unchanged.');
     root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
       .prop('checked', false);
     root.find('#ach-status-default-result').text(
@@ -2315,6 +2338,111 @@
     manageDefaultRequest('restore');
   });
   root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
+    .on('change', function () { statusLock(statusBusy); });
+  function validUnboundResponse(r, action, locale, revision) {
+    var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };
+    var id = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
+    var status = function (v) { return v === null || Number.isInteger(v) && v >= 100 && v <= 599; };
+    if (!r || r.status !== true || r.schema !== 1 || r.mode !== 'native_http_unbound' ||
+        r.unbound_action !== action || r.scope !== 'global' || r.site_id !== null ||
+        r.template !== 'unbound' || r.locale !== locale || r.revision !== revision ||
+        !id(r.request_id) || r.operation_id !== r.request_id ||
+        !hash(r.source_sha256) || !hash(r.rendered_sha256) ||
+        !status(r.before_ipv4_status) || !status(r.before_ipv6_status) ||
+        r.recovery_id !== null && !id(r.recovery_id) ||
+        r.read_only !== (action === 'recheck') ||
+        typeof r.runtime_verified !== 'boolean' ||
+        typeof r.changed !== 'boolean' ||
+        r.impact !== 'Unknown HTTP Host on port 80 (IPv4/IPv6) only; no HTTPS or stopped-site change')
+      return false;
+    if (action === 'recheck')
+      return r.changed === false &&
+        ['Source Ready','Applied','Restored','Conflict','Drift','Recovery Required','Needs Review'].includes(r.state) &&
+        (r.state !== 'Source Ready' || r.recovery_id === null) &&
+        (r.state !== 'Applied' || id(r.recovery_id));
+    return action === 'apply' ?
+      r.state === 'Applied' && r.changed && r.runtime_verified && id(r.recovery_id) :
+      r.state === 'Restored' && r.changed && r.runtime_verified && id(r.recovery_id);
+  }
+  function manageUnboundRequest(action) {
+    var scope = statusScope(), template = root.find('#ach-status-template').val(),
+      locale = root.find('#ach-status-locale').val();
+    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'global' ||
+        template !== 'unbound' || statusLoadedScope !== 'global:') return;
+    var previous = statusUnboundEvidence;
+    if (action === 'apply' &&
+        (!sameDefaultSelection(previous) ||
+         !['Source Ready','Restored'].includes(previous.state) ||
+         root.find('#ach-status-unbound-apply-approve').prop('checked') !== true)) return;
+    if (action === 'restore' &&
+        (!sameDefaultSelection(previous) ||
+         !['Applied','Recovery Required'].includes(previous.state) ||
+         root.find('#ach-status-unbound-restore-approve').prop('checked') !== true)) return;
+    var ticket = statusTicket, revision = statusRevision, brand = statusFields();
+    statusUnboundEvidence = null;
+    root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve').prop('checked', false);
+    root.find('#ach-status-unbound-result').text(action === 'recheck' ?
+      'Inspecting native Nginx HTTP default routing and IPv4/IPv6 responses...' :
+      'Checking approved source and performing the global Nginx operation...');
+    statusLock(true);
+    request('status_unbound', Object.assign({}, scope, brand, {
+      unbound_action:action, template:template, locale:locale,
+      expected_revision:String(revision),
+      expected_source_sha256:previous ? previous.source : '',
+      expected_render_sha256:previous ? previous.rendered : '',
+      expected_recovery_id:previous ? previous.recovery : '',
+      expected_ipv4_status:previous ? String(previous.v4) : '',
+      expected_ipv6_status:previous ? String(previous.v6) : '',
+      unbound_approval:action === 'recheck' ? '' : action + '_global_http_unbound_reload'
+    }), function (r) {
+      if (ticket !== statusTicket) return;
+      var same = statusLoadedScope === 'global:' &&
+        statusScope()?.scope === 'global' &&
+        JSON.stringify(statusFields()) === JSON.stringify(brand) &&
+        root.find('#ach-status-template').val() === 'unbound' &&
+        root.find('#ach-status-locale').val() === locale;
+      if (!same || !validUnboundResponse(r, action, locale, revision) ||
+          action === 'apply' && r &&
+          (r.rendered_sha256 !== previous.rendered || r.source_sha256 !== previous.source ||
+           r.recovery_id === previous.recovery && previous.state !== 'Restored') ||
+          action === 'restore' && r &&
+          (r.recovery_id !== previous.recovery || r.source_sha256 !== previous.source)) {
+        root.find('#ach-status-unbound-result').text(
+          'Unbound routing outcome unconfirmed. Recheck saved recovery before any retry.' +
+          (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') +
+          (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : ''));
+      } else {
+        if (action === 'recheck') {
+          statusUnboundEvidence = {
+            ticket:ticket, revision:revision, template:'unbound', locale:locale,
+            brand:JSON.stringify(brand), state:r.state,
+            source:r.source_sha256, rendered:r.rendered_sha256,
+            recovery:r.recovery_id, v4:r.before_ipv4_status, v6:r.before_ipv6_status
+          };
+        }
+        root.find('#ach-status-unbound-result').text(
+          r.state + (r.changed ? ' — HTTP route changed' : ' — no configuration change') +
+          '\nNginx source SHA-256: ' + r.source_sha256 +
+          '\nSelected HTML SHA-256: ' + r.rendered_sha256 +
+          '\nPrevious IPv4/IPv6 HTTP statuses: ' + r.before_ipv4_status + ' / ' + r.before_ipv6_status +
+          '\nRuntime verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
+          '\nRecovery ID: ' + (r.recovery_id || 'None') +
+          '\nRequest ID: ' + r.operation_id +
+          '\nUnknown Host HTTP/80 only. HTTPS/443 and stopped-site routing were not changed.');
+      }
+      statusLock(false);
+    });
+  }
+  root.find('#ach-status-unbound-recheck').on('click', function () {
+    manageUnboundRequest('recheck');
+  });
+  root.find('#ach-status-unbound-apply').on('click', function () {
+    manageUnboundRequest('apply');
+  });
+  root.find('#ach-status-unbound-restore').on('click', function () {
+    manageUnboundRequest('restore');
+  });
+  root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve')
     .on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-save').on('click', function () {
     if (statusBusy || statusRevision === null) return;

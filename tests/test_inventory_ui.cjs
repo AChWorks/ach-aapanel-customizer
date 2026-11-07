@@ -65,6 +65,9 @@ function loadUi() {
     '#ach-status-default-recheck', '#ach-status-default-apply',
     '#ach-status-default-restore', '#ach-status-default-apply-approve',
     '#ach-status-default-restore-approve', '#ach-status-default-result',
+    '#ach-status-unbound-recheck', '#ach-status-unbound-apply',
+    '#ach-status-unbound-restore', '#ach-status-unbound-apply-approve',
+    '#ach-status-unbound-restore-approve', '#ach-status-unbound-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -291,6 +294,10 @@ function loadUi() {
       defaultSourceRecheckDisabled: elements.get('#ach-status-default-recheck').props.disabled,
       defaultSourceApplyDisabled: elements.get('#ach-status-default-apply').props.disabled,
       defaultSourceRestoreDisabled: elements.get('#ach-status-default-restore').props.disabled,
+      unboundResult: elements.get('#ach-status-unbound-result').textContent,
+      unboundRecheckDisabled: elements.get('#ach-status-unbound-recheck').props.disabled,
+      unboundApplyDisabled: elements.get('#ach-status-unbound-apply').props.disabled,
+      unboundRestoreDisabled: elements.get('#ach-status-unbound-restore').props.disabled,
       statusAdoption: elements.get('#ach-status-adoption-result').textContent,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       statusCompareSummary: elements.get('#ach-status-comparison-summary').textContent,
@@ -4467,4 +4474,85 @@ test('New-site defaults revoke source evidence on branding, locale, scope change
   ui.statusSetValue('#ach-status-scope','site','change');
   assert.equal(ui.state().defaultSourceRecheckDisabled,true);
   assert.equal(ui.state().defaultSourceApplyDisabled,true);
+});
+
+
+const unboundImpact = 'Unknown HTTP Host on port 80 (IPv4/IPv6) only; no HTTPS or stopped-site change';
+function unboundReply(action, state='Source Ready', overrides={}) {
+  const recovery='c'.repeat(32);
+  const changed=action!=='recheck';
+  return {
+    status:true, schema:1, mode:'native_http_unbound', unbound_action:action,
+    scope:'global', site_id:null, template:'unbound', locale:'en', revision:2,
+    request_id:'b'.repeat(32), operation_id:'b'.repeat(32),
+    state, source_sha256:'9'.repeat(64), rendered_sha256:'8'.repeat(64),
+    recovery_id:['Applied','Recovery Required','Restored'].includes(state)?recovery:null,
+    before_ipv4_status:200, before_ipv6_status:200,
+    changed, read_only:!changed, runtime_verified:changed || state==='Applied',
+    impact:unboundImpact, ...overrides
+  };
+}
+
+test('HTTP/80 unbound requires explicit approvals and fresh recovery Recheck', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  assert.equal(ui.state().unboundRecheckDisabled,true);
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  assert.equal(ui.state().unboundRecheckDisabled,false);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+  const recheck=ui.statusClick('#ach-status-unbound-recheck');
+  assert.match(recheck.options.url,/s=status_unbound$/);
+  assert.equal(recheck.options.data.unbound_action,'recheck');
+  assert.equal(recheck.options.data.scope,'global');
+  recheck.respond(unboundReply('recheck'));
+  assert.match(ui.state().unboundResult,/Source Ready/);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  assert.equal(ui.state().unboundApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-unbound-apply');
+  assert.equal(apply.options.data.unbound_approval,'apply_global_http_unbound_reload');
+  assert.equal(apply.options.data.expected_source_sha256,'9'.repeat(64));
+  assert.equal(apply.options.data.expected_render_sha256,'8'.repeat(64));
+  assert.equal(apply.options.data.expected_ipv4_status,'200');
+  assert.equal(apply.options.data.expected_ipv6_status,'200');
+  apply.respond(unboundReply('apply','Applied'));
+  assert.match(ui.state().unboundResult,/Applied/);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+  const current=ui.statusClick('#ach-status-unbound-recheck');
+  current.respond(unboundReply('recheck','Applied'));
+  ui.statusSetChecked('#ach-status-unbound-restore-approve',true);
+  assert.equal(ui.state().unboundRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-unbound-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
+  assert.equal(restore.options.data.unbound_approval,'restore_global_http_unbound_reload');
+  restore.respond(unboundReply('restore','Restored'));
+  assert.match(ui.state().unboundResult,/Restored/);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+});
+
+test('HTTP unbound wrong replies, brand edits and scope/locale changes revoke authorization', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  ui.statusClick('#ach-status-unbound-recheck').respond(
+    unboundReply('recheck','Source Ready',{mode:'not_http_unbound'})
+  );
+  assert.match(ui.state().unboundResult,/unconfirmed/);
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck'));
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  assert.equal(ui.state().unboundApplyDisabled,false);
+  ui.statusSetValue('#ach-status-name','Changed brand','input change');
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck'));
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  assert.equal(ui.state().unboundApplyDisabled,false);
+  ui.statusSetValue('#ach-status-locale','fa','change');
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.state().unboundRecheckDisabled,true);
+  assert.equal(ui.state().unboundApplyDisabled,true);
 });
