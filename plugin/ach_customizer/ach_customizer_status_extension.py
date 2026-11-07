@@ -673,7 +673,8 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 except (ExtensionError, OSError):
                     current_sha = expected_sha
             else:
-                current_sha = (record["before_sha"] if record and state == "Restored"
+                current_sha = (record["before_sha"] if record and
+                               state in ("Restored", "Source Restored")
                                else record["after_sha"] if record else expected_sha)
             return {"state": state, "changed": False, "site_id": site_id,
                     "page_file_sha256": current_sha,

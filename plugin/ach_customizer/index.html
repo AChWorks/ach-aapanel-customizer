@@ -380,8 +380,8 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
-      <h4>Status Pages · Preview / Site 404 Management</h4>
-      <p class="ach-note"><strong>Offline template preview and site-specific 404 only.</strong> Eleven English/Persian template variants; branding Save/Reset does not change sites. The separately gated Manual Apply/Restore action below can replace only an already-existing, verified native site's 404.html with a checked backup. Other Status Pages targets, 502 and Nginx routing changes remain unsupported.</p>
+      <h4>Status Pages · Preview / Site 404/502 Management</h4>
+      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For a verified aaPanel 8.0.7 Nginx website, guarded 404/502 Apply/Restore manages a plugin-owned extension and requires explicit approval for a shared Nginx reload; existing document-root error files remain untouched. Global/panel-default/new-site Apply and other status template activation are not yet supported.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>

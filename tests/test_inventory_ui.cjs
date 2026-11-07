@@ -1845,6 +1845,35 @@ test('Native 502 source-only preview gates extension Apply and Restore with Ngin
   assert.match(ui.state().statusManage,/502.html SOURCE SHA-256/);
 });
 
+test('Restored 502 Recheck accepts the verified previous source hash, including absent sources', () => {
+  const emptySha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+  for (const previous of [managed404Original, emptySha]) {
+    const ui = statusProbeUi();
+    ui.statusSetValue('#ach-status-template', '502', 'change');
+    const backendResponse = manage404Response('recheck', {
+      template:'502', state:'Source Restored', changed:false,
+      page_file_sha256:previous, before_sha256:previous,
+      after_sha256:managed404Render, runtime_verified:false,
+      verification_scope:'source_and_nonce_only'
+    });
+    ui.statusClick('#ach-status-manage-recheck').respond(backendResponse);
+    assert.match(ui.state().statusManage, /Source Restored/);
+    assert.match(ui.state().statusManage, /Current restored 502.html SOURCE SHA-256:/);
+    assert.match(ui.state().statusManage, /original 502 response NOT verified/);
+    assert.match(ui.state().statusManage, new RegExp(previous));
+    assert.doesNotMatch(ui.state().statusManage, /incomplete or incompatible/);
+    assert.equal(ui.state().statusManageRestoreDisabled, true);
+
+    // This was the previous backend defect: a Source Restored state carrying
+    // the applied HTML hash cannot be accepted as a restored source.
+    ui.statusClick('#ach-status-manage-recheck').respond({
+      ...backendResponse, page_file_sha256:managed404Render
+    });
+    assert.match(ui.state().statusManage, /incomplete or incompatible/);
+    assert.equal(ui.state().statusManageRestoreDisabled, true);
+  }
+});
+
 test('Status 404 Restore confirms an interrupted earlier rollback without a second file write', () => {
   const ui=statusProbeUi();
   ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck',{
@@ -1949,8 +1978,9 @@ test('Uncertain Status write exposes validated recovery ID without authorizing R
     ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
     ui.statusSetChecked('#ach-status-manage-apply-approve',true);
     const apply=ui.statusClick('#ach-status-manage-apply');
-    apply.respond({status:false,stage:'uncertain',msg:'Site exchange unconfirmed',
-      operation_id:'d'.repeat(32),recovery_id:recovery});
+    apply.respond({status:false,stage:'status_manage_uncertain',msg:'Site exchange unconfirmed',
+      operation_id:'d'.repeat(32),request_id:'d'.repeat(32),
+      recovery_required:true,recovery_id:recovery});
     assert.match(ui.state().error,/Site exchange unconfirmed/);
     if (recovery.length===32) {
       assert.match(ui.state().error,/Recovery ID: e{32}; Recheck before Restore/);

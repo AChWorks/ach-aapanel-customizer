@@ -247,19 +247,38 @@ class NativeStatusManagementTests(unittest.TestCase):
         self.same_root_sites = 1
 
     def test_root_sharing_discovered_after_write_is_uncertain_and_requires_recovery(self):
+        from ach_customizer_activity import read_activity
+        durable_id = "c" * 32
+
         def changed_after_mutation(*args, **kwargs):
             self.same_root_sites = 2
             return {
                 "state": "Applied", "changed": True, "site_id": 7,
-                "page_file_sha256": "a" * 64, "recovery_id": "c" * 32,
+                "page_file_sha256": "a" * 64, "recovery_id": durable_id,
                 "read_only": False, "mode": "native_status_extension"
             }
-        with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}),              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings),              patch.object(manager, "manage_site_extension", side_effect=changed_after_mutation):
-            response = self.plugin.status_manage(self.args())
+
+        try:
+            with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}), \
+                 patch.object(backend, "_bound_domains_for_sites",
+                              side_effect=self.bindings), \
+                 patch.object(manager, "manage_site_extension",
+                              side_effect=changed_after_mutation):
+                response = self.plugin.status_manage(self.args())
+        finally:
+            self.same_root_sites = 1
+
         self.assertFalse(response["status"])
         self.assertEqual(response["stage"], "status_manage_uncertain")
         self.assertTrue(response["recovery_required"])
-        self.same_root_sites = 1
+        self.assertEqual(response["recovery_id"], durable_id)
+        self.assertNotEqual(response["operation_id"], durable_id)
+        self.assertEqual(response["request_id"], response["operation_id"])
+        events = read_activity(self.tmp.name, module="status_pages", limit=10)
+        self.assertTrue(events)
+        self.assertEqual(events[0]["recovery_id"], durable_id)
+        self.assertEqual(events[0]["operation_id"], response["operation_id"])
+        self.assertEqual(events[0]["stage"], "status_manage_uncertain")
 
     def test_backend_failure_does_not_hide_recovery_required_stage(self):
         with patch.dict(sys.modules, {"public": self.public(), "flask": self.flask()}), \

@@ -97,10 +97,16 @@ class ExtensionTests(unittest.TestCase):
                 restored = self.run_manager("restore", recovery=applied["recovery_id"])
                 expected_state = "Restored" if code == "404" else "Source Restored"
                 self.assertEqual(restored["state"], expected_state)
-                self.assertEqual(self.run_manager("recheck")["state"], expected_state)
+                rechecked = self.run_manager("recheck")
+                self.assertEqual(rechecked["state"], expected_state)
+                self.assertEqual(rechecked["page_file_sha256"], rechecked["before_sha256"])
                 if code == "502":
                     self.assertFalse(restored["runtime_verified"])
+                    self.assertFalse(rechecked["runtime_verified"])
                     self.assertEqual(restored["verification_scope"], "source_and_nonce_only")
+                    self.assertEqual(rechecked["verification_scope"], "source_and_nonce_only")
+                else:
+                    self.assertTrue(rechecked["runtime_verified"])
                 self.assertFalse((self.ext / extension._include_name(7, code)).exists())
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
         self.assertEqual(sum("reload" in cmd for cmd in self.commands), 4)
@@ -544,6 +550,25 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(self.run_manager("restore",
                          recovery=applied["recovery_id"])["state"], "Restored")
 
+    def test_502_restored_recheck_reports_existing_source_hash_not_applied_hash(self):
+        existing = self.site_root / "502.html"
+        previous = b"<html>original operator 502 source</html>"
+        existing.write_bytes(previous)
+        expected = hashlib.sha256(previous).hexdigest()
+        applied = self.run_manager(code="502", current=expected)
+        self.assertNotEqual(applied["page_file_sha256"], expected)
+        restored = self.run_manager("restore", code="502",
+                                    recovery=applied["recovery_id"])
+        rechecked = self.run_manager("recheck", code="502")
+        self.assertEqual(restored["state"], "Source Restored")
+        self.assertEqual(rechecked["state"], "Source Restored")
+        self.assertEqual(rechecked["page_file_sha256"], expected)
+        self.assertEqual(rechecked["before_sha256"], expected)
+        self.assertEqual(rechecked["after_sha256"], applied["page_file_sha256"])
+        self.assertFalse(rechecked["runtime_verified"])
+        self.assertEqual(rechecked["verification_scope"], "source_and_nonce_only")
+        self.assertEqual(existing.read_bytes(), previous)
+
     def test_502_no_nonce_cannot_prove_previous_real_502(self):
         for wrong_status in (404, 200, 500):
             with self.subTest(wrong_status=wrong_status):
@@ -560,8 +585,14 @@ class ExtensionTests(unittest.TestCase):
                 self.assertEqual(result["state"], "Source Restored")
                 self.assertFalse(result["runtime_verified"])
                 self.assertEqual(result["page_file_sha256"], hashlib.sha256(b"").hexdigest())
-                self.assertEqual(self.run_manager("recheck", code="502")["state"],
-                                 "Source Restored")
+                rechecked = self.run_manager("recheck", code="502")
+                self.assertEqual(rechecked["state"], "Source Restored")
+                self.assertEqual(rechecked["page_file_sha256"],
+                                 hashlib.sha256(b"").hexdigest())
+                self.assertEqual(rechecked["page_file_sha256"],
+                                 rechecked["before_sha256"])
+                self.assertFalse(rechecked["runtime_verified"])
+                self.assertEqual(rechecked["verification_scope"], "source_and_nonce_only")
                 self.probe = base_probe
 
     def test_502_source_drift_rejects_full_restore_claim(self):

@@ -983,6 +983,7 @@ class ach_customizer_main:
                         raise ExtensionError(
                             "uncertain",
                             "Native target changed; inspect saved status recovery before retrying",
+                            recovery_id=result.get("recovery_id"),
                         ) from exc
                     response = {
                         "status": True, "request_id": request_id,
