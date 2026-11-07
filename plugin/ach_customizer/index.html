@@ -380,8 +380,8 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
-      <h4>Status Pages · Preview / Site 404/502 Management</h4>
-      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For a verified aaPanel 8.0.7 Nginx website, guarded 404/502 Apply/Restore manages a plugin-owned extension and requires explicit approval for a shared Nginx reload; existing document-root error files remain untouched. Global/panel-default/new-site Apply and other status template activation are not yet supported.</p>
+      <h4>Status Pages · Preview / Site 404/502 / New-site defaults</h4>
+      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 Apply/Restore uses a verified plugin-owned extension and shared Nginx reload. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. Global catch-all, stopped and unbound routing are not yet supported.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -446,6 +446,16 @@
         <div class="ach-controls"><button id="ach-status-manage-restore" type="button" class="btn btn-warning" disabled>Restore selected site status and reload Nginx</button></div>
         <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site 404 recovery before Restore. An uncertain write must not be blindly repeated.</p>
       </div>
+      <div class="ach-note" aria-label="aaPanel new-site source defaults">
+        <strong>Panel default templates for future newly created sites</strong>
+        <p>Global branding scope only. Choose <code>new-site</code>, <code>404</code> or <code>502</code> above. aaPanel copies <code>defaultDoc.html</code>, <code>404.html</code> or <code>502.html</code> when creating a new site. Changing these sources <strong>does not change existing sites or active HTTP/Nginx routing</strong>, and does not reload Nginx. Recheck first, then approve the exact source replacement; Restore uses the saved original bytes and recovery ID.</p>
+        <div class="ach-controls"><button id="ach-status-default-recheck" type="button" disabled>Recheck new-site default source</button></div>
+        <label><input id="ach-status-default-apply-approve" type="checkbox" /> I approve replacing this exact aaPanel new-site default source for future sites only.</label>
+        <div class="ach-controls"><button id="ach-status-default-apply" type="button" class="btn btn-danger" disabled>Apply future-site default template</button></div>
+        <label><input id="ach-status-default-restore-approve" type="checkbox" /> I reviewed the saved recovery ID and approve restoring the previous default source.</label>
+        <div class="ach-controls"><button id="ach-status-default-restore" type="button" class="btn btn-warning" disabled>Restore previous default source</button></div>
+        <p id="ach-status-default-result" role="status" aria-live="polite">Choose global scope and a supported template, then Recheck. No active site is modified.</p>
+      </div>
       <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
       <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
@@ -497,7 +507,7 @@
 
   // Transaction evidence is bound to one native-site/brand/locale snapshot.
   // It is revoked on any edit, site change, refresh, or attempted write.
-  var statusProbeEvidence = null, statusManageEvidence = null;
+  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
@@ -598,7 +608,7 @@
     return method === 'set_control' || method === 'inspect_local_hosts' ||
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
-      method === 'status_manage' ||
+      method === 'status_manage' || method === 'status_defaults' ||
       method === 'fpm_apply' || method === 'fpm_rollback';
   }
   function validInventoryPage(r, expectedPage) {
@@ -641,10 +651,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage)|fpm_(apply|rollback))$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults)|fpm_(apply|rollback))$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'status_manage' ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -680,8 +690,8 @@
         if (/^fpm_(apply|rollback)$/.test(method)) showFpmOperationResult(method, null, 'unconfirmed');
         if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
           msg(t.error + ': ' + status +
-            ((/^fpm_(apply|rollback)$/.test(method) || method === 'status_manage' &&
-              data.site_action !== 'recheck') ?
+            ((/^fpm_(apply|rollback)$/.test(method) || (method === 'status_manage' && data.site_action !== 'recheck' ||
+               method === 'status_defaults' && data.default_action !== 'recheck')) ?
               '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
         }
         done(null);
@@ -1454,6 +1464,14 @@
       evidence.template === root.find('#ach-status-template').val() &&
       evidence.brand === JSON.stringify(statusFields());
   }
+  function sameDefaultSelection(evidence) {
+    var scope = statusScope();
+    return !!evidence && !!scope && scope.scope === 'global' &&
+      evidence.ticket === statusTicket && evidence.revision === statusRevision &&
+      evidence.template === root.find('#ach-status-template').val() &&
+      evidence.locale === root.find('#ach-status-locale').val() &&
+      evidence.brand === JSON.stringify(statusFields());
+  }
   function statusLock(busy) {
     statusBusy = busy;
     // Website inventory loads independently; their completion must not
@@ -1496,10 +1514,26 @@
       !selectedReady || !sameStatusSelection(statusManageEvidence) ||
       !['Applied','Recovery Required'].includes(statusManageEvidence.state) ||
       root.find('#ach-status-manage-restore-approve').prop('checked') !== true);
+    var defaultReady = !busy && !!actionable && scope.scope === 'global' &&
+      ['new-site','404','502'].includes(template);
+    var defaultMatches = defaultReady && sameDefaultSelection(statusDefaultEvidence);
+    root.find('#ach-status-default-recheck').prop('disabled', !defaultReady);
+    root.find('#ach-status-default-apply').prop('disabled',
+      !defaultMatches || !['Source Ready','Restored'].includes(statusDefaultEvidence.state) ||
+      statusDefaultEvidence.current === statusDefaultEvidence.rendered ||
+      root.find('#ach-status-default-apply-approve').prop('checked') !== true);
+    root.find('#ach-status-default-restore').prop('disabled',
+      !defaultMatches || !['Applied','Recovery Required'].includes(statusDefaultEvidence.state) ||
+      root.find('#ach-status-default-restore-approve').prop('checked') !== true);
   }
   function statusClearPreview() {
     statusProbeEvidence = null;
     statusManageEvidence = null;
+    statusDefaultEvidence = null;
+    root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
+      .prop('checked', false);
+    root.find('#ach-status-default-result').text(
+      'Recheck the current new-site default before Apply/Restore; no existing website is changed.');
     root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
       .prop('checked', false);
     root.find('#ach-status-manage-result').text(
@@ -2170,6 +2204,118 @@
   root.find('#ach-status-manage-restore').on('click', function () {
     manageStatusRequest('restore');
   });
+  function validDefaultResponse(r, action, template, locale, revision) {
+    var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };
+    var id = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
+    var filename = {'new-site':'defaultDoc.html','404':'404.html','502':'502.html'}[template];
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.default_action !== action || r.scope !== 'global' || r.site_id !== null ||
+        r.mode !== 'native_new_site_sources' || r.template !== template ||
+        r.source_file !== filename || r.locale !== locale || r.revision !== revision ||
+        !id(r.request_id) || r.operation_id !== r.request_id ||
+        !hash(r.current_sha256) || !hash(r.rendered_sha256) ||
+        ![null,undefined].includes(r.before_sha256) && !hash(r.before_sha256) ||
+        ![null,undefined].includes(r.after_sha256) && !hash(r.after_sha256) ||
+        r.recovery_id !== null && !id(r.recovery_id) ||
+        r.read_only !== (action === 'recheck') ||
+        r.runtime_verified !== false || typeof r.changed !== 'boolean' ||
+        r.impact !== 'New sites only; does not change existing sites or live Nginx routing')
+      return false;
+    if (action === 'recheck') {
+      if (r.changed !== false || !['Source Ready','Already Current','Applied','Restored',
+             'Recovery Required','Drift'].includes(r.state)) return false;
+      return ['Source Ready','Already Current'].includes(r.state) ?
+        r.recovery_id === null && r.before_sha256 === null && r.after_sha256 === null :
+        id(r.recovery_id) && hash(r.before_sha256) && hash(r.after_sha256);
+    }
+    return action === 'apply' ?
+      ['Applied','Already Current','Already Applied'].includes(r.state) &&
+      r.changed === (r.state === 'Applied') &&
+      (r.state === 'Already Current' ? r.recovery_id === null : id(r.recovery_id)) :
+      r.state === 'Restored' && id(r.recovery_id) &&
+      r.current_sha256 === r.before_sha256;
+  }
+  function manageDefaultRequest(action) {
+    var scope = statusScope(), template = root.find('#ach-status-template').val(),
+        locale = root.find('#ach-status-locale').val();
+    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'global' ||
+        !['new-site','404','502'].includes(template) ||
+        statusLoadedScope !== 'global:') return;
+    var previous = statusDefaultEvidence;
+    if (action === 'apply' &&
+        (!sameDefaultSelection(previous) ||
+         !['Source Ready','Restored'].includes(previous.state) ||
+         previous.current === previous.rendered ||
+         root.find('#ach-status-default-apply-approve').prop('checked') !== true)) return;
+    if (action === 'restore' &&
+        (!sameDefaultSelection(previous) ||
+         !['Applied','Recovery Required'].includes(previous.state) ||
+         root.find('#ach-status-default-restore-approve').prop('checked') !== true)) return;
+    var revision = statusRevision, ticket = statusTicket, brand = statusFields();
+    statusDefaultEvidence = null;
+    root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
+      .prop('checked', false);
+    root.find('#ach-status-default-result').text(action === 'recheck' ?
+      'Reading current aaPanel new-site source and recovery journal...' :
+      'Verifying saved source identity and performing the approved future-site-only operation...');
+    statusLock(true);
+    request('status_defaults', Object.assign({}, scope, brand, {
+      default_action:action, template:template, locale:locale,
+      expected_revision:String(revision),
+      expected_current_sha256:previous ? previous.current : '',
+      expected_render_sha256:previous ? previous.rendered : '',
+      expected_recovery_id:previous ? previous.recovery : '',
+      default_approval:action === 'recheck' ? '' :
+        action + '_new_site_default_' + template
+    }), function (r) {
+      if (ticket !== statusTicket) return;
+      var same = statusLoadedScope === 'global:' &&
+        statusScope()?.scope === 'global' &&
+        JSON.stringify(statusFields()) === JSON.stringify(brand) &&
+        root.find('#ach-status-template').val() === template &&
+        root.find('#ach-status-locale').val() === locale;
+      if (!same || !validDefaultResponse(r, action, template, locale, revision) ||
+          action === 'apply' && r &&
+          (r.current_sha256 !== previous.rendered ||
+           r.recovery_id === previous.recovery && r.state === 'Applied') ||
+          action === 'restore' && r &&
+          (r.recovery_id !== previous.recovery ||
+           r.current_sha256 !== previous.before)) {
+        root.find('#ach-status-default-result').text(
+          'New-site default outcome unconfirmed; Recheck persisted recovery before retrying.');
+      } else {
+        if (action === 'recheck') {
+          statusDefaultEvidence = {
+            ticket:ticket, revision:revision, template:template, locale:locale,
+            brand:JSON.stringify(brand), state:r.state,
+            current:r.current_sha256, rendered:r.rendered_sha256,
+            before:r.before_sha256, recovery:r.recovery_id
+          };
+        }
+        root.find('#ach-status-default-result').text(
+          r.state + (r.changed ? ' — source bytes changed' : ' — no source change') +
+          '\nSource: ' + r.source_file +
+          '\nCurrent source SHA-256: ' + r.current_sha256 +
+          '\nSelected render SHA-256: ' + r.rendered_sha256 +
+          '\nSaved original SHA-256: ' + (r.before_sha256 || 'None') +
+          '\nRecovery ID: ' + (r.recovery_id || 'None') +
+          '\nRequest ID: ' + r.operation_id +
+          '\nOnly newly created sites receive this default. Existing sites and Nginx are unchanged.');
+      }
+      statusLock(false);
+    });
+  }
+  root.find('#ach-status-default-recheck').on('click', function () {
+    manageDefaultRequest('recheck');
+  });
+  root.find('#ach-status-default-apply').on('click', function () {
+    manageDefaultRequest('apply');
+  });
+  root.find('#ach-status-default-restore').on('click', function () {
+    manageDefaultRequest('restore');
+  });
+  root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
+    .on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-save').on('click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();

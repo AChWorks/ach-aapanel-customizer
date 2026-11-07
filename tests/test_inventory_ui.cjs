@@ -62,6 +62,9 @@ function loadUi() {
     '#ach-status-manage-recheck', '#ach-status-manage-apply',
     '#ach-status-manage-restore', '#ach-status-manage-apply-approve',
     '#ach-status-manage-restore-approve', '#ach-status-manage-result',
+    '#ach-status-default-recheck', '#ach-status-default-apply',
+    '#ach-status-default-restore', '#ach-status-default-apply-approve',
+    '#ach-status-default-restore-approve', '#ach-status-default-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -284,6 +287,10 @@ function loadUi() {
       statusManageRecheckDisabled: elements.get('#ach-status-manage-recheck').props.disabled,
       statusManageApplyDisabled: elements.get('#ach-status-manage-apply').props.disabled,
       statusManageRestoreDisabled: elements.get('#ach-status-manage-restore').props.disabled,
+      defaultSourceResult: elements.get('#ach-status-default-result').textContent,
+      defaultSourceRecheckDisabled: elements.get('#ach-status-default-recheck').props.disabled,
+      defaultSourceApplyDisabled: elements.get('#ach-status-default-apply').props.disabled,
+      defaultSourceRestoreDisabled: elements.get('#ach-status-default-restore').props.disabled,
       statusAdoption: elements.get('#ach-status-adoption-result').textContent,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       statusCompareSummary: elements.get('#ach-status-comparison-summary').textContent,
@@ -4372,4 +4379,92 @@ test('Malformed website lifecycle payload and uncertain save outcome fail closed
   assert.equal(ui.state().siteChangesSaveDisabled,true);
   assert.equal(ui.state().siteChangesApproveDisabled,true);
   assert.match(ui.siteChangesCompare().options.url,/s=compare_site_changes$/);
+});
+
+
+const defaultSourceNames = {'new-site':'defaultDoc.html','404':'404.html','502':'502.html'};
+function defaultReply(action, template='404', state='Source Ready', overrides={}) {
+  const source='9'.repeat(64), rendered='8'.repeat(64), operation='c'.repeat(32);
+  return {
+    status:true,schema:1,default_action:action,scope:'global',site_id:null,
+    mode:'native_new_site_sources',template,source_file:defaultSourceNames[template],
+    locale:'en',revision:2,request_id:'b'.repeat(32),operation_id:'b'.repeat(32),
+    state,current_sha256:state==='Applied'?rendered:source,
+    rendered_sha256:rendered,
+    before_sha256:['Applied','Recovery Required','Restored'].includes(state)?source:null,
+    after_sha256:['Applied','Recovery Required','Restored'].includes(state)?rendered:null,
+    recovery_id:['Applied','Recovery Required','Restored'].includes(state)?operation:null,
+    changed:action==='apply'&&state==='Applied',read_only:action==='recheck',
+    runtime_verified:false,
+    impact:'New sites only; does not change existing sites or live Nginx routing',
+    ...overrides,
+  };
+}
+
+test('New-site defaults require global scope and a fresh source recheck', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  assert.equal(ui.state().defaultSourceRecheckDisabled,false);
+  assert.equal(ui.state().defaultSourceApplyDisabled,true);
+  assert.equal(ui.state().defaultSourceRestoreDisabled,true);
+  const current=ui.statusClick('#ach-status-default-recheck');
+  assert.match(current.options.url,/s=status_defaults$/);
+  assert.equal(current.options.data.default_action,'recheck');
+  assert.equal(current.options.data.scope,'global');
+  assert.equal(current.options.data.template,'404');
+  current.respond(defaultReply('recheck'));
+  assert.match(ui.state().defaultSourceResult,/Source Ready/);
+  assert.equal(ui.state().defaultSourceApplyDisabled,true);
+  ui.statusSetChecked('#ach-status-default-apply-approve',true);
+  assert.equal(ui.state().defaultSourceApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-default-apply');
+  assert.match(apply.options.url,/s=status_defaults$/);
+  assert.equal(apply.options.data.default_approval,'apply_new_site_default_404');
+  assert.equal(apply.options.data.expected_current_sha256,'9'.repeat(64));
+  assert.equal(apply.options.data.expected_render_sha256,'8'.repeat(64));
+  apply.respond(defaultReply('apply','404','Applied'));
+  assert.match(ui.state().defaultSourceResult,/Applied.*source bytes changed/);
+  assert.equal(ui.state().defaultSourceRestoreDisabled,true,
+    'After Apply a fresh persisted recovery Recheck is mandatory');
+  const check=ui.statusClick('#ach-status-default-recheck');
+  check.respond(defaultReply('recheck','404','Applied'));
+  ui.statusSetChecked('#ach-status-default-restore-approve',true);
+  assert.equal(ui.state().defaultSourceRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-default-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
+  assert.equal(restore.options.data.default_approval,'restore_new_site_default_404');
+  restore.respond(defaultReply('restore','404','Restored',{
+    current_sha256:'9'.repeat(64),changed:true
+  }));
+  assert.match(ui.state().defaultSourceResult,/Restored/);
+  assert.match(ui.state().defaultSourceResult,/Existing sites and Nginx are unchanged/);
+  const recheckRestored=ui.statusClick('#ach-status-default-recheck');
+  recheckRestored.respond(defaultReply('recheck','404','Restored'));
+  ui.statusSetChecked('#ach-status-default-apply-approve',true);
+  assert.equal(ui.state().defaultSourceApplyDisabled,false,
+    'Confirmed restored original remains eligible for an explicit new Apply');
+});
+
+test('New-site defaults revoke source evidence on branding, locale, scope changes and bad results', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusClick('#ach-status-default-recheck').respond(defaultReply('recheck'));
+  ui.statusSetChecked('#ach-status-default-apply-approve',true);
+  assert.equal(ui.state().defaultSourceApplyDisabled,false);
+  ui.statusSetValue('#ach-status-locale','fa','change');
+  assert.equal(ui.state().defaultSourceApplyDisabled,true);
+  ui.statusSetValue('#ach-status-template','new-site','change');
+  const wrong=ui.statusClick('#ach-status-default-recheck');
+  wrong.respond(defaultReply('recheck','new-site','Source Ready',{source_file:'502.html'}));
+  assert.match(ui.state().defaultSourceResult,/unconfirmed/);
+  ui.statusSetValue('#ach-status-locale','en','change');
+  ui.statusClick('#ach-status-default-recheck').respond(defaultReply('recheck','new-site'));
+  ui.statusSetChecked('#ach-status-default-apply-approve',true);
+  assert.equal(ui.state().defaultSourceApplyDisabled,false);
+  ui.statusSetValue('#ach-status-name','Different','input change');
+  assert.equal(ui.state().defaultSourceApplyDisabled,true);
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.state().defaultSourceRecheckDisabled,true);
+  assert.equal(ui.state().defaultSourceApplyDisabled,true);
 });
