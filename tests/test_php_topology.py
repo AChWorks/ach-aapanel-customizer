@@ -247,6 +247,14 @@ class SiteTopologyTests(unittest.TestCase):
         self.assertEqual(result["matched_sites"], [])
         self.assertFalse(result["apply_eligible"])
 
+    def test_missing_native_api_attribute_keeps_topology_non_authorizing(self):
+        self.panel = object()
+        got = self.inspect()
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertFalse(got["apply_eligible"])
+        self.assertIsNone(got["source_sha256"])
+        self.assertEqual(got["matched_sites"], [])
+
     def test_alternate_engine_version_or_incomplete_installed_source_is_not_mapped(self):
         for webserver, version in (("apache", "8.0.7"), ("nginx", "8.1.1")):
             self.panel.webserver = webserver

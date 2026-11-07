@@ -17,6 +17,7 @@ from ach_customizer_monitor import (
     inspect_php_fpm_site_impact, _bounded_file_text, _single_www_listen,
     MAX_CONFIG_BYTES,
 )
+from ach_customizer_php_runtime import _validated_single_www_layout
 
 VERSION = re.compile(r"[1-9][0-9]{1,2}\Z")
 NOTE = (
@@ -35,17 +36,7 @@ def _service_file_source(config_root, version):
     """
     path = Path(config_root) / version / "etc" / "php-fpm.conf"
     text, fingerprint = _bounded_file_text(path, MAX_CONFIG_BYTES, with_fingerprint=True)
-    sections = []
-    for line in text.splitlines():
-        line = line.split(";", 1)[0].split("#", 1)[0].strip()
-        if not line:
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            sections.append(line[1:-1].strip())
-        elif "=" in line and line.split("=", 1)[0].strip().lower() == "include":
-            raise MonitorInputError("Additional PHP-FPM pools/includes require native review")
-    if sections.count("www") != 1 or any(item not in ("www", "global") for item in sections):
-        raise MonitorInputError("Unsupported multiple or missing PHP-FPM pool sections")
+    _validated_single_www_layout(text)
     socket = _single_www_listen(str(path))
     if len(socket) > 200 or ".." in Path(socket).parts or "//" in socket:
         raise MonitorInputError("Unverifiable PHP-FPM Unix socket pathname")
@@ -148,7 +139,7 @@ def inspect_php_fpm_site_topology(
             source_sha256=source,
             reason=first["reason"],
         )
-    except (OSError, UnicodeError, ValueError, RuntimeError, TypeError) as exc:
+    except (OSError, UnicodeError, ValueError, RuntimeError, TypeError, AttributeError) as exc:
         # A PHP source or DB change invalidates the *whole* snapshot, not just
         # an arbitrary subset of site IDs. No partial success is asserted.
         result.update(state="Needs Review", site_count=0, matched_sites=[],

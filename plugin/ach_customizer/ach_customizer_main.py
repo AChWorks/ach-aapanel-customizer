@@ -279,7 +279,7 @@ class ach_customizer_main:
                         result["socket_path"] if result["state"] == "Observed" else None
                     ),
                 )
-            except (ImportError, RuntimeError, TypeError) as exc:
+            except (ImportError, RuntimeError, TypeError, AttributeError) as exc:
                 topology = {
                     "schema": 1, "state": "Needs Review", "version": version,
                     "scope": "shared_service", "read_only": True,

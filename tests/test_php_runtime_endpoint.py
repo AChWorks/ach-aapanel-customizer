@@ -105,6 +105,33 @@ class NativePhpRuntimeEndpointTests(unittest.TestCase):
         self.assertEqual(result["state"], "Partial")
         self.assertIsNone(mapper.call_args.kwargs["observed_runtime_socket"])
 
+    def test_topology_missing_native_apis_does_not_discard_process_evidence(self):
+        # The panel's public helper can be stale after a ZIP update while
+        # independently collected runtime/procfs evidence remains valid.
+        with patch.dict(sys.modules, {
+                "flask": self.session(), "public": types.ModuleType("public")
+        }), patch.object(runtime, "inspect_php_fpm_runtime",
+                         return_value=self.observed()):
+            result = self.plugin.inspect_php_runtime({"php_version": "81"})
+        self.assertTrue(result["status"], result)
+        self.assertEqual(result["state"], "Observed")
+        self.assertEqual(result["master_pid"], 432)
+        self.assertEqual(result["site_mapping"]["state"], "Needs Review")
+        self.assertFalse(result["site_mapping"]["apply_eligible"])
+        self.assertRegex(result["operation_id"], r"^[0-9a-f]{32}$")
+
+        with patch.dict(sys.modules, {
+                "flask": self.session(), "public": types.ModuleType("public")
+        }), patch.object(runtime, "inspect_php_fpm_runtime",
+                         return_value=self.observed()), patch.object(
+                             topology, "inspect_php_fpm_site_topology",
+                             side_effect=AttributeError("old panel API")):
+            response = self.plugin.inspect_php_runtime({"php_version": "81"})
+        self.assertTrue(response["status"], response)
+        self.assertEqual(response["master_pid"], 432)
+        self.assertEqual(response["site_mapping"]["state"], "Needs Review")
+        self.assertFalse(response["site_mapping"]["apply_eligible"])
+
     def test_secondary_temporary_get_and_missing_context_denied_before_scan(self):
         for context in (self.session(uid=2), self.session(method="GET"),
                         self.session(temp=True), self.session(context=False)):

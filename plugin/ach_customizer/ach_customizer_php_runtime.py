@@ -37,6 +37,36 @@ class RuntimeInspectError(MonitorInputError):
     pass
 
 
+def _validated_single_www_layout(source):
+    """Recognize only conventional in-file PHP-FPM [global]/[www] layouts.
+
+    This is a conservative structural check, NOT php-fpm -t or an assurance
+    that every service option has valid runtime semantics.
+    """
+    sections = []
+    for original in source.splitlines():
+        line = original.split(";", 1)[0].split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("["):
+            match = re.fullmatch(r"\[([A-Za-z_][A-Za-z0-9_-]*)\]", line)
+            if not match:
+                raise RuntimeInspectError("Malformed PHP-FPM pool section requires review")
+            sections.append(match.group(1))
+            continue
+        if "=" not in line:
+            raise RuntimeInspectError("Malformed PHP-FPM directive requires review")
+        key, value = (part.strip() for part in line.split("=", 1))
+        if (not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*(?:\[[^\[\]]+\])?", key)
+                or not value):
+            raise RuntimeInspectError("Malformed PHP-FPM directive requires review")
+        if key.lower() == "include":
+            raise RuntimeInspectError("Included PHP-FPM pools require native review")
+    if (sections.count("www") != 1 or sections.count("global") > 1 or
+            any(item not in ("www", "global") for item in sections)):
+        raise RuntimeInspectError("Unsupported multiple or missing PHP-FPM pool sections")
+
+
 def _open_directory(path):
     path = Path(path)
     if not path.is_absolute() or ".." in path.parts:
@@ -244,12 +274,9 @@ def inspect_php_fpm_runtime(config_root, version, *, proc_root="/proc"):
         original_binary = _native_binary(binary)
         config_text, config_sig = _bounded_file_text(
             Path(conf), MAX_CONFIG_BYTES, with_fingerprint=True)
-        # Ambiguous included pools are not modeled as a matching live config.
-        if any(
-                re.match(r"(?i)^include\s*=", line.split(";", 1)[0].split("#", 1)[0].strip())
-                for line in config_text.splitlines()):
-            result["reason"] = "Included/multiple PHP pools require a separate native runtime adapter"
-            return result
+        # The process and site topology must use the same conservative
+        # single-pool qualification before reporting a positive observation.
+        _validated_single_www_layout(config_text)
         socket_path = _single_www_listen(conf)
         if len(socket_path) > 200:
             raise RuntimeInspectError("Oversized PHP-FPM Unix socket path")
@@ -264,36 +291,47 @@ def inspect_php_fpm_runtime(config_root, version, *, proc_root="/proc"):
             )
             return result
         pid, start = matches[0]
+
+        def recheck_master_source():
+            # Every Partial result retaining a PID must revalidate identity;
+            # checking only the fully Observed path permits stale PID reuse.
+            if (_native_binary(binary) != original_binary or
+                    _bounded_file_text(
+                        Path(conf), MAX_CONFIG_BYTES, with_fingerprint=True)[1] != config_sig or
+                    _single_www_listen(conf) != socket_path or
+                    _process_start(proc_root, pid) != start or
+                    not _exe_matches(proc_root, pid, original_binary) or
+                    not _master_title(proc_root, pid, conf)):
+                raise RuntimeInspectError(
+                    "PHP process or configuration changed during observation")
+
         result["master_state"] = "Matching Master"
         result["master_pid"] = int(pid)
         try:
             original_socket = _socket_identity(socket_path)
         except FileNotFoundError:
+            recheck_master_source()
             result["state"] = "Partial"
             result["socket_state"] = "Missing"
             result["reason"] = "Matching PHP master exists but its Unix socket path is missing"
             return result
         inode = _listening_inode(proc_root, socket_path)
         if inode is None:
+            recheck_master_source()
             result["state"] = "Partial"
             result["socket_state"] = "Not Observed"
             result["reason"] = "PHP socket pathname exists but no matching kernel listener was observed"
             return result
         if not _master_holds_listener(proc_root, pid, inode):
+            recheck_master_source()
             result["state"] = "Partial"
             result["socket_state"] = "Not Observed"
             result["reason"] = "The matching PHP master did not own the observed Unix listener"
             return result
         # Pin point-in-time associations again after traversing procfs:
         # detect binary/config/socket drift or recycled PIDs before reporting.
-        if (_native_binary(binary) != original_binary or
-                _bounded_file_text(Path(conf), MAX_CONFIG_BYTES, with_fingerprint=True)[1]
-                != config_sig or
-                _single_www_listen(conf) != socket_path or
-                _socket_identity(socket_path) != original_socket or
-                _process_start(proc_root, pid) != start or
-                not _exe_matches(proc_root, pid, original_binary) or
-                not _master_title(proc_root, pid, conf) or
+        recheck_master_source()
+        if (_socket_identity(socket_path) != original_socket or
                 _listening_inode(proc_root, socket_path) != inode or
                 not _master_holds_listener(proc_root, pid, inode)):
             raise RuntimeInspectError("PHP process, configuration or socket changed during observation")
