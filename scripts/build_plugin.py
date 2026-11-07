@@ -10,7 +10,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = ROOT / 'plugin' / 'ach_customizer'
-CORE_FILES = ('ach_customizer_main.py', 'ach_customizer_activity.py', 'ach_customizer_lifecycle.py', 'ach_customizer_monitor.py', 'ach_customizer_site_changes.py', 'ach_customizer_state.py', 'ach_customizer_cleanup.py', 'ach_customizer_fpm_apply.py', 'ach_customizer_fpm_workflow.py', 'ach_customizer_status_pages.py', 'ach_customizer_status_inspect.py', 'ach_customizer_status_probe.py', 'ach_customizer_status_extension.py', 'ach_customizer_status_defaults.py', 'ach_customizer_status_unbound.py', 'ach_customizer_php_runtime.py', 'ach_customizer_php_topology.py', 'ach_customizer_cache_audit.py', 'ach_customizer_hosts.py', 'icon.png', 'index.html', 'info.json', 'install.sh')
+CORE_FILES = ('ach_customizer_main.py', 'ach_customizer_activity.py', 'ach_customizer_lifecycle.py', 'ach_customizer_monitor.py', 'ach_customizer_site_changes.py', 'ach_customizer_state.py', 'ach_customizer_cleanup.py', 'ach_customizer_fpm_apply.py', 'ach_customizer_fpm_workflow.py', 'ach_customizer_status_pages.py', 'ach_customizer_status_inspect.py', 'ach_customizer_status_probe.py', 'ach_customizer_status_extension.py', 'ach_customizer_status_site_file.py', 'ach_customizer_status_defaults.py', 'ach_customizer_status_unbound.py', 'ach_customizer_php_runtime.py', 'ach_customizer_php_topology.py', 'ach_customizer_cache_audit.py', 'ach_customizer_hosts.py', 'icon.png', 'index.html', 'info.json', 'install.sh')
 PAGE_VARIANTS = ('403', '404', '429', '500', '502', '503', '504', '50x', 'new-site', 'stopped', 'unbound')
 FILES = CORE_FILES + ('status_pages/manifest.json',) + tuple(
     f'status_pages/{locale}/{page}.html'

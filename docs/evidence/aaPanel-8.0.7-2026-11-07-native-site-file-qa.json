@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-07",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "acceptance": [
+    "https://github.com/AChWorks/ach-aapanel-customizer/issues/10",
+    "https://github.com/AChWorks/ach-aapanel-customizer/issues/21"
+  ],
+  "source_base": "57aae782b39ce2d07b9aa694fc4207564165d631",
+  "candidate_version": "0.1.19 UNRELEASED",
+  "scope": "Native aaPanel 8.0.7 Nginx: select an existing site 404.html/502.html Apply/Recheck/Restore path when native VHost has verified original error_page mapping but no managed extension include. Exact original-byte backup and journal; no VHost change or Nginx reload. Existing extension mode unchanged.",
+  "source_validation": {
+    "python_tests_passed": 466,
+    "python_failed": 0,
+    "javascript_tests_passed": 214,
+    "javascript_failed": 0,
+    "embedded_js_parse": "PASS",
+    "shell_syntax": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "exact_package": {
+    "zip_name": "ach_customizer_0119_native_site_files_r1.zip",
+    "sha256": "b2fb65c3d600ff1f66bd564a3f00467fe04707002b9555573b0101aeb4b07bfa",
+    "plugin_version": "0.1.19",
+    "members": 47,
+    "installed_file_sha256": "47/47 PASS",
+    "build": "deterministic two independent builds byte-identical",
+    "native_import": "panelPlugin.update_zip + panelPlugin.input_zip"
+  },
+  "native_qa": {
+    "provider": "Test Server For AI",
+    "workspace": "/srv/ai-workspace/ach-aapanel-rebuild-20261105",
+    "guest": "ach-aapanel-managed-qa",
+    "environment": "Isolated managed QEMU Debian12 / aaPanel8.0.7 / Nginx / PHP 8.1 and 8.5",
+    "test_driver": "artifacts/qa_0119_native_site_file.py",
+    "test_driver_sha256": "d20b3ac9ed652857dd25e21934bc625ace1910cc0c4bf2390ed53dd27a6bb67c",
+    "native_installer": "artifacts/qa_0119_install_site_file_r1.py",
+    "native_installer_sha256": "2b0d693bfd19584f2ac2839db72aaae9fef2c593e8ba929f7754910381b64106",
+    "evaluated_target": "New native PHP website ach-file-0119.invalid, site ID9, isolated guest only",
+    "existing_non_targets": [
+      "wp1.digikalashop.top",
+      "wp2.digikalashop.top",
+      "wp3.digikalashop.top"
+    ],
+    "verified": [
+      "Original three WordPress websites all local HTTP200 before operation.",
+      "Native aaPanel ZIP update/import succeeded; exact 47/47 installed member bytes.",
+      "New native PHP site has native error_page 404/502 file mapping and NO managed extension include; its existing HTML files are eligible.",
+      "Primary-admin explicit file-mode 404 HTTP/80 and 502 source-only preflights successful; no fabricated 502 HTTP check.",
+      "Wrong-mode extension Apply and mismatched file-mode approval denied before file mutation.",
+      "404 EN and 502 FA file Apply/Recheck successful; 404 actual HTTP404 and exact body SHA, no proof nonce; 502 status source-only.",
+      "Original 404.html and 502.html user/group/mode preserved after Apply and Restore.",
+      "Actual native SiteStop saved-journal-only Suspended Recheck for both operations; file Apply and Restore denied while stopped.",
+      "Actual SiteStart recovered previous 404 HTTP and both file Applied observations.",
+      "Deliberate VHost source drift produced saved-only Needs Review for both; Restore denied; original source bytes reconciled.",
+      "Exact 404 Restored and 502 Source Restored; original status source bytes restored; target VHost unchanged.",
+      "Non-target WordPress three HTTP200 and native VHost SHA256 unchanged; Nginx syntax passed."
+    ],
+    "execution_note": "The earlier QA package before final source corrections was separately tested with same functional success. The R1 package SHA above is the exact final source built ZIP and was independently imported and tested again. All tests use synthetic Flask primary-administrator POST contexts, NOT authenticated aaPanel browser sessions."
+  },
+  "cold_restore": {
+    "status": "PASS",
+    "protected_snapshot": "rescue/pre-status-extension-20261107.qcow2",
+    "protected_snapshot_sha256_unchanged": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "installed_baseline_plugin": "0.1.12",
+    "baseline_installed_files": "39/39 SHA256 PASS",
+    "guest_health": "QEMU running; PHP8.1/8.5 running; Nginx -t PASS; original 3 WordPress HTTP200 after boot warm-up",
+    "test_site_and_vhost": "absent",
+    "disposable_test_overlay": "qa-0119-native-site-file-r1-tested.qcow2 removed after verified cold restore",
+    "preserve": "managed-qa/qa-0119-native-site-file-before.qcow2 retained: predates R1 and contains unique bytes relative to protected golden snapshot (qemu-img compare mismatch), not proved disposable",
+    "note": "WP1 returned transient HTTP500 immediately after guest start, then HTTP200 on next bounded post-boot health verification; do not treat early transient 500 as persistent site failure."
+  },
+  "limits": [
+    "Does not create absent site status HTML, rewrite vendor aaPanel VHosts, or add Nginx extension include.",
+    "Site-file 404 has actual loopback HTTP status+body verification; 502 is always source-only, not a simulated HTTP502.",
+    "Native stopped page HTTP200 semantic remains uncorrected (desired HTTP503 not delivered).",
+    "Unknown-host HTTPS/443 and effective generic 50x are not supported by this slice.",
+    "Full real authenticated aaPanel Browser/CSRF, secondary/temporary-role, disable/reinstall/uninstall and consolidated Phase B native acceptance remain open in Issue #21.",
+    "No Merge/Release/Production deployment authorization for the candidate."
+  ]
+}
