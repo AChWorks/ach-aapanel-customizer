@@ -48,6 +48,16 @@ class Site404TransactionTests(unittest.TestCase):
         self.probes = 0
         self.fail_probe_numbers = set()
         self.vhost_sha = hashlib.sha256(self.vhost.read_bytes()).hexdigest()
+        self.route_guard = patch.object(
+            manager, "verify_configured_site_404",
+            side_effect=lambda site, **kwargs: {
+                "configured_static_http_80": True,
+                "loaded_workers_verified": False,
+                "nginx_dump_sha256": "a" * 64,
+                "vhost_sha256": hashlib.sha256(self.vhost.read_bytes()).hexdigest(),
+            })
+        self.route_guard.start()
+        self.addCleanup(self.route_guard.stop)
         self.before_sha = hashlib.sha256(self.original).hexdigest()
 
     def fake_probe(self, site, *, locale, rendered_sha256, rendered_html, vhost_root):
@@ -299,6 +309,161 @@ class Site404TransactionTests(unittest.TestCase):
                 # state to give the next case all backup/journal fsync steps.
                 (self.state / "ach_customizer.site404.9.before").unlink()
                 self.assertEqual(self.run_manager("recheck")["state"], "Unmanaged")
+
+    def test_exact_404_http_match_without_route_evidence_cannot_write(self):
+        # The historic fake HTTP matcher is insufficient by itself. A
+        # separately proven configured Nginx scope is mandatory.
+        import ach_customizer_status_routing as route
+        with patch.object(manager, "verify_configured_site_404",
+                          side_effect=route.RouteGuardError("unsupported nested includes")):
+            with self.assertRaises(manager.StatusManageError) as ctx:
+                self.run_manager()
+        self.assertEqual(ctx.exception.stage, "runtime")
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertIsNone(self.recovery())
+        self.assertFalse((self.state / "ach_customizer.site404.9.before").exists())
+
+    def test_nginx_dump_drift_during_matching_http_probe_refuses_apply(self):
+        common = {
+            "configured_static_http_80": True,
+            "loaded_workers_verified": False,
+            "vhost_sha256": self.vhost_sha,
+        }
+        with patch.object(manager, "verify_configured_site_404", side_effect=[
+                dict(common, nginx_dump_sha256="a" * 64),
+                dict(common, nginx_dump_sha256="b" * 64)]):
+            with self.assertRaises(manager.StatusManageError) as error:
+                self.run_manager()
+        self.assertEqual(error.exception.stage, "runtime")
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertIsNone(self.recovery())
+        self.assertFalse((self.state / "ach_customizer.site404.9.before").exists())
+
+    def test_exchange_failure_before_swap_rechecks_and_restores_original(self):
+        # Kernel exchange unavailable or failed before doing anything: leave
+        # private staged proposed bytes, require explicit recovery, never
+        # invent a successful Apply.
+        with patch.object(manager, "_exchange_site_with_stage",
+                          side_effect=OSError("failed before exchange")):
+            with self.assertRaises(manager.StatusManageError) as ctx:
+                self.run_manager()
+        self.assertEqual(ctx.exception.stage, "uncertain")
+        self.assertEqual(self.page.read_bytes(), self.original)
+        record = self.recovery()
+        staged = self.site_root / manager.STAGING_DIRECTORY / manager._staging_name(
+            record["operation_id"], "apply")
+        self.assertEqual(staged.read_bytes(), self.render["html"].encode())
+        self.assertEqual(self.run_manager("recheck")["state"], "Recovery Required")
+        restored = self.run_manager("restore", expected_recovery=record["operation_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertFalse(restored["changed"])
+        self.assertFalse(staged.exists())
+        self.assertEqual(self.page.read_bytes(), self.original)
+
+    def test_exchange_preserves_independent_editor_replacement_between_checks(self):
+        # An uncooperative editor atomically replaces the destination at the
+        # precise last kernel operation, AFTER our final digest/inode checks.
+        original_exchange = manager._exchange_site_with_stage
+        outsider = b"independent editor's latest 404 bytes\n"
+        swaps = 0
+
+        def intervening_exchange(stage_fd, stage_name, site_fd):
+            nonlocal swaps
+            swaps += 1
+            if swaps == 1:
+                replacement = self.site_root / "third-party-new.html"
+                replacement.write_bytes(outsider)
+                replacement.chmod(0o644)
+                os.replace(replacement, self.page)
+            return original_exchange(stage_fd, stage_name, site_fd)
+
+        with patch.object(manager, "_exchange_site_with_stage",
+                          side_effect=intervening_exchange):
+            with self.assertRaises(manager.StatusManageError) as error:
+                self.run_manager()
+        # The editor's bytes are back at their original filename. A previous
+        # os.replace-only implementation silently overwrote these bytes.
+        self.assertIn(error.exception.stage, ("uncertain", "concurrency"))
+        self.assertGreaterEqual(swaps, 2)
+        self.assertEqual(self.page.read_bytes(), outsider)
+        self.assertEqual(self.recovery()["phase"], "prepared")
+        self.assertEqual((self.state / "ach_customizer.site404.9.before").read_bytes(),
+                         self.original)
+        self.assertEqual(self.run_manager("recheck")["state"], "Drift")
+
+    def test_exchange_preserves_third_party_update_after_swap(self):
+        original_exchange = manager._exchange_site_with_stage
+        outsider = b"new site bytes after exchange\n"
+        count = 0
+
+        def edit_installed_after_exchange(stage_fd, stage_name, site_fd):
+            nonlocal count
+            original_exchange(stage_fd, stage_name, site_fd)
+            count += 1
+            if count == 1:
+                replacement = self.site_root / "independent.tmp"
+                replacement.write_bytes(outsider)
+                replacement.chmod(0o644)
+                os.replace(replacement, self.page)
+
+        with patch.object(manager, "_exchange_site_with_stage",
+                          side_effect=edit_installed_after_exchange):
+            with self.assertRaises(manager.StatusManageError) as error:
+                self.run_manager()
+        self.assertEqual(error.exception.stage, "uncertain")
+        self.assertEqual(self.page.read_bytes(), outsider)
+        recovery = self.recovery()
+        staged_name = manager._staging_name(recovery["operation_id"], "apply")
+        displaced = self.site_root / manager.STAGING_DIRECTORY / staged_name
+        self.assertTrue(displaced.exists(), "Retain displaced original inode")
+        self.assertEqual(displaced.read_bytes(), self.original)
+        self.assertEqual(self.run_manager("recheck")["state"], "Drift")
+        with self.assertRaisesRegex(manager.StatusManageError, "recoverable Apply exchange"):
+            self.run_manager("restore", expected_recovery=recovery["operation_id"])
+
+    def test_exchange_lost_acknowledgment_does_not_discard_displaced_inode(self):
+        # Simulate a syscall that changed the directory but whose result was
+        # lost before userspace could acknowledge the swap.
+        original_exchange = manager._exchange_site_with_stage
+
+        def swap_then_lose_reply(stage_fd, stage_name, site_fd):
+            original_exchange(stage_fd, stage_name, site_fd)
+            raise OSError("simulated lost exchange acknowledgment")
+
+        with patch.object(manager, "_exchange_site_with_stage",
+                          side_effect=swap_then_lose_reply):
+            with self.assertRaises(manager.StatusManageError) as error:
+                self.run_manager()
+        self.assertEqual(error.exception.stage, "uncertain")
+        recovery = self.recovery()
+        staged_name = manager._staging_name(recovery["operation_id"], "apply")
+        displaced = self.site_root / manager.STAGING_DIRECTORY / staged_name
+        self.assertEqual(displaced.read_bytes(), self.original)
+        self.assertEqual(self.page.read_bytes(), self.render["html"].encode())
+        self.assertEqual(self.run_manager("recheck")["state"], "Recovery Required")
+        restored = self.run_manager("restore", expected_recovery=recovery["operation_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertFalse(displaced.exists())
+        self.assertEqual(self.recovery()["phase"], "restored")
+        self.assertEqual(self.run_manager("recheck")["state"], "Restored")
+
+    def test_private_stage_directory_must_not_be_a_symlink(self):
+        alien = self.other_root
+        (self.site_root / manager.STAGING_DIRECTORY).symlink_to(alien, target_is_directory=True)
+        with self.assertRaises(Exception):
+            self.run_manager()
+        self.assertEqual(self.page.read_bytes(), self.original)
+        self.assertEqual(self.other_file.read_bytes(), b"other untouched site")
+        self.assertEqual(self.recovery()["phase"], "restored")
+
+    def test_private_stage_is_not_traversable_to_web_workers(self):
+        done = self.run_manager()
+        self.assertEqual(done["state"], "Applied")
+        staging = self.site_root / manager.STAGING_DIRECTORY
+        self.assertEqual(staging.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(list(staging.iterdir()), [])
+        self.assertTrue(self.other_file.exists())
 
     def test_backup_no_clobber_preserves_existing_bytes(self):
         permanent = "backup-preserved"
