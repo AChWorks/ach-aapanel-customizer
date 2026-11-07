@@ -848,7 +848,8 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                                 vhost_root="/www/server/panel/vhost/nginx",
                                 nginx_conf_root="/www/server/nginx/conf",
-                                rewrite_root="/www/server/panel/vhost/rewrite"):
+                                rewrite_root="/www/server/panel/vhost/rewrite",
+                                other_socket_resolver=None, include_other_sites=False):
     """Bounded, read-only **file attribution**, never an effective-runtime claim.
 
     One shared PHP-FPM service can serve multiple native sites. Nginx
@@ -869,6 +870,7 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         "manual_apply_eligible": False,
         "site_count": 0,
         "other_php_sites_count": 0,
+        **({"other_sites": []} if include_other_sites else {}),
         "reason": "",
         "note": ("Verified native Nginx VHost/PHP includes, inert site extension glob and [www] Unix-socket FILE attribution only; "
                  "not proof of effective routing, PHP worker state, or a complete impact boundary for Apply."),
@@ -962,6 +964,7 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                         # website cannot also feed the inspected shared pool.
                         # Validate its actual literal native socket as well.
                         expected_socket = socket if assigned == version else (
+                            other_socket_resolver(assigned) if other_socket_resolver else
                             "/tmp/php-cgi-" + assigned + ".sock"
                         )
                         if assigned != version and expected_socket == socket:
@@ -979,6 +982,14 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 result["matched_sites"].append(site_key)
             else:
                 result["other_php_sites_count"] += 1
+                if include_other_sites:
+                    result["other_sites"].append({
+                        **site_key, "version": assigned,
+                        "socket_path": None if assigned == "00" else (
+                            other_socket_resolver(assigned) if other_socket_resolver else
+                            "/tmp/php-cgi-" + assigned + ".sock"
+                        ),
+                    })
         if result["unresolved_sites"]:
             result["reason"] = "Some website assignments are ambiguous; shared impact is incomplete"
         else:
@@ -997,4 +1008,6 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         # Only per-site unsupported VHosts keep already proven file links.
         result.update(matched_sites=[], unresolved_sites=[], site_count=0,
                       other_php_sites_count=0, reason=str(exc)[:250])
+        if include_other_sites:
+            result["other_sites"] = []
     return result
