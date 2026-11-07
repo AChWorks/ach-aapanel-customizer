@@ -51,7 +51,7 @@ function loadUi() {
     '#ach-fpm-recovery-version', '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
     '#ach-fpm-recovery-impact', '#ach-fpm-restore-rows',
     '#ach-fpm-rollback-controls', '#ach-fpm-rollback-approval', '#ach-fpm-rollback',
-    '#ach-status-template', '#ach-status-locale', '#ach-status-scope', '#ach-status-site-id',
+    '#ach-status-template', '#ach-status-locale', '#ach-status-scope', '#ach-status-site-id', '#ach-status-delivery',
     '#ach-status-name', '#ach-status-tagline', '#ach-status-url', '#ach-status-label',
     '#ach-status-accent', '#ach-status-background', '#ach-status-foreground',
     '#ach-status-footer', '#ach-status-load', '#ach-status-preview-button',
@@ -75,7 +75,7 @@ function loadUi() {
   ]) elements.set(name, fakeNode('div'));
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
-    ['#ach-status-scope','global'], ['#ach-status-site-id',''],
+    ['#ach-status-scope','global'], ['#ach-status-site-id',''], ['#ach-status-delivery','extension'],
     ['#ach-activity-level',''], ['#ach-activity-module','']
   ]) elements.get(selector).props.value = val;
   const controls = [
@@ -1874,6 +1874,123 @@ test('Source-drift journal is visible but malformed or unverified states cannot 
   }));
   assert.match(ui.state().statusManage,/incomplete or incompatible/);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Native site-file 404 approval and Restore are delivery-bound and never request reload', () => {
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-delivery','file','change');
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  const read=ui.statusClick('#ach-status-probe-button');
+  assert.equal(read.options.data.site_delivery,'file');
+  read.respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  assert.equal(apply.options.data.site_delivery,'file');
+  assert.equal(apply.options.data.site_approval,'apply_exact_site_404_site_file');
+  apply.respond(manage404Response('apply',{
+    mode:'native_site_status_file',runtime_verified:true,
+    verification_scope:'http404_body'
+  }));
+  assert.match(ui.state().statusManage,/confirmed native site-file replacement/);
+  assert.match(ui.state().statusManage,/No Nginx reload was requested/);
+  const check=ui.statusClick('#ach-status-manage-recheck');
+  assert.equal(check.options.data.site_delivery,'file');
+  check.respond(manage404Response('recheck',{
+    changed:false,mode:'native_site_status_file',
+    runtime_verified:true,verification_scope:'http404_body'
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(restore.options.data.site_delivery,'file');
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_404_site_file');
+  restore.respond(manage404Response('restore',{
+    mode:'native_site_status_file',runtime_verified:true,
+    verification_scope:'http404_body'
+  }));
+  assert.match(ui.state().statusManage,/Restored/);
+  assert.match(ui.state().statusManage,/No Nginx reload was requested/);
+});
+
+test('Switching delivery invalidates prior preflight and rejects mismatched mode responses', () => {
+  const ui=statusProbeUi();
+  const old=ui.statusClick('#ach-status-probe-button');
+  ui.statusSetValue('#ach-status-delivery','file','change');
+  old.respond(native404Proposal());
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  const fresh=ui.statusClick('#ach-status-probe-button');
+  fresh.respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  apply.respond(manage404Response('apply'));
+  assert.match(ui.state().statusManage,/unconfirmed/i);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Native file 404/502 rejects forged runtime and extension proof semantics', () => {
+  for (const [template, invalid] of [
+    ['404', {runtime_verified:true,verification_scope:'source_and_nonce_only'}],
+    ['404', {runtime_verified:true,verification_scope:'http404_body',state:'Needs Review'}],
+    ['502', {runtime_verified:true,verification_scope:'source_only'}],
+    ['502', {runtime_verified:false,verification_scope:'source_and_nonce_only'}],
+  ]) {
+    const ui=statusProbeUi();
+    ui.statusSetValue('#ach-status-delivery','file','change');
+    if (template==='502') ui.statusSetValue('#ach-status-template','502','change');
+    const read=ui.statusClick('#ach-status-manage-recheck');
+    read.respond(manage404Response('recheck',{
+      mode:'native_site_status_file',template,changed:false,
+      runtime_verified:template==='404',
+      verification_scope:template==='404'?'http404_body':'source_only',
+      ...invalid
+    }));
+    assert.match(ui.state().statusManage,/incomplete or incompatible/i);
+    ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+  }
+});
+
+test('Native site-file 502 is explicitly source-only, not fake HTTP 502', () => {
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-delivery','file','change');
+  ui.statusSetValue('#ach-status-template','502','change');
+  ui.statusClick('#ach-status-probe-button').respond(statusProbe({
+    template:'502',state:'Source Ready',scope:'native_vhost_source_only',
+    page_file_sha256:managed404Original,body_sha256:null,http_status:null,
+    body_bytes:null,body_matches_file:false,body_matches_render:false,
+    http_404_observed:false,
+    adoption_preview:{
+      schema:1,state:'Source Ready',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,
+      requires_adoption:true,requires_backup:true,
+      ownership_verified:false,recovery_verified:false,apply_supported:false,
+      reason:'Original site-file backup required'
+    }
+  }));
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  assert.equal(apply.options.data.site_approval,'apply_exact_site_502_site_file');
+  apply.respond(manage404Response('apply',{
+    template:'502',mode:'native_site_status_file',
+    runtime_verified:false,verification_scope:'source_only'
+  }));
+  const check=ui.statusClick('#ach-status-manage-recheck');
+  check.respond(manage404Response('recheck',{
+    template:'502',mode:'native_site_status_file',
+    runtime_verified:false,verification_scope:'source_only',changed:false
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_502_site_file');
+  restore.respond(manage404Response('restore',{
+    template:'502',mode:'native_site_status_file',
+    state:'Source Restored',runtime_verified:false,verification_scope:'source_only'
+  }));
+  assert.match(ui.state().statusManage,/live HTTP 502 NOT verified/);
+  assert.match(ui.state().statusManage,/No Nginx reload was requested/);
 });
 
 test('Native 502 source-only preview gates extension Apply and Restore with Nginx reload approval', () => {

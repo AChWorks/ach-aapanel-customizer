@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Status: Unreleased 0.1.17 development candidate on integrated Phase A — native aaPanel UI, Monitor, site lifecycle baseline, PHP 8.1+ read-only runtime/socket mapping, guarded PHP 8.1 and 8.5 Manual Apply/Restore candidates, FastCGI source audit, Status Pages 404/502 Nginx extension Apply/Recheck/Restore, new-site defaultDoc/404/502 source Apply/Restore, global HTTP/80 unknown-Host 404 routing, offline branding/preview, Activity/Diagnostics and local-hosts inspection. PR #32 integrated HTTP/80 routing into main with passing source/native checks, but PHP 8.1 writable compatibility, complete authenticated-browser QA, HTTPS/stopped-site/50x Status Pages, independent review of subsequent changes, stable release and Production deployment remain pending.**
+**Status: Unreleased 0.1.19 development source.** The native aaPanel plugin includes Monitor, site lifecycle observation, PHP 8.1/8.5 guarded Manual Apply/Restore, FastCGI source audit, EN/FA Status Pages branding and preview, two explicit per-site 404/502 Apply/Restore methods (existing native site-file replacement with original-byte backup and **no Nginx reload**, or verified native extension with a checked Nginx reload), new-site default source Apply/Restore, and global IPv4/IPv6 unknown-Host HTTP/80 404 routing. Exact native-file delivery was exercised in the isolated aaPanel 8.0.7 guest; this source is **not released or deployed**. Stopped-site HTTP 503 semantics, unbound HTTPS/443, generic effective 50x, full browser/CSRF and complete lifecycle QA remain open under Issue #10 and Issue #21.
 
 ## Why
 
@@ -16,7 +16,7 @@ It is **not WordPress-only** and does not imply every aaPanel subsystem will be 
 
 - [Canonical product specification](docs/PROJECT-SPEC.md) — mission, accepted requirements, scope, constraints, lifecycle and first acceptance criteria.
 - [Native aaPanel integration and test gates](docs/aapanel-integration.md) — official source references, safety boundaries, and open runtime compatibility checks.
-- [Issue #10: Status Pages module](https://github.com/AChWorks/ach-aapanel-customizer/issues/10) — owner-approved EN/FA references, white-label controls, and future verified per-site Apply.
+- [Issue #10: Status Pages module](https://github.com/AChWorks/ach-aapanel-customizer/issues/10) — owner-approved EN/FA references, white-label controls, delivered bounded site methods, and remaining stopped/HTTPS/50x acceptance.
 - [AChWorks descriptor](achworks.yaml) — concise project discovery metadata.
 - GitHub [Issues](https://github.com/AChWorks/ach-aapanel-customizer/issues) — active research and implementation work after issue creation.
 - GitHub [PRs](https://github.com/AChWorks/ach-aapanel-customizer/pulls) — proposed code/documentation changes and review evidence.
@@ -44,6 +44,12 @@ Source-level tests cover cross-version independence, recovery, failing reload re
 **PR #33 R1 review remediation:** The PHP81 manual writer now rejects a mismatched or ambiguous [global] pid or [www] listen before Prepare, recovery journal creation, file replacement or service reload. Only the exact native /www/server/php/81/var/run/php-fpm.pid and /tmp/php-cgi-81.sock layout matches the current runtime hooks; no extra PHP versions or generic service parser are added. Operators can independently select **PHP81** or **PHP85** under **Saved recovery service** even if normal PHP inventory fails. Recovery identity/manual guidance remain visible; automatic Restore still requires fresh site/source evidence and explicit approval. Existing PHP85 recovery names, schema and shared lock remain unchanged.
 
 [PR #33 R1 exact-package native and source regression evidence](docs/evidence/aaPanel-8.0.7-2026-11-07-php81-pr33-r1-remediation-qa.json) documents 451 Python and 208 JavaScript source tests, the corrected 46-member native ZIP, real fail-closed alternate PID/socket acceptance checks, PHP81 Apply/Restore/fault recovery and the independently verified cold guest restore. The original 0.1.17 QA link above documents the earlier candidate and must not be confused with this R1 package. Independent delta re-review, authenticated-browser/CSRF and Production/release approval remain outstanding.
+
+### Native per-site 404/502 file delivery — Issue #10 (unreleased 0.1.19)
+
+For native aaPanel 8.0.7 PHP websites whose Nginx VHost already declares the conventional error_page 404 /404.html and error_page 502 /502.html, but **does not load the managed Nginx extension include**, Status Pages now offers an explicit **Existing native 404.html / 502.html (no reload)** delivery choice. A primary administrator first checks the selected site's existing source/HTTP evidence, approves the exact scope/mode, and obtains an immutable root-owned original-byte backup and Recovery ID. Apply atomically replaces only the existing site status HTML while retaining uid/gid/mode; Restore requires the matching saved operation and returns the exact previous bytes. No vendor VHost edit or Nginx reload is made. Real HTTP 404 status/body is checked; 502 remains **source-only**, not a claim of live 502 verification. Stopped sites or changed VHosts expose read-only saved recovery but block writes.
+
+This mode does **not** add missing status files or modify WordPress/application routes. Sites with the verified native Nginx extension include continue to use the separate existing extension mode, with its own explicit checked reload. The isolated [aaPanel native lifecycle test evidence](docs/aapanel-integration.md#native-site-file-404502-delivery-without-nginx-reload-issue-10-unreleased-0119) and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) document the remaining authenticated browser and broader delivery gates.
 
 ### Site status recovery across native Stop/Start — Issue #10 (unreleased 0.1.18)
 

@@ -806,6 +806,9 @@ class ach_customizer_main:
                 raise StatusPageError("Select an existing native website for an HTTP 404 probe")
             expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
             template = self._argument(args, "template")
+            delivery = self._argument(args, "site_delivery", "extension")
+            if delivery not in ("extension", "file"):
+                raise StatusPageError("Unsupported site status delivery mode")
             if (template not in ("404", "502") or
                     self._argument(args, "locale") not in LOCALES):
                 raise StatusPageError("Select an English/Persian site 404 or 502")
@@ -841,8 +844,13 @@ class ach_customizer_main:
                     rendered_html=rendered["html"],
                 )
             else:
-                from ach_customizer_status_extension import preview_site_502
-                observed = preview_site_502(
+                if delivery == "file":
+                    from ach_customizer_status_site_file import preview_site_file_502
+                    preview = preview_site_file_502
+                else:
+                    from ach_customizer_status_extension import preview_site_502
+                    preview = preview_site_502
+                observed = preview(
                     before, locale=self._argument(args, "locale"),
                     rendered_sha256=rendered["rendered_sha256"],
                     rendered_html=rendered["html"],
@@ -869,11 +877,11 @@ class ach_customizer_main:
             return self._fail("status_probe", exc, request_id)
 
     def status_manage(self, args):
-        """Guarded site-specific 404/502 Nginx extension Apply/Recheck/Restore.
+        """Guarded 404/502 extension or existing native site-file management.
 
-        Explicit primary-administrator approval is required for a global
-        Nginx reload. Never change an existing site HTML file or vendor VHost.
-        The separately owned status extension must be proved by real HTTP.
+        Extension mode retains its separately approved shared Nginx reload.
+        File mode changes only the selected, preexisting site status HTML;
+        no vendor VHost edit or service reload is performed.
         """
         request_id = uuid4().hex
         site_id = None
@@ -891,12 +899,16 @@ class ach_customizer_main:
             locale = self._argument(args, "locale")
             if locale not in LOCALES:
                 raise StatusPageError("Unsupported Status Pages locale")
+            delivery = self._argument(args, "site_delivery", "extension")
+            if delivery not in ("extension", "file"):
+                raise StatusPageError("Unsupported site status delivery mode")
+            suffix = "_reload" if delivery == "extension" else "_site_file"
             if action == "apply" and self._argument(args, "site_approval") != (
-                    "apply_exact_site_" + code + "_reload"):
-                raise StatusPageError("Explicit site-specific status extension and Nginx reload approval required")
+                    "apply_exact_site_" + code + suffix):
+                raise StatusPageError("Explicit site-specific status Apply approval required")
             if action == "restore" and self._argument(args, "site_approval") != (
-                    "restore_exact_site_" + code + "_reload"):
-                raise StatusPageError("Explicit saved status recovery and Nginx reload approval required")
+                    "restore_exact_site_" + code + suffix):
+                raise StatusPageError("Explicit site-specific saved recovery Restore approval required")
             expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
             from ach_customizer_state import _open_state_dir, parse_revision
             from ach_customizer_status_pages import _load_at, _take_lock
@@ -906,6 +918,16 @@ class ach_customizer_main:
                 raise StatusPageError(
                     "Status extension manager not loaded after plugin update; restart panel and reopen"
                 ) from exc
+            if delivery == "file":
+                try:
+                    from ach_customizer_status_site_file import manage_site_file
+                except ImportError as exc:
+                    raise StatusPageError(
+                        "Native site-file adapter not loaded; restart panel and recheck"
+                    ) from exc
+                manage = manage_site_file
+            else:
+                manage = manage_site_extension
             import public
             if public.get_webserver() != "nginx" or str(public.get_panel_version()).strip() != "8.0.7":
                 raise StatusPageError("Native status extension adapter requires aaPanel 8.0.7 Nginx")
@@ -965,7 +987,7 @@ class ach_customizer_main:
                         raise StatusPageError("Native website changed during 404 preflight")
                     if action != "recheck":
                         unique_native_root()
-                    result = manage_site_extension(
+                    result = manage(
                         action, before, code=code, html=rendered["html"],
                         expected_current=self._argument(args, "expected_page_sha256"),
                         expected_vhost=self._argument(args, "expected_vhost_sha256"),

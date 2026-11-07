@@ -11,6 +11,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "plugin" / "ach_customizer"
 sys.path.insert(0, str(PACKAGE))
 import ach_customizer_main as backend
 import ach_customizer_status_extension as manager
+import ach_customizer_status_site_file as site_file_manager
 from ach_customizer_status_pages import render_page
 
 
@@ -112,6 +113,70 @@ class NativeStatusManagementTests(unittest.TestCase):
              patch.object(backend, "_bound_domains_for_sites", side_effect=self.bindings), \
              patch.object(manager, "manage_site_extension", return_value=manager_result) as applied:
             return self.plugin.status_manage(args), applied.call_args
+
+    def file_api(self, action="apply", *, fields=None, result=None, flask=None):
+        args=self.args(action, **(fields or {}))
+        args["site_delivery"]="file"
+        args["site_approval"]=(
+            "apply_exact_site_404_site_file" if action=="apply" else
+            "restore_exact_site_404_site_file" if action=="restore" else ""
+        )
+        if result is None:
+            result={
+                "state":"Applied","changed":True,"site_id":7,
+                "page_file_sha256":"a"*64,
+                "recovery_id":"c"*32,"read_only":False,
+                "mode":"native_site_status_file"
+            }
+        with patch.dict(sys.modules,{"public":self.public(),
+                                      "flask":flask or self.flask()}), \
+             patch.object(backend,"_bound_domains_for_sites",side_effect=self.bindings), \
+             patch.object(site_file_manager,"manage_site_file",return_value=result) as file_call, \
+             patch.object(manager,"manage_site_extension") as extension_call:
+            response=self.plugin.status_manage(args)
+            return response,file_call.call_args,extension_call.call_count
+
+    def test_site_file_mode_keeps_exact_admin_approval_and_native_site_binding(self):
+        response, call, extension_calls=self.file_api()
+        self.assertTrue(response["status"],response)
+        self.assertEqual(response["mode"],"native_site_status_file")
+        self.assertEqual(call.args[0],"apply")
+        self.assertEqual(call.kwargs["expected_vhost"],"b"*64)
+        self.assertEqual(extension_calls,0)
+        wrong=self.args(site_delivery="file",site_approval="apply_exact_site_404_reload")
+        result,call=self.run_api(wrong)
+        self.assertFalse(result["status"],result)
+        self.assertIsNone(call)
+
+    def test_site_file_mode_denies_wrong_role_and_stopped_write_but_rechecks(self):
+        denied,call,_=self.file_api(flask=self.flask(uid=2))
+        self.assertFalse(denied["status"],denied)
+        self.assertIsNone(call)
+        self.site["status"]="0"
+        paused_snapshot=json.dumps([
+            7,"demo.test","/www/demo.test","0",[["demo.test",80]]
+        ],separators=(",",":"))
+        for action in ("apply","restore"):
+            response,call,_=self.file_api(action,fields={
+                "expected_site_snapshot":paused_snapshot
+            })
+            self.assertFalse(response["status"],response)
+            self.assertIsNone(call)
+        saved={
+            "state":"Suspended","changed":False,"site_id":7,
+            "page_file_sha256":"a"*64,"rendered_sha256":"a"*64,
+            "before_sha256":"b"*64,"after_sha256":"a"*64,
+            "recovery_id":"c"*32,"read_only":True,
+            "mode":"native_site_status_file",
+            "verification_scope":"saved_journal_only","runtime_verified":False,
+            "journal_phase":"applied","note":"Native site stopped"
+        }
+        result,call,_=self.file_api("recheck",fields={
+            "expected_site_snapshot":paused_snapshot
+        },result=saved)
+        self.assertTrue(result["status"],result)
+        self.assertEqual(result["state"],"Suspended")
+        self.assertEqual(call.args[0],"recheck")
 
     def test_apply_enforces_primary_admin_native_identity_and_hash_contract(self):
         response, call = self.run_api(self.args())

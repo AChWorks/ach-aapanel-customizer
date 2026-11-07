@@ -32,7 +32,7 @@ class PackageContractTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), first)
             with ZipFile(target) as archive:
                 names = archive.namelist()
-                self.assertEqual(len(names), 46)
+                self.assertEqual(len(names), 47)
                 self.assertTrue(all(n.startswith('ach_customizer/') and '..' not in n for n in names))
                 self.assertIn('ach_customizer/info.json', names)
                 self.assertIn('ach_customizer/install.sh', names)
@@ -49,6 +49,7 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_php_runtime.py', names)
                 self.assertIn('ach_customizer/ach_customizer_php_topology.py', names)
                 self.assertIn('ach_customizer/ach_customizer_status_extension.py', names)
+                self.assertIn('ach_customizer/ach_customizer_status_site_file.py', names)
                 self.assertIn('ach_customizer/ach_customizer_status_unbound.py', names)
                 self.assertNotIn('ach_customizer/ach_customizer_status_manage.py', names)
                 self.assertNotIn('ach_customizer/ach_customizer_status_routing.py', names)
