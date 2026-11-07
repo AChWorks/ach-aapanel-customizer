@@ -63,6 +63,7 @@ case "${1:-}" in
         echo 'ACh aaPanel Customizer: aaPanel removes plugin files; only verified plugin-owned icon cleanup was attempted'
         echo 'ACh aaPanel Customizer: existing PHP-FPM settings may include previously applied changes; uninstall does not revert them'
         echo 'ACh aaPanel Customizer: applied website Status Pages extensions, Nginx assets and recovery journals are preserved; Restore explicitly before uninstall if needed'
+        echo 'ACh aaPanel Customizer: any previously applied global HTTP/80 unbound default-server and recovery journal are preserved; Restore explicitly before uninstall if needed'
         echo 'ACh aaPanel Customizer: persistent operator state and recovery records are preserved'
         echo 'ACh aaPanel Customizer: reinstall the plugin or follow documented supervised recovery to restore earlier PHP-FPM settings'
         ;;
