@@ -67,7 +67,11 @@ class ach_customizer_main:
             severity = "ERROR" if failed else "WARNING" if needs_review else level
             outcome = ("failed" if failed else "Needs Review" if needs_review else
                        response.get("state", "success"))
-            recovery = response.get("operation_id")
+            # FPM's operation_id is a durable recovery identity. The Status
+            # Pages manager uses a separate recovery_id; its operation_id is
+            # only the request correlation, NEVER the recovery journal ID.
+            recovery = (response.get("recovery_id") if module == "status_pages" else
+                        response.get("operation_id"))
             if (not response.get("request_id") or not isinstance(recovery, str)
                     or re.fullmatch(r"[0-9a-f]{32}", recovery) is None):
                 recovery = ""
@@ -78,7 +82,7 @@ class ach_customizer_main:
                 outcome=outcome,
                 target=target, error_class=type(error).__name__ if error else "",
                 detail=detail,
-                recovery_id=recovery if not failed else "",
+                recovery_id=recovery if (not failed or module == "status_pages") else "",
             )
             persisted = append_activity(_STATE_DIR, entry)
             # None means below verbosity threshold, NOT a persistence failure.
@@ -105,9 +109,14 @@ class ach_customizer_main:
             message = "Unexpected plugin error; inspect Activity using Operation ID"
         response = {"status": False, "stage": stage,
                     "msg": message, "operation_id": operation_id}
-        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_")) else
+        actual_recovery = getattr(error, "recovery_id", None)
+        if (isinstance(actual_recovery, str) and
+                re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):
+            response["recovery_id"] = actual_recovery
+            response["request_id"] = operation_id
+        module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
             response, module, stage, error=diagnostic_error or error)
@@ -225,6 +234,71 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("website_discovery", exc, operation_id)
 
+    def compare_site_changes(self, args):
+        """Full-primary-admin Monitor-only native site/binding comparison."""
+        request_id = uuid4().hex
+        site_error_type = None
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            # Resolve the new optional helper lazily: a stale in-memory aaPanel
+            # module must not break unrelated installed plugin actions.
+            try:
+                from ach_customizer_site_changes import compare, SiteChangesError
+                site_error_type = SiteChangesError
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Site-change helper is outdated after plugin update; "
+                    "restart the panel service during maintenance and reopen the plugin"
+                ) from exc
+            import public
+            result = compare(public, directory=_STATE_DIR)
+            response = {"status": True, "operation_id": request_id, **result}
+            return self._activity_result(
+                response, "websites", "compare_site_changes",
+                target="native-sites", level="DEBUG")
+        except PermissionError as exc:
+            return self._fail("website_changes_authorization", exc, request_id)
+        except Exception as exc:
+            if site_error_type is not None and isinstance(exc, site_error_type):
+                return self._fail("website_changes_compare", str(exc), request_id,
+                                  diagnostic_error=exc)
+            return self._fail("website_changes_compare", exc, request_id)
+
+    def save_site_baseline(self, args):
+        """Explicit reviewed baseline revision; never writes a site or service."""
+        request_id = uuid4().hex
+        site_error_type = None
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_site_changes import save_reviewed_baseline, SiteChangesError
+                site_error_type = SiteChangesError
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Site-change helper is outdated after plugin update; "
+                    "restart the panel service during maintenance and reopen the plugin"
+                ) from exc
+            import public
+            result = save_reviewed_baseline(
+                public, directory=_STATE_DIR,
+                expected_revision=self._argument(args, "expected_revision"),
+                expected_monitor_revision=self._argument(args, "expected_monitor_revision"),
+                expected_source_sha256=self._argument(args, "expected_source_sha256"),
+                reviewed=self._argument(args, "reviewed"),
+            )
+            response = {"status": True, "operation_id": request_id, **result}
+            return self._activity_result(
+                response, "websites", "save_site_baseline", target="native-sites")
+        except PermissionError as exc:
+            return self._fail("website_baseline_authorization", exc, request_id)
+        except Exception as exc:
+            if site_error_type is not None and isinstance(exc, site_error_type):
+                return self._fail("website_baseline_save", str(exc), request_id,
+                                  diagnostic_error=exc)
+            return self._fail("website_baseline_save", exc, request_id)
+
     def get_php_versions(self, args):
         """Primary-admin-only, read-only installed PHP file discovery."""
         operation_id = uuid4().hex
@@ -250,6 +324,61 @@ class ach_customizer_main:
             return self._fail("php_versions_authorization", exc, operation_id)
         except Exception as exc:
             return self._fail("php_versions_discovery", exc, operation_id)
+
+    def inspect_php_runtime(self, args):
+        """Read-only selected-version master/socket evidence; never Apply."""
+        operation_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            version = self._argument(args, "php_version")
+            # Lazy import prevents stale aaPanel module caches from taking
+            # down existing PHP discovery/Monitor/Status Pages endpoints.
+            try:
+                from ach_customizer_php_runtime import inspect_php_fpm_runtime
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "PHP runtime inspector not loaded after plugin update; "
+                    "restart aaPanel panel service, reopen and Refresh installed PHP"
+                ) from exc
+            result = inspect_php_fpm_runtime("/www/server/php", version)
+            # This is a second, independent read-only file attribution. An
+            # old/stale native ZIP worker must keep the existing process
+            # inspection usable, but must NOT claim site-map success.
+            try:
+                import public
+                from ach_customizer_php_topology import inspect_php_fpm_site_topology
+                topology = inspect_php_fpm_site_topology(
+                    public, "/www/server/php", version,
+                    observed_runtime_socket=(
+                        result["socket_path"] if result["state"] == "Observed" else None
+                    ),
+                )
+            except (ImportError, RuntimeError, TypeError, AttributeError) as exc:
+                topology = {
+                    "schema": 1, "state": "Needs Review", "version": version,
+                    "scope": "shared_service", "read_only": True,
+                    "runtime_verified": False, "apply_eligible": False,
+                    "pool": None, "config_path": None, "socket_path": None,
+                    "site_count": 0, "matched_sites": [], "other_sites": [],
+                    "unresolved_sites": [], "source_sha256": None,
+                    "reason": "Native PHP site-topology adapter unavailable or incompatible",
+                    "note": (
+                        "No site-to-service impact boundary established. Restart panel "
+                        "after plugin update; reload native website inventory."
+                    ),
+                }
+            result["site_mapping"] = topology
+            response = {"status": True, "operation_id": operation_id, **result}
+            return self._activity_result(
+                response, "php_fpm", "inspect_php_runtime",
+                target=str(version)[:16],
+                level="DEBUG" if result["state"] == "Observed" and
+                topology["state"] == "File Mapping" else "WARNING"
+            )
+        except PermissionError as exc:
+            return self._fail("php_runtime_authorization", exc, operation_id)
+        except Exception as exc:
+            return self._fail("php_runtime_inspection", exc, operation_id)
 
     def inspect_local_hosts(self, args):
         """Full-admin-only, read-only origin-local /etc/hosts diagnosis.
@@ -331,6 +460,87 @@ class ach_customizer_main:
             return self._fail("hosts_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("hosts_inspection", exc, request_id)
+
+    def inspect_fastcgi_cache(self, args):
+        """Full-primary-admin, read-only native FastCGI source audit.
+
+        The selected site and bound domain snapshot are comparison-only.
+        Neither request-supplied filesystem paths nor suggested domains can
+        determine which site/VHost is inspected. No cache mutation or purge.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_cache_audit import inspect_site_fastcgi_cache
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Cache inspector not loaded after plugin update; restart "
+                    "aaPanel panel service and refresh the native site inventory"
+                ) from exc
+            expected_key = self._argument(args, "expected_site_key")
+            expected_snapshot = self._argument(args, "expected_site_snapshot")
+            if (not isinstance(expected_key, str) or not expected_key or
+                    len(expected_key) > 255 or
+                    not isinstance(expected_snapshot, str) or
+                    not 1 <= len(expected_snapshot) <= 110000):
+                raise MonitorInputError("Refresh the selected native website inventory")
+            try:
+                selected = json.loads(expected_snapshot)
+            except (TypeError, ValueError):
+                raise MonitorInputError("Invalid native website snapshot; refresh inventory") from None
+            if (not isinstance(selected, list) or len(selected) != 5 or
+                    type(selected[0]) is not int or
+                    not isinstance(selected[1], str) or
+                    not isinstance(selected[2], str) or
+                    not isinstance(selected[3], str) or
+                    not isinstance(selected[4], list) or
+                    len(selected[4]) > 100 or
+                    any(not isinstance(item, list) or len(item) != 2 or
+                            not isinstance(item[0], str) or
+                            type(item[1]) is not int for item in selected[4])):
+                raise MonitorInputError("Invalid native site selection; refresh inventory")
+            site_id = self._status_site_id(args)
+            if site_id is None:
+                raise MonitorInputError("Choose a native aaPanel website")
+            import public
+
+            def current_site():
+                record = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(record, dict) or type(record.get("id")) not in
+                        (int, str) or str(record["id"]) != str(site_id)
+                        or not isinstance(record.get("name"), str)
+                        or not record["name"]):
+                    raise MonitorInputError("Native site identity changed")
+                site = {"id": site_id, "name": record["name"],
+                        "path": record.get("path"), "status": record.get("status")}
+                _bound_domains_for_sites(public, [site])
+                return site
+
+            before = current_site()
+            if (before["name"] != expected_key or
+                    native_site_snapshot(before) != selected):
+                raise MonitorInputError(
+                    "Website or bound-domain selection changed; refresh native inventory")
+            result = inspect_site_fastcgi_cache(public, site_id, before["name"])
+            if current_site() != before:
+                raise MonitorInputError(
+                    "Native site or bound domains changed during cache inspection")
+            response = {
+                "status": True, "request_id": request_id, **result,
+            }
+            return self._activity_result(
+                response, "websites", "inspect_fastcgi_cache",
+                target=str(site_id),
+                level="WARNING" if result["state"] != "Source Observed"
+                    or result["findings"] else "DEBUG",
+            )
+        except PermissionError as exc:
+            return self._fail("cache_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("cache_inspection", exc, request_id)
 
     def preview_php_fpm(self, args):
         operation_id = uuid4().hex
@@ -595,9 +805,10 @@ class ach_customizer_main:
             if site_id is None:
                 raise StatusPageError("Select an existing native website for an HTTP 404 probe")
             expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
-            if (self._argument(args, "template") != "404" or
+            template = self._argument(args, "template")
+            if (template not in ("404", "502") or
                     self._argument(args, "locale") not in LOCALES):
-                raise StatusPageError("HTTP probe supports only English/Persian site 404")
+                raise StatusPageError("Select an English/Persian site 404 or 502")
             import public
             if public.get_webserver() != "nginx":
                 raise StatusPageError("Only native Nginx HTTP/80 can be probed")
@@ -622,12 +833,20 @@ class ach_customizer_main:
             if self._argument(args, "brand_name") is not None:
                 effective = self._status_values(args)
                 source = "Unsaved probe selection"
-            rendered = render_page(self._argument(args, "locale"), "404", effective)
-            observed = probe_site_404(
-                before, locale=self._argument(args, "locale"),
-                rendered_sha256=rendered["rendered_sha256"],
-                rendered_html=rendered["html"],
-            )
+            rendered = render_page(self._argument(args, "locale"), template, effective)
+            if template == "404":
+                observed = probe_site_404(
+                    before, locale=self._argument(args, "locale"),
+                    rendered_sha256=rendered["rendered_sha256"],
+                    rendered_html=rendered["html"],
+                )
+            else:
+                from ach_customizer_status_extension import preview_site_502
+                observed = preview_site_502(
+                    before, locale=self._argument(args, "locale"),
+                    rendered_sha256=rendered["rendered_sha256"],
+                    rendered_html=rendered["html"],
+                )
             if (native_record() != before or public.get_webserver() != "nginx"
                     or read_preferences(_STATE_DIR) != preferences):
                 raise StatusPageError(
@@ -642,12 +861,167 @@ class ach_customizer_main:
             return self._activity_result(
                 response, "status_pages", "status_probe",
                 target="site:" + str(site_id),
-                level="INFO" if observed["state"] == "HTTP Match" else "WARNING",
+                level="INFO" if observed["state"] in ("HTTP Match", "Source Ready") else "WARNING",
             )
         except PermissionError as exc:
             return self._fail("status_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("status_probe", exc, request_id)
+
+    def status_manage(self, args):
+        """Guarded site-specific 404/502 Nginx extension Apply/Recheck/Restore.
+
+        Explicit primary-administrator approval is required for a global
+        Nginx reload. Never change an existing site HTML file or vendor VHost.
+        The separately owned status extension must be proved by real HTTP.
+        """
+        request_id = uuid4().hex
+        site_id = None
+        action = self._argument(args, "site_action")
+        try:
+            self._status_primary_admin_post()
+            if action not in ("apply", "restore", "recheck"):
+                raise StatusPageError("Unsupported status file operation")
+            if self._argument(args, "scope") != "site":
+                raise StatusPageError("Only explicitly selected website scope supports status extensions")
+            site_id = self._status_site_id(args)
+            code = self._argument(args, "template")
+            if site_id is None or code not in ("404", "502"):
+                raise StatusPageError("Select a website and the 404 or 502 template")
+            locale = self._argument(args, "locale")
+            if locale not in LOCALES:
+                raise StatusPageError("Unsupported Status Pages locale")
+            if action == "apply" and self._argument(args, "site_approval") != (
+                    "apply_exact_site_" + code + "_reload"):
+                raise StatusPageError("Explicit site-specific status extension and Nginx reload approval required")
+            if action == "restore" and self._argument(args, "site_approval") != (
+                    "restore_exact_site_" + code + "_reload"):
+                raise StatusPageError("Explicit saved status recovery and Nginx reload approval required")
+            expected_key, expected_identity, serialized = self._status_probe_selection(args, site_id)
+            from ach_customizer_state import _open_state_dir, parse_revision
+            from ach_customizer_status_pages import _load_at, _take_lock
+            try:
+                from ach_customizer_status_extension import manage_site_extension, ExtensionError
+            except ImportError as exc:
+                raise StatusPageError(
+                    "Status extension manager not loaded after plugin update; restart panel and reopen"
+                ) from exc
+            import public
+            if public.get_webserver() != "nginx" or str(public.get_panel_version()).strip() != "8.0.7":
+                raise StatusPageError("Native status extension adapter requires aaPanel 8.0.7 Nginx")
+
+            def native_record():
+                record = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(record, dict) or
+                        type(record.get("id")) is not int or record["id"] != site_id):
+                    raise StatusPageError("Native website changed; refresh selection")
+                _bound_domains_for_sites(public, [record])
+                return record
+
+            before = native_record()
+            if (before.get("name") != expected_key or
+                    native_site_snapshot(before) != expected_identity):
+                raise StatusPageError("Website identity/domains changed; reload site inventory")
+
+            def unique_native_root():
+                # A path shared by two native websites is not an isolated
+                # status-page target. Confirm under a bounded native SQL read,
+                # not from browser-provided inventory or VHost filename.
+                rows = public.M("sites").where(
+                    "path=?", (before["path"],)
+                ).field("id,path").limit("0,2").select()
+                if (not isinstance(rows, list) or len(rows) != 1 or
+                        not isinstance(rows[0], dict) or
+                        type(rows[0].get("id")) is not int or
+                        rows[0]["id"] != site_id or
+                        rows[0].get("path") != before["path"]):
+                    raise StatusPageError(
+                        "Native document root is shared or could not be proven exclusive; "
+                        "site 404 write is unsafe"
+                    )
+
+            if action != "recheck":
+                unique_native_root()
+            if str(before.get("status")) != "1":
+                raise StatusPageError("Selected website is stopped")
+
+            state_fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock_fd = _take_lock(state_fd)
+                try:
+                    state = _load_at(state_fd)
+                    revision = parse_revision(self._argument(args, "expected_revision"))
+                    if state["revision"] != revision:
+                        raise StatusPageError("Branding revision changed; recheck selected website")
+                    effective, _source = select_brand(state, site_id)
+                    if self._argument(args, "brand_name") is not None:
+                        effective = self._status_values(args)
+                    rendered = render_page(locale, code, effective)
+                    if native_record() != before:
+                        raise StatusPageError("Native website changed during 404 preflight")
+                    if action != "recheck":
+                        unique_native_root()
+                    result = manage_site_extension(
+                        action, before, code=code, html=rendered["html"],
+                        expected_current=self._argument(args, "expected_page_sha256"),
+                        expected_vhost=self._argument(args, "expected_vhost_sha256"),
+                        expected_render=self._argument(args, "expected_render_sha256"),
+                        expected_recovery=self._argument(args, "expected_recovery_id"),
+                        data_fd=state_fd,
+                    )
+                    try:
+                        if action != "recheck":
+                            unique_native_root()
+                        if (native_record() != before or
+                                public.get_webserver() != "nginx" or
+                                str(public.get_panel_version()).strip() != "8.0.7"):
+                            raise StatusPageError(
+                                "Native site or webserver changed during 404 operation"
+                            )
+                    except StatusPageError as exc:
+                        raise ExtensionError(
+                            "uncertain",
+                            "Native target changed; inspect saved status recovery before retrying",
+                            recovery_id=result.get("recovery_id"),
+                        ) from exc
+                    response = {
+                        "status": True, "request_id": request_id,
+                        "operation_id": request_id, "schema": 1,
+                        "site_action": action, "revision": revision,
+                        "verified_site_snapshot": serialized,
+                        "locale": locale, "template": code,
+                        **result,
+                    }
+                finally:
+                    os.close(lock_fd)
+            finally:
+                os.close(state_fd)
+            return self._activity_result(
+                response, "status_pages", "status_" + action,
+                target="site:" + str(site_id),
+                level="WARNING" if result["state"] in (
+                    "Drift", "Recovery Required", "Needs Review", "Orphan Backup", "Orphan Drift"
+                ) else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("status_manage_authorization", exc, request_id)
+        except StatusPageError as exc:
+            step = getattr(exc, "stage", "preflight")
+            cause = exc.__cause__
+            if cause is not None:
+                # Private operational diagnosis retains stage and errno while
+                # avoiding arbitrary filesystem paths, bytes or credentials.
+                logging.getLogger("ach_customizer").warning(
+                    "Native Status extension failure: stage=%s request_id=%s "
+                    "cause_class=%s errno=%s", step, request_id,
+                    type(cause).__name__, getattr(cause, "errno", None))
+            response = self._fail("status_manage_" + str(step), exc, request_id)
+            if step in ("uncertain", "postcheck", "recovery"):
+                response["recovery_required"] = True
+            return response
+        except Exception as exc:
+            return self._fail("status_manage_unexpected", exc, request_id)
 
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""

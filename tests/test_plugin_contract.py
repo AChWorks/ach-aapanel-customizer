@@ -32,12 +32,13 @@ class PackageContractTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), first)
             with ZipFile(target) as archive:
                 names = archive.namelist()
-                self.assertEqual(len(names), 39)
+                self.assertEqual(len(names), 44)
                 self.assertTrue(all(n.startswith('ach_customizer/') and '..' not in n for n in names))
                 self.assertIn('ach_customizer/info.json', names)
                 self.assertIn('ach_customizer/install.sh', names)
                 self.assertIn('ach_customizer/ach_customizer_cleanup.py', names)
                 self.assertIn('ach_customizer/ach_customizer_state.py', names)
+                self.assertIn('ach_customizer/ach_customizer_site_changes.py', names)
                 self.assertIn('ach_customizer/ach_customizer_activity.py', names)
                 self.assertIn('ach_customizer/ach_customizer_lifecycle.py', names)
                 self.assertIn('ach_customizer/ach_customizer_fpm_apply.py', names)
@@ -45,7 +46,13 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_status_pages.py', names)
                 self.assertIn('ach_customizer/ach_customizer_status_inspect.py', names)
                 self.assertIn('ach_customizer/ach_customizer_status_probe.py', names)
+                self.assertIn('ach_customizer/ach_customizer_php_runtime.py', names)
+                self.assertIn('ach_customizer/ach_customizer_php_topology.py', names)
+                self.assertIn('ach_customizer/ach_customizer_status_extension.py', names)
+                self.assertNotIn('ach_customizer/ach_customizer_status_manage.py', names)
+                self.assertNotIn('ach_customizer/ach_customizer_status_routing.py', names)
                 self.assertIn('ach_customizer/ach_customizer_hosts.py', names)
+                self.assertIn('ach_customizer/ach_customizer_cache_audit.py', names)
                 self.assertIn('ach_customizer/status_pages/manifest.json', names)
                 for language in ('en', 'fa'):
                     for name in ('403', '404', '429', '500', '502', '503', '504',
@@ -97,6 +104,7 @@ class PackageContractTests(unittest.TestCase):
             'entry.st_mode & 0o022',
         ):
             self.assertIn(requirement, helper)
+        self.assertIn('Status Pages extensions, Nginx assets and recovery journals are preserved', shell)
         self.assertNotIn('rm -rf', shell)
         self.assertNotIn('rm -f', shell)
         self.assertNotIn('rmtree(', helper)

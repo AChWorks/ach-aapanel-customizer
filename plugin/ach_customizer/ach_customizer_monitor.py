@@ -320,7 +320,7 @@ def parse_page(value, *, maximum=100000):
     return number
 
 
-def _bound_domains_for_sites(panel_public, sites):
+def _bound_domains_for_sites(panel_public, sites, *, strict_native=False):
     """Read recorded domain bindings in one bounded aaPanel domain-table query.
 
     aaPanel's native AddDomain/DelDomain can change HTTP domains without
@@ -346,6 +346,7 @@ def _bound_domains_for_sites(panel_public, sites):
     if len(result) > MAX_DOMAIN_ROWS_PER_PAGE:
         raise RuntimeError("Bound-domain inventory exceeded the read limit; use a smaller page size")
     bindings = {site_id: [] for site_id in ids}
+    native_ids = {site_id: [] for site_id in ids} if strict_native else None
     seen = set()
     seen_ids = set()
     total_name_bytes = 0
@@ -383,15 +384,23 @@ def _bound_domains_for_sites(panel_public, sites):
         seen.add(identity)
         seen_ids.add(row_id)
         bindings[pid].append({"name": domain, "port": port})
+        if strict_native:
+            native_ids[pid].append(row_id)
     for site in sites:
         site["bound_domains"] = bindings[site["id"]]
+        if strict_native:
+            site["_native_domain_row_ids"] = native_ids[site["id"]]
         site["canonical_domain_bound"] = any(
             binding["name"] == site["name"] for binding in site["bound_domains"]
         )
 
 
-def get_site_page(panel_public, page=1, page_size=25):
-    """Read aaPanel site IDs and actual bound domains; never write host state."""
+def get_site_page(panel_public, page=1, page_size=25, *, strict_native=False):
+    """Read native site/domain records; strict mode validates raw lifecycle data.
+
+    Ordinary Website UI calls retain their existing tolerant presentation
+    behavior. A saved lifecycle baseline must never consume coerced omissions.
+    """
     page = parse_page(page)
     size = parse_page(page_size, maximum=100)
     offset = (page - 1) * size
@@ -408,6 +417,28 @@ def get_site_page(panel_public, page=1, page_size=25):
     for site in result[:size]:
         if not isinstance(site, dict):
             raise RuntimeError("aaPanel sites query returned an invalid row")
+        if strict_native:
+            raw_id = site.get("id")
+            if (type(raw_id) is int and 1 <= raw_id <= 2147483647):
+                pass
+            elif (isinstance(raw_id, str) and
+                  re.fullmatch(r"[1-9][0-9]{0,9}", raw_id) and
+                  int(raw_id) <= 2147483647):
+                pass
+            else:
+                raise RuntimeError("Malformed native site identity for lifecycle baseline")
+            if (not isinstance(site.get("path"), str) or
+                    not site["path"].strip() or
+                    len(site["path"].encode("utf-8")) > 2048):
+                raise RuntimeError("Missing or malformed native document root")
+            raw_status = site.get("status")
+            if (type(raw_status) is int and 0 <= raw_status <= 2147483647):
+                pass
+            elif (isinstance(raw_status, str) and raw_status.strip() and
+                  len(raw_status.encode("utf-8")) <= 64):
+                pass
+            else:
+                raise RuntimeError("Missing or malformed native site status")
         try:
             site_id = int(site["id"])
         except (KeyError, ValueError, TypeError):
@@ -425,7 +456,7 @@ def get_site_page(panel_public, page=1, page_size=25):
             "application": "Unclassified",
             "classification": "Needs Review",
         })
-    _bound_domains_for_sites(panel_public, sites)
+    _bound_domains_for_sites(panel_public, sites, strict_native=strict_native)
     return {"inventory_schema": INVENTORY_SCHEMA_VERSION, "page": page, "page_size": size,
             "has_more": len(result) > size, "sites": sites}
 
@@ -737,13 +768,62 @@ def _verified_native_php_include(nginx_dir, name, socket):
     return dependencies
 
 
-def _native_extension_fingerprint(directory):
+def _verified_owned_status_extension(directory, site_id, site_key, name, text):
+    """Accept only the exact status writer's owned Nginx source and journal.
+
+    A managed location is not a generic permission for routing directives.
+    Reuse the status writer's canonical generator, on-disk file ownership and
+    durable recovery record, including a prepared-but-published operation.
+    """
+    import os
+
+    from ach_customizer_state import DATA_DIR, StateError, _open_state_dir
+    from ach_customizer_status_extension import (
+        ExtensionError, PUBLIC_ROOT, _asset_path, _bounded_file,
+        _directory, _include, _owned_dir, _record_load,
+    )
+
+    code = name.rsplit("_", 1)[-1][:-5]
+    if (type(site_id) is not int or not 1 <= site_id <= 2147483647
+            or Path(directory).name != site_key or code not in ("404", "502")
+            or name != "ach_customizer_" + str(site_id) + "_" + code + ".conf"):
+        raise MonitorInputError("Native Status Pages extension identity needs review")
+    try:
+        state_fd = _open_state_dir(DATA_DIR)
+        try:
+            record = _record_load(state_fd, site_id, code)
+        finally:
+            os.close(state_fd)
+        if (not record or record["site_name"] != site_key
+                or record["phase"] not in ("prepared", "applied")
+                or record["asset_path"] != _asset_path(
+                    PUBLIC_ROOT, site_id, code, record["after_sha"])):
+            raise MonitorInputError("Native Status Pages recovery ownership needs review")
+        expected = _include(code, record["asset_path"], record["op"])
+        if (record["include_sha"] != hashlib.sha256(expected).hexdigest()
+                or text.encode("utf-8") != expected):
+            raise MonitorInputError("Native Status Pages extension content needs review")
+        extension_fd = _directory(str(directory))
+        try:
+            _owned_dir(extension_fd)
+            if _bounded_file(extension_fd, name, permissions=0o600) != expected:
+                raise MonitorInputError("Native Status Pages file identity needs review")
+        finally:
+            os.close(extension_fd)
+    except (ExtensionError, StateError) as exc:
+        raise MonitorInputError("Native Status Pages ownership needs review") from exc
+    # Its verified operation and source are part of the shared-impact digest.
+    # A concurrent journal or file change also invalidates the next scan.
+    return record
+
+
+def _native_extension_fingerprint(directory, *, site_id=None, site_key=None):
     """Read a single native per-site '*.conf' glob without following links.
 
-    Accept only inert native logging overlays. Arbitrary extension fragments
-    may change request handling or PHP routing, so they must remain unresolved.
-    Two anchored full snapshots detect directory entry/content changes during
-    inspection; the digest is rechecked by Prepare/Apply before any write.
+    Accept inert native logging overlays or the exact verified, plugin-owned
+    Status Pages 404/502 source. All other routing remains unresolved. Two
+    anchored snapshots include file identities, bytes and recovery ownership.
+    The digest is rechecked before an approved FPM Apply/Rollback.
     """
     import os
     import stat
@@ -786,12 +866,18 @@ def _native_extension_fingerprint(directory):
                 text, signature = _bounded_file_text(
                     directory / name, MAX_NGINX_SITE_BYTES, with_fingerprint=True,
                 )
-                active = _active_nginx_text(text)
-                for line in active.splitlines():
-                    if (line.strip() and not re.fullmatch(
-                            r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)):
-                        raise MonitorInputError("Native extension has unverified routing or directives")
-                files.append({"name": name, "signature": signature})
+                if name.startswith("ach_customizer_"):
+                    journal = _verified_owned_status_extension(
+                        directory, site_id, site_key, name, text)
+                    files.append({"name": name, "signature": signature,
+                                  "status_journal": journal})
+                else:
+                    active = _active_nginx_text(text)
+                    for line in active.splitlines():
+                        if (line.strip() and not re.fullmatch(
+                                r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)):
+                            raise MonitorInputError("Native extension has unverified routing or directives")
+                    files.append({"name": name, "signature": signature})
             after = os.fstat(fd)
             if any(getattr(before, field) != getattr(after, field) for field in identities):
                 raise MonitorInputError("Native extension changed during inspection")
@@ -848,7 +934,8 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                                 vhost_root="/www/server/panel/vhost/nginx",
                                 nginx_conf_root="/www/server/nginx/conf",
-                                rewrite_root="/www/server/panel/vhost/rewrite"):
+                                rewrite_root="/www/server/panel/vhost/rewrite",
+                                other_socket_resolver=None, include_other_sites=False):
     """Bounded, read-only **file attribution**, never an effective-runtime claim.
 
     One shared PHP-FPM service can serve multiple native sites. Nginx
@@ -863,14 +950,15 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         "version": version,
         "matched_sites": [],
         "unresolved_sites": [],
-        # A file-only native route is not permission to reload a shared FPM
-        # service. Only the separately proven legacy/conventional shape is
-        # currently write-eligible; extensions and wpfastcgi are read-only.
+        # A complete, verified native site/socket inventory can support the
+        # separate, explicitly approved PHP 8.5 shared-service manual writer.
+        # File attribution never authorizes an action by itself.
         "manual_apply_eligible": False,
         "site_count": 0,
         "other_php_sites_count": 0,
+        **({"other_sites": []} if include_other_sites else {}),
         "reason": "",
-        "note": ("Verified native Nginx VHost/PHP includes, inert site extension glob and [www] Unix-socket FILE attribution only; "
+        "note": ("Verified native Nginx VHost/PHP includes, inert or owned Status Pages site extensions and [www] Unix-socket FILE attribution only; "
                  "not proof of effective routing, PHP worker state, or a complete impact boundary for Apply."),
     }
     try:
@@ -885,7 +973,6 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         native_standard = "enable-php-" + version + ".conf"
         dependencies = _verified_native_php_include(nginx_dir, native_standard, socket)
         checked_snippets = {native_standard}
-        native_unverified_write_shape = False
         # Native DB is the authority for website IDs. Refuse partial sets:
         # missing later pages would create an unsafe shared-resource claim.
         rows = (
@@ -939,11 +1026,9 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     dependencies.append({"kind": "native_rewrite", "id": site_id,
                                          "signature": rewrite_signature})
                 if has_extension:
-                    native_unverified_write_shape = True
                     dependencies.append({"kind": "native_extension", "id": site_id,
-                                         "signature": _native_extension_fingerprint(extension)})
-                if php_name.endswith("-wpfastcgi.conf"):
-                    native_unverified_write_shape = True
+                                         "signature": _native_extension_fingerprint(
+                                             extension, site_id=site_id, site_key=name)})
                 if php_name not in checked_snippets:
                     if assigned == "00":
                         if php_name != "enable-php-00.conf":
@@ -962,6 +1047,7 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                         # website cannot also feed the inspected shared pool.
                         # Validate its actual literal native socket as well.
                         expected_socket = socket if assigned == version else (
+                            other_socket_resolver(assigned) if other_socket_resolver else
                             "/tmp/php-cgi-" + assigned + ".sock"
                         )
                         if assigned != version and expected_socket == socket:
@@ -979,6 +1065,14 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 result["matched_sites"].append(site_key)
             else:
                 result["other_php_sites_count"] += 1
+                if include_other_sites:
+                    result["other_sites"].append({
+                        **site_key, "version": assigned,
+                        "socket_path": None if assigned == "00" else (
+                            other_socket_resolver(assigned) if other_socket_resolver else
+                            "/tmp/php-cgi-" + assigned + ".sock"
+                        ),
+                    })
         if result["unresolved_sites"]:
             result["reason"] = "Some website assignments are ambiguous; shared impact is incomplete"
         else:
@@ -988,13 +1082,18 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 dependencies, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")).hexdigest()
             result["state"] = "File Mapping"
-            result["manual_apply_eligible"] = not native_unverified_write_shape
-            if native_unverified_write_shape:
-                result["note"] += (" Native extension/wpcache layouts are mapped read-only; "
-                                   "shared-service Apply/Restore needs separate clone-based native QA.")
+            # Both native forms are checked: extension/*.conf contains inert logging
+            # or an exact owned Status Pages snippet; wpfastcgi has the selected
+            # [www] Unix socket with no hidden upstream. Do not reject ordinary
+            # aaPanel sites merely for using these validated native features.
+            # The only implemented manual writer is PHP 8.5; other versions
+            # retain discovery support but must never appear write-eligible.
+            result["manual_apply_eligible"] = (version == "85" and bool(result["matched_sites"]))
     except (OSError, UnicodeError, MonitorInputError, ValueError) as exc:
         # A global DB/schema/socket error invalidates *all* partial matches.
         # Only per-site unsupported VHosts keep already proven file links.
         result.update(matched_sites=[], unresolved_sites=[], site_count=0,
                       other_php_sites_count=0, reason=str(exc)[:250])
+        if include_other_sites:
+            result["other_sites"] = []
     return result

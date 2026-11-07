@@ -36,11 +36,16 @@ function loadUi() {
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
+    '#ach-site-changes-compare', '#ach-site-changes-approve',
+    '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-rows',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
+    '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
     '#ach-php-version', '#ach-php-discover', '#ach-php-discovery-status',
+    '#ach-php-runtime-check', '#ach-php-runtime-result',
+    '#ach-php-topology-rows', '#ach-php-topology-summary',
     '#ach-fpm-prepare', '#ach-fpm-plan', '#ach-fpm-operation-notice', '#ach-fpm-review',
     '#ach-fpm-details', '#ach-fpm-approval', '#ach-fpm-commit',
     '#ach-fpm-check-recovery', '#ach-fpm-recovery-status',
@@ -53,7 +58,10 @@ function loadUi() {
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
-    '#ach-status-probe-button', '#ach-status-probe-result',
+    '#ach-status-probe-button', '#ach-status-probe-result', '#ach-status-adoption-result',
+    '#ach-status-manage-recheck', '#ach-status-manage-apply',
+    '#ach-status-manage-restore', '#ach-status-manage-apply-approve',
+    '#ach-status-manage-restore-approve', '#ach-status-manage-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -76,7 +84,14 @@ function loadUi() {
   });
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
+  elements.get('#ach-php-runtime-check').props.disabled = true;
   const requests = [];
+  let allowStatusDiscard = false;
+  const statusConfirmations = [];
+  const browserWindow = {confirm(message) {
+    statusConfirmations.push(message);
+    return allowStatusDiscard;
+  }};
 
   function selection(nodes) {
     return {
@@ -173,7 +188,8 @@ function loadUi() {
     return request;
   };
 
-  vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder }, { timeout: 1000 });
+  vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder,
+    window:browserWindow }, { timeout: 1000 });
 
   function trigger(node, event) {
     assert.equal(typeof node.handlers[event], 'function', event + ' handler missing');
@@ -227,6 +243,8 @@ function loadUi() {
     return {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
+      cacheResult: elements.get('#ach-cache-result').textContent,
+      cacheInspectDisabled: elements.get('#ach-cache-inspect-button').props.disabled,
       hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
       hostsSelectorDisabled: elements.get('#ach-hosts-site-id').props.disabled,
       hostsChoices: elements.get('#ach-hosts-site-id').children.map(option => ({
@@ -246,6 +264,11 @@ function loadUi() {
       statusSource: elements.get('#ach-status-source').textContent,
       statusName: elements.get('#ach-status-name').props.value,
       siteStatus: elements.get('#ach-sites-status').textContent,
+      siteChangesStatus: elements.get('#ach-site-changes-status').textContent,
+      siteChangesSaveDisabled: elements.get('#ach-site-changes-save').props.disabled,
+      siteChangesApproveDisabled: elements.get('#ach-site-changes-approve').props.disabled,
+      siteChangesRows: elements.get('#ach-site-changes-rows').children.map(tr =>
+        tr.children.map(td => td.textContent)),
       sitesSkeletonHidden: elements.get('#ach-sites-loading').props.hidden,
       sitesTableRowsHidden: elements.get('#ach-sites-rows').props.hidden,
       activitySkeletonHidden: elements.get('#ach-activity-loading').props.hidden,
@@ -257,11 +280,21 @@ function loadUi() {
       statusInspectDisabled: elements.get('#ach-status-inspect-button').props.disabled,
       statusProbeDisabled: elements.get('#ach-status-probe-button').props.disabled,
       statusProbe: elements.get('#ach-status-probe-result').textContent,
+      statusManage: elements.get('#ach-status-manage-result').textContent,
+      statusManageRecheckDisabled: elements.get('#ach-status-manage-recheck').props.disabled,
+      statusManageApplyDisabled: elements.get('#ach-status-manage-apply').props.disabled,
+      statusManageRestoreDisabled: elements.get('#ach-status-manage-restore').props.disabled,
+      statusAdoption: elements.get('#ach-status-adoption-result').textContent,
       statusInspect: elements.get('#ach-status-inspect-result').textContent,
       statusCompareSummary: elements.get('#ach-status-comparison-summary').textContent,
       statusCompareExcerpt: elements.get('#ach-status-comparison-excerpt').textContent,
       impactSummary: elements.get('#ach-impact-summary').textContent,
       phpDiscovery: elements.get('#ach-php-discovery-status').textContent,
+      phpRuntime: elements.get('#ach-php-runtime-result').textContent,
+      phpTopology: elements.get('#ach-php-topology-summary').textContent,
+      phpTopologyRows: elements.get('#ach-php-topology-rows').children.map(tr =>
+        tr.children.map(td => td.textContent)),
+      phpRuntimeDisabled: elements.get('#ach-php-runtime-check').props.disabled,
       phpVersion: elements.get('#ach-php-version').props.value,
       phpVersionDisabled: elements.get('#ach-php-version').props.disabled,
       phpOptions: elements.get('#ach-php-version').children.map(option => ({
@@ -359,10 +392,25 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
+    statusPermitDiscard: value => { allowStatusDiscard = value; },
+    statusConfirmations: () => statusConfirmations.slice(),
+    statusSelection: () => ({
+      scope:elements.get('#ach-status-scope').props.value,
+      site:elements.get('#ach-status-site-id').props.value
+    }),
     openStatus, statusSetValue, statusSetChecked, statusClick, openActivity,
-    openPhp, refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
+    openPhp,
+    inspectPhpRuntime: () => { trigger(elements.get('#ach-php-runtime-check'), 'click'); return requests.at(-1); },
+    selectPhpVersion: v => { elements.get('#ach-php-version').props.value=v; trigger(elements.get('#ach-php-version'), 'change'); },
+    refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
     activityRefresh: () => { trigger(elements.get('#ach-activity-refresh'), 'click'); return requests.at(-1); },
     respond, respondOverview, toggleMonitor, submitPhp,
+    siteChangesCompare: () => { trigger(elements.get('#ach-site-changes-compare'), 'click'); return requests.at(-1); },
+    siteChangesApprove: checked => {
+      elements.get('#ach-site-changes-approve').props.checked = checked;
+      trigger(elements.get('#ach-site-changes-approve'), 'change');
+    },
+    siteChangesSave: () => { trigger(elements.get('#ach-site-changes-save'), 'click'); return requests.at(-1); },
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -385,6 +433,7 @@ function loadUi() {
     })),
     statusSiteInfo: () => elements.get('#ach-status-sites-state').textContent,
     statusSiteDisabled: () => elements.get('#ach-status-site-id').props.disabled,
+    statusFieldDisabled: (selector = '#ach-status-name') => elements.get(selector).props.disabled,
     loadMoreSites: () => {
       trigger(elements.get('#ach-status-sites-more'), 'click');
       return requests.at(-1);
@@ -759,12 +808,12 @@ test('Native PHP preview shows two shared file-linked websites safely without im
   assert.equal(result.errorClass, false);
 });
 
-test('Native extension or WordPress cache mapping is visible but cannot enable Manual Apply', () => {
+test('Explicitly ineligible PHP file mapping remains visible but cannot enable Manual Apply', () => {
   const ui = loadUi();
   const request = ui.submitPhp();
   request.respond(phpPreview(phpImpact({
     manual_apply_eligible: false,
-    note: 'Native extension/wpcache mapping is read-only; Apply/Restore requires clone QA.'
+    note: 'Native assignment remains ineligible until its route is fully verified.'
   })));
   const state = ui.state();
   assert.match(state.impactSummary, /File mapping: 2 site\(s\)/);
@@ -1052,6 +1101,16 @@ function statusPrefs(revision = 2, source = 'Global default', effective = brand(
 }
 
 
+function loadNativeStatusSiteSelection(ui, id='7') {
+  const request = ui.requests.at(-1);
+  assert.match(request.options.url,/s=status_sites$/);
+  const native = {...site(),id:Number(id),name:'demo.test',
+    document_root:'/www/demo.test',
+    bound_domains:[{name:'demo.test',port:80}],canonical_domain_bound:true};
+  request.respond({...page([native]),purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id',id,'change');
+}
+
 const hostsInspection = (overrides={}) => ({
   status:true,schema:1,site_id:7,site_key:'site.test',
   read_only:true,fix_supported:false,resolver_verified:false,
@@ -1074,6 +1133,129 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
   ui.respond(inventory);
   ui.statusSetValue('#ach-hosts-site-id',id,'input change');
 }
+
+const cacheInspection = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  read_only:true,runtime_verified:false,cache_safe_verified:false,
+  purge_supported:false,fix_supported:false,
+  state:'Source Observed',zone_state:'Direct Zone',cache_zone:'WORDPRESS',
+  global_zone_directly_declared:true,
+  bypass_directive_seen:true,no_cache_directive_seen:true,
+  host_key_variable_seen:true,purge_directive_seen:true,
+  ignore_headers:['Set-Cookie'],
+  findings:['SHARED_ZONE_REFERENCES','RESPONSE_CACHE_HEADER_IGNORED',
+    'PURGE_DIRECTIVE_OBSERVED','PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED'],
+  other_sites_same_zone:[{id:8,site_key:'other.test'}],
+  unresolved_other_sites:0,inspected_sites:2,source_sha256:'b'.repeat(64),
+  reason:'',note:'Source-only observation. No loaded cache or Nginx Helper safety claim.',
+  ...overrides
+});
+
+test('FastCGI cache audit binds exact native website snapshot and never grants Apply/purge', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  assert.equal(ui.state().cacheInspectDisabled,false);
+  const request=ui.statusClick('#ach-cache-inspect-button');
+  assert.match(request.options.url,/s=inspect_fastcgi_cache$/);
+  assert.equal(request.options.type,'POST');
+  assert.deepEqual(Object.keys(request.options.data).sort(),[
+    'expected_site_key','expected_site_snapshot','site_id']);
+  assert.deepEqual(JSON.parse(request.options.data.expected_site_snapshot),[
+    7,'site.test','/www/site.test','1',[['site.test',80]]
+  ]);
+  assert.equal(ui.state().cacheInspectDisabled,true);
+  request.respond(cacheInspection());
+  assert.equal(ui.state().cacheInspectDisabled,false);
+  const state=ui.state().cacheResult;
+  assert.match(state,/Cache source: Source Observed/);
+  assert.match(state,/direct directive: Direct Zone/);
+  assert.match(state,/Direct cache zone: WORDPRESS/);
+  assert.match(state,/SHARED_ZONE_REFERENCES/);
+  assert.match(state,/RESPONSE_CACHE_HEADER_IGNORED/);
+  assert.match(state,/8: other.test/);
+  assert.match(state,/DO NOT infer/);
+  assert.doesNotMatch(state,/safe to purge|private content protected/);
+});
+
+test('Partial FastCGI cache source and Needs Review never claim verified isolation', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    state:'Partial',inspected_sites:3,unresolved_other_sites:1,
+    reason:'Unknown third-party Nginx site extension'
+  }));
+  assert.match(ui.state().cacheResult,/Cache source: Partial/);
+  assert.match(ui.state().cacheResult,/unresolved sites: 1\/3/);
+  assert.match(ui.state().cacheResult,/No loaded cache or Nginx Helper safety claim/);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    state:'Needs Review',zone_state:'Needs Review',cache_zone:null,
+    global_zone_directly_declared:false,findings:[],other_sites_same_zone:[],
+    inspected_sites:0,source_sha256:null,reason:'Unsupported site Nginx include'
+  }));
+  assert.match(ui.state().cacheResult,/Needs Review/);
+  assert.doesNotMatch(ui.state().cacheResult,/Direct cache zone: WORDPRESS/);
+});
+
+test('Forged FastCGI cache source responses fail closed and do not enable mutation', () => {
+  const forged = [
+    {site_id:8},{site_key:'other.test'},{fix_supported:true},
+    {purge_supported:true},{cache_safe_verified:true},{runtime_verified:true},
+    {source_sha256:'fake'},{inspected_sites:101},
+    {zone_state:'Direct Zone',cache_zone:null},{zone_state:'Direct Off'},
+    {state:'Source Observed',unresolved_other_sites:1},
+    {state:'Partial',unresolved_other_sites:0},
+    {findings:['PERSONAL_DATA_LEAK']},
+    {ignore_headers:['xss<script>']},
+    {other_sites_same_zone:[{id:7,site_key:'selected.test'}]},
+    {other_sites_same_zone:[{id:8,site_key:'other.test'},{id:8,site_key:'again.test'}]},
+    {other_sites_same_zone:[{id:8,site_key:'other.test'}],inspected_sites:1}
+  ];
+  for (const changed of forged) {
+    const ui=loadUi();
+    selectHostsSite(ui);
+    ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection(changed));
+    assert.match(ui.state().cacheResult,/unavailable or incompatible/,JSON.stringify(changed));
+    assert.equal(ui.state().cacheInspectDisabled,false);
+  }
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    findings:['<img src=x onerror=alert(1)>']
+  }));
+  assert.doesNotMatch(ui.state().cacheResult,/<img/);
+});
+
+test('FastCGI cache result is revoked on selected website, Refresh or policy changes', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({state_revision:9}));
+  selectHostsSite(ui);
+  const old=ui.statusClick('#ach-cache-inspect-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  old.respond(cacheInspection());
+  assert.match(ui.state().cacheResult,/selection changed/);
+  assert.doesNotMatch(ui.state().cacheResult,/WORDPRESS/);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection());
+  assert.match(ui.state().cacheResult,/WORDPRESS/);
+  const refresh=ui.refreshSites();
+  assert.equal(ui.state().cacheInspectDisabled,true);
+  assert.match(ui.state().cacheResult,/changed/);
+  refresh.respond(hostsInventory());
+  assert.equal(ui.state().cacheInspectDisabled,true,'Must reselect after inventory Refresh');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  const pending=ui.statusClick('#ach-cache-inspect-button');
+  ui.openOverview();
+  const write=ui.toggleMonitor('site_inventory',false);
+  assert.match(write.options.url,/s=set_control$/);
+  assert.equal(ui.state().cacheInspectDisabled,true);
+  // A monitor write/pending policy invalidates the selected source; old
+  // in-flight callbacks never reattach a stale cache policy.
+  pending.respond(cacheInspection());
+  assert.doesNotMatch(ui.state().cacheResult,/Direct cache zone: WORDPRESS/);
+  assert.match(ui.state().cacheResult,/changed|revoked/);
+  write.reject(null,'timeout');
+  assert.equal(ui.state().cacheInspectDisabled,true);
+});
 
 test('Native-site local hosts inspection reports loopback without claiming Gateway failure', () => {
   const ui=loadUi();
@@ -1313,7 +1495,7 @@ test('Status Pages site override is explicit and reset needs confirmation', () =
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
   assert.equal(ui.state().statusSaveDisabled,true,'Missing site ID must block mutations');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   const load=ui.requests.at(-1);
   assert.match(load.options.url,/s=status_preferences$/);
   assert.equal(load.options.data.site_id,'7');
@@ -1445,7 +1627,7 @@ test('Site inspection is scoped, read-only, renders a bounded disk/source diagno
   assert.equal(ui.state().statusInspectDisabled,true, 'Global scope cannot inspect a site');
   ui.statusSetValue('#ach-status-scope','site','change');
   assert.equal(ui.state().statusInspectDisabled,true, 'Site ID is required');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs(7));
   assert.equal(ui.state().statusInspectDisabled,false);
   ui.statusSetValue('#ach-status-site-id','8');
@@ -1532,11 +1714,354 @@ test('Explicit live 404 probe reports HTTP/body evidence without granting Apply'
   assert.match(ui.state().statusProbe,/not proof|No Apply permission/);
   assert.equal(ui.state().statusProbeDisabled,false);
   ui.statusSetValue('#ach-status-template','502','change');
-  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.equal(ui.state().statusProbeDisabled,false);
   assert.match(ui.state().statusProbe,/not checked/);
+  const source=ui.statusClick('#ach-status-probe-button');
+  assert.match(source.options.url,/s=status_probe$/);
+  assert.equal(source.options.data.template,'502');
+  source.respond(statusProbe({template:'502',state:'Needs Review'}));
+  assert.match(ui.state().statusProbe,/unconfirmed|incompatible/);
+});
+
+const managed404Original='b'.repeat(64);
+const managed404Render='a'.repeat(64);
+const managed404Vhost='c'.repeat(64);
+const managed404Recovery='e'.repeat(32);
+function native404Proposal() {
+  return statusProbe({
+    body_sha256:managed404Original,page_file_sha256:managed404Original,
+    rendered_sha256:managed404Render,body_matches_file:true,body_matches_render:false,
+    adoption_preview:{
+      schema:1,state:'Backup Required',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,
+      requires_adoption:true,requires_backup:true,
+      ownership_verified:false,recovery_verified:false,apply_supported:false,
+      reason:'Explicit adoption and backup required'
+    }
+  });
+}
+function manage404Response(action,fields={}) {
+  return {
+    status:true,schema:1,site_id:7,site_action:action,
+    verified_site_snapshot:probeSnapshot,locale:'en',template:'404',
+    revision:2,mode:'native_status_extension',
+    request_id:'d'.repeat(32),operation_id:'d'.repeat(32),
+    read_only:action==='recheck',changed:action!=='recheck',
+    state:action==='apply'?'Applied':action==='restore'?'Restored':'Applied',
+    page_file_sha256:action==='restore'?managed404Original:managed404Render,
+    recovery_id:managed404Recovery,
+    ...(action==='recheck'?{
+      rendered_sha256:managed404Render,
+      before_sha256:managed404Original,after_sha256:managed404Render
+    }:{}),
+    ...fields
+  };
+}
+test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and snapshot-bound', () => {
+  const ui=statusProbeUi();
+  assert.equal(ui.state().statusManageRecheckDisabled,false);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,true,
+    'Approval without verified live/source evidence does not grant Apply');
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  assert.equal(ui.state().statusManageApplyDisabled,true,
+    'Live proof alone does not grant a write without a new confirmation');
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  assert.match(apply.options.url,/s=status_manage$/);
+  assert.equal(apply.options.data.site_action,'apply');
+  assert.equal(apply.options.data.scope,'site');
+  assert.equal(apply.options.data.site_id,'7');
+  assert.equal(apply.options.data.site_approval,'apply_exact_site_404_reload');
+  assert.equal(apply.options.data.expected_site_snapshot,probeSnapshot);
+  assert.equal(apply.options.data.expected_page_sha256,managed404Original);
+  assert.equal(apply.options.data.expected_vhost_sha256,managed404Vhost);
+  assert.equal(apply.options.data.expected_render_sha256,managed404Render);
+  assert.equal(apply.options.timeout,45000);
+  assert.equal(ui.state().statusManageRecheckDisabled,true);
+  apply.respond(manage404Response('apply'));
+  assert.match(ui.state().statusManage,/Applied/);
+  assert.match(ui.state().statusManage,/confirmed managed extension change/);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  const recheck=ui.statusClick('#ach-status-manage-recheck');
+  assert.match(recheck.options.url,/s=status_manage$/);
+  assert.equal(recheck.options.data.site_action,'recheck');
+  assert.equal(recheck.options.data.site_approval,'');
+  recheck.respond(manage404Response('recheck',{changed:false}));
+  assert.match(ui.state().statusManage,/Applied/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(restore.options.data.site_action,'restore');
+  assert.equal(restore.options.data.expected_recovery_id,managed404Recovery);
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_404_reload');
+  restore.respond(manage404Response('restore'));
+  assert.match(ui.state().statusManage,/Restored/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Native 502 source-only preview gates extension Apply and Restore with Nginx reload approval', () => {
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-template','502','change');
+  ui.statusClick('#ach-status-probe-button').respond(statusProbe({
+    template:'502',state:'Source Ready',scope:'native_vhost_source_only',
+    page_file_sha256:managed404Original,body_sha256:null,http_status:null,
+    body_bytes:null,body_matches_file:false,body_matches_render:false,
+    http_404_observed:false,body_matches_file:false,
+    adoption_preview:{
+      schema:1,state:'Source Ready',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,
+      requires_adoption:false,requires_backup:false,
+      ownership_verified:false,recovery_verified:false,
+      apply_supported:false,reason:'Explicit reload required'
+    }
+  }));
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  const request=ui.statusClick('#ach-status-manage-apply');
+  assert.equal(request.options.data.template,'502');
+  assert.equal(request.options.data.site_approval,'apply_exact_site_502_reload');
+  request.respond(manage404Response('apply',{template:'502'}));
+  assert.match(ui.state().statusManage,/Applied/);
+  const recheck=ui.statusClick('#ach-status-manage-recheck');
+  recheck.respond(manage404Response('recheck',{template:'502',changed:false}));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(restore.options.data.template,'502');
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_502_reload');
+  restore.respond(manage404Response('restore',{template:'502',
+    state:'Source Restored',runtime_verified:false,
+    verification_scope:'source_and_nonce_only'}));
+  assert.match(ui.state().statusManage,/Source Restored/);
+  assert.match(ui.state().statusManage,/original 502 response NOT verified/);
+  assert.match(ui.state().statusManage,/502.html SOURCE SHA-256/);
+});
+
+test('Restored 502 Recheck accepts the verified previous source hash, including absent sources', () => {
+  const emptySha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+  for (const previous of [managed404Original, emptySha]) {
+    const ui = statusProbeUi();
+    ui.statusSetValue('#ach-status-template', '502', 'change');
+    const backendResponse = manage404Response('recheck', {
+      template:'502', state:'Source Restored', changed:false,
+      page_file_sha256:previous, before_sha256:previous,
+      after_sha256:managed404Render, runtime_verified:false,
+      verification_scope:'source_and_nonce_only'
+    });
+    ui.statusClick('#ach-status-manage-recheck').respond(backendResponse);
+    assert.match(ui.state().statusManage, /Source Restored/);
+    assert.match(ui.state().statusManage, /Current restored 502.html SOURCE SHA-256:/);
+    assert.match(ui.state().statusManage, /original 502 response NOT verified/);
+    assert.match(ui.state().statusManage, new RegExp(previous));
+    assert.doesNotMatch(ui.state().statusManage, /incomplete or incompatible/);
+    assert.equal(ui.state().statusManageRestoreDisabled, true);
+
+    // This was the previous backend defect: a Source Restored state carrying
+    // the applied HTML hash cannot be accepted as a restored source.
+    ui.statusClick('#ach-status-manage-recheck').respond({
+      ...backendResponse, page_file_sha256:managed404Render
+    });
+    assert.match(ui.state().statusManage, /incomplete or incompatible/);
+    assert.equal(ui.state().statusManageRestoreDisabled, true);
+  }
+});
+
+test('Status 404 Restore confirms an interrupted earlier rollback without a second file write', () => {
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck',{
+    state:'Recovery Required',changed:false,
+    page_file_sha256:managed404Original
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.match(restore.options.url,/s=status_manage$/);
+  restore.respond(manage404Response('restore',{changed:false,state:'Restored'}));
+  assert.match(ui.state().statusManage,/Restored — no managed extension change/);
+  assert.doesNotMatch(ui.state().statusManage,/unconfirmed/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Status 404 orphaned backup is visible but never grants Restore without a journal', () => {
+  const ui=statusProbeUi();
+  const recheck=ui.statusClick('#ach-status-manage-recheck');
+  recheck.respond(manage404Response('recheck',{
+    state:'Orphan Backup',changed:false,page_file_sha256:managed404Original,
+    before_sha256:managed404Original,after_sha256:null,recovery_id:null
+  }));
+  assert.match(ui.state().statusManage,/Orphan Backup/);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  const calls=ui.requests.length;
+  ui.statusClick('#ach-status-manage-restore');
+  assert.equal(ui.requests.length,calls);
+  const drift=ui.statusClick('#ach-status-manage-recheck');
+  drift.respond(manage404Response('recheck',{
+    state:'Orphan Drift',changed:false,page_file_sha256:managed404Render,
+    before_sha256:managed404Original,after_sha256:null,recovery_id:null
+  }));
+  assert.match(ui.state().statusManage,/Orphan Drift/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Forged 404 recovery-state acknowledgements cannot enable Restore or prove success', () => {
+  for (const forged of [
+    {state:'Unmanaged',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:null},
+    {state:'Orphan Backup',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:managed404Recovery,
+     page_file_sha256:managed404Original},
+    {state:'Orphan Backup',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:null,page_file_sha256:managed404Render},
+    {state:'Orphan Drift',changed:false,before_sha256:managed404Original,
+     after_sha256:null,recovery_id:null,page_file_sha256:managed404Original},
+    {state:'Restored',changed:false,page_file_sha256:managed404Render}
+  ]) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-manage-recheck').respond(
+      manage404Response('recheck',forged));
+    assert.match(ui.state().statusManage,/incomplete or incompatible/,
+      'Do not accept an inconsistent recovery snapshot '+JSON.stringify(forged));
+    ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+  }
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck',{
+    state:'Recovery Required',changed:false,page_file_sha256:managed404Original
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  restore.respond(manage404Response('restore',{
+    state:'Already Restored',changed:true,page_file_sha256:managed404Original
+  }));
+  assert.match(ui.state().statusManage,/unconfirmed/);
+});
+
+test('Status 404 Apply rejects stale evidence and forged positive acknowledgements', () => {
+  for(const bad of [
+    {state:'Restored'}, {site_id:8}, {changed:false}, {recovery_id:'bad'},
+    {page_file_sha256:managed404Original},
+    {verified_site_snapshot:'[7]'},
+    {read_only:true},
+    {request_id:'x'.repeat(32)}
+  ]) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+    ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+    const action=ui.statusClick('#ach-status-manage-apply');
+    action.respond(manage404Response('apply',bad));
+    assert.match(ui.state().statusManage,/unconfirmed/);
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+    assert.equal(ui.state().statusManageApplyDisabled,true);
+  }
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  ui.statusSetValue('#ach-status-name','Changed after probe','input change');
+  assert.equal(ui.state().statusManageApplyDisabled,true);
   const before=ui.requests.length;
-  ui.statusClick('#ach-status-probe-button');
-  assert.equal(ui.requests.length,before,'Cannot probe a 502 through the 404-only endpoint');
+  ui.statusClick('#ach-status-manage-apply');
+  assert.equal(ui.requests.length,before);
+});
+
+test('Uncertain Status write exposes validated recovery ID without authorizing Restore', () => {
+  for (const recovery of ['e'.repeat(32), 'not-a-recovery-id']) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+    ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+    const apply=ui.statusClick('#ach-status-manage-apply');
+    apply.respond({status:false,stage:'status_manage_uncertain',msg:'Site exchange unconfirmed',
+      operation_id:'d'.repeat(32),request_id:'d'.repeat(32),
+      recovery_required:true,recovery_id:recovery});
+    assert.match(ui.state().error,/Site exchange unconfirmed/);
+    if (recovery.length===32) {
+      assert.match(ui.state().error,/Recovery ID: e{32}; Recheck before Restore/);
+    } else {
+      assert.doesNotMatch(ui.state().error,/Recovery ID:/);
+    }
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+    assert.equal(ui.state().statusManageRecheckDisabled,false);
+  }
+});
+
+test('Status 404 writes return explicit uncertainty, preserving Recheck as recovery path', () => {
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  const request=ui.statusClick('#ach-status-manage-apply');
+  request.reject(null,'timeout');
+  assert.match(ui.state().statusManage,/unconfirmed/);
+  assert.match(ui.state().error,/Outcome unknown/);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.equal(ui.state().statusManageRecheckDisabled,false);
+  // A refreshed operator recheck may report an incomplete prepared transaction.
+  ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck',{
+    state:'Recovery Required',changed:false
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+});
+
+test('Read-only 404 adoption preview preserves observed content conflicts and denies writes', () => {
+  const ui=statusProbeUi();
+  const sha='a'.repeat(64);
+  const other='b'.repeat(64);
+  const observed=statusProbe({
+    body_sha256:other, page_file_sha256:other, body_matches_file:true,
+    body_matches_render:false, rendered_sha256:sha,
+    adoption_preview:{
+      schema:1,state:'Backup Required',route_source_state:'Native VHost',
+      current_sha256:other,proposed_sha256:sha,
+      requires_adoption:true,requires_backup:true,
+      ownership_verified:false,recovery_verified:false,apply_supported:false,
+      reason:'Explicit adoption and recoverable backup required'
+    }
+  });
+  ui.statusClick('#ach-status-probe-button').respond(observed);
+  assert.match(ui.state().statusProbe,/HTTP Match/);
+  assert.match(ui.state().statusAdoption,/Backup Required/);
+  assert.match(ui.state().statusAdoption,/No write is authorized by this preview/);
+  ui.statusSetValue('#ach-status-name','Changed during observation','input change');
+  assert.match(ui.state().statusAdoption,/not checked/);
+});
+
+test('Tampered 404 adoption preflight never authorizes Apply or a trusted result', () => {
+  const base={
+    schema:1,state:'Matches Preview',route_source_state:'Native VHost',
+    current_sha256:'a'.repeat(64),proposed_sha256:'a'.repeat(64),
+    requires_adoption:false,requires_backup:false,
+    ownership_verified:false,recovery_verified:false,apply_supported:false,
+    reason:'Observed current site file matches selected preview'
+  };
+  for (const altered of [
+    {apply_supported:true}, {ownership_verified:true},
+    {recovery_verified:true},{route_source_state:'unknown'},
+    {state:'Backup Required'}, {requires_backup:true},
+    {proposed_sha256:'b'.repeat(64)},
+    {current_sha256:'b'.repeat(64)},
+    {reason:'x'.repeat(400)}
+  ]) {
+    const ui=statusProbeUi();
+    ui.statusClick('#ach-status-probe-button').respond(
+      statusProbe({adoption_preview:{...base,...altered}})
+    );
+    assert.match(ui.state().statusProbe,/unconfirmed or incompatible/);
+    assert.match(ui.state().statusAdoption,/unavailable or incompatible/);
+  }
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(
+    statusProbe({adoption_preview:base})
+  );
+  assert.match(ui.state().statusAdoption,/Matches Preview/);
+  assert.match(ui.state().statusAdoption,/No write is authorized by this preview/);
 });
 
 test('HTTP mismatch, soft success, and unknown evidence stay distinguishable', () => {
@@ -1630,7 +2155,7 @@ test('Existing native status-file reference is reviewable without false conflict
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const result=statusInspection({
     state:'Needs Review',
@@ -1666,7 +2191,7 @@ test('Invalid, cross-site and routing-overclaim inspection replies fail closed',
     const ui=loadUi();
     ui.openStatus().respond(statusPrefs());
     ui.statusSetValue('#ach-status-scope','site','change');
-    ui.statusSetValue('#ach-status-site-id','7','change');
+    loadNativeStatusSiteSelection(ui,'7');
     ui.requests.at(-1).respond(statusPrefs());
     ui.statusClick('#ach-status-inspect-button').respond(bad);
     assert.match(ui.state().statusInspect,/unconfirmed or incompatible/);
@@ -1678,7 +2203,7 @@ test('Backend inspection failure does not display previous disk-match evidence',
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
     state:'File Match',page_file_state:'Same bytes',
@@ -1718,7 +2243,7 @@ test('Site 404/502 compare shows untrusted on-disk HTML strictly as text, never 
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const dangerous='<img src=x onerror=alert(1)>';
   const diff='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-'+dangerous+'\\n+<h1>Safe preview</h1>';
@@ -1757,7 +2282,7 @@ test('Branding field changes while a compare request is in flight reject its old
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const req=ui.statusClick('#ach-status-inspect-button');
   assert.equal(req.options.data.brand_name,'ACh');
@@ -1790,7 +2315,7 @@ test('Malformed, mismatched or enormous compare responses cannot display stale d
     const ui=loadUi();
     ui.openStatus().respond(statusPrefs());
     ui.statusSetValue('#ach-status-scope','site','change');
-    ui.statusSetValue('#ach-status-site-id','7','change');
+    loadNativeStatusSiteSelection(ui,'7');
     ui.requests.at(-1).respond(statusPrefs());
     ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
       state:'Conflict',page_file_state:'Different bytes',
@@ -1807,7 +2332,7 @@ test('UTF-8 byte limit rejects multibyte excerpts that fit UTF-16 and per-line l
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const marker='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n';
   const manyArabic=Array.from({length:12},()=>'-'+'پ'.repeat(300)).join('\n');
@@ -1851,7 +2376,7 @@ test('Diff validation rejects oversized line counts and malformed unified header
     const ui=loadUi();
     ui.openStatus().respond(statusPrefs());
     ui.statusSetValue('#ach-status-scope','site','change');
-    ui.statusSetValue('#ach-status-site-id','7','change');
+    loadNativeStatusSiteSelection(ui,'7');
     ui.requests.at(-1).respond(statusPrefs());
     ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
       state:'Conflict',page_file_state:'Different bytes',
@@ -1867,7 +2392,7 @@ test('A valid Persian diff still renders, then stale content disappears on inval
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
-  ui.statusSetValue('#ach-status-site-id','7','change');
+  loadNativeStatusSiteSelection(ui,'7');
   ui.requests.at(-1).respond(statusPrefs());
   const valid='--- current 404.html\n+++ proposed 404.html\n@@ -1 +1 @@\n-درخواست‌ها ID-404\n+به‌روزرسانی‌شده ID-404';
   const response=statusInspection({
@@ -1899,6 +2424,10 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /function fitNativeLayer/);
   assert.match(html, /--ach-green:#20a53a/);
   assert.match(html, /--ach-sidebar-bg:#f0f0f1/);
+  assert.match(html, /\.ach-sidebar \{[^}]*border-right:0/);
+  assert.match(html, /\.ach-main \{[^}]*background:var\(--ach-surface\)/);
+  assert.match(html, /\.ach-workspace \{[^}]*border-radius:0 0 10px 10px/);
+  assert.match(html, /\.layui-layer:has\(#ach-customizer\) \{[^}]*border-radius:10px/);
   assert.doesNotMatch(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
@@ -2390,6 +2919,240 @@ test('Native PHP discovery selects actual PHP 8.1+ file candidates without enabl
   assert.match(ui.state().fpmPlan,/manual Apply unavailable/);
 });
 
+function phpRuntimeEvidence(overrides={}) {
+  return {
+    status:true,schema:1,version:'81',read_only:true,runtime_verified:false,
+    apply_eligible:false,state:'Observed',
+    master_state:'Matching Master',socket_state:'Bound Listener',
+    master_pid:432,socket_path:'/tmp/php-cgi-81.sock',
+    reason:'',note:'Read-only point-in-time Linux process/socket observation. No Apply permission.',
+    ...overrides
+  };
+}
+
+function phpTopologyEvidence(overrides={}) {
+  return {
+    schema:1,state:'File Mapping',version:'81',scope:'shared_service',
+    read_only:true,runtime_verified:false,apply_eligible:false,
+    pool:'www',config_path:'/www/server/php/81/etc/php-fpm.conf',
+    socket_path:'/tmp/php-cgi-81.sock',site_count:3,
+    matched_sites:[
+      {id:3,site_key:'first.test'},{id:4,site_key:'wordpress.test'}],
+    other_sites:[
+      {id:6,site_key:'other.test',version:'85',socket_path:'/tmp/another-85.sock'}],
+    unresolved_sites:[],source_sha256:'a'.repeat(64),
+    reason:'',note:'Native Nginx FILE attribution only, not loaded configuration.',
+    ...overrides
+  };
+}
+
+test('Selected PHP81 runtime displays native cross-version file site mapping only', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    site_mapping:phpTopologyEvidence()
+  }));
+  assert.match(ui.state().phpRuntime,/Observed/);
+  assert.match(ui.state().phpTopology,/File Mapping/);
+  assert.match(ui.state().phpTopology,/2 assigned to selected service/);
+  assert.match(ui.state().phpTopology,/Apply\/Restore eligibility: NEVER inferred/);
+  assert.deepEqual(ui.state().phpTopologyRows,[
+    ['3','first.test','PHP 81 / www','File-assigned to selected shared socket'],
+    ['4','wordpress.test','PHP 81 / www','File-assigned to selected shared socket'],
+    ['6','other.test','PHP 85 / www','Other native file/socket assignment']
+  ]);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  ui.selectPhpVersion('85');
+  assert.equal(ui.state().phpTopologyRows.length,0,'Version change revokes mapping');
+  assert.match(ui.state().phpTopology,/revoked/);
+});
+
+test('Partial PHP topology honestly labels uninspected sites, not complete impact', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    site_mapping:phpTopologyEvidence({
+      state:'Partial',site_count:4,source_sha256:null,
+      unresolved_sites:[{id:7,site_key:'operator-site.test',reason:'VHost PHP assignment needs review'}],
+      reason:'Some website assignments are ambiguous; shared impact is incomplete'
+    })
+  }));
+  assert.match(ui.state().phpTopology,/Partial/);
+  assert.match(ui.state().phpTopology,/1 unresolved/);
+  assert.deepEqual(ui.state().phpTopologyRows.at(-1),[
+    '7','operator-site.test','Needs Review','VHost PHP assignment needs review'
+  ]);
+  assert.doesNotMatch(ui.state().phpTopology,/all sites proven|effective routing verified/i);
+});
+
+test('Untrusted site topology payloads never manufacture complete shared impact', () => {
+  const wrong=[
+    {apply_eligible:true},{runtime_verified:true},{site_count:10000},
+    {version:'85'}, {socket_path:'/tmp/other.sock'},
+    {source_sha256:null},
+    {site_count:4},
+    {unresolved_sites:[{id:7,site_key:'bad.test',reason:'Ambiguous'}]},
+    {matched_sites:[{id:3,site_key:'first.test'},{id:3,site_key:'duplicate.test'}]},
+    {other_sites:[{id:6,site_key:'other.test',version:'85',socket_path:'/tmp/../evil.sock'}]},
+    {other_sites:[{id:6,site_key:'other.test',version:'81',socket_path:'/tmp/another.sock'}]},
+    {other_sites:[{id:6,site_key:'other.test',version:'00',socket_path:'/tmp/other.sock'}]},
+    {state:'File Mapping',reason:'Unknown'},
+    {state:'Partial',source_sha256:null,reason:'Partial'},
+    {config_path:'/outside/81/php-fpm.conf'}
+  ];
+  for(const patch of wrong){
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+      site_mapping:phpTopologyEvidence(patch)
+    }));
+    assert.match(ui.state().phpTopology,/missing or incompatible/,
+      JSON.stringify(patch));
+    assert.equal(ui.state().phpTopologyRows.length,0);
+    assert.equal(ui.state().fpmPrepareDisabled,true);
+  }
+});
+
+test('PHP topology Needs Review, absent backend adapter and source switch remain non-authorizing', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    site_mapping:phpTopologyEvidence({
+      state:'Needs Review',pool:null,socket_path:null,config_path:null,
+      site_count:0,matched_sites:[],other_sites:[],unresolved_sites:[],
+      source_sha256:null,reason:'Unsupported aaPanel PHP pool layout'
+    })
+  }));
+  assert.match(ui.state().phpTopology,/Needs Review/);
+  assert.equal(ui.state().phpTopologyRows.length,0);
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence());
+  assert.match(ui.state().phpTopology,/missing or incompatible/);
+  const previous=ui.inspectPhpRuntime();
+  ui.refreshPhp().respond(ui.phpVersions());
+  previous.respond(phpRuntimeEvidence({site_mapping:phpTopologyEvidence()}));
+  assert.equal(ui.state().phpTopologyRows.length,0);
+  assert.match(ui.state().phpTopology,/revoked/);
+});
+
+test('PHP85 manual Apply/Restore attempts revoke any earlier file-to-service mapping', () => {
+  const mapped85 = phpTopologyEvidence({
+    version:'85',config_path:'/www/server/php/85/etc/php-fpm.conf',
+    socket_path:'/tmp/php-cgi-85.sock',
+    matched_sites:[{id:6,site_key:'php85.test'}],
+    other_sites:[{id:3,site_key:'php81.test',version:'81',
+      socket_path:'/tmp/php-cgi-81.sock'}],site_count:2
+  });
+  const evidence85 = phpRuntimeEvidence({
+    version:'85',socket_path:'/tmp/php-cgi-85.sock',site_mapping:mapped85
+  });
+  const apply=loadUi();
+  apply.openPhp().respond(apply.phpVersions());
+  apply.selectPhpVersion('85');
+  apply.inspectPhpRuntime().respond(evidence85);
+  assert.equal(apply.state().phpTopologyRows.length,2);
+  apply.submitPhp('85',false).respond(phpPreview());
+  apply.prepareFpm().respond(guardedPlan());
+  apply.approveFpm(true);
+  const commit=apply.commitFpm();
+  assert.equal(apply.state().phpTopologyRows.length,0);
+  assert.match(apply.state().phpTopology,/revoked/);
+  assert.match(apply.state().phpRuntime,/Apply attempt invalidated/);
+  commit.respond(appliedResult());
+
+  const restore=loadUi();
+  restore.openPhp().respond(restore.phpVersions());
+  restore.selectPhpVersion('85');
+  restore.inspectPhpRuntime().respond(evidence85);
+  assert.equal(restore.state().phpTopologyRows.length,2);
+  restore.inspectFpmRecovery().respond(recoveryPreview());
+  restore.approveFpmRollback(true);
+  const rollback=restore.rollbackFpm();
+  assert.equal(restore.state().phpTopologyRows.length,0);
+  assert.match(restore.state().phpRuntime,/Restore attempt invalidated/);
+  rollback.respond(rolledBackResult());
+});
+
+test('Read-only PHP 8.1 runtime inspection requires a discovered version and preserves no Apply claim', () => {
+  const ui=loadUi();
+  assert.equal(ui.state().phpRuntimeDisabled,true);
+  ui.openPhp().respond(ui.phpVersions());
+  assert.equal(ui.state().phpRuntimeDisabled,true,'No version selected yet');
+  ui.selectPhpVersion('81');
+  assert.equal(ui.state().phpRuntimeDisabled,false);
+  const req=ui.inspectPhpRuntime();
+  assert.match(req.options.url,/s=inspect_php_runtime$/);
+  assert.equal(req.options.data.php_version,'81');
+  assert.equal(Object.keys(req.options.data).length,1);
+  assert.equal(ui.state().phpRuntimeDisabled,true,'No duplicate concurrent runtime reads');
+  req.respond(phpRuntimeEvidence());
+  assert.equal(ui.state().phpRuntimeDisabled,false);
+  assert.match(ui.state().phpRuntime,/PHP 81 — Observed/);
+  assert.match(ui.state().phpRuntime,/Master process: Matching Master/);
+  assert.match(ui.state().phpRuntime,/Master PID: 432/);
+  assert.match(ui.state().phpRuntime,/Socket listener: Bound Listener/);
+  assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
+  assert.equal(ui.state().fpmPrepareDisabled,true,
+    'Runtime process evidence never enables a new PHP81 write adapter');
+});
+
+test('PHP runtime observation discards stale selected-version and inventory-refresh callbacks', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  const first=ui.inspectPhpRuntime();
+  ui.selectPhpVersion('85');
+  first.respond(phpRuntimeEvidence());
+  assert.match(ui.state().phpRuntime,/version changed/);
+  assert.doesNotMatch(ui.state().phpRuntime,/Bound Listener/);
+  const next=ui.inspectPhpRuntime();
+  const refreshing=ui.refreshPhp();
+  next.respond(phpRuntimeEvidence({version:'85'}));
+  assert.match(ui.state().phpRuntime,/inventory refresh invalidated/);
+  refreshing.respond(ui.phpVersions());
+  assert.equal(ui.state().phpVersion,'85');
+  assert.match(ui.state().phpRuntime,/inventory refresh invalidated/);
+  assert.equal(ui.state().phpRuntimeDisabled,false);
+});
+
+test('Invalid PHP runtime replies never masquerade as proven service or Apply permission', () => {
+  for (const tampered of [
+    {runtime_verified:true},{apply_eligible:true},{version:'85'},
+    {state:'Observed',socket_state:'Missing'},
+    {state:'Observed',master_pid:null},
+    {socket_path:'../../etc/passwd'},
+    {socket_path:'/tmp/evil.sock\\n<script>'},
+    {state:'Observed',reason:'source unknown'},
+    {master_state:'unexpected'}, {master_pid:'432'},
+    {note:'x'.repeat(800)}
+  ]) {
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    const request=ui.inspectPhpRuntime();
+    request.respond(phpRuntimeEvidence(tampered));
+    assert.match(ui.state().phpRuntime,/unavailable\/incompatible/,JSON.stringify(tampered));
+    assert.equal(ui.state().phpRuntimeDisabled,false);
+    assert.equal(ui.state().fpmPrepareDisabled,true);
+  }
+  for(const observed of [
+    phpRuntimeEvidence({state:'Partial',socket_state:'Missing',
+      reason:'Current socket is absent'}),
+    phpRuntimeEvidence({state:'Needs Review',master_state:'Not Observed',
+      master_pid:null,socket_state:'Needs Review',reason:'No matching master observed'})
+  ]) {
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    ui.inspectPhpRuntime().respond(observed);
+    assert.match(ui.state().phpRuntime,new RegExp(observed.state));
+    assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
+  }
+});
+
 test('Partial PHP installation inventory disables missing and unsupported versions', () => {
   const ui=loadUi();
   const supported=ui.phpVersions().versions[0];
@@ -2551,8 +3314,255 @@ test('Status Pages unsaved brand values survive native tab switching', () => {
   ui.openStatus();
   assert.equal(ui.requests.length,before,'no unnecessary status_preferences request');
   assert.equal(ui.state().statusName,'Unsaved operator change');
+  const unchanged=ui.requests.length;
+  ui.statusClick('#ach-status-load');
+  assert.equal(ui.requests.length,unchanged,'Dirty Recheck requires explicit discard');
+  assert.equal(ui.state().statusName,'Unsaved operator change');
+  ui.statusPermitDiscard(true);
   ui.statusClick('#ach-status-load').respond(statusPrefs());
   assert.notEqual(ui.state().statusName,'Unsaved operator change');
+});
+
+test('Status Pages scope switch Cancel keeps dirty inputs and original scope', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-name','Working brand','input change');
+  const before=ui.requests.length;
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'Working brand');
+  assert.match(ui.state().statusResult,/Unsaved changes kept/);
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:''});
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.match(ui.requests.at(-1).options.url,/s=status_sites$/);
+});
+
+test('Status Pages dirty site switch restores previous site on Cancel', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  const seven={...site(),id:7,name:'seven.test',
+    bound_domains:[{name:'seven.test',port:80}]};
+  const eight={...site(),id:8,name:'eight.test',
+    bound_domains:[{name:'eight.test',port:80}]};
+  ui.requests.at(-1).respond({...page([seven,eight]),purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  ui.requests.at(-1).respond(statusPrefs(3,'Site override',{
+    ...brand(),brand_name:'Site seven'
+  }));
+  ui.statusSetValue('#ach-status-name','Uncommitted seven','input change');
+  const before=ui.requests.length;
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Uncommitted seven');
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  const load=ui.requests.at(-1);
+  assert.match(load.options.url,/s=status_preferences$/);
+  assert.equal(load.options.data.site_id,'8');
+  load.respond(statusPrefs(4,'Site override',{...brand(),brand_name:'Site eight'}));
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'8'});
+  assert.equal(ui.state().statusName,'Site eight');
+});
+
+test('Status Pages dirty Recheck guarded, clean and reverted values never prompt', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(3));
+  ui.statusSetValue('#ach-status-name','Changed','input change');
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-load');
+  assert.equal(ui.requests.length,before);
+  assert.equal(ui.state().statusName,'Changed');
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  const recheck=ui.statusClick('#ach-status-load');
+  assert.match(recheck.options.url,/s=status_preferences$/);
+  recheck.respond(statusPrefs(4));
+  ui.statusPermitDiscard(false);
+  const withoutDirty=ui.statusClick('#ach-status-load');
+  assert.match(withoutDirty.options.url,/s=status_preferences$/);
+  withoutDirty.respond(statusPrefs(4));
+  const unchanged=ui.statusConfirmations().length;
+  ui.statusSetValue('#ach-status-name','Changed','input change');
+  ui.statusSetValue('#ach-status-name',brand().brand_name,'input change');
+  const reverted=ui.statusClick('#ach-status-load');
+  assert.equal(ui.statusConfirmations().length,unchanged);
+  assert.match(reverted.options.url,/s=status_preferences$/);
+});
+
+function statusSiteDraftFixture(ui, selectedId=7) {
+  const seven = {...site(), id:selectedId, name:'seven.test',
+    bound_domains:[{name:'seven.test',port:80}]};
+  const eight = {...site(), id:8, name:'eight.test',
+    bound_domains:[{name:'eight.test',port:80}]};
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  ui.requests.at(-1).respond({...page([seven,eight].sort((a,b)=>a.id-b.id)),purpose:'status_site_selection'});
+  ui.statusSetValue('#ach-status-site-id',String(selectedId),'change');
+  ui.requests.at(-1).respond(statusPrefs(3,'Site override',
+    {...brand(),brand_name:'Saved seven'}));
+  ui.statusSetValue('#ach-status-name','Dirty seven','input change');
+  return {seven,eight};
+}
+
+test('Reviewed R1: dirty site remains selected through a successful native site-list refresh', () => {
+  const ui=loadUi();
+  const {seven,eight}=statusSiteDraftFixture(ui);
+  const prompts=ui.statusConfirmations().length;
+  assert.equal(ui.statusFieldDisabled(),false);
+  assert.equal(ui.state().statusSaveDisabled,false);
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  assert.match(refresh.options.url,/s=status_sites$/);
+  assert.equal(ui.statusSiteDisabled(),true,'Unverified selector must be temporarily frozen');
+  assert.equal(ui.state().statusSaveDisabled,true,'Refreshing list is not authorization to Save');
+  assert.equal(ui.statusFieldDisabled(),false,'Editable draft must remain available');
+  assert.equal(ui.state().statusName,'Dirty seven');
+  refresh.respond({...page([seven,eight]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.equal(ui.statusConfirmations().length,prompts,'No modal for no-loss refresh');
+  const save=ui.statusClick('#ach-status-save');
+  assert.match(save.options.url,/s=status_save$/);
+  assert.equal(save.options.data.site_id,'7');
+  assert.equal(save.options.data.brand_name,'Dirty seven');
+});
+
+test('Reviewed R1: vanished site preserves draft and explicit Cancel restores lost option', () => {
+  const ui=loadUi();
+  const {eight}=statusSiteDraftFixture(ui);
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  refresh.respond({...page([eight]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.statusFieldDisabled(),false);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.equal(ui.state().statusInspectDisabled,true);
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.match(ui.statusSiteInfo(),/no longer in refreshed inventory/);
+  assert.deepEqual(ui.statusSiteChoices().map(v=>v.id),['','8','7']);
+  const before=ui.requests.length;
+  ui.statusClick('#ach-status-save');
+  ui.statusClick('#ach-status-preview-button');
+  assert.equal(ui.requests.length,before,'A ghost site must not authorize operations');
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  assert.equal(ui.requests.length,before);
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.statusConfirmations().length,1);
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-site-id','8','change');
+  const next=ui.requests.at(-1);
+  assert.equal(ui.requests.length,before+1);
+  assert.match(next.options.url,/s=status_preferences$/);
+  next.respond(statusPrefs(4,'Site override',{...brand(),brand_name:'Saved eight'}));
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'8'});
+  assert.equal(ui.state().statusName,'Saved eight');
+  assert.equal(ui.state().statusSaveDisabled,false);
+});
+
+test('Reviewed R1: dirty selection found on later inventory page re-enables Save only after discovery', () => {
+  const ui=loadUi();
+  const {seven}=statusSiteDraftFixture(ui,70);
+  const otherSites=Array.from({length:25},(_,i) => ({
+    ...site(),id:i+1,name:'batch'+(i+1)+'.test',
+    document_root:'/www/batch'+(i+1)+'.test',
+    bound_domains:[{name:'batch'+(i+1)+'.test',port:80}],
+    canonical_domain_bound:true
+  }));
+  const refresh=ui.statusClick('#ach-status-sites-retry');
+  refresh.respond({...page(otherSites),purpose:'status_site_selection',has_more:true});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'70'});
+  assert.match(ui.statusSiteInfo(),/Load more websites/);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  const next=ui.loadMoreSites();
+  assert.equal(next.options.data.page,2);
+  next.respond({...page([seven]),page:2,purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'70'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.equal(ui.statusConfirmations().length,0);
+  assert.equal(ui.statusSiteChoices().filter(v=>v.id==='70').length,1);
+});
+
+test('Reviewed R1: failed or stale inventory does not erase draft or authorize stale Save', () => {
+  const ui=loadUi();
+  const {seven}=statusSiteDraftFixture(ui);
+  const first=ui.statusClick('#ach-status-sites-retry');
+  const newest=ui.statusClick('#ach-status-sites-retry');
+  assert.equal(newest,first,'Pending retry must not start concurrent inventory reads');
+  first.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.equal(ui.state().statusSaveDisabled,false);
+  const second=ui.statusClick('#ach-status-sites-retry');
+  second.respond({status:true,inventory_schema:999});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusName,'Dirty seven');
+  assert.equal(ui.state().statusSaveDisabled,true);
+  assert.equal(ui.statusSiteDisabled(),true);
+  assert.match(ui.statusSiteInfo(),/inventory unavailable/);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-save');
+  assert.equal(ui.requests.length,count);
+  const recovery=ui.statusClick('#ach-status-sites-retry');
+  recovery.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'site',site:'7'});
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.equal(ui.state().statusName,'Dirty seven');
+});
+
+test('Reviewed R1: delayed site-list response cannot replace a newly accepted global draft', () => {
+  const ui=loadUi();
+  const {seven}=statusSiteDraftFixture(ui);
+  const stale=ui.statusClick('#ach-status-sites-retry');
+  assert.equal(ui.state().statusName,'Dirty seven');
+  ui.statusPermitDiscard(true);
+  ui.statusSetValue('#ach-status-scope','global','change');
+  const global=ui.requests.at(-1);
+  assert.notEqual(global,stale);
+  assert.match(global.options.url,/s=status_preferences$/);
+  global.respond(statusPrefs(11,'Global default',
+    {...brand(),brand_name:'New global'}));
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'New global');
+  stale.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'New global');
+  assert.equal(ui.state().statusSaveDisabled,false);
+  assert.deepEqual(ui.statusSiteChoices().map(x=>x.id),['']);
+  assert.equal(ui.statusConfirmations().length,1);
+});
+
+test('Reviewed R1: no unsaved branding can be entered before a valid loaded baseline', () => {
+  const ui=loadUi();
+  const initial=ui.openStatus();
+  assert.equal(ui.statusFieldDisabled(),true);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  initial.respond(statusPrefs());
+  assert.equal(ui.statusFieldDisabled(),false);
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.equal(ui.statusFieldDisabled(),true);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  const list=ui.requests.at(-1);
+  const seven={...site(),id:7,name:'seven.test',
+    bound_domains:[{name:'seven.test',port:80}]};
+  list.respond({...page([seven]),purpose:'status_site_selection'});
+  assert.equal(ui.statusFieldDisabled(),true);
+  ui.statusSetValue('#ach-status-site-id','7','change');
+  const preference=ui.requests.at(-1);
+  assert.match(preference.options.url,/s=status_preferences$/);
+  assert.equal(ui.statusFieldDisabled(),true);
+  preference.respond({status:false,stage:'preferences_read'});
+  assert.equal(ui.statusFieldDisabled(),true);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  ui.statusClick('#ach-status-load').respond(statusPrefs(8,'Site override',
+    {...brand(),brand_name:'Seven'}));
+  assert.equal(ui.statusFieldDisabled(),false);
+  assert.equal(ui.state().statusSaveDisabled,false);
 });
 
 test('Native lazy navigation uses per-view loading state, not a global flash', () => {
@@ -3216,4 +4226,150 @@ test('Review optional: rapid reentry does not duplicate same pending Status or A
   pendingActivity.reject(null,'timeout');
   ui.openSites(); ui.openActivity();
   assert.equal(ui.requests.length,activityCount+1,'Retry after failure remains possible');
+});
+
+const nativeSiteForDrift = (id, name) => ({
+  id, name, document_root:'/srv/' + id, panel_status:'1', bound_domains:[[name, 80]]
+});
+const siteChangesPayload = (overrides = {}) => {
+  const response = {
+    status:true, schema:1, state:'Baseline Missing', scope:'native_site_records',
+    read_only:true, runtime_verified:false, baseline_revision:0,
+    monitor_revision:0, baseline_sha256:null, source_sha256:'a'.repeat(64),
+    site_count:1, initial_sites:[nativeSiteForDrift(3,'initial.test')], changes:[],
+    note:'aaPanel database only; runtime not verified.', ...overrides
+  };
+  if (!Object.hasOwn(overrides,'initial_sites') && response.baseline_revision !== 0)
+    response.initial_sites=[];
+  return response;
+};
+
+test('Site lifecycle comparison requires reviewed baseline and refuses blind retry', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const compare=ui.siteChangesCompare();
+  assert.match(compare.options.url,/s=compare_site_changes$/);
+  compare.respond(siteChangesPayload());
+  assert.match(ui.state().siteChangesStatus,/Baseline Missing/);
+  assert.deepEqual(ui.state().siteChangesRows,[
+    ['3','Initial','initial.test',
+     'Name: initial.test; root: /srv/3; status: 1; domains/ports: initial.test:80']]);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  ui.siteChangesApprove(true);
+  assert.equal(ui.state().siteChangesSaveDisabled,false);
+  const save=ui.siteChangesSave();
+  assert.match(save.options.url,/s=save_site_baseline$/);
+  assert.equal(save.options.data.expected_revision,0);
+  assert.equal(save.options.data.expected_monitor_revision,0);
+  assert.equal(save.options.data.expected_source_sha256,'a'.repeat(64));
+  assert.equal(save.options.data.reviewed,'true');
+  assert.deepEqual(Object.keys(save.options.data).sort(),
+    ['expected_monitor_revision','expected_revision','expected_source_sha256','reviewed']);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  save.respond({status:true,schema:1,state:'Baseline Saved',changed:true,
+    baseline_revision:1,source_sha256:'a'.repeat(64)});
+  assert.match(ui.state().siteChangesStatus,/Baseline Saved/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+});
+
+test('Website lifecycle Monitor renders HTML as text and invalidates old approval on Refresh', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const before=nativeSiteForDrift(3,'old.example.test');
+  const after=nativeSiteForDrift(3,'<svg onload=alert(1)>');
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    changes:[{id:3,kind:'Changed',fields:['name','bound_domains'],before,after}]
+  }));
+  assert.deepEqual(ui.state().siteChangesRows,[
+    ['3','Changed','<svg onload=alert(1)>',
+     'name: old.example.test -> <svg onload=alert(1)>; bound_domains: old.example.test:80 -> <svg onload=alert(1)>:80']]);
+  ui.siteChangesApprove(true);
+  assert.equal(ui.state().siteChangesSaveDisabled,false);
+  ui.refreshSites();
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  assert.deepEqual(ui.state().siteChangesRows,[]);
+});
+
+test('Site lifecycle review exposes actual before/after roots, statuses and bindings', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  const previous=nativeSiteForDrift(3,'old.test');
+  const current={...previous,document_root:'/srv/new-root',panel_status:'0',
+    bound_domains:[['private.test',443],['alias.test',80]]};
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    changes:[{id:3,kind:'Changed',
+      fields:['document_root','panel_status','bound_domains'],
+      before:previous,after:current}]
+  }));
+  assert.deepEqual(ui.state().siteChangesRows,[
+    ['3','Changed','old.test',
+     'document_root: /srv/3 -> /srv/new-root; panel_status: 1 -> 0; '+
+     'bound_domains: old.test:80 -> private.test:443, alias.test:80']]);
+  ui.siteChangesApprove(true);
+  const save=ui.siteChangesSave();
+  assert.equal(save.options.data.expected_monitor_revision,0);
+});
+
+test('Initial baseline payload must carry validated actual site records', () => {
+  const bad=[
+    siteChangesPayload({initial_sites:[]}),
+    siteChangesPayload({monitor_revision:'0'}),
+    siteChangesPayload({initial_sites:[nativeSiteForDrift(3,'a'),nativeSiteForDrift(3,'b')],
+      site_count:2}),
+    siteChangesPayload({initial_sites:[nativeSiteForDrift(3,'<img src=x onerror=alert(1)>'),
+      nativeSiteForDrift(1,'x')],site_count:2}),
+    siteChangesPayload({initial_sites:[{...nativeSiteForDrift(3,'a'),bound_domains:[['bad',0]]}]}),
+  ];
+  for(const value of bad) {
+    const ui=loadUi();
+    ui.openSites().respond(page());
+    ui.siteChangesCompare().respond(value);
+    assert.equal(ui.state().siteChangesSaveDisabled,true);
+    assert.deepEqual(ui.state().siteChangesRows,[]);
+  }
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    initial_sites:[nativeSiteForDrift(3,'<img src=x onerror=alert(1)>')]
+  }));
+  assert.match(ui.state().siteChangesRows[0][3],/<img src=x onerror=alert\(1\)>/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  ui.siteChangesApprove(true);
+  assert.equal(ui.state().siteChangesSaveDisabled,false);
+  ui.refreshSites();
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+});
+
+test('Malformed website lifecycle payload and uncertain save outcome fail closed', () => {
+  for (const bad of [
+    siteChangesPayload({read_only:false}),
+    siteChangesPayload({source_sha256:'x'}),
+    siteChangesPayload({baseline_revision:5,baseline_sha256:null}),
+    siteChangesPayload({state:'No Changes',changes:[{id:1}]}),
+    siteChangesPayload({changes:[{id:3,kind:'Added',before:null,
+      after:nativeSiteForDrift(3,'new.example.test'),fields:[]}]}),
+    siteChangesPayload({state:'Changes Observed',baseline_revision:1,
+      baseline_sha256:'b'.repeat(64),changes:[{id:3,kind:'Changed',
+        fields:['document_root'],before:nativeSiteForDrift(3,'old'),
+        after:nativeSiteForDrift(3,'new')}]})
+  ]) {
+    const ui=loadUi();
+    ui.openSites().respond(page());
+    ui.siteChangesCompare().respond(bad);
+    assert.equal(ui.state().siteChangesSaveDisabled,true);
+    assert.match(ui.state().siteChangesStatus,/unconfirmed or incompatible/);
+    assert.deepEqual(ui.state().siteChangesRows,[]);
+  }
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  ui.siteChangesCompare().respond(siteChangesPayload());
+  ui.siteChangesApprove(true);
+  ui.siteChangesSave().respond({status:true,schema:1,state:'Baseline Saved',
+    changed:true,baseline_revision:9,source_sha256:'a'.repeat(64)});
+  assert.match(ui.state().siteChangesStatus,/outcome unconfirmed/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  assert.equal(ui.state().siteChangesApproveDisabled,true);
+  assert.match(ui.siteChangesCompare().options.url,/s=compare_site_changes$/);
 });

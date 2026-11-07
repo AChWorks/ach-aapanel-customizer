@@ -15,13 +15,15 @@
       max-height:calc(100dvh - 48px) !important;
       left:max(16px,calc((100vw - min(980px,calc(100vw - 32px)))/2)) !important;
       top:max(8px,calc((100dvh - min(760px,calc(100dvh - 48px)))/2)) !important;
+      border-radius:10px !important;
     }
     .layui-layer:has(#ach-customizer) > .layui-layer-title {
       background:#fff !important; border-bottom:1px solid #e5e5e5 !important;
+      border-radius:10px 10px 0 0;
     }
     .layui-layer:has(#ach-customizer) > .layui-layer-content {
       height:calc(100% - 42px) !important;
-      overflow:hidden !important;
+      overflow:hidden !important; border-radius:0 0 10px 10px;
     }
     .layui-layer:has(#ach-customizer) #ach-customizer { height:100% !important; }
   }
@@ -37,18 +39,28 @@
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
     font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
     font-size:13px; line-height:1.5; overflow:hidden;
+    border-radius:0 0 10px 10px;
   }
   #ach-customizer .ach-shell { display:flex; flex-direction:column; height:100%; min-width:0; }
   #ach-customizer .ach-sr-only {
     position:absolute; width:1px; height:1px; padding:0; margin:-1px;
     overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
   }
-  #ach-customizer .ach-workspace { display:grid; grid-template-columns:170px minmax(0,1fr); flex:1; min-height:0; }
-  #ach-customizer .ach-sidebar { min-width:0; overflow-y:auto; background:var(--ach-sidebar-bg); border-right:1px solid var(--ach-line); padding:0; }
+  #ach-customizer .ach-workspace {
+    display:grid; grid-template-columns:170px minmax(0,1fr); flex:1; min-height:0;
+    /* The host dialog owns its title. Only the scrollable content corners are clipped. */
+    border-radius:0 0 10px 10px; overflow:hidden;
+  }
+  #ach-customizer .ach-sidebar {
+    min-width:0; overflow-y:auto; background:var(--ach-sidebar-bg); padding:0;
+    /* No continuous divider: the selected white row flows into the white pane. */
+    border-right:0;
+  }
   #ach-customizer .ach-sidebar button {
     appearance:none; display:block; width:100%; min-height:40px; padding:10px 20px;
     border:0; border-radius:0; background:transparent;
     text-align:left; color:var(--ach-text); font:inherit; line-height:1.4; cursor:pointer;
+    transition:background-color .12s ease, color .12s ease;
   }
   #ach-customizer .ach-sidebar button:hover:not([aria-selected="true"]) { background:#e7e7e8; }
   #ach-customizer .ach-sidebar button[aria-selected="true"] {
@@ -57,6 +69,7 @@
   #ach-customizer .ach-main {
     overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
     padding:16px 20px 28px; min-width:0; min-height:0; scrollbar-gutter:stable;
+    background:var(--ach-surface);
   }
   #ach-customizer .ach-main h4 {
     margin:0 0 12px; font-size:14px; line-height:21px; color:#263544; font-weight:600;
@@ -67,7 +80,7 @@
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
   #ach-customizer .ach-note {
     padding:11px 13px; background:var(--ach-soft); border:1px solid #e8ecef;
-    border-radius:3px; overflow-wrap:anywhere; color:#52606d;
+    border-radius:8px; overflow-wrap:anywhere; color:#52606d;
   }
   #ach-customizer .ach-note p { margin:6px 0 0; }
   #ach-customizer .ach-note p:last-child { margin-bottom:0; }
@@ -104,7 +117,7 @@
     display:grid; grid-template-columns:1.3fr 2fr 1fr; gap:14px; min-width:0;
   }
   #ach-customizer .ach-skeleton-row span {
-    display:block; height:13px; border-radius:3px; background:#e9edf0;
+    display:block; height:13px; border-radius:8px; background:#e9edf0;
     animation:ach-placeholder 1.45s ease-in-out infinite alternate;
   }
   #ach-customizer .ach-skeleton-row:nth-child(2) span { animation-delay:.18s; }
@@ -158,6 +171,8 @@
   #ach-customizer .ach-main:focus-visible {
     outline:2px solid var(--ach-focus); outline-offset:2px;
   }
+  /* Keep focus outlines inside the clipped native dialog navigation. */
+  #ach-customizer .ach-sidebar button:focus-visible { outline-offset:-2px; }
   #ach-customizer .ach-main input:not([type="checkbox"]):focus-visible,
   #ach-customizer .ach-main select:focus-visible {
     border-color:var(--ach-focus); box-shadow:0 0 0 2px rgba(41,125,192,.12);
@@ -169,7 +184,7 @@
   }
   #ach-customizer th { background:#f7f9fa; color:#586775; font-weight:600; white-space:nowrap; }
   #ach-customizer tbody tr:hover { background:#fafcfd; }
-  #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:3px; }
+  #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:8px; }
   #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0 0; }
   #ach-customizer .ach-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
   #ach-customizer .ach-toolbar [role="status"] {
@@ -178,7 +193,7 @@
   #ach-customizer .ach-toolbar > button { flex:0 0 auto; }
   #ach-customizer #ach-message {
     margin:0 0 14px; padding:9px 12px; border:1px solid #e1e7ed;
-    border-radius:3px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
+    border-radius:8px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
   }
   #ach-customizer #ach-message:empty { display:none; }
   #ach-customizer #ach-message.ach-error,
@@ -186,14 +201,14 @@
   #ach-customizer #ach-message.ach-error { background:#fff5f3; border-color:#f0d1ce; }
   #ach-customizer .ach-fpm-operation-notice {
     position:sticky; top:0; z-index:2; padding:10px 12px; margin:12px 0;
-    background:#f2f8f3; border:1px solid #d4e4d6; border-radius:3px;
+    background:#f2f8f3; border:1px solid #d4e4d6; border-radius:8px;
     font-weight:600; overflow-wrap:anywhere;
   }
   #ach-customizer .ach-fpm-operation-notice.ach-error { background:#fff5f4; border-color:#e4c8c7; }
   #ach-customizer #ach-status-result,
   #ach-customizer #ach-overview-control-result {
     padding:9px 11px; margin:8px 0 0; background:#f7f9fb;
-    border:1px solid #dde6ed; border-radius:6px;
+    border:1px solid #dde6ed; border-radius:8px;
     color:#425466; overflow-wrap:anywhere;
   }
   #ach-customizer #ach-overview-control-result[data-state="saved"],
@@ -206,17 +221,17 @@
   }
   #ach-customizer .ach-status-preview {
     display:block; width:100%; min-height:440px; border:1px solid var(--ach-line);
-    border-radius:3px; background:#fff;
+    border-radius:8px; background:#fff;
   }
   #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
   #ach-customizer .ach-status-comparison {
     max-width:100%; max-height:260px; margin:8px 0 14px; overflow:auto;
-    border:1px solid var(--ach-line); border-radius:3px; padding:10px 12px;
+    border:1px solid var(--ach-line); border-radius:8px; padding:10px 12px;
     background:#f7f9fb; color:#233141; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;
     white-space:pre-wrap; overflow-wrap:anywhere; tab-size:2;
   }
   #ach-customizer .ach-status-comparison:empty { display:none; }
-  #ach-customizer .ach-badge { display:inline-block; font-size:11px; padding:2px 7px; border-radius:3px; background:#e9f2ec; color:#21642d; }
+  #ach-customizer .ach-badge { display:inline-block; font-size:11px; padding:2px 7px; border-radius:8px; background:#e9f2ec; color:#21642d; }
   #ach-customizer .ach-activity-error { color:#ac3431; font-weight:600; }
   #ach-customizer .ach-activity-warning { color:#8c601c; font-weight:600; }
   #ach-customizer .ach-activity-info { color:#3b6474; }
@@ -247,6 +262,7 @@
   }
   @media (max-height:550px) { #ach-customizer { height:calc(100dvh - 64px); min-height:200px; } }
   @media (prefers-reduced-motion:reduce) {
+    #ach-customizer .ach-sidebar button,
     #ach-customizer .ach-main button,
     #ach-customizer .ach-main input:not([type="checkbox"]),
     #ach-customizer .ach-main select, #ach-customizer .ach-skeleton-row span {
@@ -296,16 +312,36 @@
       </div>
       <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"><tr><td colspan="5">Website inventory not loaded.</td></tr></tbody></table><div id="ach-sites-loading" class="ach-table-skeleton" aria-hidden="true" hidden><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div></div></div>
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
+      <div class="ach-note" aria-label="Native website lifecycle Monitor">
+        <strong>Website lifecycle changes (read-only)</strong>
+        <p>Compare all supported native aaPanel site IDs, site keys, roots, enabled status and bound domain/port records to the last explicitly saved baseline. Does not inspect effective Nginx routing, PHP, DNS or live content. Up to 100 sites; new/removed sites and aaPanel DB changes are never automatically enforced.</p>
+        <div class="ach-controls"><button type="button" id="ach-site-changes-compare">Compare website records</button></div>
+        <p id="ach-site-changes-status" role="status" aria-live="polite">No baseline comparison loaded.</p>
+        <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Change</th><th>Site key</th><th>Changed database fields</th></tr></thead><tbody id="ach-site-changes-rows"></tbody></table></div>
+        <label><input id="ach-site-changes-approve" type="checkbox" disabled /> I reviewed the current comparison and want to replace the saved plugin-owned baseline.</label>
+        <div class="ach-controls"><button type="button" id="ach-site-changes-save" class="btn btn-warning" disabled>Save reviewed baseline</button></div>
+      </div>
       <p class="ach-note"><strong>Local hosts override check (read-only):</strong> inspect exact site-bound names in origin-local /etc/hosts. Loopback does not prove DNS or Gateway failure; no correction is offered.</p>
       <div class="ach-controls"><label for="ach-hosts-site-id">Website (current inventory page)</label><select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts</button></div>
-      <p class="ach-note">Select a discovered website above, or use Previous / Next to inspect another page. This is an origin-local file check, not a remote DNS or Gateway test.</p>
+      <p class="ach-note">Select a discovered website above, or use Previous / Next to inspect another page. The same selection also supports the separate read-only FastCGI cache source audit below. Neither diagnosis tests a remote host or authorizes changing Nginx/cache files.</p>
       <p id="ach-hosts-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website from the inventory for read-only inspection.</p>
+      <hr />
+      <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines known Nginx VHost and PHP snippet text for cache-zone reuse, missing direct bypass/write-guard statements, cache-key host tokens, response-header ignore and purge directives. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
+      <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
+      <p id="ach-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
-      <p class="ach-note">Read-only PHP-FPM file/default comparison. Conventional aaPanel Nginx site-to-pool file assignments are listed separately; neither file mapping nor this preview verifies effective routing/runtime state or authorizes Apply.</p>
+      <p class="ach-note">Installed PHP, master-process/Unix-socket observations and PHP-FPM file/default comparisons are separate read-only evidence. Conventional Nginx site-to-pool file assignments are shown below. No process/source observation proves effective site routing or authorizes a PHP-FPM Apply.</p>
       <div class="ach-controls"><button id="ach-php-discover" type="button">Refresh installed PHP</button></div>
       <p id="ach-php-discovery-status" role="status" aria-live="polite">Open PHP-FPM to discover installed versioned services. File presence does not verify running processes or enable Apply.</p>
+      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP service + site files (read-only)</button></div>
+      <p id="ach-php-runtime-result" class="ach-status-metadata" role="status" aria-live="polite">Select a discovered PHP 8.1+ version for bounded Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
+      <p id="ach-php-topology-summary" class="ach-status-metadata" role="status" aria-live="polite">No site-to-PHP socket file mapping loaded. The runtime process check does not by itself identify impacted sites.</p>
+      <div class="ach-scroll" aria-label="Read-only native PHP file assignments"><table>
+        <thead><tr><th>Site ID</th><th>Native site key</th><th>File-assigned PHP</th><th>Attribution</th></tr></thead>
+        <tbody id="ach-php-topology-rows"><tr><td colspan="4">Inspect selected PHP to map source files.</td></tr></tbody>
+      </table></div>
       <form id="ach-php-form">
         <div class="ach-fields">
           <div><label for="ach-php-version">Installed PHP-FPM version</label><select id="ach-php-version" name="php_version" disabled required><option value="">Discover PHP installations first</option></select></div>
@@ -344,8 +380,8 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
-      <h4>Status Pages · Offline Preview</h4>
-      <p class="ach-note"><strong>Offline preview only.</strong> Eleven English/Persian templates. Only branding is saved; no pages installed, Nginx/site changes or HTTP status changes. Live Apply/Restore unavailable.</p>
+      <h4>Status Pages · Preview / Site 404/502 Management</h4>
+      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For a verified aaPanel 8.0.7 Nginx website, guarded 404/502 Apply/Restore manages a plugin-owned extension and requires explicit approval for a shared Nginx reload; existing document-root error files remain untouched. Global/panel-default/new-site Apply and other status template activation are not yet supported.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -394,9 +430,22 @@
       <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
       <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
       <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
-      <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check live HTTP/80 site 404 (read-only)</button></div>
-      <p class="ach-note">HTTP probe makes one explicit GET for a random nonexistent path through 127.0.0.1:80 with the selected website's native, bound Host. It cannot prove HTTPS, Cloudflare, other routes, or safe Apply. The request may appear in website access logs.</p>
+      <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check selected 404/502 source (read-only)</button></div>
+      <p class="ach-note">404: explicit loopback HTTP/80 GET plus source inspection. 502: configured-source inspection only (no artificial production 502). Neither authorizes Apply without the separate confirmed extension operation. The native proof request may appear in access logs.</p>
       <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Live HTTP/80 404 not checked.</p>
+      <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">404 adoption preflight not checked. No change authorized.</p>
+      <div class="ach-note" aria-label="Guarded website status extension management">
+        <strong>Website 404/502 — guarded Nginx extension Apply / Restore</strong>
+        <p>aaPanel 8.0.7 + Nginx only. Changes a plugin-owned website extension and immutable HTML asset, not existing document-root 404.html or 502.html or aaPanel VHost. <strong>Apply and Restore each reload the shared Nginx service, affecting all sites.</strong> Source syntax and actual selected-site error response must be verified. Unsupported or uncertain changes require Recheck, not automatic retry.</p>
+        <div class="ach-controls">
+          <button id="ach-status-manage-recheck" type="button" disabled>Recheck selected site status</button>
+        </div>
+        <label><input id="ach-status-manage-apply-approve" type="checkbox" /> I approve installing this site's plugin-owned status extension and reloading Nginx globally after validation.</label>
+        <div class="ach-controls"><button id="ach-status-manage-apply" type="button" class="btn btn-danger" disabled>Apply selected status page and reload Nginx</button></div>
+        <label><input id="ach-status-manage-restore-approve" type="checkbox" /> I reviewed this site's recovery identity and approve removing its managed extension and reloading Nginx globally.</label>
+        <div class="ach-controls"><button id="ach-status-manage-restore" type="button" class="btn btn-warning" disabled>Restore selected site status and reload Nginx</button></div>
+        <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site 404 recovery before Restore. An uncertain write must not be blindly repeated.</p>
+      </div>
       <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
       <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
@@ -442,9 +491,17 @@
   var statusBusy = false, statusReadBusy = false;
   var statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSavedBrand = null;
+  // Last accepted selector state, distinct from the browser's newly changed
+  // select value. Cancel must restore it without invalidating live evidence.
+  var statusAcceptedScope = 'global', statusAcceptedSiteId = '';
+
+  // Transaction evidence is bound to one native-site/brand/locale snapshot.
+  // It is revoked on any edit, site change, refresh, or attempted write.
+  var statusProbeEvidence = null, statusManageEvidence = null;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
+  var siteChangesBusy = false, siteChangesTicket = 0, siteChangesSnapshot = null;
   // Keep the native dialog mounted. Switching panels does not discard unsaved
   // edits or re-fetch previously accepted read-only data without Refresh.
   var sectionsLoaded = {overview:false, websites:false, php:false, status:false, activity:false};
@@ -489,8 +546,19 @@
     root.find('#ach-' + kind + '-loading').prop('hidden', !busy);
     root.find('#ach-' + kind + '-rows').prop('hidden', busy);
   }
+  function resetSiteChanges(note) {
+    siteChangesTicket++;
+    siteChangesBusy = false;
+    siteChangesSnapshot = null;
+    root.find('#ach-site-changes-approve').prop('checked', false).prop('disabled', true);
+    root.find('#ach-site-changes-save').prop('disabled', true);
+    root.find('#ach-site-changes-compare').prop('disabled', false);
+    root.find('#ach-site-changes-rows').empty();
+    root.find('#ach-site-changes-status').text(note || 'Comparison needs Refresh.');
+  }
   function invalidateWebsitesSnapshot() {
     // Reject an inventory request started under an earlier Monitor policy.
+    resetSiteChanges('Monitor policy changed; compare again after Refresh.');
     siteTicket++;
     siteBusy = false;
     tableBusy('sites', false);
@@ -529,7 +597,8 @@
   function hasPotentialActivity(method) {
     return method === 'set_control' || method === 'inspect_local_hosts' ||
       method === 'get_php_versions' || method === 'status_save' ||
-      method === 'status_probe' ||
+      method === 'status_probe' || method === 'save_site_baseline' ||
+      method === 'status_manage' ||
       method === 'fpm_apply' || method === 'fpm_rollback';
   }
   function validInventoryPage(r, expectedPage) {
@@ -572,10 +641,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|status_(save|reset)|fpm_(apply|rollback))$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage)|fpm_(apply|rollback))$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'status_manage' ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -585,6 +654,8 @@
           if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
             msg(incompatible ? 'PHP-FPM operation response incompatible or incomplete. Inspect saved recovery before retrying.' :
               (response && (response.stage || '') + ': ' + (response.msg || t.error) + (response.operation_id ? ' (' + t.id + ': ' + response.operation_id + ')' : '') +
+              (typeof response.recovery_id === 'string' && /^[0-9a-f]{32}$/.test(response.recovery_id) ?
+                ' (Recovery ID: ' + response.recovery_id + '; Recheck before Restore)' : '') +
               (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
               (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
           }
@@ -608,8 +679,10 @@
       .fail(function (_xhr, status) {
         if (/^fpm_(apply|rollback)$/.test(method)) showFpmOperationResult(method, null, 'unconfirmed');
         if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
-          msg(t.error + ': ' + status + (/^fpm_(apply|rollback)$/.test(method) ?
-            '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
+          msg(t.error + ': ' + status +
+            ((/^fpm_(apply|rollback)$/.test(method) || method === 'status_manage' &&
+              data.site_action !== 'recheck') ?
+              '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
         }
         done(null);
         if (hasPotentialActivity(method)) invalidateActivitySnapshot();
@@ -830,6 +903,7 @@
   });
   function sites() {
     if (siteBusy) return;
+    resetSiteChanges('Website inventory refresh invalidated the earlier comparison. Compare again.');
     if (websitePolicyState !== 'stable') {
       root.find('#ach-sites-refresh').prop('disabled', true);
       root.find('#ach-prev, #ach-next').prop('disabled', true);
@@ -895,7 +969,181 @@
       root.find('#ach-next').prop('disabled', !hasMore);
     });
   }
+  function validSiteChangesSite(site, id) {
+    if (!site || typeof site !== 'object' || Array.isArray(site) ||
+        !Number.isSafeInteger(site.id) || site.id !== id || id <= 0 ||
+        typeof site.name !== 'string' || !site.name.trim() || site.name.length > 255 ||
+        typeof site.document_root !== 'string' || site.document_root.length > 2048 ||
+        typeof site.panel_status !== 'string' || site.panel_status.length > 64 ||
+        !Array.isArray(site.bound_domains) || site.bound_domains.length > 24) return false;
+    var seen = new Set();
+    return site.bound_domains.every(function (binding) {
+      if (!Array.isArray(binding) || binding.length !== 2 ||
+          typeof binding[0] !== 'string' || !binding[0].trim() || binding[0].length > 255 ||
+          !Number.isSafeInteger(binding[1]) || binding[1] < 1 || binding[1] > 65535) return false;
+      var key = JSON.stringify(binding);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  function validSiteChangesResponse(r) {
+    if (!r || typeof r !== 'object' || Array.isArray(r) || r.status !== true ||
+        r.schema !== 1 || r.scope !== 'native_site_records' ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        !['Baseline Missing', 'Changes Observed', 'No Changes'].includes(r.state) ||
+        !Number.isSafeInteger(r.baseline_revision) || r.baseline_revision < 0 ||
+        !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
+        !Number.isSafeInteger(r.site_count) || r.site_count < 0 || r.site_count > 100 ||
+        !/^[a-f0-9]{64}$/.test(String(r.source_sha256 || '')) ||
+        typeof r.note !== 'string' ||
+        !Array.isArray(r.initial_sites) || r.initial_sites.length > 100 ||
+        !Array.isArray(r.changes) || r.changes.length > 200) return false;
+    if (r.baseline_revision === 0) {
+      if (r.state !== 'Baseline Missing' || r.baseline_sha256 !== null ||
+          r.changes.length || r.initial_sites.length !== r.site_count) return false;
+    } else if (!/^[a-f0-9]{64}$/.test(String(r.baseline_sha256 || '')) ||
+               r.initial_sites.length || (r.state === 'Baseline Missing') ||
+               (r.state === 'No Changes') !== (r.changes.length === 0)) return false;
+    var previousId = 0;
+    for (var i = 0; i < r.initial_sites.length; i++) {
+      var item = r.initial_sites[i];
+      if (!validSiteChangesSite(item, item && item.id) || item.id <= previousId) return false;
+      previousId = item.id;
+    }
+    var ids = new Set(), fieldsAllowed = ['name', 'document_root', 'panel_status', 'bound_domains'];
+    return r.changes.every(function (entry) {
+      if (!entry || !Number.isSafeInteger(entry.id) || entry.id <= 0 ||
+          ids.has(entry.id) || !['Added', 'Removed', 'Changed'].includes(entry.kind) ||
+          !Array.isArray(entry.fields) ||
+          entry.fields.some(function (name) { return !fieldsAllowed.includes(name); })) return false;
+      ids.add(entry.id);
+      if (entry.kind === 'Added') return entry.before === null && entry.fields.length === 0 &&
+        validSiteChangesSite(entry.after, entry.id);
+      if (entry.kind === 'Removed') return entry.after === null && entry.fields.length === 0 &&
+        validSiteChangesSite(entry.before, entry.id);
+      if (!validSiteChangesSite(entry.before, entry.id) ||
+          !validSiteChangesSite(entry.after, entry.id) || !entry.fields.length ||
+          new Set(entry.fields).size !== entry.fields.length) return false;
+      return fieldsAllowed.every(function (name) {
+        return (JSON.stringify(entry.before[name]) !== JSON.stringify(entry.after[name])) ===
+          entry.fields.includes(name);
+      });
+    });
+  }
+  function siteChangesDetails(site) {
+    return 'Name: ' + site.name + '; root: ' + site.document_root +
+      '; status: ' + site.panel_status + '; domains/ports: ' +
+      (site.bound_domains.map(function (entry) {
+        return entry[0] + ':' + entry[1];
+      }).join(', ') || 'None');
+  }
+  function siteChangesField(site, name) {
+    return name === 'bound_domains' ?
+      site.bound_domains.map(function (entry) { return entry[0] + ':' + entry[1]; }).join(', ') :
+      site[name];
+  }
+  function siteChangesLock(busy) {
+    siteChangesBusy = busy;
+    root.find('#ach-site-changes-compare').prop('disabled',
+      busy || siteBusy || websitePolicyState !== 'stable');
+    root.find('#ach-site-changes-approve').prop('disabled',
+      busy || !siteChangesSnapshot || websitePolicyState !== 'stable');
+    root.find('#ach-site-changes-save').prop('disabled',
+      busy || !siteChangesSnapshot || siteBusy || websitePolicyState !== 'stable' ||
+      root.find('#ach-site-changes-approve').prop('checked') !== true);
+  }
+  root.find('#ach-site-changes-compare').on('click', function () {
+    if (siteChangesBusy || siteBusy || websitePolicyState !== 'stable') return;
+    resetSiteChanges('Comparing native website records...');
+    var ticket = ++siteChangesTicket;
+    siteChangesLock(true);
+    request('compare_site_changes', {}, function (r) {
+      if (ticket !== siteChangesTicket) return;
+      if (websitePolicyState !== 'stable' || siteBusy ||
+          !validSiteChangesResponse(r)) {
+        resetSiteChanges('Website comparison unconfirmed or incompatible; Compare again.');
+        return;
+      }
+      siteChangesSnapshot = r;
+      var body = root.find('#ach-site-changes-rows').empty();
+      // Initial baseline review includes the actual bounded records, not just
+      // a count/digest. Every value is rendered text-only to prevent markup.
+      r.initial_sites.forEach(function (site) {
+        var tr = $('<tr>');
+        $('<td>').text(site.id).appendTo(tr);
+        $('<td>').text('Initial').appendTo(tr);
+        $('<td>').text(site.name).appendTo(tr);
+        $('<td>').text(siteChangesDetails(site)).appendTo(tr);
+        body.append(tr);
+      });
+      r.changes.forEach(function (change) {
+        var site = change.after || change.before;
+        var details = change.kind === 'Changed' ?
+          change.fields.map(function (field) {
+            return field + ': ' + siteChangesField(change.before, field) +
+              ' -> ' + siteChangesField(change.after, field);
+          }).join('; ') :
+          ((change.kind === 'Added' ? 'New: ' : 'Removed: ') + siteChangesDetails(site));
+        var tr = $('<tr>');
+        $('<td>').text(change.id).appendTo(tr);
+        $('<td>').text(change.kind).appendTo(tr);
+        $('<td>').text(site.name).appendTo(tr);
+        $('<td>').text(details).appendTo(tr);
+        body.append(tr);
+      });
+      root.find('#ach-site-changes-status').text(
+        r.state + ' — ' + r.site_count + ' site(s) in current bounded inventory, ' +
+        r.changes.length + ' changed ID(s). Baseline revision ' + r.baseline_revision +
+        '. Source SHA256: ' + r.source_sha256 + '. ' + r.note);
+      root.find('#ach-site-changes-approve').prop('checked', false);
+      siteChangesLock(false);
+    });
+  });
+  root.find('#ach-site-changes-approve').on('change', function () {
+    siteChangesLock(siteChangesBusy);
+  });
+  root.find('#ach-site-changes-save').on('click', function () {
+    if (siteChangesBusy || siteBusy || !siteChangesSnapshot ||
+        websitePolicyState !== 'stable' ||
+        root.find('#ach-site-changes-approve').prop('checked') !== true) return;
+    var snapshot = siteChangesSnapshot, ticket = ++siteChangesTicket;
+    siteChangesSnapshot = null; // An uncertain request must not be retried blindly.
+    root.find('#ach-site-changes-approve').prop('checked', false);
+    root.find('#ach-site-changes-status').text('Saving reviewed plugin-owned baseline...');
+    siteChangesLock(true);
+    request('save_site_baseline', {
+      expected_revision:snapshot.baseline_revision,
+      expected_monitor_revision:snapshot.monitor_revision,
+      expected_source_sha256:snapshot.source_sha256, reviewed:'true'
+    }, function (r) {
+      if (ticket !== siteChangesTicket) return;
+      if (!r || r.schema !== 1 ||
+          !['Baseline Saved', 'Baseline Unchanged'].includes(r.state) ||
+          typeof r.changed !== 'boolean' ||
+          r.changed !== (r.state === 'Baseline Saved') ||
+          r.source_sha256 !== snapshot.source_sha256 ||
+          r.baseline_revision !== snapshot.baseline_revision + (r.changed ? 1 : 0)) {
+        resetSiteChanges('Baseline outcome unconfirmed; Compare again to reconcile before another save.');
+        return;
+      }
+      resetSiteChanges(r.state + ' — revision ' + r.baseline_revision +
+        '. Compare again to verify the stored baseline against current records.');
+    });
+  });
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
+  var cacheBusy = false, cacheTicket = 0;
+  function invalidateCacheAudit(note) {
+    ++cacheTicket;
+    cacheBusy = false;
+    root.find('#ach-cache-result').text(note ||
+      'Select a native website to inspect source-only FastCGI cache clues.');
+    cacheLock();
+  }
+  function cacheLock() {
+    root.find('#ach-cache-inspect-button').prop('disabled',
+      cacheBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+  }
   function nativeHostsSnapshot(site) {
     var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
     bindings.sort(function (a, b) {
@@ -918,11 +1166,13 @@
     hostsBusy = busy;
     root.find('#ach-hosts-site-id').prop('disabled', busy || siteBusy || websitePolicyState !== 'stable' || !hostsPageSites.size);
     root.find('#ach-hosts-inspect-button').prop('disabled', busy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+    cacheLock();
   }
   function resetHostsSelection(message) {
     ++hostsTicket; // Supersede an in-flight inspection on page/navigation changes.
     hostsBusy = false;
     hostsPageSites = new Map();
+    invalidateCacheAudit('Website page/selection changed; inspect FastCGI cache sources again.');
     var select = root.find('#ach-hosts-site-id').empty().val('');
     $('<option>').val('').text('Select a website on this page').appendTo(select);
     root.find('#ach-hosts-result').text(message || 'Select a discovered website to inspect.');
@@ -932,6 +1182,7 @@
     var select = root.find('#ach-hosts-site-id').empty().val('');
     $('<option>').val('').text(sites.length ? 'Select a website on this page' : 'No websites on this page').appendTo(select);
     hostsPageSites = new Map();
+    invalidateCacheAudit('Website inventory refreshed; choose a site for a new FastCGI cache audit.');
     sites.forEach(function (site) {
       var id = String(site.id);
       // A snapshot is an optimistic *comparison only*, not a domain/path source.
@@ -979,6 +1230,7 @@
   root.find('#ach-hosts-site-id').on('input change', function () {
     ++hostsTicket;
     root.find('#ach-hosts-result').text('Site selection changed; recheck.');
+    invalidateCacheAudit('Website selection changed; no previous cache audit is current.');
     hostsLock(false);
   });
   root.find('#ach-hosts-inspect-button').on('click', function () {
@@ -1007,6 +1259,113 @@
           '\nFile SHA-256: ' + r.hosts_sha256 + '\n' + r.note);
       }
       hostsLock(false);
+    });
+  });
+  function validCacheAudit(r, id) {
+    var sha = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+    var same = hostsPageSites.get(id);
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== same?.name ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.cache_safe_verified !== false || r.fix_supported !== false ||
+        r.purge_supported !== false ||
+        !['Source Observed','Partial','Needs Review'].includes(r.state) ||
+        !['Direct Zone','Direct Off','No Direct Directive','Needs Review'].includes(r.zone_state) ||
+        !(r.cache_zone === null || typeof r.cache_zone === 'string' &&
+          /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(r.cache_zone)) ||
+        typeof r.global_zone_directly_declared !== 'boolean' ||
+        typeof r.bypass_directive_seen !== 'boolean' ||
+        typeof r.no_cache_directive_seen !== 'boolean' ||
+        typeof r.host_key_variable_seen !== 'boolean' ||
+        typeof r.purge_directive_seen !== 'boolean' ||
+        !Number.isSafeInteger(r.inspected_sites) || r.inspected_sites < 0 ||
+        r.inspected_sites > 100 ||
+        !Number.isSafeInteger(r.unresolved_other_sites) ||
+        r.unresolved_other_sites < 0 || r.unresolved_other_sites > 99 ||
+        typeof r.reason !== 'string' || r.reason.length > 250 ||
+        typeof r.note !== 'string' || r.note.length > 650 ||
+        !Array.isArray(r.findings) || r.findings.length > 12 ||
+        !Array.isArray(r.ignore_headers) || r.ignore_headers.length > 5 ||
+        !Array.isArray(r.other_sites_same_zone) ||
+        r.other_sites_same_zone.length > 99) return false;
+    var codes = new Set([
+      'NO_DIRECT_CACHE_BYPASS','NO_DIRECT_CACHE_WRITE_GUARD',
+      'KEY_NOT_DIRECTLY_OBSERVED','HOST_PARTITION_NOT_OBSERVED',
+      'ZONE_DECLARATION_NOT_IN_MAIN_FILE','SHARED_ZONE_REFERENCES',
+      'RESPONSE_CACHE_HEADER_IGNORED','NON_GET_CACHE_METHOD',
+      'PURGE_DIRECTIVE_OBSERVED','PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED'
+    ]);
+    if (new Set(r.findings).size !== r.findings.length ||
+        !r.findings.every(x => codes.has(x)) ||
+        !r.ignore_headers.every(x =>
+          ['Set-Cookie','Cache-Control','Expires','Vary','X-Accel-Expires'].includes(x)) ||
+        new Set(r.ignore_headers).size !== r.ignore_headers.length) return false;
+    var ids = new Set([Number(id)]);
+    for (var peer of r.other_sites_same_zone) {
+      if (!peer || !Number.isSafeInteger(peer.id) || peer.id < 1 ||
+          peer.id > 2147483647 || ids.has(peer.id) ||
+          typeof peer.site_key !== 'string' || !peer.site_key ||
+          peer.site_key.length > 255) return false;
+      ids.add(peer.id);
+    }
+    if (r.state === 'Needs Review')
+      return r.zone_state === 'Needs Review' && r.cache_zone === null &&
+        r.inspected_sites === 0 && r.source_sha256 === null &&
+        r.reason.length > 0 && r.other_sites_same_zone.length === 0 &&
+        r.unresolved_other_sites === 0 && r.findings.length === 0;
+    if (!sha(r.source_sha256) || r.inspected_sites < 1 ||
+        r.unresolved_other_sites + r.other_sites_same_zone.length >= r.inspected_sites ||
+        (r.zone_state === 'Direct Zone' ?
+          r.cache_zone === null : r.cache_zone !== null) ||
+        (r.zone_state !== 'Direct Zone' && r.other_sites_same_zone.length !== 0) ||
+        (r.global_zone_directly_declared && r.zone_state !== 'Direct Zone') ||
+        (r.state === 'Partial' ? !(r.unresolved_other_sites > 0 && r.reason) :
+          r.unresolved_other_sites !== 0 || r.reason !== '')) return false;
+    return true;
+  }
+  root.find('#ach-cache-inspect-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cacheBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var ticket = ++cacheTicket;
+    cacheBusy = true;
+    cacheLock();
+    root.find('#ach-cache-result').text(
+      'Checking native Nginx FastCGI cache SOURCE text (no HTTP, purge or Apply)...');
+    request('inspect_fastcgi_cache', {
+      site_id:id,
+      expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r) {
+      if (ticket !== cacheTicket) return;
+      cacheBusy = false;
+      cacheLock();
+      if (id !== hostsSiteId() || !validCacheAudit(r, id)) {
+        root.find('#ach-cache-result').text(
+          'Cache inspection unavailable or incompatible. No source or runtime policy inferred.');
+        return;
+      }
+      if (r.state === 'Needs Review') {
+        root.find('#ach-cache-result').text(
+          'FastCGI cache source: Needs Review — ' + r.reason + '\n' + r.note);
+        return;
+      }
+      root.find('#ach-cache-result').text(
+        'Cache source: ' + r.state + '; direct directive: ' + r.zone_state +
+        '\nDirect cache zone: ' + (r.cache_zone || 'Not established') +
+        '; declared in inspected main nginx.conf: ' + r.global_zone_directly_declared +
+        '\nDirect fastcgi_cache_bypass: ' + r.bypass_directive_seen +
+        '; direct fastcgi_no_cache: ' + r.no_cache_directive_seen +
+        '\nDirect key contains host variable: ' + r.host_key_variable_seen +
+        '; purge directive observed: ' + r.purge_directive_seen +
+        '\nIgnored response-cache headers: ' + (r.ignore_headers.join(', ') || 'None observed') +
+        '\nOther registered sites with same directly observed zone: ' +
+        (r.other_sites_same_zone.map(x=>x.id + ': ' + x.site_key).join(', ') || 'None observed') +
+        '; unresolved sites: ' + r.unresolved_other_sites + '/' + r.inspected_sites +
+        '\nReview signals: ' + (r.findings.join(', ') || 'None in this limited source scan') +
+        (r.reason ? '\n' + r.reason : '') +
+        '\nSource snapshot SHA-256: ' + r.source_sha256 +
+        '\n' + r.note +
+        '\nDO NOT infer that private routes are safe or that site-scoped Purge All is isolated.');
     });
   });
   root.find('#ach-sites-refresh').on('click', function () {
@@ -1062,6 +1421,39 @@
       return current[key] === statusSavedBrand[key];
     });
   }
+  function statusTrustedSelection(scope) {
+    // A stale inventory is never authority for site-scoped actions. Retain
+    // the operator's draft, but require a freshly validated native site row.
+    return !!scope && (scope.scope === 'global' ||
+      (!statusSitesBusy && selectedProbeSite(scope) !== null));
+  }
+  function statusMayDiscardEdits() {
+    if (!statusSavedBrand || statusBrandMatchesSaved()) return true;
+    if (typeof window === 'undefined' || typeof window.confirm !== 'function')
+      return false; // Unknown host confirmation support cannot discard edits.
+    return window.confirm(
+      'Discard unsaved Status Pages branding changes? This cannot be undone.');
+  }
+  function statusRestoreAcceptedSelection() {
+    root.find('#ach-status-scope').val(statusAcceptedScope);
+    root.find('#ach-status-site-id').val(statusAcceptedSiteId);
+    statusNotice('Unsaved changes kept. Save branding or explicitly discard changes before switching.');
+    statusLock(statusBusy);
+  }
+  function statusRememberSelection() {
+    statusAcceptedScope = root.find('#ach-status-scope').val();
+    statusAcceptedSiteId = root.find('#ach-status-site-id').val() || '';
+  }
+  function sameStatusSelection(evidence) {
+    var scope = statusScope(), site = selectedProbeSite(scope);
+    return evidence && scope && site && statusRevision !== null &&
+      evidence.ticket === statusTicket && evidence.revision === statusRevision &&
+      evidence.scope === scope.site_id &&
+      evidence.snapshot === nativeHostsSnapshot(site) &&
+      evidence.locale === root.find('#ach-status-locale').val() &&
+      evidence.template === root.find('#ach-status-template').val() &&
+      evidence.brand === JSON.stringify(statusFields());
+  }
   function statusLock(busy) {
     statusBusy = busy;
     // Website inventory loads independently; their completion must not
@@ -1070,33 +1462,64 @@
       'disabled', busy || statusSitesBusy);
     root.find('#ach-status-load').prop('disabled', busy);
     root.find('#ach-status-scope, #ach-status-template, #ach-status-locale').prop('disabled', busy);
-    root.find('#ach-status-site-id').prop('disabled', busy ||
+    root.find('#ach-status-site-id').prop('disabled',
+      busy || statusSitesBusy || !statusSitesTrusted ||
       root.find('#ach-status-scope').val() !== 'site');
-    root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer').prop('disabled', busy);
-    root.find('#ach-status-preview-button, #ach-status-save').prop(
-      'disabled', busy || statusRevision === null);
-    root.find('#ach-status-reset').prop('disabled',
-      busy || statusRevision === null ||
-      root.find('#ach-status-reset-approve').prop('checked') !== true);
     var scope = statusScope(), template = root.find('#ach-status-template').val();
-    root.find('#ach-status-inspect-button').prop('disabled', busy || statusRevision === null ||
+    // Without a validated saved baseline, no untracked editable draft is
+    // possible. During an inventory refresh, existing drafts stay editable,
+    // but Save/Reset/Preview are gated on fresh site membership.
+    var editable = statusRevision !== null && !!statusSavedBrand &&
+      !!scope && statusLoadedScope === scope.scope + ':' + scope.site_id;
+    var actionable = editable && statusTrustedSelection(scope);
+    root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer').prop('disabled', busy || !editable);
+    root.find('#ach-status-preview-button, #ach-status-save').prop(
+      'disabled', busy || !actionable);
+    root.find('#ach-status-reset').prop('disabled',
+      busy || !actionable ||
+      root.find('#ach-status-reset-approve').prop('checked') !== true);
+    root.find('#ach-status-inspect-button').prop('disabled', busy || !actionable ||
       !scope || scope.scope !== 'site' ||
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
       (template !== '404' && template !== '502'));
-    root.find('#ach-status-probe-button').prop('disabled', busy || statusRevision === null ||
-      !scope || scope.scope !== 'site' ||
-      statusLoadedScope !== scope.scope + ':' + scope.site_id ||
-      !selectedProbeSite(scope) || template !== '404');
+    var selected = selectedProbeSite(scope);
+    var selectedReady = !busy && !!actionable && statusRevision !== null && scope &&
+      scope.scope === 'site' && selected &&
+      statusLoadedScope === scope.scope + ':' + scope.site_id &&
+      (template === '404' || template === '502');
+    root.find('#ach-status-probe-button').prop('disabled', !selectedReady);
+    root.find('#ach-status-manage-recheck').prop('disabled', !selectedReady);
+    root.find('#ach-status-manage-apply').prop('disabled',
+      !selectedReady || !sameStatusSelection(statusProbeEvidence) ||
+      root.find('#ach-status-manage-apply-approve').prop('checked') !== true);
+    root.find('#ach-status-manage-restore').prop('disabled',
+      !selectedReady || !sameStatusSelection(statusManageEvidence) ||
+      !['Applied','Recovery Required'].includes(statusManageEvidence.state) ||
+      root.find('#ach-status-manage-restore-approve').prop('checked') !== true);
   }
   function statusClearPreview() {
+    statusProbeEvidence = null;
+    statusManageEvidence = null;
+    root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
+      .prop('checked', false);
+    root.find('#ach-status-manage-result').text(
+      'Recheck saved status recovery before Restore. Never repeat an uncertain Nginx reload blindly.');
     root.find('#ach-status-iframe').prop('srcdoc', '');
     root.find('#ach-status-sha').text('');
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
     root.find('#ach-status-probe-result').text('Live HTTP/80 404 not checked.');
+    root.find('#ach-status-adoption-result').text('404 adoption preflight not checked. Apply/Restore remain unavailable.');
     root.find('#ach-status-comparison-summary').text('Content comparison not run.');
     root.find('#ach-status-comparison-excerpt').text('');
   }
-  function statusLoad() {
+  function statusLoad(approvedDiscard) {
+    // Guard direct Recheck and automatic reload as well as scope/site changes.
+    if ((statusBusy && !(approvedDiscard === true && statusReadBusy)) ||
+        (approvedDiscard !== true && !statusMayDiscardEdits())) {
+      statusNotice('Unsaved changes kept. Save branding or explicitly discard changes before Recheck.');
+      return;
+    }
+    statusRememberSelection();
     sectionsLoaded.status = false;
     statusReadBusy = true;
     var scope = statusScope();
@@ -1138,19 +1561,19 @@
     });
   }
   function loadStatusSites(reset) {
-    if (root.find('#ach-status-scope').val() !== 'site') return;
+    if (root.find('#ach-status-scope').val() !== 'site' || statusSitesBusy) return;
     if (reset) {
       // Invalidate every older response, even after site -> global -> site.
+      // Never remove the selected option here: a dirty site draft must remain
+      // recoverable if a refresh fails, excludes the site or is still paged.
       statusSitesTicket += 1;
       statusSites = []; statusSitePage = 1; statusSitesMore = true;
       statusSitesBusy = false; statusSitesTrusted = false;
       statusClearPreview();
-      statusLock(statusBusy);
-      root.find('#ach-status-site-id').empty().prop('disabled', true);
-      $('<option>').val('').text('Loading websites...').appendTo(root.find('#ach-status-site-id'));
     }
     if (statusSitesBusy || !statusSitesMore) return;
     statusSitesBusy = true;
+    statusLock(statusBusy);
     root.find('#ach-status-sites-more, #ach-status-sites-retry').prop('disabled', true);
     root.find('#ach-status-sites-state').text('Loading website inventory...');
     var expectedPage = statusSitePage, ticket = statusSitesTicket;
@@ -1184,56 +1607,91 @@
       }
       statusSites = statusSites.concat(newSites);
       statusSitesTrusted = true;
-      var select = root.find('#ach-status-site-id'), selected = select.val();
+      var select = root.find('#ach-status-site-id'), selected = select.val() || '';
       select.empty();
       $('<option>').val('').text('Choose a website...').appendTo(select);
       statusSites.forEach(function (site) {
         $('<option>').val(String(site.id)).text(site.name + ' (ID ' + site.id + ')').appendTo(select);
       });
-      select.val(statusSites.some(function (site) { return String(site.id) === selected; }) ? selected : '');
-      select.prop('disabled', false);
       statusSitePage += 1;
       statusSitesMore = r.has_more;
+      var found = statusSites.some(function (site) { return String(site.id) === selected; });
+      if (selected && !found) {
+        // Keep the prior selected value in the actual DOM so Cancel can
+        // restore it even when an edited site's inventory row disappeared.
+        // This placeholder is NOT a validated native site for any operation.
+        $('<option>').val(selected).text(
+          'Previously selected site ID ' + selected +
+          (statusSitesMore ? ' (load more to verify)' : ' (no longer in inventory)')
+        ).appendTo(select);
+      }
+      select.val(selected);
       root.find('#ach-status-sites-more').prop('hidden', !statusSitesMore).prop('disabled', !statusSitesMore);
-      root.find('#ach-status-sites-state').text(statusSites.length + ' website(s) loaded' + (statusSitesMore ? '; more available.' : '.'));
+      root.find('#ach-status-sites-state').text(
+        statusSites.length + ' website(s) loaded' +
+        (statusSitesMore ? '; more available.' : '.') +
+        (selected && !found ?
+          ' Selected site ID ' + selected +
+          (statusSitesMore ? ' is not yet verified; draft preserved. ' :
+            ' is no longer in refreshed inventory; draft preserved. ') +
+          (statusSitesMore ? 'Load more websites to check it.' :
+            'Save unavailable. Copy your draft or explicitly select another site.') :
+          '')
+      );
       statusLock(statusBusy);
     });
   }
   root.find('#ach-status-sites-more').on('click', function () { loadStatusSites(false); });
   root.find('#ach-status-sites-retry').on('click', function () { loadStatusSites(true); });
-  root.find('#ach-status-load').on('click', statusLoad);
+  root.find('#ach-status-load').on('click', function () { statusLoad(); });
   root.find('#ach-status-scope').on('change', function () {
+    if ((statusBusy && !statusReadBusy) || !statusMayDiscardEdits()) {
+      statusRestoreAcceptedSelection();
+      return;
+    }
     var siteMode = $(this).val() === 'site';
     if (!siteMode) {
       statusSitesTicket += 1;
       statusSitesBusy = false; statusSitesMore = false;
       statusSites = []; statusSitePage = 1; statusSitesTrusted = false;
-      root.find('#ach-status-site-id').empty();
+      root.find('#ach-status-site-id').empty().val('');
       $('<option>').val('').text('Select website scope first').appendTo(root.find('#ach-status-site-id'));
       root.find('#ach-status-sites-state').text('Choose website scope to load current site options.');
     }
     root.find('#ach-status-site-id').prop('disabled', !siteMode || !statusSites.length);
     root.find('#ach-status-sites-retry').prop('hidden', !siteMode);
     root.find('#ach-status-sites-more').prop('hidden', !siteMode || !statusSitesMore);
-    statusLoad();
+    statusLoad(true);
     if (siteMode && !statusSites.length) loadStatusSites(true);
   });
-  root.find('#ach-status-site-id').on('change', statusLoad);
+  root.find('#ach-status-site-id').on('change', function () {
+    if ((statusBusy && !statusReadBusy) || !statusMayDiscardEdits()) {
+      statusRestoreAcceptedSelection();
+      return;
+    }
+    statusLoad(true);
+  });
   // Both the sandbox preview and on-disk comparison are bound to the exact
   // unsaved branding fields. Editing any field must revoke their old evidence.
   root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer')
     .on('input change', function () {
       statusClearPreview();
+      statusLock(statusBusy);
       if (statusRevision === null || statusBusy || !statusSavedBrand) return;
       statusNotice(statusBrandMatchesSaved() ?
         'Fields match saved preferences (Revision ' + statusRevision + ').' :
         'Unsaved changes — select Save branding preferences to keep them.');
     });
   root.find('#ach-status-reset-approve').on('change', function () { statusLock(statusBusy); });
+  root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
+    .on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-preview-button').on('click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
-    if (!scope) { statusNotice('Select a native site ID.', 'error'); return; }
+    if (!scope || !statusTrustedSelection(scope)) {
+      statusNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
+      return;
+    }
     statusClearPreview();
     var ticket = statusTicket, selectedBrand = statusFields();
     statusLock(true);
@@ -1266,6 +1724,8 @@
   function validStatusInspection(r, scope, template, locale) {
     var states = ['Needs Review','Conflict','Unsupported','Unmanaged','File Match'];
     var pageStates = ['Uninspected','Absent','Same bytes','Different bytes'];
+    var routeStates = ['Uninspected','None','Native VHost','Referenced Extension',
+                       'Unreferenced Extension','Alternate','Ambiguous'];
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
     var boundedStrings = function (value, max) {
@@ -1329,6 +1789,11 @@
       typeof r.extension_include_textual === 'boolean' &&
       boundedStrings(r.extensions_scanned, 32) &&
       boundedStrings(r.error_page_sources, 33) &&
+      (r.route_source_state === undefined || routeStates.includes(r.route_source_state)) &&
+      (r.route_source_state !== 'Native VHost' ||
+        r.error_page_sources.includes('site VHost')) &&
+      (r.route_source_state !== 'Unreferenced Extension' ||
+        r.extension_include_textual === false) &&
       ((r.page_file_state === 'Absent' || r.page_file_state === 'Uninspected') ?
         r.page_file_sha256 === null && r.page_file_bytes === null :
         hash(r.page_file_sha256) && Number.isSafeInteger(r.page_file_bytes)) &&
@@ -1347,7 +1812,8 @@
     var scope = statusScope();
     var template = root.find('#ach-status-template').val();
     var locale = root.find('#ach-status-locale').val();
-    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'site' ||
+    if (statusBusy || statusRevision === null || !statusTrustedSelection(scope) ||
+        scope.scope !== 'site' ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
         (template !== '404' && template !== '502')) return;
     var ticket = statusTicket, submittedBrand = statusFields();
@@ -1386,6 +1852,7 @@
           '\nExtension include mentioned in VHost text: ' + (r.extension_include_textual ? 'Yes' : 'No') +
           '\nScanned extension files: ' + (r.extensions_scanned.join(', ') || 'None') +
           '\nSelected-status error_page source references: ' + (r.error_page_sources.join(', ') || 'None observed') +
+          '\nTextual route source: ' + (r.route_source_state || 'Not reported by backend') +
           '\n' + r.note);
         var comparison = r.comparison;
         root.find('#ach-status-comparison-summary').text(
@@ -1398,16 +1865,60 @@
       statusLock(false);
     });
   });
+  function validAdoptionPreview(plan, probe) {
+    var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };
+    var routes = ['Uninspected','None','Native VHost','Referenced Extension',
+                  'Unreferenced Extension','Alternate','Ambiguous'];
+    if (!plan || plan.schema !== 1 || plan.apply_supported !== false ||
+        plan.ownership_verified !== false || plan.recovery_verified !== false ||
+        !routes.includes(plan.route_source_state) ||
+        !['Needs Review','Matches Preview','Backup Required'].includes(plan.state) ||
+        plan.current_sha256 !== probe.page_file_sha256 ||
+        plan.proposed_sha256 !== probe.rendered_sha256 ||
+        (plan.vhost_sha256 !== undefined &&
+          plan.vhost_sha256 !== null && !hash(plan.vhost_sha256)) ||
+        (plan.current_sha256 !== null && !hash(plan.current_sha256)) ||
+        typeof plan.reason !== 'string' || plan.reason.length > 240 ||
+        typeof plan.requires_adoption !== 'boolean' ||
+        typeof plan.requires_backup !== 'boolean') return false;
+    var expected = (probe.state === 'HTTP Match' &&
+      plan.route_source_state === 'Native VHost') ?
+      (probe.body_matches_render ? 'Matches Preview' : 'Backup Required') :
+      'Needs Review';
+    return plan.state === expected &&
+      plan.requires_adoption === (expected === 'Backup Required') &&
+      plan.requires_backup === (expected === 'Backup Required');
+  }
   function validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot) {
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
+    if (root.find('#ach-status-template').val() === '502') {
+      var plan = r && r.adoption_preview;
+      return r && r.status === true && r.schema === 1 && r.template === '502' &&
+        r.state === 'Source Ready' && r.scope === 'native_vhost_source_only' &&
+        r.read_only === true && r.apply_supported === false &&
+        r.nginx_runtime_verified === false && r.http_status === null &&
+        r.body_sha256 === null && !r.body_matches_file && !r.body_matches_render &&
+        r.site_id === Number(scope.site_id) && selectedSite &&
+        r.site_key === selectedSite.name && r.verified_site_snapshot === selectedSnapshot &&
+        r.locale === locale && r.revision === statusRevision &&
+        hash(r.page_file_sha256) && hash(r.rendered_sha256) &&
+        plan && plan.schema === 1 && plan.state === 'Source Ready' &&
+        plan.route_source_state === 'Native VHost' &&
+        plan.apply_supported === false && plan.ownership_verified === false &&
+        plan.recovery_verified === false && hash(plan.vhost_sha256) &&
+        plan.current_sha256 === r.page_file_sha256 &&
+        plan.proposed_sha256 === r.rendered_sha256 &&
+        typeof r.reason === 'string' && r.reason.length <= 240 &&
+        typeof r.note === 'string' && r.note.length <= 600;
+    }
     return r && r.schema === 1 && r.status === true &&
       r.read_only === true && r.apply_supported === false &&
       r.nginx_runtime_verified === false && r.scope === 'loopback_http_80' &&
       r.site_id === Number(scope.site_id) && Number.isSafeInteger(r.site_id) &&
       selectedSite && r.site_key === selectedSite.name &&
       r.verified_site_snapshot === selectedSnapshot &&
-      r.template === '404' && r.locale === locale &&
+      r.template === root.find('#ach-status-template').val() && r.locale === locale &&
       ['HTTP Match','HTTP Mismatch','Needs Review'].includes(r.state) &&
       typeof r.site_key === 'string' && /^[A-Za-z0-9.-]{3,253}$/.test(r.site_key) &&
       typeof r.reason === 'string' && r.reason.length <= 240 &&
@@ -1430,20 +1941,29 @@
         (r.http_404_observed === (r.http_status === 404)) &&
         r.body_matches_file === (r.http_404_observed && r.body_sha256 === r.page_file_sha256) &&
         (r.state === 'HTTP Match' ? r.body_matches_file : !r.body_matches_file)) &&
-      r.body_matches_render === (r.body_matches_file && r.body_sha256 === r.rendered_sha256);
+      r.body_matches_render === (r.body_matches_file && r.body_sha256 === r.rendered_sha256) &&
+      (r.adoption_preview === undefined || validAdoptionPreview(r.adoption_preview, r));
   }
   root.find('#ach-status-probe-button').on('click', function () {
     var scope = statusScope(), locale = root.find('#ach-status-locale').val();
+    var template = root.find('#ach-status-template').val();
     var selectedSite = selectedProbeSite(scope);
     if (statusBusy || statusRevision === null || !scope || !selectedSite ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
-        root.find('#ach-status-template').val() !== '404') return;
+        !['404','502'].includes(template)) return;
     var selectedSnapshot = nativeHostsSnapshot(selectedSite);
     var ticket = statusTicket, submittedBrand = statusFields();
-    root.find('#ach-status-probe-result').text('Checking local HTTP/80 404; website/config files are not changed...');
+    statusProbeEvidence = null;
+    statusManageEvidence = null;
+    root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
+      .prop('checked', false);
+    root.find('#ach-status-probe-result').text(template === '404' ?
+      'Checking local HTTP/80 404 and native site source (read-only)...' :
+      'Inspecting native 502 source (read-only; no error is induced)...');
+    root.find('#ach-status-adoption-result').text('Checking native status extension source prerequisites...');
     statusLock(true);
     request('status_probe', Object.assign({}, scope, submittedBrand, {
-      template:'404', locale:locale,
+      template:template, locale:locale,
       expected_site_key:selectedSite.name,
       expected_site_snapshot:selectedSnapshot
     }), function (r) {
@@ -1455,11 +1975,12 @@
         statusLoadedScope === scope.scope + ':' + scope.site_id &&
         selectedProbeSite(scope) === selectedSite &&
         nativeHostsSnapshot(selectedSite) === selectedSnapshot &&
-        root.find('#ach-status-template').val() === '404' &&
+        root.find('#ach-status-template').val() === template &&
         root.find('#ach-status-locale').val() === locale;
       if (!sameSelection || !validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot)) {
         root.find('#ach-status-probe-result').text(
           'HTTP response evidence unconfirmed or incompatible. No Apply readiness inferred.');
+        root.find('#ach-status-adoption-result').text('Preflight unavailable or incompatible. No Apply/Restore permission.');
       } else {
         root.find('#ach-status-probe-result').text(
           r.state + ': ' + r.reason +
@@ -1470,14 +1991,192 @@
           '\nHTTP body matches site file: ' + (r.body_matches_file ? 'Yes' : 'No') +
           '\nHTTP body matches selected render: ' + (r.body_matches_render ? 'Yes' : 'No') +
           '\n' + r.note);
+        var adoption = r.adoption_preview;
+        if (((template === '404' && r.state === 'HTTP Match' &&
+               r.page_file_sha256 !== r.rendered_sha256) ||
+              (template === '502' && r.state === 'Source Ready')) &&
+            adoption && adoption.route_source_state === 'Native VHost' &&
+            /^[0-9a-f]{64}$/.test(adoption.vhost_sha256 || '')) {
+          statusProbeEvidence = {
+            ticket:ticket, revision:statusRevision, scope:scope.site_id,
+            snapshot:selectedSnapshot, locale:locale, template:template,
+            brand:JSON.stringify(submittedBrand),
+            current:r.page_file_sha256, proposed:r.rendered_sha256,
+            vhost:adoption.vhost_sha256
+          };
+        }
+        root.find('#ach-status-adoption-result').text(adoption ?
+          'Read-only ' + template + ' preflight: ' + adoption.state + ' — ' + adoption.reason +
+          '\nTextual route provenance: ' + adoption.route_source_state +
+          '\nExisting file SHA-256: ' + (adoption.current_sha256 || 'Unavailable') +
+          '\nProposed SHA-256: ' + adoption.proposed_sha256 +
+          '\nExplicit adoption and backup required: ' + (adoption.requires_backup ? 'Yes' : 'Not inferred') +
+          '\nNo write is authorized by this preview. Explicit approval triggers a guarded extension update and shared Nginx reload.' :
+          'This backend supplied no adoption preflight. No Apply/Restore permission.');
       }
       statusLock(false);
     });
   });
+  function validStatusManage(r, action, siteId, snapshot, revision) {
+    var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };
+    var token = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.site_action !== action || r.site_id !== Number(siteId) ||
+        !Number.isSafeInteger(r.site_id) || r.site_id <= 0 ||
+        r.verified_site_snapshot !== snapshot || r.revision !== revision ||
+        r.locale !== root.find('#ach-status-locale').val() ||
+        r.template !== root.find('#ach-status-template').val() ||
+        r.mode !== 'native_status_extension' ||
+        !token(r.request_id) || r.operation_id !== r.request_id ||
+        typeof r.changed !== 'boolean' || !hash(r.page_file_sha256) ||
+        (r.recovery_id !== null && !token(r.recovery_id)) ||
+        r.read_only !== (action === 'recheck')) return false;
+    if (action === 'recheck') {
+      if (!['Unmanaged','Restored','Source Restored','Applied','Recovery Required','Drift','Needs Review',
+             'Orphan Backup','Orphan Drift'].includes(r.state) ||
+          (r.state === 'Source Restored' &&
+           (r.template !== '502' || r.runtime_verified !== false ||
+            r.verification_scope !== 'source_and_nonce_only')) ||
+          r.changed !== false || !hash(r.rendered_sha256)) return false;
+      if (r.state === 'Unmanaged') {
+        return r.recovery_id === null && r.before_sha256 === null &&
+          r.after_sha256 === null;
+      }
+      if (r.state === 'Orphan Backup' || r.state === 'Orphan Drift') {
+        return r.recovery_id === null && hash(r.before_sha256) &&
+          r.after_sha256 === null &&
+          (r.state === 'Orphan Backup' ?
+            r.page_file_sha256 === r.before_sha256 :
+            r.page_file_sha256 !== r.before_sha256);
+      }
+      return token(r.recovery_id) && hash(r.before_sha256) &&
+        hash(r.after_sha256) &&
+        (!['Restored','Source Restored'].includes(r.state) ||
+         r.page_file_sha256 === r.before_sha256) &&
+        (r.state !== 'Applied' || r.page_file_sha256 === r.after_sha256);
+    }
+    return action === 'apply' ?
+      ['Applied','Already Applied','Already Current'].includes(r.state) &&
+      r.changed === (r.state === 'Applied') &&
+      (r.state === 'Already Current' || token(r.recovery_id)) :
+      ['Restored','Source Restored','Already Restored'].includes(r.state) &&
+      (r.state !== 'Source Restored' ||
+       (r.template === '502' && r.runtime_verified === false &&
+        r.verification_scope === 'source_and_nonce_only')) &&
+      (r.state !== 'Already Restored' || r.changed === false) && token(r.recovery_id);
+  }
+  function manageStatusRequest(action) {
+    var scope = statusScope(), site = selectedProbeSite(scope);
+    var template = root.find('#ach-status-template').val();
+    if (statusBusy || statusRevision === null || !scope || !site ||
+        statusLoadedScope !== 'site:' + scope.site_id ||
+        !['404','502'].includes(template)) return;
+    var proposal = statusProbeEvidence, recovery = statusManageEvidence;
+    if (action === 'apply' &&
+        (!sameStatusSelection(proposal) ||
+         root.find('#ach-status-manage-apply-approve').prop('checked') !== true)) return;
+    if (action === 'restore' &&
+        (!sameStatusSelection(recovery) ||
+         !['Applied','Recovery Required'].includes(recovery.state) ||
+         root.find('#ach-status-manage-restore-approve').prop('checked') !== true)) return;
+    var ticket = statusTicket, revision = statusRevision;
+    var brand = statusFields(), snapshot = nativeHostsSnapshot(site);
+    var locale = root.find('#ach-status-locale').val();
+    statusProbeEvidence = null;
+    statusManageEvidence = null;
+    root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
+      .prop('checked', false);
+    root.find('#ach-status-manage-result').text(
+      action === 'recheck' ? 'Reading ' + template + ' status recovery and current source...' :
+      action === 'apply' ? 'Validating native status source and preparing guarded Nginx extension...' :
+      'Checking saved ' + template + ' recovery identity before a guarded Nginx reload...');
+    statusLock(true);
+    request('status_manage', Object.assign({}, scope, brand, {
+      site_action:action, template:template, locale:locale,
+      expected_revision:String(revision),
+      expected_site_key:site.name, expected_site_snapshot:snapshot,
+      expected_page_sha256:proposal ? proposal.current : '',
+      expected_vhost_sha256:proposal ? proposal.vhost : '',
+      expected_render_sha256:proposal ? proposal.proposed : '',
+      expected_recovery_id:recovery ? recovery.recovery_id : '',
+      site_approval:action === 'apply' ? 'apply_exact_site_' + template + '_reload' :
+        action === 'restore' ? 'restore_exact_site_' + template + '_reload' : ''
+    }), function (r) {
+      if (ticket !== statusTicket) return;
+      var same = site === selectedProbeSite(statusScope()) &&
+        statusScope()?.site_id === scope.site_id &&
+        nativeHostsSnapshot(site) === snapshot &&
+        JSON.stringify(statusFields()) === JSON.stringify(brand) &&
+        root.find('#ach-status-locale').val() === locale &&
+        root.find('#ach-status-template').val() === template;
+      if (!same || !validStatusManage(r, action, scope.site_id, snapshot, revision) ||
+          (action === 'apply' && r &&
+            (r.page_file_sha256 !== proposal.proposed ||
+             r.state === 'Already Current' && r.recovery_id !== null)) ||
+          (action === 'restore' && r &&
+            (r.page_file_sha256 !== recovery.before_sha256 ||
+             r.recovery_id !== recovery.recovery_id))) {
+        root.find('#ach-status-manage-result').text(
+          action === 'recheck' ?
+          'Recheck incomplete or incompatible. No managed status is asserted.' :
+          'Write outcome unconfirmed. Recheck saved site recovery before any retry; do not assume success.');
+      } else {
+        if (action === 'recheck' && r.recovery_id) {
+          statusManageEvidence = {
+            ticket:ticket, revision:revision, scope:scope.site_id,
+            snapshot:snapshot, locale:locale, template:template,
+            brand:JSON.stringify(brand),
+            state:r.state, recovery_id:r.recovery_id,
+            before_sha256:r.before_sha256, after_sha256:r.after_sha256
+          };
+        }
+        root.find('#ach-status-manage-result').text(
+          r.state + (r.changed ? ' — confirmed managed extension change' : ' — no managed extension change') +
+          (r.state === 'Source Restored' ?
+            ' — original 502 response NOT verified; source and retired operation nonce checked' : '') +
+          (action === 'recheck' && r.state === 'Applied' &&
+           r.rendered_sha256 !== r.after_sha256 ?
+            ' — saved page differs from current selected branding/template' : '') +
+          (action === 'recheck' && r.state === 'Orphan Backup' ?
+            ' — durable backup matches the site file, but no journal exists. Restore is unavailable. Recheck live HTTP, then explicitly approve a new Apply to safely recover the backup.' : '') +
+          (action === 'recheck' && r.state === 'Orphan Drift' ?
+            ' — current site 404 differs from an unjournaled backup. No automatic overwrite or Restore is allowed; manual investigation is required.' : '') +
+          '\nWebsite ID: ' + r.site_id +
+          '\n' + (template === '502' && r.state === 'Source Restored' ?
+            'Current restored 502.html SOURCE SHA-256: ' :
+            'Current ' + template + ' status SHA-256: ') + r.page_file_sha256 +
+          '\n' + (template === '502' ?
+            'Previous site 502.html SOURCE SHA-256 (not an observed HTTP 502): ' :
+            'Previous HTTP 404 baseline SHA-256: ') +
+          (r.before_sha256 || recovery?.before_sha256 || 'None stored') +
+          '\nRecovery ID: ' + (r.recovery_id || 'None') +
+          '\nOperation ID: ' + r.operation_id +
+          '\nOnly this selected site\'s plugin-owned status extension was targeted. Nginx is shared; the guarded Apply/Restore performs a service reload. Independently validate non-target health.');
+        if (action !== 'recheck') {
+          root.find('#ach-status-probe-result').text(
+            'Prior HTTP evidence invalidated by the write. Run a fresh 404 probe if needed.');
+          root.find('#ach-status-adoption-result').text('Previous read-only preflight invalidated.');
+        }
+      }
+      statusLock(false);
+    });
+  }
+  root.find('#ach-status-manage-recheck').on('click', function () {
+    manageStatusRequest('recheck');
+  });
+  root.find('#ach-status-manage-apply').on('click', function () {
+    manageStatusRequest('apply');
+  });
+  root.find('#ach-status-manage-restore').on('click', function () {
+    manageStatusRequest('restore');
+  });
   root.find('#ach-status-save').on('click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
-    if (!scope) { statusNotice('Select a native site ID.', 'error'); return; }
+    if (!scope || !statusTrustedSelection(scope)) {
+      statusNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
+      return;
+    }
     var priorRevision = statusRevision, submitted = statusFields();
     statusNotice('Saving ' + scope.scope + ' branding preferences...');
     statusLock(true);
@@ -1493,7 +2192,6 @@
         typeof r.source === 'string';
       if (!acknowledged) {
         statusRevision = null;
-        statusSavedBrand = null;
         statusNotice('Save not confirmed. Recheck saved branding before retrying.', 'error');
       } else {
         statusRevision = r.revision;
@@ -1513,7 +2211,7 @@
     if (statusBusy || statusRevision === null ||
         root.find('#ach-status-reset-approve').prop('checked') !== true) return;
     var scope = statusScope();
-    if (!scope) return;
+    if (!statusTrustedSelection(scope)) return;
     var priorRevision = statusRevision;
     statusNotice('Resetting ' + scope.scope + ' branding preferences...');
     statusLock(true);
@@ -1530,7 +2228,6 @@
         typeof r.source === 'string';
       if (!acknowledged) {
         statusRevision = null;
-        statusSavedBrand = null;
         statusNotice('Reset not confirmed. Recheck saved branding before retrying.', 'error');
       } else {
         statusRevision = r.revision;
@@ -1606,6 +2303,144 @@
   root.find('#ach-activity-level').on('change', loadActivity);
   root.find('#ach-activity-module').on('change', loadActivity);
   var phpInventoryTicket = 0, phpInventoryBusy = false, phpInventory = new Map();
+  var phpRuntimeTicket = 0, phpRuntimeBusy = false;
+  function phpRuntimeLock() {
+    var version = String(root.find('#ach-php-version').val() || '');
+    root.find('#ach-php-runtime-check').prop('disabled',
+      phpRuntimeBusy || phpInventoryBusy || !phpInventory.get(version)?.preview_candidate);
+  }
+  function clearPhpTopology(reason) {
+    root.find('#ach-php-topology-rows').empty();
+    root.find('#ach-php-topology-summary').text(reason ||
+      'Site-to-PHP file mapping not established. No complete shared impact boundary inferred.');
+  }
+  function invalidatePhpRuntime(reason) {
+    ++phpRuntimeTicket;
+    phpRuntimeBusy = false;
+    root.find('#ach-php-runtime-result').text(reason ||
+      'Select installed PHP and Inspect runtime. No process or effective pool state assumed.');
+    clearPhpTopology('Site mapping revoked: selected PHP source or inventory may have changed.');
+    phpRuntimeLock();
+  }
+  function validPhpRuntime(r, version) {
+    var path = function (v) {
+      return typeof v === 'string' && v.length <= 200 &&
+        /^\/[A-Za-z0-9_./-]+\.sock$/.test(v) && !v.includes('/../') &&
+        !v.includes('//');
+    };
+    if (!r || r.status !== true || r.schema !== 1 || r.version !== version ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.apply_eligible !== false ||
+        !['Observed','Partial','Needs Review'].includes(r.state) ||
+        !['Matching Master','Not Observed','Needs Review'].includes(r.master_state) ||
+        !['Bound Listener','Not Observed','Missing','Needs Review'].includes(r.socket_state) ||
+        (r.socket_path !== null && !path(r.socket_path)) ||
+        (r.master_pid !== null &&
+         (!Number.isSafeInteger(r.master_pid) || r.master_pid <= 0 || r.master_pid > 4194304)) ||
+        typeof r.reason !== 'string' || r.reason.length > 250 ||
+        typeof r.note !== 'string' || r.note.length > 400) return false;
+    if (r.state === 'Observed') {
+      return r.master_state === 'Matching Master' && r.socket_state === 'Bound Listener' &&
+        r.master_pid !== null && path(r.socket_path) && r.reason === '';
+    }
+    if (r.state === 'Partial') {
+      return r.master_state === 'Matching Master' &&
+        ['Missing','Not Observed'].includes(r.socket_state) &&
+        r.master_pid !== null && path(r.socket_path) && r.reason.length > 0;
+    }
+    return ['Not Observed','Needs Review'].includes(r.master_state) &&
+      r.socket_state === 'Needs Review' && r.master_pid === null && r.reason.length > 0;
+  }
+  function validPhpTopology(t, version, runtime) {
+    var socket = function (v) {
+      return typeof v === 'string' && v.length <= 200 &&
+        /^\/[A-Za-z0-9_./-]+\.sock$/.test(v) &&
+        !v.includes('/../') && !v.includes('//');
+    };
+    if (!t || t.schema !== 1 || t.version !== version || t.scope !== 'shared_service' ||
+        t.read_only !== true || t.runtime_verified !== false || t.apply_eligible !== false ||
+        !['File Mapping','Partial','Needs Review'].includes(t.state) ||
+        (t.pool !== null && t.pool !== 'www') ||
+        (t.config_path !== null && t.config_path !== '/www/server/php/' + version + '/etc/php-fpm.conf') ||
+        (t.socket_path !== null && !socket(t.socket_path)) ||
+        !Number.isSafeInteger(t.site_count) || t.site_count < 0 || t.site_count > 100 ||
+        typeof t.reason !== 'string' || t.reason.length > 250 ||
+        typeof t.note !== 'string' || t.note.length > 600 ||
+        !Array.isArray(t.matched_sites) || !Array.isArray(t.other_sites) ||
+        !Array.isArray(t.unresolved_sites) ||
+        (t.source_sha256 !== null &&
+         (typeof t.source_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(t.source_sha256)))) return false;
+    var entries = t.matched_sites.concat(t.other_sites,t.unresolved_sites), seen=new Set();
+    if (entries.length !== t.site_count) return false;
+    for (var item of entries) {
+      if (!item || typeof item !== 'object' || Array.isArray(item) ||
+          !Number.isSafeInteger(item.id) || item.id < 1 || item.id > 2147483647 ||
+          typeof item.site_key !== 'string' || !item.site_key ||
+          item.site_key.length > 255 || seen.has(item.id)) return false;
+      seen.add(item.id);
+    }
+    for (var other of t.other_sites) {
+      var validCode = other.version === '00' ||
+        typeof other.version === 'string' && /^[1-9][0-9]{1,2}$/.test(other.version) &&
+        (Number(other.version[0]) > 8 ||
+         Number(other.version[0]) === 8 && Number(other.version.slice(1)) >= 1);
+      if (!validCode || other.version === version ||
+          (other.version === '00' ? other.socket_path !== null : !socket(other.socket_path))) return false;
+    }
+    for (var unresolved of t.unresolved_sites) {
+      if (typeof unresolved.reason !== 'string' || !unresolved.reason ||
+          unresolved.reason.length > 180) return false;
+    }
+    if (t.state === 'Needs Review') {
+      return t.site_count === 0 && entries.length === 0 &&
+        t.source_sha256 === null && t.reason.length > 0;
+    }
+    if (t.pool !== 'www' || !socket(t.socket_path) ||
+        t.config_path !== '/www/server/php/' + version + '/etc/php-fpm.conf' ||
+        runtime.state === 'Observed' && runtime.socket_path !== t.socket_path) return false;
+    if (t.state === 'Partial')
+      return t.unresolved_sites.length > 0 && t.source_sha256 === null && t.reason.length > 0;
+    return t.unresolved_sites.length === 0 && t.source_sha256 !== null && t.reason === '';
+  }
+  function renderPhpTopology(mapping, version) {
+    var rows = root.find('#ach-php-topology-rows').empty();
+    if (mapping.state === 'Needs Review') {
+      root.find('#ach-php-topology-summary').text(
+        'PHP ' + version + ' site file mapping: Needs Review — ' + mapping.reason +
+        '\nNo site assignment is trusted. ' + mapping.note);
+      return;
+    }
+    var displayed = mapping.matched_sites.map(function (item) {
+      return {id:item.id,key:item.site_key,assignment:'PHP '+version+' / www',
+        note:'File-assigned to selected shared socket'};
+    }).concat(mapping.other_sites.map(function (item) {
+      return {id:item.id,key:item.site_key,
+        assignment:item.version === '00' ? 'No PHP (00)' : 'PHP '+item.version+' / www',
+        note:'Other native file/socket assignment'};
+    }),mapping.unresolved_sites.map(function (item) {
+      return {id:item.id,key:item.site_key,assignment:'Needs Review',note:item.reason};
+    }));
+    displayed.sort(function(a,b){return a.id-b.id;});
+    displayed.forEach(function (site) {
+      var tr=$('<tr>');
+      $('<td>').text(String(site.id)).appendTo(tr);
+      $('<td>').text(site.key).appendTo(tr);
+      $('<td>').text(site.assignment).appendTo(tr);
+      $('<td>').text(site.note).appendTo(tr);
+      rows.append(tr);
+    });
+    if (!displayed.length) {
+      rows.append($('<tr>').append($('<td colspan="4">').text('No native websites registered.')));
+    }
+    root.find('#ach-php-topology-summary').text(
+      'PHP '+version+' — '+mapping.state+' (native FILE attribution only)' +
+      '\nBound [www] Unix socket source: '+mapping.socket_path +
+      '\nSites: '+mapping.site_count+' total, '+mapping.matched_sites.length+
+      ' assigned to selected service, '+mapping.other_sites.length+
+      ' other/no-PHP, '+mapping.unresolved_sites.length+' unresolved.'+
+      (mapping.reason ? '\n'+mapping.reason : '')+
+      '\n'+mapping.note+'\nApply/Restore eligibility: NEVER inferred from file topology.');
+  }
   function validPhpInventory(r) {
     if (!r || r.schema !== 1 || r.read_only !== true || r.runtime_verified !== false ||
         ['Observed','Partial','Needs Review'].indexOf(r.state) < 0 ||
@@ -1645,6 +2480,7 @@
     sectionsLoaded.php = false;
     var previous = String(root.find('#ach-php-version').val() || '');
     phpInventory = new Map();
+    invalidatePhpRuntime('PHP inventory refresh invalidated earlier process/socket evidence.');
     root.find('#ach-php-version').empty().val('').prop('disabled', true);
     $('<option>').val('').text('Select installed PHP').appendTo(root.find('#ach-php-version'));
     root.find('#ach-php-discover').prop('disabled', true);
@@ -1672,6 +2508,7 @@
       });
       root.find('#ach-php-version').val(selectable && phpInventory.get(previous)?.preview_candidate ? previous : '');
       root.find('#ach-php-version').prop('disabled', !selectable);
+      phpRuntimeLock();
       root.find('#ach-php-discovery-status').text(
         r.versions.length + ' PHP version(s) observed; ' + selectable +
         ' file-preview candidate(s). ' + (r.reason ? r.reason + '. ' : '') + r.note
@@ -1679,11 +2516,56 @@
     }, function () { return ticket === phpInventoryTicket; });
   }
   root.find('#ach-php-discover').on('click', loadPhpInventory);
+  root.find('#ach-php-version').on('change', function () {
+    invalidatePhpRuntime('PHP version changed. Inspect the selected version again.');
+  });
+  root.find('#ach-php-runtime-check').on('click', function () {
+    var selected = String(root.find('#ach-php-version').val() || '');
+    if (phpInventoryBusy || phpRuntimeBusy ||
+        !phpInventory.get(selected)?.preview_candidate) return;
+    var ticket = ++phpRuntimeTicket, inventory = phpInventoryTicket;
+    phpRuntimeBusy = true;
+    phpRuntimeLock();
+    root.find('#ach-php-runtime-result').text(
+      'Inspecting exact PHP binary/master process/Unix socket in Linux procfs...');
+    clearPhpTopology('Checking native site-to-versioned socket source mappings...');
+    request('inspect_php_runtime', {php_version:selected}, function (r) {
+      if (ticket !== phpRuntimeTicket || inventory !== phpInventoryTicket ||
+          String(root.find('#ach-php-version').val() || '') !== selected) return;
+      phpRuntimeBusy = false;
+      phpRuntimeLock();
+      if (!validPhpRuntime(r, selected)) {
+        root.find('#ach-php-runtime-result').text(
+          'PHP runtime evidence unavailable/incompatible. No running state or Apply eligibility inferred.');
+        clearPhpTopology('Untrusted PHP runtime response; no site file mapping is accepted.');
+        return;
+      }
+      if (validPhpTopology(r.site_mapping, selected, r))
+        renderPhpTopology(r.site_mapping, selected);
+      else clearPhpTopology('Native PHP file mapping missing or incompatible. No site-service attribution inferred.');
+      root.find('#ach-php-runtime-result').text(
+        'PHP ' + selected + ' — ' + r.state +
+        '\nMaster process: ' + r.master_state +
+        '\nMaster PID: ' + (r.master_pid || 'Unavailable') +
+        '\nUnix socket path: ' + (r.socket_path || 'Unavailable') +
+        '\nSocket listener: ' + r.socket_state +
+        (r.reason ? '\nReason: ' + r.reason : '') +
+        '\n' + r.note +
+        '\nPHP-FPM Apply eligibility: not inferred from this inspection.');
+    }, function () {
+      return ticket === phpRuntimeTicket && inventory === phpInventoryTicket &&
+        String(root.find('#ach-php-version').val() || '') === selected;
+    });
+  });
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     if (['overview','websites','php','status','activity'].indexOf(tab) < 0) return;
     root.find('[data-tab]').attr('aria-selected', 'false').attr('tabindex', '-1');
     $(this).attr('aria-selected', 'true').attr('tabindex', '0');
+    // Mobile horizontal tabs can extend past the nav viewport. Keep the
+    // selected control visible for mouse, touch and keyboard navigation.
+    if (typeof this.scrollIntoView === 'function')
+      this.scrollIntoView({block:'nearest', inline:'nearest'});
     root.find('[data-view]').prop('hidden', true);
     root.find('[data-view="' + tab + '"]').prop('hidden', false);
     if (root[0]) { var body = root[0].querySelector('#ach-content'); if (body) body.scrollTop = 0; }
@@ -1848,6 +2730,7 @@
     phpPreviewEligible = false;
     resetFpmPlan();
     resetRecovery();
+    invalidatePhpRuntime('PHP-FPM Apply attempt invalidated prior master/socket and site source evidence. Inspect again.');
     fpmLock(true);
     markFpmOperationPending('Apply');
     request('fpm_apply', Object.assign({}, fieldsNow, approval), function (r) {
@@ -1922,7 +2805,9 @@
   root.find('#ach-fpm-rollback').on('click', function () {
     if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
     var op = fpmRecovery.operation_id, current = fpmRecovery;
-    resetRecovery(); fpmLock(true);
+    resetRecovery();
+    invalidatePhpRuntime('PHP-FPM Restore attempt invalidated prior master/socket and site source evidence. Inspect again.');
+    fpmLock(true);
     markFpmOperationPending('Restore');
     request('fpm_rollback', {php_version:'85', approved_scope:'PHP85-www-shared-service',
       operation_id:op, expected_impact:current.impact_sha256,
