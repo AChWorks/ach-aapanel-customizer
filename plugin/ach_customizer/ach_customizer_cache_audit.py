@@ -27,11 +27,12 @@ DIRECTIVES = (
     "fastcgi_cache_purge", "fastcgi_cache_path", "fastcgi_cache_valid",
 )
 NAMES = re.compile(
-    # A directive must begin at a line boundary or immediately after an
-    # Nginx statement/brace separator. A cache path like
-    # /www/server/fastcgi_cache must NOT count as a second directive.
-    r"(?m)(?:^|[;{}])[ \t]*(" + "|".join(DIRECTIVES) + r")(?=\s)"
+    # Recognize unmodelled FastCGI cache controls too. A path containing
+    # "fastcgi_cache" is not a directive: require a statement boundary.
+    r"(?m)(?:^|[;{}])[ \t]*(fastcgi_cache(?:_[A-Za-z_]+)?|"
+    r"fastcgi_no_cache|fastcgi_ignore_headers)(?=\s)"
 )
+ARG_TOKEN = re.compile(r"""[^\s'"\\;{}]+|"[^"\\]*"|'[^'\\]*'""")
 LINES = re.compile(
     r"(?m)^[ \t]*(" + "|".join(DIRECTIVES) +
     r")[ \t]+([^;{}\r\n]{1,1024});[ \t]*(?=\r?$)"
@@ -56,8 +57,10 @@ def _text_and_signature(path):
 
 
 def _statements(text):
-    """Fail closed on inline/unsupported cache statements, don't silently skip."""
+    """Fail closed on inline, unknown or ambiguous cache statements."""
     found = NAMES.findall(text)
+    if any(name not in DIRECTIVES for name in found):
+        raise CacheAuditError("Unsupported Nginx FastCGI-cache control requires review")
     rows = LINES.findall(text)
     if len(rows) != len(found):
         raise CacheAuditError("Unsupported/inline Nginx FastCGI-cache statement")
@@ -68,6 +71,30 @@ def _statements(text):
             raise CacheAuditError("Malformed Nginx FastCGI-cache directive")
         output[name].append(value)
     return output
+
+
+def _argument_tokens(arguments):
+    """Recognize simple Nginx quoted/unquoted tokens, not arbitrary escapes.
+
+    Escapes and concatenated quote fragments have context-specific Nginx
+    semantics; rejecting them is safer than dropping a security-relevant flag.
+    """
+    result = []
+    end = 0
+    for match in ARG_TOKEN.finditer(arguments):
+        gap = arguments[end:match.start()]
+        if gap.strip() or (result and not gap):
+            raise CacheAuditError("Ambiguous Nginx FastCGI argument quoting")
+        token = match.group()
+        if token.startswith(('"', "'")):
+            token = token[1:-1]
+        if not token or any(char.isspace() for char in token):
+            raise CacheAuditError("Unsupported compound Nginx FastCGI argument")
+        result.append(token)
+        end = match.end()
+    if arguments[end:].strip() or not result:
+        raise CacheAuditError("Ambiguous Nginx FastCGI argument quoting")
+    return result
 
 
 def _merge_directives(*sources):
@@ -115,7 +142,7 @@ def _site_source(site_key, vhost_root, nginx_root, rewrite_root):
         raise CacheAuditError("PHP snippet has uninspected FastCGI nested includes")
     for part in nested:
         params, params_sig = _text_and_signature(Path(nginx_root) / part)
-        if (re.search(r"(?m)(?:^|[;{}])[ \t]*include(?=\s)", params)
+        if (re.search(r"\b(?:include|location)\b", params)
                 or _unsupported_nginx_upstream(params)):
             raise CacheAuditError("FastCGI parameter include has unresolved routing")
         sources.append(params)
@@ -185,6 +212,11 @@ def _analyze_selected(directives, zone_state, zone, global_zones, peers):
             findings.append(name)
 
     active = zone_state == "Direct Zone"
+    # A source-only scan cannot infer Nginx location/server precedence.
+    # Even two literal keys with identical values may apply at different
+    # scopes; never combine them into one favorable host-partition signal.
+    if len(directives["fastcgi_cache_key"]) > 1:
+        raise CacheAuditError("Multiple FastCGI cache-key scopes require review")
     if active:
         if not directives["fastcgi_cache_bypass"]:
             add("NO_DIRECT_CACHE_BYPASS")
@@ -193,7 +225,7 @@ def _analyze_selected(directives, zone_state, zone, global_zones, peers):
         if not directives["fastcgi_cache_key"]:
             add("KEY_NOT_DIRECTLY_OBSERVED")
         else:
-            key = " ".join(directives["fastcgi_cache_key"])
+            key = directives["fastcgi_cache_key"][0]
             if not re.search(r"\$(?:host|http_host|server_name)(?![A-Za-z0-9_])", key):
                 add("HOST_PARTITION_NOT_OBSERVED")
         if zone not in global_zones:
@@ -207,11 +239,12 @@ def _analyze_selected(directives, zone_state, zone, global_zones, peers):
     }
     ignored = {
         recognized_headers[field.lower()] for entry in directives["fastcgi_ignore_headers"]
-        for field in entry.split() if field.lower() in recognized_headers
+        for field in _argument_tokens(entry) if field.lower() in recognized_headers
     }
+    methods = [_argument_tokens(entry) for entry in directives["fastcgi_cache_methods"]]
     if active and ignored:
         add("RESPONSE_CACHE_HEADER_IGNORED")
-    if active and any("POST" in entry.split() for entry in directives["fastcgi_cache_methods"]):
+    if active and any(token.upper() == "POST" for entry in methods for token in entry):
         add("NON_GET_CACHE_METHOD")
     if directives["fastcgi_cache_purge"]:
         add("PURGE_DIRECTIVE_OBSERVED")
@@ -281,6 +314,9 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         first = scan()
         if first != scan():
             raise CacheAuditError("Nginx/native website sources changed during cache audit")
+        if (panel_public.get_webserver() != "nginx" or
+                str(panel_public.get_panel_version()).strip() != "8.0.7"):
+            raise CacheAuditError("Native web engine or panel version changed during audit")
         sites, globals_, directives, zone_state, zone, peers, unresolved, fingerprints = first
         findings, ignored = _analyze_selected(directives, zone_state, zone, globals_, peers)
         host_seen = any(re.search(

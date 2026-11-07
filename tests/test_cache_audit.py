@@ -182,6 +182,84 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         self.assertEqual(result["ignore_headers"], ["Cache-Control", "Set-Cookie"])
         self.assertIn("RESPONSE_CACHE_HEADER_IGNORED", result["findings"])
 
+    def test_quoted_security_relevant_header_and_method_arguments(self):
+        php = self.nginx / "enable-php-85-wpfastcgi.conf"
+        php.write_text(self.native_snippet.replace(
+            " fastcgi_cache_valid 200 10m;",
+            " fastcgi_ignore_headers \"Set-Cookie\" 'CACHE-CONTROL';\n"
+            ' fastcgi_cache_methods GET HEAD "post";\n'
+            " fastcgi_cache_valid 200 10m;"
+        ))
+        result = self.inspect()
+        self.assertEqual(result["state"], "Source Observed", result)
+        self.assertEqual(result["ignore_headers"], ["Cache-Control", "Set-Cookie"])
+        self.assertIn("RESPONSE_CACHE_HEADER_IGNORED", result["findings"])
+        self.assertIn("NON_GET_CACHE_METHOD", result["findings"])
+
+    def test_ambiguous_quotes_and_escapes_never_suppress_security_findings(self):
+        php = self.nginx / "enable-php-85-wpfastcgi.conf"
+        for arguments in ('"Set-Cookie', 'Set-Cookie\\\\', '"Set-Cookie Cache-Control"',
+                          'Set-Cookie"Cache-Control"'):
+            with self.subTest(arguments=arguments):
+                php.write_text(self.native_snippet.replace(
+                    " fastcgi_cache_valid 200 10m;",
+                    " fastcgi_ignore_headers " + arguments + ";\n"
+                    " fastcgi_cache_valid 200 10m;"
+                ))
+                result = self.inspect()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertIsNone(result["source_sha256"])
+
+    def test_conflicting_keys_in_different_sources_are_not_aggregated(self):
+        php = self.nginx / "enable-php-85-wpfastcgi.conf"
+        vhost = self.vhost / "wp.test.conf"
+        for parent, child in (("$scheme$host$request_uri", "$scheme$request_uri"),
+                              ("$scheme$request_uri", "$scheme$host$request_uri")):
+            with self.subTest(parent=parent):
+                vhost.write_text(
+                    "server {\n server_name wp.test;\n"
+                    ' fastcgi_cache_key "' + parent + '";\n'
+                    " include enable-php-85-wpfastcgi.conf;\n}\n")
+                php.write_text(self.native_snippet.replace(
+                    "$scheme$request_method$host$request_uri", child))
+                result = self.inspect()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertFalse(result["host_key_variable_seen"])
+                self.assertIsNone(result["source_sha256"])
+
+    def test_unmodelled_cache_controls_and_parameter_routing_require_review(self):
+        php = self.nginx / "enable-php-85-wpfastcgi.conf"
+        for directive in ("fastcgi_cache_use_stale updating;",
+                          "fastcgi_cache_background_update on;",
+                          "fastcgi_cache_revalidate on;",
+                          "fastcgi_cache_lock on;"):
+            with self.subTest(directive=directive):
+                php.write_text(self.native_snippet.replace(
+                    " fastcgi_cache_valid 200 10m;",
+                    " " + directive + "\n fastcgi_cache_valid 200 10m;"))
+                self.assertEqual(self.inspect()["state"], "Needs Review")
+        php.write_text(self.native_snippet)
+        params = self.nginx / "fastcgi.conf"
+        params.write_text("location /private { return 200; }\n")
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+
+    def test_platform_identity_change_during_scan_is_not_observed(self):
+        initial = self.inspect()
+        self.assertEqual(initial["state"], "Source Observed")
+        original = audit._site_source
+        called = False
+        def mutate_platform(*args, **kwargs):
+            nonlocal called
+            value = original(*args, **kwargs)
+            if not called:
+                self.panel.version = "9.0.0"
+                called = True
+            return value
+        with patch.object(audit, "_site_source", side_effect=mutate_platform):
+            result = self.inspect()
+        self.assertEqual(result["state"], "Needs Review")
+        self.assertIsNone(result["source_sha256"])
+
     def test_incomplete_other_site_is_partial_and_cannot_infer_complete_scope(self):
         self.make_vhost("shop.test", "/tmp/operator-overrides.conf")
         result = self.inspect()
