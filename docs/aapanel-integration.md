@@ -31,6 +31,14 @@ explicitly plugin-owned form key for both actions. Keep `action`, `name`, and
 Retain the normal aaPanel `x-http-token`, primary-administrator authorization
 and optimistic preference revision; this is not permission to weaken any gate.
 
+## Native site lifecycle drift and reviewed baseline (Issue #1, development only)
+
+The manual compare_site_changes full-primary-admin POST reads at most 100 native aaPanel sites identities and their bounded domain bindings through strict pre-coercion validation of the existing site inventory API. Native domain reads are paginated in bounded 20-site batches (up to 24 bindings per site; 2,400 total) with duplicate row-identity detection; two complete read passes must agree. Only site key, document root, panel status and bound-domain/port differences against a prior baseline are reported. Rows are never inferred from DNS, files, Nginx loaded configuration, PHP services or WordPress content. Invalid/unreadable/ambiguous native data and over-limit inventories fail closed without storing a partial baseline.
+
+Initially no baseline exists: Compare displays all current candidate records (including document roots, site status and actual domain/port bindings). Existing baseline differences display before/after values rather than field names alone. The user must explicitly check review confirmation and select **Save reviewed baseline**. The save_site_baseline endpoint requires the exact source SHA-256 and optimistic baseline **and Monitor** revisions. It performs two source passes before and two while holding the shared plugin-owned state lock, and revalidates the Monitor-enabled policy and revision under that lock immediately before publishing. If another administrator disables either the Overall Monitor or Website inventory module, or changes policy revision, the write is denied. A verified save stores only ach_customizer.sites-baseline.json in the owner-checked aaPanel persistent data directory (0600), using atomic replace, fsync and no-follow file operations. Failure after rename may have committed; the UI must start with a new Compare rather than blindly retrying. No live host configuration or vendor aaPanel core is modified.
+
+This feature is source-only and does not establish effective/healthy Nginx website routing, guarantee identification of a reused native site ID with identical records, prevent changes after the final database read, schedule automated scans or provide repair/Apply/Auto-enforce. Background reconciliation, policy migration and native installed test evidence are separate acceptance work; do not mistake Source checks for Issue #21 acceptance.
+
 ## Native aaPanel dialog UI (unreleased UI refinement)
 
 The ACh Customizer management surface follows the compact Nginx-management

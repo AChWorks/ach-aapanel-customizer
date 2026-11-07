@@ -296,6 +296,15 @@
       </div>
       <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"><tr><td colspan="5">Website inventory not loaded.</td></tr></tbody></table><div id="ach-sites-loading" class="ach-table-skeleton" aria-hidden="true" hidden><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div></div></div>
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
+      <div class="ach-note" aria-label="Native website lifecycle Monitor">
+        <strong>Website lifecycle changes (read-only)</strong>
+        <p>Compare all supported native aaPanel site IDs, site keys, roots, enabled status and bound domain/port records to the last explicitly saved baseline. Does not inspect effective Nginx routing, PHP, DNS or live content. Up to 100 sites; new/removed sites and aaPanel DB changes are never automatically enforced.</p>
+        <div class="ach-controls"><button type="button" id="ach-site-changes-compare">Compare website records</button></div>
+        <p id="ach-site-changes-status" role="status" aria-live="polite">No baseline comparison loaded.</p>
+        <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Change</th><th>Site key</th><th>Changed database fields</th></tr></thead><tbody id="ach-site-changes-rows"></tbody></table></div>
+        <label><input id="ach-site-changes-approve" type="checkbox" disabled /> I reviewed the current comparison and want to replace the saved plugin-owned baseline.</label>
+        <div class="ach-controls"><button type="button" id="ach-site-changes-save" class="btn btn-warning" disabled>Save reviewed baseline</button></div>
+      </div>
       <p class="ach-note"><strong>Local hosts override check (read-only):</strong> inspect exact site-bound names in origin-local /etc/hosts. Loopback does not prove DNS or Gateway failure; no correction is offered.</p>
       <div class="ach-controls"><label for="ach-hosts-site-id">Website (current inventory page)</label><select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts</button></div>
       <p class="ach-note">Select a discovered website above, or use Previous / Next to inspect another page. The same selection also supports the separate read-only FastCGI cache source audit below. Neither diagnosis tests a remote host or authorizes changing Nginx/cache files.</p>
@@ -456,6 +465,7 @@
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
+  var siteChangesBusy = false, siteChangesTicket = 0, siteChangesSnapshot = null;
   // Keep the native dialog mounted. Switching panels does not discard unsaved
   // edits or re-fetch previously accepted read-only data without Refresh.
   var sectionsLoaded = {overview:false, websites:false, php:false, status:false, activity:false};
@@ -500,8 +510,19 @@
     root.find('#ach-' + kind + '-loading').prop('hidden', !busy);
     root.find('#ach-' + kind + '-rows').prop('hidden', busy);
   }
+  function resetSiteChanges(note) {
+    siteChangesTicket++;
+    siteChangesBusy = false;
+    siteChangesSnapshot = null;
+    root.find('#ach-site-changes-approve').prop('checked', false).prop('disabled', true);
+    root.find('#ach-site-changes-save').prop('disabled', true);
+    root.find('#ach-site-changes-compare').prop('disabled', false);
+    root.find('#ach-site-changes-rows').empty();
+    root.find('#ach-site-changes-status').text(note || 'Comparison needs Refresh.');
+  }
   function invalidateWebsitesSnapshot() {
     // Reject an inventory request started under an earlier Monitor policy.
+    resetSiteChanges('Monitor policy changed; compare again after Refresh.');
     siteTicket++;
     siteBusy = false;
     tableBusy('sites', false);
@@ -540,7 +561,7 @@
   function hasPotentialActivity(method) {
     return method === 'set_control' || method === 'inspect_local_hosts' ||
       method === 'get_php_versions' || method === 'status_save' ||
-      method === 'status_probe' ||
+      method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'fpm_apply' || method === 'fpm_rollback';
   }
   function validInventoryPage(r, expectedPage) {
@@ -583,7 +604,7 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|status_(save|reset)|fpm_(apply|rollback))$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset)|fpm_(apply|rollback))$/.test(method)) {
       msg(t.loading, false);
     }
     $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : 20000, dataType:'json' })
@@ -841,6 +862,7 @@
   });
   function sites() {
     if (siteBusy) return;
+    resetSiteChanges('Website inventory refresh invalidated the earlier comparison. Compare again.');
     if (websitePolicyState !== 'stable') {
       root.find('#ach-sites-refresh').prop('disabled', true);
       root.find('#ach-prev, #ach-next').prop('disabled', true);
@@ -906,6 +928,168 @@
       root.find('#ach-next').prop('disabled', !hasMore);
     });
   }
+  function validSiteChangesSite(site, id) {
+    if (!site || typeof site !== 'object' || Array.isArray(site) ||
+        !Number.isSafeInteger(site.id) || site.id !== id || id <= 0 ||
+        typeof site.name !== 'string' || !site.name.trim() || site.name.length > 255 ||
+        typeof site.document_root !== 'string' || site.document_root.length > 2048 ||
+        typeof site.panel_status !== 'string' || site.panel_status.length > 64 ||
+        !Array.isArray(site.bound_domains) || site.bound_domains.length > 24) return false;
+    var seen = new Set();
+    return site.bound_domains.every(function (binding) {
+      if (!Array.isArray(binding) || binding.length !== 2 ||
+          typeof binding[0] !== 'string' || !binding[0].trim() || binding[0].length > 255 ||
+          !Number.isSafeInteger(binding[1]) || binding[1] < 1 || binding[1] > 65535) return false;
+      var key = JSON.stringify(binding);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  function validSiteChangesResponse(r) {
+    if (!r || typeof r !== 'object' || Array.isArray(r) || r.status !== true ||
+        r.schema !== 1 || r.scope !== 'native_site_records' ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        !['Baseline Missing', 'Changes Observed', 'No Changes'].includes(r.state) ||
+        !Number.isSafeInteger(r.baseline_revision) || r.baseline_revision < 0 ||
+        !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
+        !Number.isSafeInteger(r.site_count) || r.site_count < 0 || r.site_count > 100 ||
+        !/^[a-f0-9]{64}$/.test(String(r.source_sha256 || '')) ||
+        typeof r.note !== 'string' ||
+        !Array.isArray(r.initial_sites) || r.initial_sites.length > 100 ||
+        !Array.isArray(r.changes) || r.changes.length > 200) return false;
+    if (r.baseline_revision === 0) {
+      if (r.state !== 'Baseline Missing' || r.baseline_sha256 !== null ||
+          r.changes.length || r.initial_sites.length !== r.site_count) return false;
+    } else if (!/^[a-f0-9]{64}$/.test(String(r.baseline_sha256 || '')) ||
+               r.initial_sites.length || (r.state === 'Baseline Missing') ||
+               (r.state === 'No Changes') !== (r.changes.length === 0)) return false;
+    var previousId = 0;
+    for (var i = 0; i < r.initial_sites.length; i++) {
+      var item = r.initial_sites[i];
+      if (!validSiteChangesSite(item, item && item.id) || item.id <= previousId) return false;
+      previousId = item.id;
+    }
+    var ids = new Set(), fieldsAllowed = ['name', 'document_root', 'panel_status', 'bound_domains'];
+    return r.changes.every(function (entry) {
+      if (!entry || !Number.isSafeInteger(entry.id) || entry.id <= 0 ||
+          ids.has(entry.id) || !['Added', 'Removed', 'Changed'].includes(entry.kind) ||
+          !Array.isArray(entry.fields) ||
+          entry.fields.some(function (name) { return !fieldsAllowed.includes(name); })) return false;
+      ids.add(entry.id);
+      if (entry.kind === 'Added') return entry.before === null && entry.fields.length === 0 &&
+        validSiteChangesSite(entry.after, entry.id);
+      if (entry.kind === 'Removed') return entry.after === null && entry.fields.length === 0 &&
+        validSiteChangesSite(entry.before, entry.id);
+      if (!validSiteChangesSite(entry.before, entry.id) ||
+          !validSiteChangesSite(entry.after, entry.id) || !entry.fields.length ||
+          new Set(entry.fields).size !== entry.fields.length) return false;
+      return fieldsAllowed.every(function (name) {
+        return (JSON.stringify(entry.before[name]) !== JSON.stringify(entry.after[name])) ===
+          entry.fields.includes(name);
+      });
+    });
+  }
+  function siteChangesDetails(site) {
+    return 'Name: ' + site.name + '; root: ' + site.document_root +
+      '; status: ' + site.panel_status + '; domains/ports: ' +
+      (site.bound_domains.map(function (entry) {
+        return entry[0] + ':' + entry[1];
+      }).join(', ') || 'None');
+  }
+  function siteChangesField(site, name) {
+    return name === 'bound_domains' ?
+      site.bound_domains.map(function (entry) { return entry[0] + ':' + entry[1]; }).join(', ') :
+      site[name];
+  }
+  function siteChangesLock(busy) {
+    siteChangesBusy = busy;
+    root.find('#ach-site-changes-compare').prop('disabled',
+      busy || siteBusy || websitePolicyState !== 'stable');
+    root.find('#ach-site-changes-approve').prop('disabled',
+      busy || !siteChangesSnapshot || websitePolicyState !== 'stable');
+    root.find('#ach-site-changes-save').prop('disabled',
+      busy || !siteChangesSnapshot || siteBusy || websitePolicyState !== 'stable' ||
+      root.find('#ach-site-changes-approve').prop('checked') !== true);
+  }
+  root.find('#ach-site-changes-compare').on('click', function () {
+    if (siteChangesBusy || siteBusy || websitePolicyState !== 'stable') return;
+    resetSiteChanges('Comparing native website records...');
+    var ticket = ++siteChangesTicket;
+    siteChangesLock(true);
+    request('compare_site_changes', {}, function (r) {
+      if (ticket !== siteChangesTicket) return;
+      if (websitePolicyState !== 'stable' || siteBusy ||
+          !validSiteChangesResponse(r)) {
+        resetSiteChanges('Website comparison unconfirmed or incompatible; Compare again.');
+        return;
+      }
+      siteChangesSnapshot = r;
+      var body = root.find('#ach-site-changes-rows').empty();
+      // Initial baseline review includes the actual bounded records, not just
+      // a count/digest. Every value is rendered text-only to prevent markup.
+      r.initial_sites.forEach(function (site) {
+        var tr = $('<tr>');
+        $('<td>').text(site.id).appendTo(tr);
+        $('<td>').text('Initial').appendTo(tr);
+        $('<td>').text(site.name).appendTo(tr);
+        $('<td>').text(siteChangesDetails(site)).appendTo(tr);
+        body.append(tr);
+      });
+      r.changes.forEach(function (change) {
+        var site = change.after || change.before;
+        var details = change.kind === 'Changed' ?
+          change.fields.map(function (field) {
+            return field + ': ' + siteChangesField(change.before, field) +
+              ' -> ' + siteChangesField(change.after, field);
+          }).join('; ') :
+          ((change.kind === 'Added' ? 'New: ' : 'Removed: ') + siteChangesDetails(site));
+        var tr = $('<tr>');
+        $('<td>').text(change.id).appendTo(tr);
+        $('<td>').text(change.kind).appendTo(tr);
+        $('<td>').text(site.name).appendTo(tr);
+        $('<td>').text(details).appendTo(tr);
+        body.append(tr);
+      });
+      root.find('#ach-site-changes-status').text(
+        r.state + ' — ' + r.site_count + ' site(s) in current bounded inventory, ' +
+        r.changes.length + ' changed ID(s). Baseline revision ' + r.baseline_revision +
+        '. Source SHA256: ' + r.source_sha256 + '. ' + r.note);
+      root.find('#ach-site-changes-approve').prop('checked', false);
+      siteChangesLock(false);
+    });
+  });
+  root.find('#ach-site-changes-approve').on('change', function () {
+    siteChangesLock(siteChangesBusy);
+  });
+  root.find('#ach-site-changes-save').on('click', function () {
+    if (siteChangesBusy || siteBusy || !siteChangesSnapshot ||
+        websitePolicyState !== 'stable' ||
+        root.find('#ach-site-changes-approve').prop('checked') !== true) return;
+    var snapshot = siteChangesSnapshot, ticket = ++siteChangesTicket;
+    siteChangesSnapshot = null; // An uncertain request must not be retried blindly.
+    root.find('#ach-site-changes-approve').prop('checked', false);
+    root.find('#ach-site-changes-status').text('Saving reviewed plugin-owned baseline...');
+    siteChangesLock(true);
+    request('save_site_baseline', {
+      expected_revision:snapshot.baseline_revision,
+      expected_monitor_revision:snapshot.monitor_revision,
+      expected_source_sha256:snapshot.source_sha256, reviewed:'true'
+    }, function (r) {
+      if (ticket !== siteChangesTicket) return;
+      if (!r || r.schema !== 1 ||
+          !['Baseline Saved', 'Baseline Unchanged'].includes(r.state) ||
+          typeof r.changed !== 'boolean' ||
+          r.changed !== (r.state === 'Baseline Saved') ||
+          r.source_sha256 !== snapshot.source_sha256 ||
+          r.baseline_revision !== snapshot.baseline_revision + (r.changed ? 1 : 0)) {
+        resetSiteChanges('Baseline outcome unconfirmed; Compare again to reconcile before another save.');
+        return;
+      }
+      resetSiteChanges(r.state + ' — revision ' + r.baseline_revision +
+        '. Compare again to verify the stored baseline against current records.');
+    });
+  });
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
   var cacheBusy = false, cacheTicket = 0;
   function invalidateCacheAudit(note) {

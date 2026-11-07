@@ -320,7 +320,7 @@ def parse_page(value, *, maximum=100000):
     return number
 
 
-def _bound_domains_for_sites(panel_public, sites):
+def _bound_domains_for_sites(panel_public, sites, *, strict_native=False):
     """Read recorded domain bindings in one bounded aaPanel domain-table query.
 
     aaPanel's native AddDomain/DelDomain can change HTTP domains without
@@ -346,6 +346,7 @@ def _bound_domains_for_sites(panel_public, sites):
     if len(result) > MAX_DOMAIN_ROWS_PER_PAGE:
         raise RuntimeError("Bound-domain inventory exceeded the read limit; use a smaller page size")
     bindings = {site_id: [] for site_id in ids}
+    native_ids = {site_id: [] for site_id in ids} if strict_native else None
     seen = set()
     seen_ids = set()
     total_name_bytes = 0
@@ -383,15 +384,23 @@ def _bound_domains_for_sites(panel_public, sites):
         seen.add(identity)
         seen_ids.add(row_id)
         bindings[pid].append({"name": domain, "port": port})
+        if strict_native:
+            native_ids[pid].append(row_id)
     for site in sites:
         site["bound_domains"] = bindings[site["id"]]
+        if strict_native:
+            site["_native_domain_row_ids"] = native_ids[site["id"]]
         site["canonical_domain_bound"] = any(
             binding["name"] == site["name"] for binding in site["bound_domains"]
         )
 
 
-def get_site_page(panel_public, page=1, page_size=25):
-    """Read aaPanel site IDs and actual bound domains; never write host state."""
+def get_site_page(panel_public, page=1, page_size=25, *, strict_native=False):
+    """Read native site/domain records; strict mode validates raw lifecycle data.
+
+    Ordinary Website UI calls retain their existing tolerant presentation
+    behavior. A saved lifecycle baseline must never consume coerced omissions.
+    """
     page = parse_page(page)
     size = parse_page(page_size, maximum=100)
     offset = (page - 1) * size
@@ -408,6 +417,28 @@ def get_site_page(panel_public, page=1, page_size=25):
     for site in result[:size]:
         if not isinstance(site, dict):
             raise RuntimeError("aaPanel sites query returned an invalid row")
+        if strict_native:
+            raw_id = site.get("id")
+            if (type(raw_id) is int and 1 <= raw_id <= 2147483647):
+                pass
+            elif (isinstance(raw_id, str) and
+                  re.fullmatch(r"[1-9][0-9]{0,9}", raw_id) and
+                  int(raw_id) <= 2147483647):
+                pass
+            else:
+                raise RuntimeError("Malformed native site identity for lifecycle baseline")
+            if (not isinstance(site.get("path"), str) or
+                    not site["path"].strip() or
+                    len(site["path"].encode("utf-8")) > 2048):
+                raise RuntimeError("Missing or malformed native document root")
+            raw_status = site.get("status")
+            if (type(raw_status) is int and 0 <= raw_status <= 2147483647):
+                pass
+            elif (isinstance(raw_status, str) and raw_status.strip() and
+                  len(raw_status.encode("utf-8")) <= 64):
+                pass
+            else:
+                raise RuntimeError("Missing or malformed native site status")
         try:
             site_id = int(site["id"])
         except (KeyError, ValueError, TypeError):
@@ -425,7 +456,7 @@ def get_site_page(panel_public, page=1, page_size=25):
             "application": "Unclassified",
             "classification": "Needs Review",
         })
-    _bound_domains_for_sites(panel_public, sites)
+    _bound_domains_for_sites(panel_public, sites, strict_native=strict_native)
     return {"inventory_schema": INVENTORY_SCHEMA_VERSION, "page": page, "page_size": size,
             "has_more": len(result) > size, "sites": sites}
 
