@@ -170,8 +170,8 @@ def discover_php_fpm_versions(config_root):
                     version["preview_candidate"] = True
                     # This indicates only that an adapter exists in source;
                     # even PHP85 must pass a separate exact Prepare/approval.
-                    if code == "85":
-                        version["manual_apply_adapter"] = "guarded_php85"
+                    if code in ("81", "85"):
+                        version["manual_apply_adapter"] = "guarded_php" + code
                     version["reason"] = "Pool parser and runtime still require separate verification"
                 else:
                     version["reason"] = "Native PHP-FPM binary or main config is missing or unsupported"
@@ -1086,9 +1086,9 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
             # or an exact owned Status Pages snippet; wpfastcgi has the selected
             # [www] Unix socket with no hidden upstream. Do not reject ordinary
             # aaPanel sites merely for using these validated native features.
-            # The only implemented manual writer is PHP 8.5; other versions
-            # retain discovery support but must never appear write-eligible.
-            result["manual_apply_eligible"] = (version == "85" and bool(result["matched_sites"]))
+            # Only two natively scoped PHP 8.1/8.5 adapters exist. A positive
+            # source mapping is necessary, not a replacement for Apply review.
+            result["manual_apply_eligible"] = (version in ("81", "85") and bool(result["matched_sites"]))
     except (OSError, UnicodeError, MonitorInputError, ValueError) as exc:
         # A global DB/schema/socket error invalidates *all* partial matches.
         # Only per-site unsupported VHosts keep already proven file links.

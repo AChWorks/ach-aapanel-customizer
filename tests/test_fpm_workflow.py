@@ -526,5 +526,91 @@ class TestManualFpmWorkflow(unittest.TestCase):
             self.rollback_payload(applied["operation_id"]))["state"], "Rolled Back")
 
 
+    def test_php81_recovery_stays_readable_but_ineligible_after_runtime_layout_drift(self):
+        php81 = self.config_root / "81" / "etc" / "php-fpm.conf"
+        php81.parent.mkdir(parents=True)
+        baseline = SOURCE.replace(b"php-cgi-85", b"php-cgi-81").replace(
+            b"/tmp/example.pid", str(self.config_root / "81" / "var/run/php-fpm.pid").encode()
+        )
+        php81.write_bytes(baseline)
+        php81.chmod(0o644)
+        self.impact["version"] = "81"
+        fields = {**VALUES, "php_version": "81"}
+        prepared = self.controller.prepare(fields)
+        approved = {
+            **fields, "approved_scope": prepared["approval_scope"],
+            "expected_revision": str(prepared["monitor_revision"]),
+            "expected_before": prepared["plan"]["before_sha256"],
+            "expected_after": prepared["plan"]["after_sha256"],
+            "expected_impact": prepared["impact_sha256"],
+        }
+        changed = self.controller.apply(approved)
+        detail = self.controller.recovery({"php_version": "81"})
+        self.assertTrue(detail["safe_rollback_file_match"])
+        php81.write_bytes(php81.read_bytes().replace(
+            b"/tmp/php-cgi-81.sock", b"/tmp/unrelated-fpm.sock"))
+        # Even if another socket exists, source compatibility must not trust it
+        # or silently attempt a versioned reload for the wrong listener.
+        denied = self.controller.recovery({"php_version": "81"})
+        self.assertEqual(denied["operation_id"], changed["operation_id"])
+        self.assertFalse(denied["safe_rollback_file_match"])
+        self.assertIn("manual_recovery", denied)
+        self.assertIn("native service layout", denied["impact_reason"])
+        with self.assertRaises(core.FpmApplyError):
+            self.controller.rollback({
+                "php_version": "81",
+                "approved_scope": "PHP81-www-shared-service",
+                "operation_id": changed["operation_id"],
+                "expected_recovery": detail["recovery_decision_sha256"],
+                "expected_impact": detail["impact_sha256"],
+            })
+        journal, snapshot = core._recovery_names("81")
+        self.assertTrue((self.state_dir / journal).exists())
+        self.assertTrue((self.state_dir / snapshot).exists())
+
+    def test_php81_full_workflow_is_scoped_and_recovery_never_touches_php85(self):
+        source81 = SOURCE.replace(b"php-cgi-85", b"php-cgi-81").replace(b"/tmp/example.pid", str(self.config_root / "81" / "var/run/php-fpm.pid").encode())
+        config81 = self.config_root / "81" / "etc" / "php-fpm.conf"
+        config81.parent.mkdir(parents=True)
+        config81.write_bytes(source81)
+        config81.chmod(0o644)
+        self.impact["version"] = "81"
+        values81 = {**VALUES, "php_version": "81"}
+        prepared = self.controller.prepare(values81)
+        self.assertEqual(prepared["plan"]["version"], "81")
+        self.assertEqual(prepared["approval_scope"], "PHP81-www-shared-service")
+        self.assertEqual(prepared["shared_impact"]["version"], "81")
+        payload = {
+            **values81, "approved_scope": prepared["approval_scope"],
+            "expected_revision": str(prepared["monitor_revision"]),
+            "expected_before": prepared["plan"]["before_sha256"],
+            "expected_after": prepared["plan"]["after_sha256"],
+            "expected_impact": prepared["impact_sha256"],
+        }
+        with self.assertRaises(core.FpmApplyError):
+            self.controller.apply({**payload, "approved_scope": workflow.APPROVAL_SCOPE})
+        self.assertEqual(config81.read_bytes(), source81)
+        changed = self.controller.apply(payload)
+        self.assertEqual(changed["state"], "Applied")
+        self.assertEqual(self.controller.recovery({"php_version": "81"})["state"], "Applied")
+        self.assertEqual(self.controller.recovery({"php_version": "85"})["state"], "No Recovery")
+        self.assertEqual(self.config.read_bytes(), SOURCE)
+        detail = self.controller.recovery({"php_version": "81"})
+        rollback = {
+            "php_version": "81", "operation_id": changed["operation_id"],
+            "approved_scope": "PHP81-www-shared-service",
+            "expected_impact": detail["impact_sha256"],
+            "expected_recovery": detail["recovery_decision_sha256"],
+        }
+        with self.assertRaises(core.FpmApplyError):
+            self.controller.rollback({**rollback, "approved_scope": workflow.APPROVAL_SCOPE})
+        self.assertEqual(self.controller.rollback(rollback)["state"], "Rolled Back")
+        self.assertEqual(config81.read_bytes(), source81)
+        self.assertEqual(self.config.read_bytes(), SOURCE)
+        self.assertEqual(self.controller.recovery({"php_version": "81"})["state"], "No Recovery")
+        with self.assertRaises(core.FpmApplyError):
+            self.controller.prepare({**values81, "php_version": "84"})
+
+
 if __name__=="__main__":
     unittest.main()

@@ -159,7 +159,7 @@ class ach_customizer_main:
             },
             "overall_enable_control": "Plugin-owned Monitor switch only",
             "notice": (
-                "Monitor controls are read-only; PHP 8.5 Manual Apply requires separate admin approval. No background enforcement."
+                "Monitor controls are read-only; PHP 8.1/8.5 Manual Apply requires separate admin approval. No background enforcement."
                 if active else
                 "Monitor disabled; existing services stay running. Previously applied manual FPM changes require explicit recovery."
             ),
@@ -1230,7 +1230,7 @@ class ach_customizer_main:
             return self._fail("status_settings", exc, request_id)
 
     @staticmethod
-    def _fpm_native_audit(action, response, request_id):
+    def _fpm_native_audit(action, response, request_id, version):
         """Best-effort native aaPanel activity log with explicit delivery status.
 
         aaPanel 8.0.7 `public.WriteLog` returns the SQLite log row ID or None.
@@ -1243,7 +1243,8 @@ class ach_customizer_main:
             "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "actor": "primary_admin_action_or_rejected_attempt",
             "action": "fpm_" + action,
-            "target": "PHP85-www-shared-service",
+            "target": ("PHP" + version + "-www-shared-service"
+                       if version in ("81", "85") else "PHP-unknown-shared-service"),
             "request_id": request_id,
             "success": response["status"] is True,
             "result": response.get("state") if response["status"] else response.get("stage"),
@@ -1283,11 +1284,14 @@ class ach_customizer_main:
                 "fpm_" + action, "Unexpected manual PHP-FPM error; no automatic retry",
                 request_id, diagnostic_error=exc)
         if action in ("apply", "rollback"):
-            response["audit_logged"] = self._fpm_native_audit(action, response, request_id)
+            response["audit_logged"] = self._fpm_native_audit(
+                action, response, request_id, self._argument(args, "php_version"))
             if not response["audit_logged"]:
                 response["audit_warning"] = "aaPanel activity-log persistence was not confirmed"
         if response["status"] is True:
-            self._activity_result(response, "php_fpm", "fpm_" + action, target="PHP85-www-shared-service")
+            version = self._argument(args, "php_version")
+            target = "PHP" + version + "-www-shared-service" if version in ("81", "85") else "PHP-unknown-shared-service"
+            self._activity_result(response, "php_fpm", "fpm_" + action, target=target)
         return response
 
     def fpm_prepare(self, args):
