@@ -2913,6 +2913,73 @@ test('Reviewer: mismatched native Apply identities, config digests and source ar
   }
 });
 
+test('Verified PHP81 adapter uses version-bound Prepare, Apply and saved recovery', () => {
+  const ui=loadUi();
+  const inventory=ui.phpVersions();
+  inventory.versions[0].manual_apply_adapter='guarded_php81';
+  ui.openPhp().respond(inventory);
+  assert.match(ui.state().phpOptions[1].text,/guarded PHP81 adapter/);
+
+  ui.submitPhp('81',false).respond({
+    ...phpPreview(phpImpact({version:'81'})),version:'81',
+    source:'/www/server/php/81/etc/php-fpm.conf'
+  });
+  assert.equal(ui.state().fpmPrepareDisabled,false);
+  const prepared=ui.prepareFpm();
+  assert.equal(prepared.options.data.php_version,'81');
+  const plan81={
+    ...guardedPlan().plan,version:'81',
+    source:'/www/server/php/81/etc/php-fpm.conf'
+  };
+  prepared.respond(guardedPlan({
+    plan:plan81,shared_impact:phpImpact({version:'81'}),
+    approval_scope:'PHP81-www-shared-service'
+  }));
+  assert.equal(ui.state().fpmReviewHidden,false);
+  assert.match(ui.state().fpmDetails,/PHP 81 \[www\] shared/);
+  ui.approveFpm(true);
+  const apply=ui.commitFpm();
+  assert.equal(apply.options.data.php_version,'81');
+  assert.equal(apply.options.data.approved_scope,'PHP81-www-shared-service');
+  apply.respond(appliedResult({...plan81}));
+  assert.match(ui.state().fpmPlan,/Applied/);
+  const recovery=ui.inspectFpmRecovery();
+  assert.equal(recovery.options.data.php_version,'81');
+  recovery.respond(recoveryPreview({
+    version:'81',shared_impact:phpImpact({version:'81'})
+  }));
+  assert.equal(ui.state().fpmRollbackHidden,false);
+  ui.approveFpmRollback(true);
+  const rollback=ui.rollbackFpm();
+  assert.equal(rollback.options.data.php_version,'81');
+  assert.equal(rollback.options.data.approved_scope,'PHP81-www-shared-service');
+  rollback.respond(rolledBackResult({version:'81'}));
+  assert.match(ui.state().fpmRecovery,/Rolled Back/);
+});
+
+test('PHP81 recovery rejects PHP85 evidence and selection changes revoke approval', () => {
+  const ui=loadUi();
+  const inventory=ui.phpVersions();
+  inventory.versions[0].manual_apply_adapter='guarded_php81';
+  ui.openPhp().respond(inventory);
+  ui.selectPhpVersion('81');
+  const recovery=ui.inspectFpmRecovery();
+  assert.equal(recovery.options.data.php_version,'81');
+  recovery.respond(recoveryPreview());
+  assert.equal(ui.state().fpmRollbackHidden,true);
+  const correct=ui.inspectFpmRecovery();
+  correct.respond(recoveryPreview({
+    version:'81',shared_impact:phpImpact({version:'81'})
+  }));
+  assert.equal(ui.state().fpmRollbackHidden,false);
+  ui.approveFpmRollback(true);
+  ui.selectPhpVersion('85');
+  assert.equal(ui.state().fpmRollbackHidden,true);
+  const count=ui.requests.length;
+  ui.rollbackFpm();
+  assert.equal(ui.requests.length,count);
+});
+
 test('Native PHP discovery selects actual PHP 8.1+ file candidates without enabling Apply', () => {
   const ui=loadUi();
   const discovered=ui.openPhp();

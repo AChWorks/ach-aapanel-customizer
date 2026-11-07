@@ -23,11 +23,23 @@ from ach_customizer_monitor import (
 )
 
 MAX_BYTES = 256 * 1024
-VERSION = "85"  # First verified native PHP 8.5 [www] adapter; refuse other versions.
+VERSION = "85"  # Existing PHP 8.5 default, retained for recovery compatibility.
+SUPPORTED_VERSIONS = ("81", "85")  # Independently bounded native aaPanel adapters.
 LOCK_TIMEOUT = 3.0
 JOURNAL = "ach_customizer.fpm85.recovery.json"
 SNAPSHOT = "ach_customizer.fpm85.recovery.before"
+# Keep the original lock name as a shared lock for both versioned writers,
+# including older resident PHP 8.5 workers during a panel-plugin ZIP upgrade.
 LOCK = "ach_customizer.fpm85.recovery.lock"
+
+
+def _recovery_names(version):
+    if version not in SUPPORTED_VERSIONS:
+        raise FpmApplyError("compatibility", "Unsupported PHP-FPM recovery version")
+    return ("ach_customizer.fpm" + version + ".recovery.json",
+            "ach_customizer.fpm" + version + ".recovery.before")
+
+
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -201,8 +213,8 @@ def _plan_bytes(before, desired):
 
 
 def _plan(config_root, version, desired):
-    if version != VERSION:
-        raise FpmApplyError("compatibility", "This adapter is validated only for PHP 8.5")
+    if version not in SUPPORTED_VERSIONS:
+        raise FpmApplyError("compatibility", "Only verified PHP 8.1 and PHP 8.5 pools support Manual Apply")
     desired = expected_pool_values(desired)
     folder = Path(config_root) / version / "etc"
     fd_dir = _dir(folder)
@@ -255,9 +267,10 @@ def _lock(state_dir):
         raise
 
 
-def _read_journal(fd_dir):
+def _read_journal(fd_dir, version=VERSION):
+    journal, _ = _recovery_names(version)
     try:
-        data, _ = _read(fd_dir, JOURNAL, max_bytes=4096, mode=0o600)
+        data, _ = _read(fd_dir, journal, max_bytes=4096, mode=0o600)
     except FileNotFoundError:
         return None
     try:
@@ -265,7 +278,7 @@ def _read_journal(fd_dir):
     except (ValueError, UnicodeError) as exc:
         raise FpmApplyError("recovery", "Unreadable PHP-FPM recovery journal") from exc
     required = {"schema", "operation_id", "version", "phase", "before_sha256", "after_sha256", "timestamp"}
-    if not isinstance(record, dict) or set(record) != required or record["schema"] != 1 or record["version"] != VERSION:
+    if not isinstance(record, dict) or set(record) != required or record["schema"] != 1 or record["version"] != version:
         raise FpmApplyError("recovery", "Unsupported PHP-FPM recovery journal")
     if (record["phase"] not in ("prepared", "applied", "uncertain")
             or not isinstance(record["operation_id"], str)
@@ -277,10 +290,11 @@ def _read_journal(fd_dir):
 
 def _persist_journal(fd_dir, record):
     payload = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
-    temporary = ".ach_customizer.fpm85.journal." + uuid4().hex + ".tmp"
+    journal, _ = _recovery_names(record["version"])
+    temporary = ".ach_customizer.fpm" + record["version"] + ".journal." + uuid4().hex + ".tmp"
     try:
         _write_new(fd_dir, temporary, payload, mode=0o600)
-        os.replace(temporary, JOURNAL, src_dir_fd=fd_dir, dst_dir_fd=fd_dir)
+        os.replace(temporary, journal, src_dir_fd=fd_dir, dst_dir_fd=fd_dir)
         os.fsync(fd_dir)
     finally:
         try:
@@ -289,8 +303,8 @@ def _persist_journal(fd_dir, record):
             pass
 
 
-def _remove_recovery(fd_dir):
-    for name in (JOURNAL, SNAPSHOT):
+def _remove_recovery(fd_dir, version=VERSION):
+    for name in _recovery_names(version):
         os.unlink(name, dir_fd=fd_dir)
     os.fsync(fd_dir)
 
@@ -306,12 +320,13 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
     _check_callbacks(validate, activate, verify)
     if not callable(verify_restored):
         raise FpmApplyError("validation", "Independent baseline runtime verification is required")
+    journal, snapshot = _recovery_names(version)
     fd_state, lock_fd = _lock(state_dir)
     try:
-        existing = _read_journal(fd_state)
+        existing = _read_journal(fd_state, version)
         if existing is not None:
             raise FpmApplyError("recovery", "Complete or reconcile the previous PHP-FPM operation first")
-        if os.path.exists(Path(state_dir) / SNAPSHOT):
+        if os.path.lexists(Path(state_dir) / snapshot):
             raise FpmApplyError("recovery", "Unpaired recovery snapshot requires operator review")
         plan, before, after, original_stat = _plan(config_root, version, desired)
         if plan["before_sha256"] != expected_before or plan["after_sha256"] != expected_after:
@@ -326,7 +341,7 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
                   "timestamp":int(time.time())}
         try:
             # Stage durable exact recovery bytes and journal before changing FPM.
-            _write_new(fd_state, SNAPSHOT, before, mode=0o600)
+            _write_new(fd_state, snapshot, before, mode=0o600)
             _persist_journal(fd_state, record)
             validate()
             mutation_attempted = True
@@ -364,25 +379,25 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
                     raise FpmApplyError("conflict", "Unknown external PHP-FPM rewrite prevents recovery")
                 # Check the recovery artifacts we own before removing them.
                 try:
-                    journal = _read_journal(fd_state)
+                    saved_journal = _read_journal(fd_state, version)
                 except FileNotFoundError:
-                    journal = None
-                if journal is not None and journal["operation_id"] != operation_id:
+                    saved_journal = None
+                if saved_journal is not None and saved_journal["operation_id"] != operation_id:
                     raise FpmApplyError("recovery", "Unexpected recovery owner")
                 try:
-                    saved, _ = _read(fd_state, SNAPSHOT, mode=0o600)
+                    saved, _ = _read(fd_state, snapshot, mode=0o600)
                 except FileNotFoundError:
                     saved = None
                 if saved is not None and saved != before:
                     raise FpmApplyError("recovery", "Unexpected recovery snapshot")
-                for name in (JOURNAL, SNAPSHOT):
-                    if os.path.exists(Path(state_dir) / name):
+                for name in (journal, snapshot):
+                    if os.path.lexists(Path(state_dir) / name):
                         os.unlink(name, dir_fd=fd_state)
                 os.fsync(fd_state)
             except Exception as recovery_error:
                 record["phase"] = "uncertain"
                 try:
-                    if _read_journal(fd_state) is not None:
+                    if _read_journal(fd_state, version) is not None:
                         _persist_journal(fd_state, record)
                 except Exception:
                     pass
@@ -414,19 +429,18 @@ def _recovery_pool_values(payload):
 
 
 def recovery_status(config_root, state_dir, version):
-    """Read-only visibility into the one durable PHP 8.5 rollback boundary."""
-    if version != VERSION:
-        raise FpmApplyError("compatibility", "Only PHP 8.5 recovery is supported")
+    """Read-only visibility into the selected version's durable rollback boundary."""
+    journal, snapshot = _recovery_names(version)
     # Recovery status is a pure read: unlike a write transaction, it must not
     # create a lock file just because a user opened the plugin UI.
     fd_state = _dir(state_dir)
     try:
-        record = _read_journal(fd_state)
+        record = _read_journal(fd_state, version)
         if record is None:
-            if os.path.lexists(Path(state_dir) / SNAPSHOT):
+            if os.path.lexists(Path(state_dir) / snapshot):
                 raise FpmApplyError("recovery", "Unpaired PHP-FPM snapshot requires review")
             return {"state": "No Recovery", "version": version, "operation_id": None}
-        snapshot, _ = _read(fd_state, SNAPSHOT, mode=0o600)
+        snapshot, _ = _read(fd_state, snapshot, mode=0o600)
         if _sha(snapshot) != record["before_sha256"]:
             raise FpmApplyError("recovery", "Recovery snapshot checksum mismatch")
         fd_config = _dir(Path(config_root) / version / "etc")
@@ -436,7 +450,7 @@ def recovery_status(config_root, state_dir, version):
             os.close(fd_config)
         # Concurrent Apply/rollback owns atomic journal replacement. A changed
         # journal means the read is stale; the next operation must recheck.
-        if _read_journal(fd_state) != record:
+        if _read_journal(fd_state, version) != record:
             raise FpmApplyError("conflict", "PHP-FPM recovery changed while being inspected")
         digest = _sha(current)
         state = ("Applied" if digest == record["after_sha256"] else
@@ -471,12 +485,13 @@ def rollback(config_root, state_dir, version, operation_id, *,
     _check_callbacks(validate, activate, verify)
     if not callable(prewrite_check):
         raise FpmApplyError("validation", "Fresh pre-write Rollback impact verification is required")
+    journal, snapshot = _recovery_names(version)
     fd_state, lock_fd = _lock(state_dir)
     try:
-        record = _read_journal(fd_state)
-        if record is None or record["operation_id"] != operation_id or version != VERSION:
+        record = _read_journal(fd_state, version)
+        if record is None or record["operation_id"] != operation_id:
             raise FpmApplyError("recovery", "No matching active PHP-FPM recovery operation")
-        before, _ = _read(fd_state, SNAPSHOT, mode=0o600)
+        before, _ = _read(fd_state, snapshot, mode=0o600)
         if _sha(before) != record["before_sha256"]:
             raise FpmApplyError("recovery", "Recovery backup checksum mismatch")
         fd_config = _dir(Path(config_root) / version / "etc")
@@ -502,7 +517,7 @@ def rollback(config_root, state_dir, version, operation_id, *,
                 record["phase"] = "uncertain"
                 _persist_journal(fd_state, record)
                 raise FpmApplyError("uncertain", "Rollback runtime verification failed: " + str(exc)) from exc
-            _remove_recovery(fd_state)
+            _remove_recovery(fd_state, version)
             return {"state":"Rolled Back", "operation_id":operation_id,
                     "restored_sha256":record["before_sha256"]}
         finally:

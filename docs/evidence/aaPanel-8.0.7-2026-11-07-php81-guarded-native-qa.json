@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-07",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "acceptance_issue": "https://github.com/AChWorks/ach-aapanel-customizer/issues/2",
+  "native_qa_issue": "https://github.com/AChWorks/ach-aapanel-customizer/issues/21",
+  "base_main_sha": "0aff8a6576648d8e4964ae775ce60cfa1e460f1b",
+  "candidate_version": "0.1.17",
+  "candidate_zip_sha256": "663df1bb71ef388925cccd3a709b4c57ee599f2711e4220d7cefb01fb463b3b8",
+  "candidate_zip_members": 46,
+  "reproducibility": {
+    "connected_agent": "Test Server For AI",
+    "test_workspace": "/srv/ai-workspace/ach-aapanel-rebuild-20261105",
+    "vm": "ach-aapanel-managed-qa",
+    "native_installer": "artifacts/qa_0117_native_install.py",
+    "native_installer_sha256": "bf8f2a51adb6bc5ac20c6d5380d4d1ff6c1b3883a7c0c854c2937a8901c4651c",
+    "php81_driver": "artifacts/qa_0117_php81_native.py",
+    "php81_driver_sha256": "3ab48a35e26c005d9b39741ad40db0a58169e80d8a7f392966a29ce68507cb56",
+    "guest_driver_path": "/opt/ach-qa/qa_0117_php81_native.py",
+    "execution": "python3 managed-qa/control.py exec --timeout 180 /www/server/panel/pyenv/bin/python3 /opt/ach-qa/qa_0117_php81_native.py"
+  },
+  "environment": {
+    "os": "Debian 12",
+    "panel": "aaPanel 8.0.7",
+    "webserver": "Nginx",
+    "php81_observed_http_version": "8.1.35",
+    "php85_present": true,
+    "wordpress_fixture_count": 3
+  },
+  "native_results": {
+    "panel_plugin_native_zip_import": "PASS",
+    "installed_package_hashes": "46/46 match exact ZIP",
+    "disposable_native_php81_site": {
+      "site_id": 9,
+      "site_key": "ach-php81-0117.invalid",
+      "php_http_status": 200,
+      "body_prefix": "ACH-PHP81-OK:8.1.35"
+    },
+    "php81_site_file_mapping": {
+      "state": "File Mapping",
+      "matched": [
+        {
+          "id": 9,
+          "site_key": "ach-php81-0117.invalid"
+        }
+      ],
+      "other_php_sites_count": 3,
+      "total_site_count": 4,
+      "unresolved_sites_count": 0
+    },
+    "secondary_admin_synthetic_flask_POST_denied": true,
+    "temporary_admin_synthetic_flask_POST_denied": true,
+    "wrong_version_scope_and_stale_revision_denied": true,
+    "php81_exact_config_baseline_sha256": "c7b5b98974336652b6a7bfbd4e0fd2ce28eb64cf8d0b45fe11d78beb5df5f214",
+    "php81_applied_config_sha256": "f3e2de594cf36742da43541bcc1222a728633124b3dcf6bec49df602bc41e253",
+    "php81_apply_syntax_versioned_reload_and_runtime_health": "PASS",
+    "php81_explicit_saved_recovery_and_exact_baseline_restore": "PASS",
+    "php81_injected_error_after_real_reload_auto_restores_original": "PASS",
+    "php85_configuration_unchanged": true,
+    "original_wordpress_home_statuses": {
+      "wp1.digikalashop.top": 200,
+      "wp2.digikalashop.top": 200,
+      "wp3.digikalashop.top": 200
+    },
+    "original_wordpress_php_probe_statuses": {
+      "wp1.digikalashop.top": 302,
+      "wp2.digikalashop.top": 200,
+      "wp3.digikalashop.top": 404
+    },
+    "original_wordpress_http_statuses_unchanged_across_mutations": true,
+    "original_wordpress_vhosts_unchanged": true,
+    "original_nginx_global_config_unchanged": true,
+    "nginx_syntax_passed": true
+  },
+  "cold_restore": {
+    "status": "PASS",
+    "baseline_snapshot": "rescue/pre-status-extension-20261107.qcow2",
+    "snapshot_sha256_before_and_after": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "restored_running_overlay": "managed-qa/migrated-original-disk.qcow2",
+    "restored_overlay_backing": "rescue/pre-status-extension-20261107.qcow2",
+    "restored_plugin_version": "0.1.12",
+    "baseline_installed_package_hashes": "39/39 PASS",
+    "disposable_site_and_vhost_absent": true,
+    "php81_service_running": true,
+    "php85_service_running": true,
+    "nginx_t_pass": true,
+    "all_three_wordpress_http_200": true,
+    "qa_guest_running": true,
+    "protected_backing_image_untouched": true
+  },
+  "source_tests": {
+    "python_unittest": "448 PASS",
+    "node_javascript": "206 PASS",
+    "scope": "source and synthetic UI; not real authenticated aaPanel browser"
+  },
+  "limitations": [
+    "Synthetic Flask test_request_context validates backend permission checks but does not verify real logged-in browser session, aaPanel CSRF integration or secondary account UI.",
+    "Real plugin install/update, UI/CSRF, multi-PHP lifecycle, negative and regeneration acceptance remains open under Issue #21.",
+    "File mapping is not proof of all effective request routing or external non-aaPanel FPM consumers.",
+    "Isolated test guest only. No Production installation or release; no future PR merge without independent exact-candidate review and Owner authorization."
+  ]
+}

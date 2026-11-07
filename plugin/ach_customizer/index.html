@@ -286,7 +286,7 @@
         <p id="ach-message" role="status" aria-live="polite"></p>
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
       <h4 class="ach-sr-only">Overview</h4>
-      <p class="ach-note">Unreleased preview. Monitoring is read-only; PHP 8.5 shared-service changes require explicit approval. No automatic enforcement.</p>
+      <p class="ach-note">Unreleased preview. Monitoring is read-only; PHP 8.1/8.5 shared-service changes require explicit approval. No automatic enforcement.</p>
       <div class="ach-toolbar">
         <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
         <button type="button" id="ach-overview-refresh">Refresh state</button>
@@ -358,23 +358,23 @@
       <p id="ach-impact-summary" role="status" aria-live="polite">Shared PHP-FPM site attribution not loaded.</p>
       <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-impact-rows"></tbody></table></div>
       <div class="ach-note" aria-label="Guarded manual PHP-FPM change">
-        <strong>Manual shared PHP-FPM change — PHP 8.5 only</strong>
-        <p>PHP 8.5 only on aaPanel 8.0.7 + Nginx with unambiguous site-file mapping. Changes the shared <code>[www]</code> pool, checks syntax, reloads PHP-FPM and verifies service health. Other consumers may be affected; file mapping does not prove traffic health. No automatic reapply after external changes.</p>
+        <strong>Manual shared PHP-FPM change — verified PHP 8.1 / 8.5</strong>
+        <p>PHP 8.1 or 8.5 on aaPanel 8.0.7 + Nginx with unambiguous site-file mapping. Changes the shared <code>[www]</code> pool, checks syntax, reloads PHP-FPM and verifies service health. Other consumers may be affected; file mapping does not prove traffic health. No automatic reapply after external changes.</p>
         <button id="ach-fpm-prepare" type="button" disabled>Prepare guarded change</button>
-        <p id="ach-fpm-plan" role="status" aria-live="polite">Run a PHP 85 file preview before preparing a change.</p>
+        <p id="ach-fpm-plan" role="status" aria-live="polite">Run a PHP 8.1 or 8.5 file preview before preparing a change.</p>
         <p id="ach-fpm-operation-notice" class="ach-fpm-operation-notice" role="status" aria-live="polite" hidden></p>
         <div id="ach-fpm-review" hidden>
           <p id="ach-fpm-details"></p>
-          <label><input id="ach-fpm-approval" type="checkbox" /> I approve changing the PHP 8.5 shared [www] pool for all affected consumers.</label>
+          <label><input id="ach-fpm-approval" type="checkbox" /> I approve changing the selected PHP version’s shared [www] pool for all affected consumers.</label>
           <div class="ach-controls"><button id="ach-fpm-commit" type="button" class="btn btn-danger" disabled>Apply shared PHP-FPM change</button></div>
         </div>
         <hr />
-        <button id="ach-fpm-check-recovery" type="button">Inspect saved PHP 8.5 recovery</button>
+        <button id="ach-fpm-check-recovery" type="button">Inspect selected PHP recovery</button>
         <p id="ach-fpm-recovery-status" role="status" aria-live="polite">Recovery status not loaded.</p>
         <p id="ach-fpm-recovery-impact" role="status" aria-live="polite">Current affected sites not inspected.</p>
         <div class="ach-scroll"><table><thead><tr><th>PHP-FPM setting</th><th>Current</th><th>Restore baseline</th></tr></thead><tbody id="ach-fpm-restore-rows"></tbody></table></div>
         <div id="ach-fpm-rollback-controls" hidden>
-          <label><input id="ach-fpm-rollback-approval" type="checkbox" /> I reviewed the current shared-site impact and configuration values above, and approve restoring this exact saved PHP 8.5 baseline and reloading the shared service.</label>
+          <label><input id="ach-fpm-rollback-approval" type="checkbox" /> I reviewed the selected version’s current shared-site impact and values, and approve restoring only its saved baseline and reloading that shared service.</label>
           <div class="ach-controls"><button id="ach-fpm-rollback" type="button" class="btn btn-warning" disabled>Restore saved configuration</button></div>
         </div>
       </div>
@@ -709,15 +709,17 @@
       });
   }
   function fpmOutcome(method, response, requestData, expectedRestoreSha) {
-    // Match the real PHP 8.5 workflow's result fields, not just status=true.
+    // Match the version-bound native PHP-FPM workflow, not just status=true.
     // This is display-only evidence: backend authorization/recovery gates stand.
     if (!response || response.status !== true || Array.isArray(response)) return 'unconfirmed';
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var operation = function (value) { return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value); };
     if (method === 'fpm_apply') {
-      var sourceMatches = response.version === '85' &&
+      var selected = String(requestData.php_version || '');
+      var sourceMatches = ['81','85'].includes(selected) && response.version === selected &&
+        requestData.approved_scope === 'PHP' + selected + '-www-shared-service' &&
         response.scope === 'shared_service' && response.pool === 'www' &&
-        response.source === '/www/server/php/85/etc/php-fpm.conf';
+        response.source === '/www/server/php/' + selected + '/etc/php-fpm.conf';
       if (!sourceMatches || !hash(response.before_sha256) || !hash(response.after_sha256)) {
         return 'unconfirmed';
       }
@@ -731,6 +733,8 @@
       return 'unconfirmed';
     }
     if (method === 'fpm_rollback' && response.state === 'Rolled Back' &&
+        (requestData.php_version === '85' && (response.version === undefined || response.version === '85') ||
+         requestData.php_version === '81' && response.version === '81') &&
         operation(response.operation_id) &&
         response.operation_id === requestData.operation_id &&
         hash(response.restored_sha256) &&
@@ -2731,12 +2735,12 @@
           typeof v.binary_present !== 'boolean' || typeof v.config_present !== 'boolean' ||
           typeof v.preview_candidate !== 'boolean' || v.apply_eligible !== false ||
           ['File Preview Candidate','Needs Review','Unsupported'].indexOf(v.state) < 0 ||
-          ['none','guarded_php85'].indexOf(v.manual_apply_adapter) < 0) return false;
+          ['none','guarded_php81','guarded_php85'].indexOf(v.manual_apply_adapter) < 0) return false;
       var major = Number(v.code[0]), minor = Number(v.code.slice(1));
       if (v.label !== 'PHP ' + major + '.' + minor ||
           major * 100 + minor <= previous ||
-          v.manual_apply_adapter === 'guarded_php85' &&
-            (v.code !== '85' || !v.preview_candidate) ||
+          ['guarded_php81','guarded_php85'].includes(v.manual_apply_adapter) &&
+            (v.manual_apply_adapter !== 'guarded_php' + v.code || !v.preview_candidate) ||
           (v.preview_candidate !== (v.state === 'File Preview Candidate')) ||
           v.preview_candidate && (!v.binary_present || !v.config_present || major < 8 ||
             major === 8 && minor < 1)) return false;
@@ -2761,6 +2765,8 @@
     root.find('#ach-php-discovery-status').text('Discovering native PHP versioned files...');
     fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
     invalidatePhpPreview('PHP inventory refreshed: run a new Preview for the selected version.');
+    resetRecovery();
+    root.find('#ach-fpm-recovery-status').text('PHP inventory refreshed. Select a version and inspect recovery again.');
     request('get_php_versions', {}, function (r) {
       if (ticket !== phpInventoryTicket) return;
       phpInventoryBusy = false;
@@ -2774,7 +2780,8 @@
       var selectable = 0;
       r.versions.forEach(function (v) {
         var option = $('<option>').val(v.code).text(v.label + ' — ' + v.state +
-          (v.manual_apply_adapter === 'guarded_php85' ? ' (guarded PHP85 adapter)' : ' (no Apply adapter)'));
+          (v.manual_apply_adapter === 'guarded_php' + v.code ?
+             ' (guarded PHP' + v.code + ' adapter)' : ' (no Apply adapter)'));
         if (!v.preview_candidate) option.prop('disabled', true);
         option.appendTo(root.find('#ach-php-version'));
         phpInventory.set(v.code, v);
@@ -2792,6 +2799,10 @@
   root.find('#ach-php-discover').on('click', loadPhpInventory);
   root.find('#ach-php-version').on('change', function () {
     invalidatePhpRuntime('PHP version changed. Inspect the selected version again.');
+    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    invalidatePhpPreview('PHP version changed: run a fresh read-only preview.');
+    resetRecovery();
+    root.find('#ach-fpm-recovery-status').text('PHP version changed. Inspect this version’s recovery before restoring.');
   });
   root.find('#ach-php-runtime-check').on('click', function () {
     var selected = String(root.find('#ach-php-version').val() || '');
@@ -2916,17 +2927,22 @@
     fpmBusy = value;
     root.find('#ach-fpm-prepare').prop('disabled', value || !phpPreviewEligible);
     root.find('#ach-fpm-commit').prop('disabled', value || !fpmPlan || root.find('#ach-fpm-approval').prop('checked') !== true);
-    root.find('#ach-fpm-check-recovery').prop('disabled', value);
+    // The original PHP85 recovery must remain inspectable even when native
+    // inventory is unavailable (e.g. after an aaPanel upgrade).
+    root.find('#ach-fpm-check-recovery').prop('disabled',
+      value || !['','81','85'].includes(String(root.find('#ach-php-version').val() || '')));
     root.find('#ach-fpm-rollback').prop('disabled', value || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true);
   }
-  function validFpmPlan(r) {
-    if (!r || !r.plan || !validImpact(r.shared_impact, '85') ||
+  function validFpmPlan(r, version) {
+    if (!['81','85'].includes(version) ||
+        !r || !r.plan || !validImpact(r.shared_impact, version) ||
         r.shared_impact.state !== 'File Mapping' ||
         r.shared_impact.manual_apply_eligible !== true || !r.shared_impact.matched_sites.length ||
-        r.plan.scope !== 'shared_service' || r.plan.pool !== 'www' || r.plan.version !== '85' ||
-        r.plan.source !== '/www/server/php/85/etc/php-fpm.conf' ||
+        r.plan.scope !== 'shared_service' || r.plan.pool !== 'www' || r.plan.version !== version ||
+        r.plan.source !== '/www/server/php/' + version + '/etc/php-fpm.conf' ||
         !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
-        r.approval_scope !== 'PHP85-www-shared-service' || typeof r.warning !== 'string') return false;
+        r.approval_scope !== 'PHP' + version + '-www-shared-service' ||
+        typeof r.warning !== 'string') return false;
     return ['before_sha256', 'after_sha256'].every(function (key) {
       return typeof r.plan[key] === 'string' && /^[0-9a-f]{64}$/.test(r.plan[key]);
     }) && typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256);
@@ -2943,6 +2959,11 @@
   root.find('#ach-php-form').on('input change', function () {
     fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
     invalidatePhpPreview('Settings changed: run a fresh read-only preview.');
+    if (fpmRecovery) {
+      resetRecovery();
+      root.find('#ach-fpm-recovery-status').text(
+        'Inputs changed; inspect the selected PHP recovery again.');
+    }
   });
   root.find('#ach-fpm-prepare').on('click', function () {
     if (fpmBusy || !phpPreviewEligible) return;
@@ -2962,7 +2983,7 @@
       fpmActivePrepareTicket = 0;
       fpmLock(false);
       if (!fresh()) return;
-      if (!r || !validFpmPlan(r)) {
+      if (!r || !validFpmPlan(r, fields.php_version)) {
         phpPreviewEligible = false; resetFpmPlan();
         root.find('#ach-fpm-plan').text('Preparation failed or API incompatible. No change approved.');
         if (r) msg('Manual PHP-FPM preparation API mismatch.', true);
@@ -2977,7 +2998,7 @@
       root.find('#ach-fpm-review').prop('hidden', false);
       root.find('#ach-fpm-plan').text('Prepared; configuration is unchanged. Explicit approval is required.');
       root.find('#ach-fpm-details').text(
-        'Scope: PHP 85 [www] shared; conventionally linked aaPanel sites: ' +
+        'Scope: PHP ' + fields.php_version + ' [www] shared; conventionally linked aaPanel sites: ' +
         r.shared_impact.matched_sites.map(function (site) { return site.id + ': ' + site.site_key; }).join(', ') +
         '. Original SHA-256: ' + r.plan.before_sha256 + '. Proposed SHA-256: ' +
         r.plan.after_sha256 + '. ' + r.warning
@@ -3018,10 +3039,14 @@
     });
   });
   root.find('#ach-fpm-check-recovery').on('click', function () {
-    if (fpmBusy) return;
+    var version = String(root.find('#ach-php-version').val() || '85');
+    if (fpmBusy || !['81','85'].includes(version) ||
+        (version === '81' &&
+         phpInventory.get(version)?.manual_apply_adapter !== 'guarded_php81')) return;
     resetRecovery(); fpmLock(true);
-    request('fpm_recovery', {php_version:'85'}, function (r) {
+    request('fpm_recovery', {php_version:version}, function (r) {
       fpmLock(false);
+      if (version !== String(root.find('#ach-php-version').val() || '85')) return;
       if (!r) {
         root.find('#ach-fpm-recovery-status').text('Recovery unavailable; investigate the error before any further Apply.');
         return;
@@ -3033,11 +3058,11 @@
           Number.isSafeInteger(r.observed_values[key]) && r.observed_values[key] >= 0;
       });
       var safe = typeof r.operation_id === 'string' && /^[0-9a-f]{32}$/.test(r.operation_id) &&
-        r.version === '85' && r.safe_rollback_file_match === true &&
+        r.version === version && r.safe_rollback_file_match === true &&
         (r.state === 'Applied' || r.state === 'Already Baseline') &&
         typeof r.baseline_sha256 === 'string' &&
         /^[0-9a-f]{64}$/.test(r.baseline_sha256) &&
-        validValues && validImpact(r.shared_impact, '85') &&
+        validValues && validImpact(r.shared_impact, version) &&
         r.shared_impact.state === 'File Mapping' && r.shared_impact.matched_sites.length > 0 &&
         typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256) &&
         typeof r.recovery_decision_sha256 === 'string' &&
@@ -3047,9 +3072,9 @@
         (r.operation_id ? '; operation: ' + r.operation_id : '') +
         (r.phase ? '; phase: ' + r.phase : '') +
         (safe ? '; fresh impact approval required.' : '; automatic restoration unavailable.'));
-      if (r.shared_impact && validImpact(r.shared_impact, '85')) {
+      if (r.shared_impact && validImpact(r.shared_impact, version)) {
         root.find('#ach-fpm-recovery-impact').text(
-          'Current PHP 85 shared-site file mapping: ' +
+          'Current PHP ' + version + ' shared-site file mapping: ' +
           r.shared_impact.matched_sites.map(function (site) { return site.id + ': ' + site.site_key; }).join(', ') +
           '; other-PHP sites: ' + r.shared_impact.other_php_sites_count +
           '; unresolved sites: ' + r.shared_impact.unresolved_sites.length +
@@ -3079,11 +3104,15 @@
   root.find('#ach-fpm-rollback').on('click', function () {
     if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
     var op = fpmRecovery.operation_id, current = fpmRecovery;
+    if (current.version !== String(root.find('#ach-php-version').val() || '85')) {
+      resetRecovery();
+      return;
+    }
     resetRecovery();
     invalidatePhpRuntime('PHP-FPM Restore attempt invalidated prior master/socket and site source evidence. Inspect again.');
     fpmLock(true);
     markFpmOperationPending('Restore');
-    request('fpm_rollback', {php_version:'85', approved_scope:'PHP85-www-shared-service',
+    request('fpm_rollback', {php_version:current.version, approved_scope:'PHP' + current.version + '-www-shared-service',
       operation_id:op, expected_impact:current.impact_sha256,
       expected_recovery:current.recovery_decision_sha256}, function (r) {
       fpmLock(false);
@@ -3152,7 +3181,10 @@
         tbody.append(tr);
       });
       if (r.state === 'File Match') root.find('#ach-fpm-result').text(r.state + ': ' + t.noDrift + '. ' + r.note);
-      phpPreviewEligible = data.php_version === '85' && (r.state === 'File Drift' || r.state === 'File Match') &&
+      phpPreviewEligible = (data.php_version === '85' ||
+        data.php_version === '81' &&
+        phpInventory.get('81')?.manual_apply_adapter === 'guarded_php81') &&
+        (r.state === 'File Drift' || r.state === 'File Match') &&
         validImpact(impact, data.php_version) && impact.state === 'File Mapping' &&
         impact.manual_apply_eligible === true && impact.matched_sites.length > 0;
       root.find('#ach-fpm-prepare').prop('disabled', fpmBusy || !phpPreviewEligible);

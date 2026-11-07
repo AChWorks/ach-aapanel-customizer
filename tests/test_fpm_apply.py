@@ -81,7 +81,7 @@ class TestFpmManualApply(unittest.TestCase):
         self.assertEqual(plan["scope"], "shared_service")
         self.assertEqual([d["setting"] for d in plan["changes"]],
                          ["pm.max_children", "pm.max_spare_servers", "pm.max_requests"])
-        with self.assertRaisesRegex(manual.FpmApplyError, "validated only"):
+        with self.assertRaisesRegex(manual.FpmApplyError, "Only verified PHP"):
             manual.preview(self.root / "php", "84", DESIRED)
         self.assertEqual(list(self.data.iterdir()), [])
 
@@ -338,6 +338,88 @@ class TestFpmManualApply(unittest.TestCase):
                             prewrite_check=lambda: None)
         self.assertNotEqual(self.config.read_bytes(), BASELINE)
         self.assertTrue((self.data / manual.SNAPSHOT).is_file())
+
+
+    def test_php81_and_php85_have_independent_recovery_and_cross_version_denial(self):
+        php81 = self.root / "php" / "81" / "etc"
+        php81.mkdir(parents=True)
+        config81 = php81 / "php-fpm.conf"
+        base81 = BASELINE.replace(b"/tmp/test-fpm.sock", b"/tmp/php-cgi-81.sock")
+        config81.write_bytes(base81)
+        config81.chmod(0o644)
+        plan81 = manual.preview(self.root / "php", "81", DESIRED)
+        self.assertEqual(plan81["version"], "81")
+        changed81 = manual.apply(
+            self.root / "php", self.data, "81", DESIRED,
+            expected_before=plan81["before_sha256"],
+            expected_after=plan81["after_sha256"],
+            validate=lambda: None, activate=lambda: None,
+            verify=lambda: self.assertEqual(
+                preview_php_fpm(self.root / "php", "81", DESIRED)["state"], "File Match"),
+            verify_restored=lambda: self.assertEqual(config81.read_bytes(), base81))
+        self.assertEqual(changed81["state"], "Applied")
+        self.assertFalse((self.data / manual.JOURNAL).exists())
+        self.assertFalse((self.data / manual.SNAPSHOT).exists())
+        journal81, snapshot81 = manual._recovery_names("81")
+        self.assertEqual((self.data / snapshot81).read_bytes(), base81)
+        self.assertEqual(manual.recovery_status(
+            self.root / "php", self.data, "81")["state"], "Applied")
+        self.assertEqual(manual.recovery_status(
+            self.root / "php", self.data, "85")["state"], "No Recovery")
+
+        changed85 = self.apply()
+        self.assertTrue((self.data / manual.JOURNAL).is_file())
+        self.assertTrue((self.data / journal81).is_file())
+        with self.assertRaisesRegex(manual.FpmApplyError, "matching active"):
+            manual.rollback(
+                self.root / "php", self.data, "81", changed85["operation_id"],
+                validate=lambda: None, activate=lambda: None, verify=lambda: None,
+                prewrite_check=lambda: None)
+        with self.assertRaisesRegex(manual.FpmApplyError, "matching active"):
+            manual.rollback(
+                self.root / "php", self.data, "85", changed81["operation_id"],
+                validate=lambda: None, activate=lambda: None, verify=lambda: None,
+                prewrite_check=lambda: None)
+
+        manual.rollback(
+            self.root / "php", self.data, "85", changed85["operation_id"],
+            validate=lambda: None, activate=lambda: None, verify=lambda: None,
+            prewrite_check=lambda: None)
+        self.assertEqual(self.config.read_bytes(), BASELINE)
+        self.assertEqual(manual.recovery_status(
+            self.root / "php", self.data, "81")["state"], "Applied")
+        manual.rollback(
+            self.root / "php", self.data, "81", changed81["operation_id"],
+            validate=lambda: None, activate=lambda: None,
+            verify=lambda: self.assertEqual(config81.read_bytes(), base81),
+            prewrite_check=lambda: None)
+        self.assertEqual(config81.read_bytes(), base81)
+        self.assertFalse((self.data / journal81).exists())
+        self.assertFalse((self.data / snapshot81).exists())
+        self.assertEqual(manual.recovery_status(
+            self.root / "php", self.data, "85")["state"], "No Recovery")
+
+    def test_php81_runtime_failure_restores_exact_original_and_does_not_touch_php85(self):
+        php81 = self.root / "php" / "81" / "etc"
+        php81.mkdir(parents=True)
+        config81 = php81 / "php-fpm.conf"
+        before = BASELINE.replace(b"/tmp/test-fpm.sock", b"/tmp/php-cgi-81.sock")
+        config81.write_bytes(before)
+        config81.chmod(0o644)
+        plan = manual.preview(self.root / "php", "81", DESIRED)
+        with self.assertRaises(manual.FpmApplyError) as ctx:
+            manual.apply(
+                self.root / "php", self.data, "81", DESIRED,
+                expected_before=plan["before_sha256"],
+                expected_after=plan["after_sha256"],
+                validate=lambda: None, activate=lambda: None,
+                verify=lambda: (_ for _ in ()).throw(RuntimeError("fault after reload")),
+                verify_restored=lambda: self.assertEqual(config81.read_bytes(), before))
+        self.assertEqual(ctx.exception.stage, "apply")
+        self.assertEqual(config81.read_bytes(), before)
+        self.assertEqual(self.config.read_bytes(), BASELINE)
+        self.assertFalse(any(x.name.startswith("ach_customizer.fpm81.recovery")
+                             for x in self.data.iterdir()))
 
 
 if __name__ == "__main__":

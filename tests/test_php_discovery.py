@@ -63,7 +63,7 @@ class PHPDiscoveryFilesTests(unittest.TestCase):
         self.assertEqual(versions['81']['label'], 'PHP 8.1')
         self.assertEqual(versions['81']['state'], 'File Preview Candidate')
         self.assertTrue(versions['81']['preview_candidate'])
-        self.assertEqual(versions['81']['manual_apply_adapter'], 'none')
+        self.assertEqual(versions['81']['manual_apply_adapter'], 'guarded_php81')
         self.assertTrue(versions['85']['preview_candidate'])
         self.assertEqual(versions['85']['manual_apply_adapter'], 'guarded_php85')
         self.assertEqual(versions['810']['label'], 'PHP 8.10')
