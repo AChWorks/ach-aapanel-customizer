@@ -25,6 +25,8 @@ function fakeNode(tag, attributes = {}) {
 
 function loadUi() {
   const root = fakeNode('div');
+  const content = {scrollTop:0};
+  let focusedTab = null, tabScrollCalls = 0;
   const elements = new Map();
   const tabs = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('button', {
     'data-tab': name, 'aria-selected': name === 'overview' ? 'true' : 'false'
@@ -32,7 +34,14 @@ function loadUi() {
   const views = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
-  for (const tab of tabs) elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
+  root.querySelector = query => query === '#ach-content' ? content : null;
+  root.querySelectorAll = query => query === '[data-tab]' ? tabs : [];
+  for (const tab of tabs) {
+    elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
+    tab.focus = () => { focusedTab = tab; };
+    tab.click = () => trigger(tab, 'click');
+    tab.scrollIntoView = () => { tabScrollCalls++; };
+  }
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
@@ -95,13 +104,17 @@ function loadUi() {
   const requests = [];
   let allowStatusDiscard = false;
   const statusConfirmations = [];
-  const browserWindow = {confirm(message) {
-    statusConfirmations.push(message);
-    return allowStatusDiscard;
-  }};
+  const browserWindow = {
+    innerWidth:1280,
+    confirm(message) {
+      statusConfirmations.push(message);
+      return allowStatusDiscard;
+    }
+  };
 
   function selection(nodes) {
     return {
+      0: nodes[0],
       _nodes: nodes,
       length: nodes.length,
       find(query) {
@@ -198,9 +211,12 @@ function loadUi() {
   vm.runInNewContext(script, { $, encodeURIComponent, TextEncoder,
     window:browserWindow }, { timeout: 1000 });
 
-  function trigger(node, event) {
+  function trigger(node, event, details = {}) {
     assert.equal(typeof node.handlers[event], 'function', event + ' handler missing');
-    node.handlers[event].call(node, { preventDefault() {} });
+    const payload = { ...details, prevented:false,
+      preventDefault() { this.prevented = true; } };
+    node.handlers[event].call(node, payload);
+    return payload;
   }
   function openSites() {
     trigger(tabs.find(node => node.attributes['data-tab'] === 'websites'), 'click');
@@ -407,6 +423,17 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
+    setViewportWidth:width => { browserWindow.innerWidth = width; },
+    setMainScroll:value => { content.scrollTop = value; },
+    mainScroll:() => content.scrollTop,
+    selectedTab:() => tabs.find(tab => tab.attributes['aria-selected'] === 'true')?.attributes['data-tab'],
+    keyTab:(name, key) => {
+      const tab=tabs.find(item => item.attributes['data-tab'] === name);
+      const event=trigger(tab, 'keydown', {key});
+      return {prevented:event.prevented, focused:focusedTab?.attributes['data-tab'],
+        selected:tabs.find(item => item.attributes['aria-selected'] === 'true')?.attributes['data-tab']};
+    },
+    tabScrollCalls:() => tabScrollCalls,
     statusPermitDiscard: value => { allowStatusDiscard = value; },
     statusConfirmations: () => statusConfirmations.slice(),
     statusSelection: () => ({
@@ -2429,6 +2456,22 @@ test('Existing native status-file reference is reviewable without false conflict
   assert.doesNotMatch(ui.state().statusInspect,/State: Conflict|Apply ready|HTTP verified/);
 });
 
+test('Read-only native status inspection makes its new Activity record visible on return', () => {
+  const ui=loadUi();
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  loadNativeStatusSiteSelection(ui,'7');
+  ui.requests.at(-1).respond(statusPrefs());
+  const inspect=ui.statusClick('#ach-status-inspect-button');
+  assert.match(inspect.options.url,/s=status_inspect$/);
+  inspect.respond(statusInspection());
+  assert.match(ui.state().statusInspect,/State: Unmanaged/);
+  const activity=ui.openActivity();
+  assert.match(activity.options.url,/s=get_activity$/,
+    'Read-only site inspection writes a native Activity record');
+});
+
 test('Invalid, cross-site and routing-overclaim inspection replies fail closed', () => {
   for (const bad of [
     statusInspection({site_id:8}),
@@ -3697,6 +3740,47 @@ test('Native tab navigation reuses loaded panels and explicit Refresh fetches la
   assert.equal(ui.state().stateRevision,'State revision: 10');
 });
 
+test('Native tabs retain per-section scroll, including a repeated tab click', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.setMainScroll(412);
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  assert.equal(ui.mainScroll(),0,'First Activity visit starts at its own top');
+  ui.setMainScroll(133);
+  ui.openStatus();
+  assert.equal(ui.mainScroll(),412,'Returning to a long Status form keeps reading position');
+  ui.openStatus();
+  assert.equal(ui.mainScroll(),412,'Clicking the selected sidebar tab must not jump to top');
+  ui.openActivity();
+  assert.equal(ui.mainScroll(),133,'Activity keeps its independent scroll position');
+  assert.equal(ui.tabScrollCalls(),0,'Desktop sidebar does not scroll the host dialog');
+  ui.setViewportWidth(375);
+  ui.openStatus();
+  assert.equal(ui.tabScrollCalls(),1,'Narrow tab strip scrolls the selected item into view');
+});
+
+test('Native tab arrow keys follow actual desktop/mobile orientation', () => {
+  const ui=loadUi();
+  ui.setViewportWidth(1280);
+  assert.equal(ui.keyTab('overview','ArrowRight').prevented,false);
+  assert.equal(ui.selectedTab(),'overview','Horizontal arrows must remain available on desktop');
+  const desktop=ui.keyTab('overview','ArrowDown');
+  assert.equal(desktop.prevented,true);
+  assert.equal(desktop.focused,'websites');
+  assert.equal(desktop.selected,'websites');
+  assert.equal(ui.keyTab('websites','ArrowLeft').prevented,false);
+  ui.setViewportWidth(375);
+  assert.equal(ui.keyTab('websites','ArrowDown').prevented,false);
+  const mobile=ui.keyTab('websites','ArrowRight');
+  assert.equal(mobile.prevented,true);
+  assert.equal(mobile.focused,'php');
+  assert.equal(mobile.selected,'php');
+  assert.equal(ui.keyTab('php','Home').selected,'overview');
+  assert.equal(ui.keyTab('overview','End').selected,'activity');
+  assert.equal(ui.keyTab('activity','ArrowRight').selected,'overview',
+    'Horizontal keyboard navigation wraps around');
+});
+
 test('Status Pages unsaved brand values survive native tab switching', () => {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
@@ -4870,6 +4954,30 @@ function unboundReply(action, state='Source Ready', overrides={}) {
     impact:unboundImpact, ...overrides
   };
 }
+
+test('HTTP unbound Nginx operation has bounded timeout, Activity refresh and uncertain outcome guidance', () => {
+  const ui=loadUi();
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  const recheck=ui.statusClick('#ach-status-unbound-recheck');
+  assert.equal(recheck.options.timeout,45000,'Nginx source/probe path uses same budget as other status managers');
+  recheck.respond(unboundReply('recheck'));
+  const afterRead=ui.openActivity();
+  assert.match(afterRead.options.url,/s=get_activity$/,
+    'Successful native HTTP source inspection invalidates earlier Activity');
+  afterRead.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  ui.openStatus();
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  const apply=ui.statusClick('#ach-status-unbound-apply');
+  assert.equal(apply.options.timeout,45000);
+  apply.reject({},'timeout');
+  assert.match(ui.state().error,/Outcome unknown: inspect saved recovery before any retry/);
+  assert.match(ui.state().unboundResult,/outcome unconfirmed.*Recheck saved recovery/);
+  const afterFailure=ui.openActivity();
+  assert.match(afterFailure.options.url,/s=get_activity$/,
+    'Timed-out global Nginx Apply must invalidate Activity and require a fresh read');
+});
 
 test('HTTP/80 unbound requires explicit approvals and fresh recovery Recheck', () => {
   const ui=loadUi();
