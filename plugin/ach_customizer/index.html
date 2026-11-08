@@ -719,9 +719,15 @@
     if (readOnly && failure.stage === 'status_unbound_probe')
       guidance += '\nCheck Nginx HTTP/80 loopback listeners at 127.0.0.1 and [::1].';
     var id = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
+    var operationId = id(failure.operation_id) ? failure.operation_id : null;
+    var requestId = id(failure.request_id) ? failure.request_id : null;
+    // Native _fail() always supplies operation_id. If two valid IDs disagree,
+    // prefer that authoritative correlation instead of the contradictory alias.
+    var correlationId = requestId && operationId && requestId !== operationId ?
+      operationId : (requestId || operationId);
     return summary + guidance +
       (id(failure.recovery_id) ? '\nRecovery ID: ' + failure.recovery_id : '') +
-      (id(failure.request_id) ? '\nRequest ID: ' + failure.request_id : '');
+      (correlationId ? '\nRequest ID: ' + correlationId : '');
   }
   function request(method, data, done, shouldReport, expectedRestoreSha) {
     // Multiple independent panels may load in parallel. Preserve the global
@@ -2492,7 +2498,9 @@
            r.current_sha256 !== previous.before)) {
         root.find('#ach-status-default-result').text(statusBackendFailure(
           action, same ? failure : null,
-          'New-site default outcome unconfirmed; Recheck persisted recovery before retrying.'));
+          action === 'recheck' ?
+            'Read-only Recheck incomplete or incompatible. No write was requested. Resolve the cause and Recheck.' :
+            'New-site default write outcome unconfirmed. Recheck persisted recovery before any retry; do not assume success or failure.'));
       } else {
         if (action === 'recheck') {
           statusDefaultEvidence = {
@@ -2742,9 +2750,11 @@
           (r.recovery_id !== previous.recovery || r.source_sha256 !== previous.source)) {
         root.find('#ach-status-unbound-result').text(statusBackendFailure(
           action, same ? failure : null,
-          'Unbound routing outcome unconfirmed. Recheck saved recovery before any retry.' +
-            (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') +
-            (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : '')));
+          action === 'recheck' ?
+            'Read-only Recheck incomplete or incompatible. No write was requested. Resolve the cause and Recheck.' :
+            'Unbound routing write outcome unconfirmed. Recheck saved recovery before any retry; do not assume success or failure.' +
+              (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') +
+              (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : '')));
       } else {
         if (action === 'recheck') {
           statusUnboundEvidence = {
