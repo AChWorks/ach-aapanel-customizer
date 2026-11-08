@@ -537,6 +537,10 @@
   // Keep the native dialog mounted. Switching panels does not discard unsaved
   // edits or re-fetch previously accepted read-only data without Refresh.
   var sectionsLoaded = {overview:false, websites:false, php:false, status:false, activity:false};
+  // All sections share one native scroll pane. Preserve each section's reading
+  // position across tab changes instead of jumping to the top on every click.
+  var activeSection = 'overview';
+  var sectionScroll = {overview:0, websites:0, php:0, status:0, activity:0};
   var overviewBusy = false, overviewTicket = 0;
   function fitNativeLayer() {
     // Only resize the aaPanel layer that actually owns this plugin instance.
@@ -631,6 +635,7 @@
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'status_manage' || method === 'status_defaults' ||
+      method === 'status_unbound' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback';
   }
   function validInventoryPage(r, expectedPage) {
@@ -673,10 +678,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults)|fpm_(apply|rollback))$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound)|fpm_(apply|rollback))$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -713,7 +718,8 @@
         if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
           msg(t.error + ': ' + status +
             ((/^fpm_(apply|rollback)$/.test(method) || (method === 'status_manage' && data.site_action !== 'recheck' ||
-               method === 'status_defaults' && data.default_action !== 'recheck')) ?
+               method === 'status_defaults' && data.default_action !== 'recheck' ||
+               method === 'status_unbound' && data.unbound_action !== 'recheck')) ?
               '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
         }
         done(null);
@@ -2928,15 +2934,22 @@
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     if (['overview','websites','php','status','activity'].indexOf(tab) < 0) return;
+    var switching = tab !== activeSection;
+    var content = root[0] && root[0].querySelector('#ach-content');
+    if (switching && content) sectionScroll[activeSection] = content.scrollTop;
     root.find('[data-tab]').attr('aria-selected', 'false').attr('tabindex', '-1');
     $(this).attr('aria-selected', 'true').attr('tabindex', '0');
-    // Mobile horizontal tabs can extend past the nav viewport. Keep the
-    // selected control visible for mouse, touch and keyboard navigation.
-    if (typeof this.scrollIntoView === 'function')
+    // Do not scroll the enclosing aaPanel dialog on desktop just to select a
+    // sidebar item. Narrow layouts have an overflowing horizontal tab strip.
+    if (typeof window !== 'undefined' && window.innerWidth <= 720 &&
+        typeof this.scrollIntoView === 'function')
       this.scrollIntoView({block:'nearest', inline:'nearest'});
     root.find('[data-view]').prop('hidden', true);
     root.find('[data-view="' + tab + '"]').prop('hidden', false);
-    if (root[0]) { var body = root[0].querySelector('#ach-content'); if (body) body.scrollTop = 0; }
+    if (switching) {
+      activeSection = tab;
+      if (content) content.scrollTop = sectionScroll[tab];
+    }
     msg('', false);
     if (tab === 'overview' && !sectionsLoaded.overview) overview();
     if (tab === 'websites' && !sectionsLoaded.websites) sites();
@@ -2952,8 +2965,9 @@
     if (!root[0] || !event) return;
     var list = Array.from(root[0].querySelectorAll('[data-tab]'));
     var index = list.indexOf(this), direction = 0;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') direction = 1;
-    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') direction = -1;
+    var horizontal = typeof window !== 'undefined' && window.innerWidth <= 720;
+    if (event.key === (horizontal ? 'ArrowRight' : 'ArrowDown')) direction = 1;
+    if (event.key === (horizontal ? 'ArrowLeft' : 'ArrowUp')) direction = -1;
     var next = event.key === 'Home' ? 0 : event.key === 'End' ? list.length - 1 :
       direction && index >= 0 ? (index + direction + list.length) % list.length : -1;
     if (next >= 0) { event.preventDefault(); list[next].focus(); list[next].click(); }
