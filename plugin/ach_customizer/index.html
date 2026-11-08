@@ -86,9 +86,12 @@
   }
   #ach-customizer .ach-note p { margin:var(--ach-space-sm) 0 0; }
   #ach-customizer .ach-note p:last-child { margin-bottom:0; }
-  /* Note content owns its vertical flow. Tables and approval checkboxes are
-     block-level peers of buttons, never zero-gap inline fragments. */
-  #ach-customizer .ach-note > :is(.ach-scroll, button) { margin-block-start:var(--ach-space-md); }
+  /* Direct note peers without their own spacing: comparison tables, buttons,
+     sandbox previews and unlabeled-layout divs (for example, a delivery selector).
+     Keep .ach-controls/.ach-fields owners untouched to avoid doubled margins. */
+  #ach-customizer .ach-note > :is(.ach-scroll, button, iframe, div:not([class])) {
+    margin-block-start:var(--ach-space-md);
+  }
   #ach-customizer .ach-main .ach-note > label:has(> input[type="checkbox"]) {
     display:flex; align-items:flex-start; margin-block:var(--ach-space-md) 0;
   }
