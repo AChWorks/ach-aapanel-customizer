@@ -388,7 +388,7 @@
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
       <h4>Status Pages · Preview / Site 404/502/50x / New-site defaults / Unbound HTTP</h4>
-      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 and Nginx-generated 50x Apply/Restore use a verified plugin-owned extension and shared Nginx reload. 50x covers Nginx-produced 500/502/503/504, not arbitrary application/WordPress error bodies. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. HTTP/80 unbound-domain routing is available behind a separate guarded global Apply/Restore. HTTPS/default TLS and correct stopped-site HTTP503 remain unsupported.</p>
+      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 and Nginx-generated 50x Apply/Restore use a verified plugin-owned extension and shared Nginx reload. 50x covers Nginx-produced 500/502/503/504, not arbitrary application/WordPress error bodies. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. HTTP/80 unbound-domain routing is available behind a separate guarded global Apply/Restore. Unknown-host HTTPS/443 remains unsupported. A separate, explicitly approved native VHost rule now supports actual HTTP503 for aaPanel-stopped sites; it is dormant while running and requires recovery verification.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -478,6 +478,16 @@
         <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" class="btn btn-warning" disabled>Restore previous HTTP default routing</button></div>
         <p id="ach-status-unbound-result" role="status" aria-live="polite">Select global/unbound and Recheck. HTTP/80 only; no TLS/443 changes.</p>
       </div>
+      <div class="ach-note" aria-label="Stopped-site 503 management">
+        <strong>Stopped website · real HTTP 503 (native SiteStop/Start)</strong>
+        <p>aaPanel 8.0.7 Nginx only. Select a running website and the <code>stopped</code> template. An explicitly approved, recoverable rule is added to that native website VHost; it remains dormant while running and returns real HTTP 503 with the selected self-contained HTML after aaPanel SiteStop. The native site must be refreshed after Stop/Start before Recheck or Restore. Nginx reload is shared; unknown-domain HTTPS is unchanged. Restore removes only the verified owned rule, preserving unrelated native changes.</p>
+        <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" disabled>Recheck native stopped-site route</button></div>
+        <label><input id="ach-status-stopped-apply-approve" type="checkbox" /> I approve adding this website's exact native 503 rule and reloading shared Nginx.</label>
+        <div class="ach-controls"><button id="ach-status-stopped-apply" type="button" class="btn btn-danger" disabled>Arm HTTP 503 for SiteStop</button></div>
+        <label><input id="ach-status-stopped-restore-approve" type="checkbox" /> I reviewed the selected website's saved Recovery ID and approve removing its managed rule with a shared Nginx reload.</label>
+        <div class="ach-controls"><button id="ach-status-stopped-restore" type="button" class="btn btn-warning" disabled>Restore native stopped-site route</button></div>
+        <p id="ach-status-stopped-result" role="status" aria-live="polite">Select a verified website, stopped template and locale, then Recheck. Native stop requires a fresh website inventory.</p>
+      </div>
       <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
       <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
       <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
@@ -529,7 +539,7 @@
 
   // Transaction evidence is bound to one native-site/brand/locale snapshot.
   // It is revoked on any edit, site change, refresh, or attempted write.
-  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null, statusUnboundEvidence = null;
+  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null, statusUnboundEvidence = null, statusStoppedEvidence = null;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
@@ -635,7 +645,7 @@
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'status_manage' || method === 'status_defaults' ||
-      method === 'status_unbound' || method === 'status_inspect' ||
+      method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback';
   }
   function validInventoryPage(r, expectedPage) {
@@ -678,10 +688,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound)|fpm_(apply|rollback))$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback))$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -719,7 +729,8 @@
           msg(t.error + ': ' + status +
             ((/^fpm_(apply|rollback)$/.test(method) || (method === 'status_manage' && data.site_action !== 'recheck' ||
                method === 'status_defaults' && data.default_action !== 'recheck' ||
-               method === 'status_unbound' && data.unbound_action !== 'recheck')) ?
+               method === 'status_unbound' && data.unbound_action !== 'recheck' ||
+               method === 'status_stopped' && data.stopped_action !== 'recheck')) ?
               '. Outcome unknown: inspect saved recovery before any retry.' : ''), true);
         }
         done(null);
@@ -1551,6 +1562,17 @@
       !siteRunning || !sameStatusSelection(statusManageEvidence) ||
       !['Applied','Recovery Required'].includes(statusManageEvidence.state) ||
       root.find('#ach-status-manage-restore-approve').prop('checked') !== true);
+    var stoppedReady = !busy && !!actionable && scope.scope === 'site' &&
+      template === 'stopped' && selected;
+    var stoppedMatches = stoppedReady && sameStoppedSelection(statusStoppedEvidence);
+    root.find('#ach-status-stopped-recheck').prop('disabled', !stoppedReady);
+    root.find('#ach-status-stopped-apply').prop('disabled',
+      !stoppedMatches || String(selected.panel_status) !== '1' ||
+      !['Source Ready','Restored'].includes(statusStoppedEvidence.state) ||
+      root.find('#ach-status-stopped-apply-approve').prop('checked') !== true);
+    root.find('#ach-status-stopped-restore').prop('disabled',
+      !stoppedMatches || !['Armed','Applied','Needs Review','Recovery Required'].includes(statusStoppedEvidence.state) ||
+      root.find('#ach-status-stopped-restore-approve').prop('checked') !== true);
     var defaultReady = !busy && !!actionable && scope.scope === 'global' &&
       ['new-site','404','502'].includes(template);
     var defaultMatches = defaultReady && sameDefaultSelection(statusDefaultEvidence);
@@ -1578,6 +1600,9 @@
     statusManageEvidence = null;
     statusDefaultEvidence = null;
     statusUnboundEvidence = null;
+    statusStoppedEvidence = null;
+    root.find('#ach-status-stopped-apply-approve, #ach-status-stopped-restore-approve').prop('checked', false);
+    root.find('#ach-status-stopped-result').text('Recheck selected native stopped-site recovery; no previous Apply evidence is current.');
     root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve').prop('checked', false);
     root.find('#ach-status-unbound-result').text('Recheck global HTTP/80 routing before Apply/Restore; HTTPS is unchanged.');
     root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
@@ -2431,6 +2456,121 @@
     manageDefaultRequest('restore');
   });
   root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
+    .on('change', function () { statusLock(statusBusy); });
+  function sameStoppedSelection(evidence) {
+    var scope = statusScope(), site = selectedProbeSite(scope);
+    return !!evidence && !!scope && !!site && scope.scope === 'site' &&
+      evidence.ticket === statusTicket && evidence.revision === statusRevision &&
+      evidence.site_id === scope.site_id && evidence.snapshot === nativeHostsSnapshot(site) &&
+      evidence.locale === root.find('#ach-status-locale').val() &&
+      evidence.brand === JSON.stringify(statusFields()) &&
+      root.find('#ach-status-template').val() === 'stopped';
+  }
+  function validStoppedResponse(r, action, site, snapshot, revision, locale) {
+    var hash = v => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+    var token = v => typeof v === 'string' && /^[0-9a-f]{32}$/.test(v);
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.mode !== 'native_stopped_http503' || r.stopped_action !== action ||
+        r.scope !== 'site' || r.template !== 'stopped' || r.locale !== locale ||
+        r.site_id !== site.id || r.site_key !== site.name ||
+        r.site_status !== String(site.panel_status) ||
+        r.verified_site_snapshot !== snapshot || r.revision !== revision ||
+        !token(r.request_id) || r.operation_id !== r.request_id ||
+        !hash(r.vhost_sha256) || !hash(r.rendered_sha256) || !hash(r.served_sha256) ||
+        (r.recovery_id !== null && !token(r.recovery_id)) ||
+        typeof r.changed !== 'boolean' || typeof r.runtime_verified !== 'boolean' ||
+        r.read_only !== (action === 'recheck') || typeof r.impact !== 'string' ||
+        !r.impact.includes('SiteStop/Start')) return false;
+    if (action === 'recheck') {
+      return r.changed === false &&
+        ['Source Ready','Restored','Armed','Applied','Needs Review','Recovery Required','Conflict'].includes(r.state) &&
+        (r.state === 'Source Ready' ? r.recovery_id === null : token(r.recovery_id)) &&
+        (r.state !== 'Applied' || r.site_status === '0' && r.runtime_verified === true) &&
+        (r.state !== 'Armed' || r.site_status === '1' && r.runtime_verified === false);
+    }
+    return action === 'apply' ?
+      r.state === 'Armed' && r.changed === true && r.runtime_verified === false &&
+      r.site_status === '1' && token(r.recovery_id) :
+      r.state === 'Restored' && typeof r.changed === 'boolean' && r.runtime_verified === true &&
+      token(r.recovery_id);
+  }
+  function manageStoppedRequest(action) {
+    var scope = statusScope(), site = selectedProbeSite(scope);
+    var locale = root.find('#ach-status-locale').val();
+    if (statusBusy || statusRevision === null || !site || !scope ||
+        scope.scope !== 'site' || root.find('#ach-status-template').val() !== 'stopped' ||
+        statusLoadedScope !== 'site:' + scope.site_id) return;
+    var previous = statusStoppedEvidence;
+    if (action === 'apply' &&
+        (!sameStoppedSelection(previous) || !['Source Ready','Restored'].includes(previous.state) ||
+         String(site.panel_status) !== '1' ||
+         root.find('#ach-status-stopped-apply-approve').prop('checked') !== true)) return;
+    if (action === 'restore' &&
+        (!sameStoppedSelection(previous) ||
+         !['Armed','Applied','Needs Review','Recovery Required'].includes(previous.state) ||
+         root.find('#ach-status-stopped-restore-approve').prop('checked') !== true)) return;
+    var ticket = statusTicket, revision = statusRevision;
+    var snapshot = nativeHostsSnapshot(site), brand = statusFields();
+    statusStoppedEvidence = null;
+    root.find('#ach-status-stopped-apply-approve, #ach-status-stopped-restore-approve')
+      .prop('checked', false);
+    root.find('#ach-status-stopped-result').text(action === 'recheck' ?
+      'Inspecting loaded native site rule and saved recovery...' :
+      'Checking saved ownership and performing an approved shared Nginx operation...');
+    statusLock(true);
+    request('status_stopped', Object.assign({}, scope, brand, {
+      stopped_action:action, template:'stopped', locale:locale,
+      expected_revision:String(revision), expected_site_key:site.name,
+      expected_site_snapshot:snapshot,
+      expected_vhost_sha256:previous ? previous.vhost : '',
+      expected_render_sha256:previous ? previous.rendered : '',
+      expected_recovery_id:previous ? previous.recovery : '',
+      stopped_approval:action === 'recheck' ? '' : action + '_exact_native_stopped503_reload'
+    }), function (r) {
+      if (ticket !== statusTicket) return;
+      var same = sameStoppedSelection({ticket:ticket,revision:revision,
+        site_id:scope.site_id,snapshot:snapshot,locale:locale,brand:JSON.stringify(brand)});
+      if (!same || !validStoppedResponse(r, action, site, snapshot, revision, locale) ||
+          (action === 'apply' && r &&
+           (r.rendered_sha256 !== previous.rendered || r.recovery_id === previous.recovery)) ||
+          (action === 'restore' && r && r.recovery_id !== previous.recovery)) {
+        root.find('#ach-status-stopped-result').text(
+          action === 'recheck' ? 'Native stopped-site Recheck unavailable or incompatible. Reload inventory and Recheck.' :
+          'Outcome unknown. Refresh website inventory and Recheck saved recovery before any retry.' +
+            (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') +
+            (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : ''));
+      } else {
+        if (action === 'recheck') {
+          statusStoppedEvidence = {ticket:ticket,revision:revision,site_id:scope.site_id,
+            snapshot:snapshot,locale:locale,brand:JSON.stringify(brand),
+            state:r.state,vhost:r.vhost_sha256,rendered:r.rendered_sha256,
+            recovery:r.recovery_id};
+        }
+        root.find('#ach-status-stopped-result').text(
+          r.state + (r.changed ? ' — selected native VHost rule changed' : ' — read-only') +
+          '\nWebsite: ' + r.site_key + ' (#' + r.site_id + '); aaPanel status ' + r.site_status +
+          '\nNative VHost SHA-256: ' + r.vhost_sha256 +
+          '\nSelected HTML SHA-256: ' + r.rendered_sha256 +
+          '\nServed HTML SHA-256: ' + r.served_sha256 +
+          '\nReal HTTP 503 verified: ' + (r.runtime_verified ? 'Yes (only when stopped)' :
+            'No — Armed, restored, unverified or recovery needed') +
+          '\nRecovery ID: ' + (r.recovery_id || 'None') +
+          '\nRequest ID: ' + r.operation_id +
+          '\nShared Nginx reload; named website only. Stop/Start using aaPanel, then refresh its inventory and Recheck. HTTPS unbound unchanged.');
+      }
+      statusLock(false);
+    });
+  }
+  root.find('#ach-status-stopped-recheck').on('click', function () {
+    manageStoppedRequest('recheck');
+  });
+  root.find('#ach-status-stopped-apply').on('click', function () {
+    manageStoppedRequest('apply');
+  });
+  root.find('#ach-status-stopped-restore').on('click', function () {
+    manageStoppedRequest('restore');
+  });
+  root.find('#ach-status-stopped-apply-approve, #ach-status-stopped-restore-approve')
     .on('change', function () { statusLock(statusBusy); });
   function validUnboundResponse(r, action, locale, revision) {
     var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };

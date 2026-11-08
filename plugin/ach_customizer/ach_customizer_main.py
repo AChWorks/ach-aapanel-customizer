@@ -1053,6 +1053,125 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("status_manage_unexpected", exc, request_id)
 
+    def status_stopped(self, args):
+        """Opt-in native SiteStop/Start HTTP503 rule with exact VHost recovery.
+
+        This is deliberately separate from per-site extension status management:
+        aaPanel disables server-scope includes when stopping a website.
+        """
+        request_id = uuid4().hex
+        action = self._argument(args, "stopped_action")
+        try:
+            self._status_primary_admin_post()
+            if (self._argument(args, "scope") != "site" or
+                    self._argument(args, "template") != "stopped" or
+                    action not in ("recheck", "apply", "restore")):
+                raise StatusPageError("Choose a native website and stopped-site template")
+            site_id = self._status_site_id(args)
+            if site_id is None:
+                raise StatusPageError("Select a validated native website")
+            locale = self._argument(args, "locale")
+            if locale not in LOCALES:
+                raise StatusPageError("Select a supported stopped-site locale")
+            if (action != "recheck" and self._argument(args, "stopped_approval") !=
+                    action + "_exact_native_stopped503_reload"):
+                raise StatusPageError("Explicit website-scoped stopped-site Nginx approval required")
+            expected_key, expected_identity, serialized = self._status_probe_selection(
+                args, site_id)
+            from ach_customizer_state import _open_state_dir, parse_revision
+            from ach_customizer_status_pages import _load_at, _take_lock
+            from ach_customizer_status_stopped import manage_stopped
+            from ach_customizer_status_extension import ExtensionError
+            import public
+
+            def compatible():
+                return (public.get_webserver() == "nginx" and
+                        str(public.get_panel_version()).strip() == "8.0.7")
+            if not compatible():
+                raise StatusPageError("Stopped-site adapter requires native aaPanel 8.0.7 Nginx")
+
+            def native_record():
+                record = public.M("sites").where("id=?", (site_id,)).field(
+                    "id,name,path,status").find()
+                if (not isinstance(record, dict) or
+                        type(record.get("id")) is not int or record["id"] != site_id):
+                    raise StatusPageError("Native website changed; refresh inventory")
+                _bound_domains_for_sites(public, [record])
+                return record
+
+            before = native_record()
+            if (before.get("name") != expected_key or
+                    native_site_snapshot(before) != expected_identity):
+                raise StatusPageError("Selected website changed; refresh native inventory")
+
+            def unique_root():
+                rows = public.M("sites").where("path=?", (before["path"],)).field(
+                    "id,path").limit("0,2").select()
+                if (not isinstance(rows, list) or len(rows) != 1 or
+                        type(rows[0].get("id")) is not int or
+                        rows[0]["id"] != site_id or rows[0].get("path") != before["path"]):
+                    raise StatusPageError("Native document root is shared or unverified")
+
+            if action == "apply" and str(before.get("status")) != "1":
+                raise StatusPageError("Site must be running before arming HTTP 503; use Recheck")
+            if action != "recheck":
+                unique_root()
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock = _take_lock(fd)
+                try:
+                    state = _load_at(fd)
+                    revision = parse_revision(self._argument(args, "expected_revision"))
+                    if revision != state["revision"]:
+                        raise StatusPageError("Branding revision changed; Recheck")
+                    effective, _ = select_brand(state, site_id)
+                    if self._argument(args, "brand_name") is not None:
+                        effective = self._status_values(args)
+                    rendered = render_page(locale, "stopped", effective)
+                    if native_record() != before or not compatible():
+                        raise StatusPageError("Native site or webserver changed during preflight")
+                    if action != "recheck":
+                        unique_root()
+                    result = manage_stopped(
+                        action, before, rendered["html"], data_fd=fd,
+                        expected_vhost=self._argument(args, "expected_vhost_sha256"),
+                        expected_render=self._argument(args, "expected_render_sha256"),
+                        expected_recovery=self._argument(args, "expected_recovery_id"),
+                    )
+                    try:
+                        if action != "recheck":
+                            unique_root()
+                        if native_record() != before or not compatible():
+                            raise StatusPageError("Native site/webserver changed during operation")
+                    except StatusPageError as exc:
+                        raise ExtensionError("uncertain", "Stopped-site outcome is uncertain; Recheck saved recovery",
+                                             recovery_id=result.get("recovery_id")) from exc
+                    response = {
+                        "status": True, "request_id": request_id, "operation_id": request_id,
+                        "stopped_action": action, "scope": "site", "template": "stopped",
+                        "locale": locale, "revision": revision,
+                        "verified_site_snapshot": serialized, **result,
+                    }
+                finally:
+                    os.close(lock)
+            finally:
+                os.close(fd)
+            return self._activity_result(
+                response, "status_pages", "status_stopped_" + action,
+                target="site:" + str(site_id),
+                level="WARNING" if result["state"] in (
+                    "Recovery Required", "Needs Review", "Conflict") else "INFO")
+        except PermissionError as exc:
+            return self._fail("status_stopped_authorization", exc, request_id)
+        except StatusPageError as exc:
+            step = str(getattr(exc, "stage", "preflight"))
+            response = self._fail("status_stopped_" + step, exc, request_id)
+            if step in ("uncertain", "postcheck", "recovery"):
+                response["recovery_required"] = True
+            return response
+        except Exception as exc:
+            return self._fail("status_stopped_unexpected", exc, request_id)
+
     def status_defaults(self, args):
         """Explicit global *new-site source* 404/502/defaultDoc management.
 
