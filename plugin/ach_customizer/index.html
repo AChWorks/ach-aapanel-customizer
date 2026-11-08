@@ -35,6 +35,8 @@
     --ach-green:#20a53a; --ach-green-hover:#1d9534;
     --ach-primary-fill:#167a2f; --ach-primary-fill-hover:#146f2b;
     --ach-danger:#bd3935; --ach-warn:#986615; --ach-focus:#20a53a;
+    /* Shared spacing roles: field rows, stacked content and approval actions. */
+    --ach-space-xs:4px; --ach-space-sm:8px; --ach-space-md:12px; --ach-space-lg:20px;
     color:var(--ach-text); background:var(--ach-surface); width:100%;
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
     font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
@@ -74,7 +76,7 @@
   #ach-customizer .ach-main h4 {
     margin:0 0 12px; font-size:14px; line-height:21px; color:#263544; font-weight:600;
   }
-  #ach-customizer .ach-view > :not(h4) { margin-top:12px; margin-bottom:0; }
+  #ach-customizer .ach-view > :not(h4) { margin-top:var(--ach-space-md); margin-bottom:0; }
   #ach-customizer .ach-view > h4 + :not(h4) { margin-top:0; }
   #ach-customizer .ach-view > p.ach-note { padding:0; border:0; background:transparent; }
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
@@ -82,13 +84,19 @@
     padding:11px 13px; background:var(--ach-soft); border:1px solid #e8ecef;
     border-radius:8px; overflow-wrap:anywhere; color:#52606d;
   }
-  #ach-customizer .ach-note p { margin:6px 0 0; }
+  #ach-customizer .ach-note p { margin:var(--ach-space-sm) 0 0; }
   #ach-customizer .ach-note p:last-child { margin-bottom:0; }
+  /* Note content owns its vertical flow. Tables and approval checkboxes are
+     block-level peers of buttons, never zero-gap inline fragments. */
+  #ach-customizer .ach-note > .ach-scroll { margin-block-start:var(--ach-space-md); }
+  #ach-customizer .ach-main .ach-note > label:has(> input[type="checkbox"]) {
+    display:flex; align-items:flex-start; margin-block:var(--ach-space-md) 0;
+  }
   /* Follow the measured Nginx label / 150px control rhythm. Two compact
      setting columns use the Customizer's wider evidence-oriented dialog. */
   #ach-customizer .ach-fields, #ach-customizer .ach-status-fields {
     display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
-    gap:8px 18px; margin:12px 0;
+    gap:var(--ach-space-sm) 18px; margin:var(--ach-space-md) 0;
   }
   #ach-customizer .ach-fields > div, #ach-customizer .ach-status-fields > div {
     display:grid; grid-template-columns:minmax(0,1fr) minmax(0,150px);
@@ -107,7 +115,7 @@
     grid-column:1/-1; grid-template-columns:minmax(0,175px) minmax(0,220px) minmax(0,1fr);
   }
   #ach-customizer .ach-field-site > .ach-controls,
-  #ach-customizer .ach-field-site > small { grid-column:2/-1; margin-top:4px; }
+  #ach-customizer .ach-field-site > small { grid-column:2/-1; margin-top:var(--ach-space-xs); }
   #ach-customizer .ach-table-skeleton {
     display:grid; gap:15px; padding:15px 12px;
     min-height:160px; align-content:start;
@@ -141,7 +149,7 @@
   #ach-customizer .ach-main label:has(> input[type="checkbox"]) {
     display:inline-flex; align-items:flex-start; gap:5px; line-height:1.6;
   }
-  #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:12px 20px; margin:12px 0; }
+  #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:var(--ach-space-md) 20px; margin:var(--ach-space-md) 0; }
   #ach-customizer .ach-switches label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
   #ach-customizer .ach-switches input { margin:0; }
   #ach-customizer .ach-main button {
@@ -185,7 +193,7 @@
   #ach-customizer th { background:#f7f9fa; color:#586775; font-weight:600; white-space:nowrap; }
   #ach-customizer tbody tr:hover { background:#fafcfd; }
   #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:8px; }
-  #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0 0; }
+  #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:var(--ach-space-sm); margin:var(--ach-space-md) 0 0; }
   #ach-customizer .ach-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
   #ach-customizer .ach-toolbar [role="status"] {
     color:var(--ach-muted); flex:1 1 220px; min-width:0; margin:0; overflow-wrap:anywhere;
@@ -236,7 +244,7 @@
   #ach-customizer .ach-activity-warning { color:#8c601c; font-weight:600; }
   #ach-customizer .ach-activity-info { color:#3b6474; }
   #ach-customizer .ach-activity-table td { overflow-wrap:anywhere; }
-  #ach-customizer .ach-main hr { border:0; border-top:1px solid var(--ach-line); margin:20px 0; }
+  #ach-customizer .ach-main hr { border:0; border-top:1px solid var(--ach-line); margin:var(--ach-space-lg) 0; }
   #ach-customizer .ach-main small { display:block; margin-top:6px; color:var(--ach-muted); line-height:1.55; }
   @media (max-width:880px) {
     #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { grid-template-columns:minmax(0,1fr); }
@@ -255,7 +263,7 @@
   @media (max-width:460px) {
     #ach-customizer .ach-fields > div, #ach-customizer .ach-status-fields > div,
     #ach-customizer .ach-fields > .ach-field-site {
-      grid-template-columns:minmax(0,1fr); row-gap:4px; padding:3px 0;
+      grid-template-columns:minmax(0,1fr); row-gap:var(--ach-space-xs); padding:3px 0;
     }
     #ach-customizer .ach-field-site > .ach-controls,
     #ach-customizer .ach-field-site > small { grid-column:1; }
