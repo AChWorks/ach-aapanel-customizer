@@ -199,6 +199,51 @@ class NativeSiteFileTests(unittest.TestCase):
             manager._source(self.site, "502", str(self.vhost_root))
         self.assertEqual(self.files["502"].read_bytes(), original)
 
+    def test_foreign_overlay_during_post_publish_proof_keeps_prepared_recovery(self):
+        """A route-changing .conf must never turn a racy Apply into success."""
+        from unittest.mock import patch
+
+        overlay, analytics = self._native_log_only_include()
+        expected_vhost = manager._source(self.site, "502", str(self.vhost_root))
+        before = self.files["502"].read_bytes()
+        analytics_before = analytics.read_bytes()
+        foreign = overlay / "foreign.conf"
+        real_publish = manager._publish
+
+        def publish_then_change_overlay(*args, **kwargs):
+            real_publish(*args, **kwargs)
+            # A different aaPanel/operator actor changes effective Nginx routing
+            # after the atomic HTML replacement but before final eligibility.
+            foreign.write_text("location /foreign/ { return 403; }\n")
+
+        with patch.object(manager, "_publish", side_effect=publish_then_change_overlay):
+            with self.assertRaises(ExtensionError) as failure:
+                self.operate("apply", code="502", expected_vhost=expected_vhost)
+
+        recovery_id = failure.exception.recovery_id
+        self.assertTrue(recovery_id)
+        journal = manager._record_read(self.fd, self.site, "502")
+        self.assertEqual(journal["op"], recovery_id)
+        self.assertEqual(journal["phase"], "prepared")
+        self.assertEqual(manager._backup(self.fd, journal), before)
+        self.assertEqual(self.files["502"].read_bytes(), self.proposed.encode())
+        self.assertEqual(self.operate(code="502")["state"], "Needs Review")
+        with self.assertRaises(ExtensionError):
+            self.operate("restore", code="502", expected_recovery=recovery_id)
+
+        # Remove only the injected foreign overlay, then prove explicit
+        # recovery can restore the original file without losing the journal.
+        foreign.unlink()
+        self.assertEqual(self.operate(code="502")["state"], "Recovery Required")
+        restored = self.operate(
+            "restore", code="502", expected_recovery=recovery_id)
+        self.assertEqual(restored["state"], "Source Restored")
+        self.assertEqual(self.files["502"].read_bytes(), before)
+        self.assertEqual(analytics.read_bytes(), analytics_before)
+        self.assertEqual(manager._record_read(self.fd, self.site, "502")["phase"],
+                         "restored")
+        self.assertEqual(self.operate(code="502")["state"], "Source Restored")
+
     def test_native_analytics_overlay_symlink_permission_and_scope_guards(self):
         overlay, analytics = self._native_log_only_include()
         original = analytics.read_bytes()
