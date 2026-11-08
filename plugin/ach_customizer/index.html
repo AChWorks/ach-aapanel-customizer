@@ -88,7 +88,7 @@
   #ach-customizer .ach-note p:last-child { margin-bottom:0; }
   /* Note content owns its vertical flow. Tables and approval checkboxes are
      block-level peers of buttons, never zero-gap inline fragments. */
-  #ach-customizer .ach-note > .ach-scroll { margin-block-start:var(--ach-space-md); }
+  #ach-customizer .ach-note > :is(.ach-scroll, button) { margin-block-start:var(--ach-space-md); }
   #ach-customizer .ach-main .ach-note > label:has(> input[type="checkbox"]) {
     display:flex; align-items:flex-start; margin-block:var(--ach-space-md) 0;
   }
