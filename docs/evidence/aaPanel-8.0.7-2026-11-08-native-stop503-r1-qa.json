@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "date": "2026-11-08",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "pr": 38,
+  "prior_reviewed_head": "6956010fafc1473f98d61da61ffad43b8d1a4efa",
+  "prior_review_verdict": "COMPLETE / CHANGES_REQUIRED (3 REQUIRED)",
+  "source_branch": "feat/issue10-native-stop503-20261108",
+  "integration_base": "72e79515c999630da61abf4d3563da547245e3fa",
+  "source_version": "0.1.22 UNRELEASED",
+  "native_package": {
+    "filename": "artifacts/ach_customizer_0122_review_R1_fixed.zip",
+    "sha256": "00c84a06ce63e2d64e1e341dcefe905b951aed73644f7cfce4b377aecbb89643",
+    "members": 48,
+    "installed_member_sha256": "48/48 PASS",
+    "native_install": "panelPlugin.update_zip / panelPlugin.input_zip; aaPanel guest 8.0.7",
+    "published": false
+  },
+  "required_01": {
+    "fix": "Raw $http_host is anchored to recorded selected native website binding(s) and combined with the stopped native root in one short Nginx variable. No $host fallback, no shared Nginx hash-size override.",
+    "actual_default_host_matrix": {
+      "environment": "Separate loopback HTTP 127.0.0.1:18902 and HTTPS 127.0.0.1:18903; selected server deliberately default_server for both, real Nginx and real selected-site template; no aaPanel VHost modification",
+      "driver": "artifacts/qa_0122_pr38_r1_default_vhost.py",
+      "driver_sha256": "b4a603e61cb6babf8ec7e0ef7c40ca530d60bd62a56d66470261860ae64b2963",
+      "http": "7 selected/alias/port/case authority variants observed 503 text/html exact body; 6 unmatched/missing Host variants observed untouched native default 200",
+      "https": "7 selected/alias/port/case authority variants observed 503 text/html exact body; 6 unknown SNI/Host, invalid suffix, missing Host variants observed untouched default 200",
+      "nginx_syntax": "PASS",
+      "isolation_cleanup": "Private listeners stopped and private config removed"
+    },
+    "native_site_matrix": {
+      "driver": "artifacts/qa_0122_pr38_R1_functional_v3.py",
+      "driver_sha256": "e74a6aef8d985602d517c01cf9555b2e14352e9cd366d109a7bf6807b913ca51",
+      "en_real_http503_body_sha256": "4789b1f2eb5a95ef9c2681a38e652f1fdaf8d087cf3cb0ea19797af75558d718",
+      "fa_real_http503_body_sha256": "05950966ad99efb758c9783656a1031555259ef2af4a070b9d6ebf4bb24a1199",
+      "unmatched_http_hostname_and_port": "HTTP200 preserved while running, stopped and after Restore",
+      "missing_http_host": "original HTTP200 preserved",
+      "unmatched_sni_https443": "HTTP200 preserved while running, stopped and after Restore; bounded retries only for transient curl HTTP2 stream error during Nginx reload",
+      "named_https_sni_driver": "artifacts/qa_0122_native_https.py",
+      "named_https_sni_driver_sha256": "d2f252493a5ff6f5eb8a5cfecfccfb6f7d41039384920fcb823005bb4884530e",
+      "named_https": "Selected site's SNI 503 text/html while stopped; 200 after Restore/Start; 2 non-target named sites and certificates unchanged"
+    }
+  },
+  "required_02": {
+    "fix": "After reload and route probe, re-read exact selected native VHost and compare its loaded Nginx -T source before persisting successful journal phase. Any late writer leaves the original Recovery ID and uncertain result.",
+    "native_late_writer_fault_injection": {
+      "driver": "artifacts/qa_0122_pr38_r1_late_source.py",
+      "driver_sha256": "9a16b1b31f4926b8d55ada5ac5b44ff168477ce28c95eb1c1ece38b32d100d64",
+      "apply": "Independently appended selected-VHost comment during postreload HTTP probe; status_stopped_uncertain with stable Recovery ID, phase prepared, Recheck Recovery Required; explicit Restore preserved comment, then task-only comment removed with exact source verification",
+      "restore": "Independently appended selected-VHost comment during postreload HTTP probe; status_stopped_uncertain, phase restoring and Recovery ID preserved; unaudited source rewrite refused; after task comment's exact removal explicit Recheck/Restore reconciled with changed=false",
+      "scope": "Only selected test WordPress VHost mutated with task-owned reversible comment; other VHosts and Nginx config unchanged",
+      "result": "PASS"
+    },
+    "runtime_claim": "Final source checks prove current disk and Nginx -T source after reload; not an assertion that all earlier worker generations have exited"
+  },
+  "required_03": {
+    "fix": "Backend proof_kind identifies source_only, stopped_http503, native_http200, running_non503 or none; frontend validates action-state-proof contract and labels expected/stored/observed hashes separately.",
+    "source_ready": "Expected stopped HTML digest only",
+    "armed": "Prepared digest, no observed stopped HTTP503",
+    "applied_stopped": "Observed 503 status, exact HTML digest and text/html",
+    "restored_stopped": "Observed native HTTP200, never claims custom 503",
+    "restored_running": "Non503 running response and postreload source; no claim of all old workers exiting or stopped-route proof",
+    "needs_review_recovery": "No affirmative runtime claim",
+    "verification": "Backend state tests and JavaScript operator-visible message assertions"
+  },
+  "rollback": {
+    "result": "PASS",
+    "method": "Cold-stop managed QEMU; restore verified pretest disk; reboot and validate baseline; preserve protected snapshot",
+    "pretest_baseline_overlay_sha256": "fef8861eddcf0490707307afafe592ab33acaf8dffbb3dcecb56bf3c2834c092",
+    "baseline_plugin": "0.1.12, 39/39 original installed files",
+    "services": "Nginx, aaPanel, PHP 8.1/8.5, MariaDB and guest agent",
+    "websites": "3/3 WordPress HTTP200 and HTTPS200",
+    "protected_snapshot_sha256": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "production_changed": false
+  },
+  "limitations": [
+    "Synthetic full-admin Flask POST is not real authenticated browser/CSRF/role Phase B acceptance (#21).",
+    "Unknown-Host HTTPS/443 *management feature* remains outside this PR (#10); test proves this change does not alter fallback.",
+    "Current source/loaded Nginx config inspection does not prove all old Nginx workers have exited.",
+    "Only native aaPanel 8.0.7 Nginx test environment is covered; no release/Production deployment."
+  ],
+  "gate": "New exact-candidate independent HIGH_ASSURANCE delta re-review required; no Merge without later explicit Owner approval.",
+  "source_validation": {
+    "python_unittest": {
+      "count": 508,
+      "failures": 0,
+      "result": "PASS"
+    },
+    "javascript_node_test": {
+      "count": 228,
+      "failures": 0,
+      "result": "PASS"
+    },
+    "chromium": {
+      "section_viewports": 25,
+      "native_launcher_viewports": 5,
+      "simulated_layers": 5,
+      "other_responsive_checks": "PASS"
+    },
+    "python_compileall": "PASS",
+    "shell_syntax": "PASS",
+    "json_evidence": "PASS",
+    "git_diff_check": "PASS",
+    "exact_zip_rebuilt_after_all_source_changes": "00c84a06ce63e2d64e1e341dcefe905b951aed73644f7cfce4b377aecbb89643"
+  }
+}

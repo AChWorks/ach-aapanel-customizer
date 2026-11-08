@@ -77,6 +77,9 @@ function loadUi() {
     '#ach-status-unbound-recheck', '#ach-status-unbound-apply',
     '#ach-status-unbound-restore', '#ach-status-unbound-apply-approve',
     '#ach-status-unbound-restore-approve', '#ach-status-unbound-result',
+    '#ach-status-stopped-recheck', '#ach-status-stopped-apply',
+    '#ach-status-stopped-restore', '#ach-status-stopped-apply-approve',
+    '#ach-status-stopped-restore-approve', '#ach-status-stopped-result',
     '#ach-status-comparison-summary', '#ach-status-comparison-excerpt',
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
@@ -312,6 +315,10 @@ function loadUi() {
       defaultSourceApplyDisabled: elements.get('#ach-status-default-apply').props.disabled,
       defaultSourceRestoreDisabled: elements.get('#ach-status-default-restore').props.disabled,
       unboundResult: elements.get('#ach-status-unbound-result').textContent,
+      stoppedResult: elements.get('#ach-status-stopped-result').textContent,
+      stoppedRecheckDisabled: elements.get('#ach-status-stopped-recheck').props.disabled,
+      stoppedApplyDisabled: elements.get('#ach-status-stopped-apply').props.disabled,
+      stoppedRestoreDisabled: elements.get('#ach-status-stopped-restore').props.disabled,
       unboundRecheckDisabled: elements.get('#ach-status-unbound-recheck').props.disabled,
       unboundApplyDisabled: elements.get('#ach-status-unbound-apply').props.disabled,
       unboundRestoreDisabled: elements.get('#ach-status-unbound-restore').props.disabled,
@@ -1147,11 +1154,11 @@ function statusPrefs(revision = 2, source = 'Global default', effective = brand(
 }
 
 
-function loadNativeStatusSiteSelection(ui, id='7') {
+function loadNativeStatusSiteSelection(ui, id='7', panelStatus='1') {
   const request = ui.requests.at(-1);
   assert.match(request.options.url,/s=status_sites$/);
   const native = {...site(),id:Number(id),name:'demo.test',
-    document_root:'/www/demo.test',
+    document_root:'/www/demo.test',panel_status:panelStatus,
     bound_domains:[{name:'demo.test',port:80}],canonical_domain_bound:true};
   request.respond({...page([native]),purpose:'status_site_selection'});
   ui.statusSetValue('#ach-status-site-id',id,'change');
@@ -5041,4 +5048,261 @@ test('HTTP unbound wrong replies, brand edits and scope/locale changes revoke au
   ui.statusSetValue('#ach-status-scope','site','change');
   assert.equal(ui.state().unboundRecheckDisabled,true);
   assert.equal(ui.state().unboundApplyDisabled,true);
+});
+
+
+function stoppedAck(request, state='Source Ready', extras={}) {
+  const fields=request.options.data;
+  const action=fields.stopped_action;
+  const result = {
+    status:true,schema:1,mode:'native_stopped_http503',
+    stopped_action:action,scope:'site',template:'stopped',
+    locale:fields.locale,revision:Number(fields.expected_revision),
+    site_id:7,site_key:'demo.test',site_status:'1',
+    verified_site_snapshot:fields.expected_site_snapshot,
+    request_id:'a'.repeat(32),operation_id:'a'.repeat(32),
+    vhost_sha256:'b'.repeat(64),rendered_sha256:'c'.repeat(64),
+    served_sha256:'d'.repeat(64),recovery_id:null,
+    read_only:action==='recheck',changed:action!=='recheck',runtime_verified:false,
+    state,impact:'Native aaPanel SiteStop/Start; shared Nginx reload, HTTPS unchanged.',
+    ...extras
+  };
+  result.proof_kind = extras.proof_kind ||
+    (result.state === 'Applied' && result.runtime_verified ? 'stopped_http503' :
+      result.state === 'Restored' && result.runtime_verified ?
+        (result.site_status === '0' ? 'native_http200' : 'running_non503') :
+      ['Source Ready','Armed','Restored'].includes(result.state) ? 'source_only' : 'none');
+  return result;
+}
+function chooseStoppedSite(ui, panelStatus='1') {
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  loadNativeStatusSiteSelection(ui,'7',panelStatus);
+  const saved=ui.requests.at(-1);
+  assert.match(saved.options.url,/s=status_preferences$/);
+  saved.respond(statusPrefs(2,'Global default'));
+  ui.statusSetValue('#ach-status-template','stopped','change');
+  assert.equal(ui.state().stoppedRecheckDisabled,false);
+}
+
+test('Stopped-site 503 requires selected live site, exact Recheck and explicit Apply/Restore', () => {
+  const ui=loadUi();
+  chooseStoppedSite(ui);
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  const pre=ui.statusClick('#ach-status-stopped-recheck');
+  assert.match(pre.options.url,/s=status_stopped$/);
+  assert.equal(pre.options.type,'POST');
+  assert.equal(pre.options.timeout,45000);
+  assert.equal(pre.options.data.stopped_action,'recheck');
+  assert.equal(pre.options.data.template,'stopped');
+  assert.equal(pre.options.data.scope,'site');
+  assert.equal(pre.options.data.site_id,'7');
+  assert.equal(pre.options.data.expected_site_key,'demo.test');
+  pre.respond(stoppedAck(pre));
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  ui.statusSetChecked('#ach-status-stopped-apply-approve',true);
+  assert.equal(ui.state().stoppedApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-stopped-apply');
+  assert.match(apply.options.url,/s=status_stopped$/);
+  assert.equal(apply.options.data.stopped_approval,'apply_exact_native_stopped503_reload');
+  assert.equal(apply.options.data.expected_vhost_sha256,'b'.repeat(64));
+  assert.equal(apply.options.data.expected_render_sha256,'c'.repeat(64));
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  apply.respond(stoppedAck(apply,'Armed',{
+    read_only:false,changed:true,recovery_id:'f'.repeat(32),
+    vhost_sha256:'e'.repeat(64)
+  }));
+  assert.match(ui.state().stoppedResult,/Armed/);
+  assert.equal(ui.state().stoppedRestoreDisabled,true);
+  const saved=ui.statusClick('#ach-status-stopped-recheck');
+  saved.respond(stoppedAck(saved,'Armed',{
+    recovery_id:'f'.repeat(32),vhost_sha256:'e'.repeat(64)
+  }));
+  ui.statusSetChecked('#ach-status-stopped-restore-approve',true);
+  assert.equal(ui.state().stoppedRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-stopped-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'f'.repeat(32));
+  assert.equal(restore.options.data.stopped_approval,'restore_exact_native_stopped503_reload');
+  restore.respond(stoppedAck(restore,'Restored',{
+    read_only:false,changed:true,runtime_verified:true,recovery_id:'f'.repeat(32)
+  }));
+  assert.match(ui.state().stoppedResult,/Restored/);
+  assert.equal(ui.state().stoppedRestoreDisabled,true);
+});
+
+test('Restored-site foreign 503 rule is Conflict and never permits Apply/Restore', () => {
+  const ui=loadUi();chooseStoppedSite(ui);
+  const read=ui.statusClick('#ach-status-stopped-recheck');
+  read.respond(stoppedAck(read,'Conflict',{
+    recovery_id:'f'.repeat(32),vhost_sha256:'e'.repeat(64)
+  }));
+  assert.match(ui.state().stoppedResult,/Conflict/);
+  ui.statusSetChecked('#ach-status-stopped-apply-approve',true);
+  ui.statusSetChecked('#ach-status-stopped-restore-approve',true);
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  assert.equal(ui.state().stoppedRestoreDisabled,true);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-stopped-restore');
+  assert.equal(ui.requests.length,count);
+});
+
+test('Stopped-site prepared/restoring recovery accepts verified no-write Restore', () => {
+  const ui=loadUi();chooseStoppedSite(ui);
+  const read=ui.statusClick('#ach-status-stopped-recheck');
+  read.respond(stoppedAck(read,'Recovery Required',{
+    recovery_id:'f'.repeat(32),vhost_sha256:'e'.repeat(64)
+  }));
+  ui.statusSetChecked('#ach-status-stopped-restore-approve',true);
+  assert.equal(ui.state().stoppedRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-stopped-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'f'.repeat(32));
+  restore.respond(stoppedAck(restore,'Restored',{
+    read_only:false,changed:false,runtime_verified:true,recovery_id:'f'.repeat(32)
+  }));
+  assert.match(ui.state().stoppedResult,/Restored/);
+  assert.doesNotMatch(ui.state().stoppedResult,/Outcome unknown/);
+  assert.equal(ui.state().stoppedRestoreDisabled,true);
+});
+
+test('Stopped-site stale response or unknown write cannot authorize retry', () => {
+  const ui=loadUi();chooseStoppedSite(ui);
+  const bad=ui.statusClick('#ach-status-stopped-recheck');
+  bad.respond(stoppedAck(bad,'Source Ready',{verified_site_snapshot:'stale'}));
+  assert.match(ui.state().stoppedResult,/incompatible/);
+  ui.statusSetChecked('#ach-status-stopped-apply-approve',true);
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  const pre=ui.statusClick('#ach-status-stopped-recheck');
+  pre.respond(stoppedAck(pre));
+  ui.statusSetChecked('#ach-status-stopped-apply-approve',true);
+  const apply=ui.statusClick('#ach-status-stopped-apply');
+  apply.reject(null,'timeout');
+  assert.match(ui.state().error,/Outcome unknown/);
+  assert.match(ui.state().stoppedResult,/Outcome unknown/);
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  ui.statusClick('#ach-status-stopped-apply');
+  assert.equal(ui.requests.at(-1),apply,'No blind write retry');
+});
+
+test('Stopped-site proof labels distinguish expected from observed and stopped Restore', () => {
+  for (const scenario of [
+    {state:'Source Ready',status:'1',runtime:false,kind:'source_only',
+      label:/Expected stopped HTML SHA-256/,proof:/no HTTP 503 delivery observed/i},
+    {state:'Armed',status:'1',runtime:false,kind:'source_only',
+      label:/Prepared stopped HTML SHA-256/,proof:/has not been observed/},
+    {state:'Restored',status:'1',runtime:false,kind:'source_only',
+      label:/Previous stopped HTML SHA-256 \(not active\)/,proof:/no live stopped HTTP result observed/},
+    {state:'Recovery Required',status:'1',runtime:false,kind:'none',
+      label:/Saved stopped HTML SHA-256 \(not verified\)/,proof:/No confirmed live delivery/},
+    {state:'Needs Review',status:'1',runtime:false,kind:'none',
+      label:/Saved stopped HTML SHA-256 \(not verified\)/,proof:/managed delivery is unconfirmed/},
+    {state:'Applied',status:'0',runtime:true,kind:'stopped_http503',
+      label:/Observed HTTP 503 HTML SHA-256/,proof:/Observed HTTP 503, exact HTML digest and text\/html/}
+  ]) {
+    const ui=loadUi();chooseStoppedSite(ui,scenario.status);
+    const req=ui.statusClick('#ach-status-stopped-recheck');
+    req.respond(stoppedAck(req,scenario.state,{
+      site_status:scenario.status,runtime_verified:scenario.runtime,
+      recovery_id:scenario.state==='Source Ready'?null:'f'.repeat(32),
+      proof_kind:scenario.kind
+    }));
+    const shown=ui.state().stoppedResult;
+    assert.match(shown,scenario.label,scenario.state);
+    assert.match(shown,scenario.proof,scenario.state);
+    if (scenario.state!=='Applied') assert.doesNotMatch(shown,/Observed HTTP 503, exact HTML/);
+    if (scenario.state!=='Applied') assert.doesNotMatch(shown,/Observed HTTP 503 HTML SHA-256/);
+  }
+});
+
+test('Stopped-site Restore verification describes native HTTP 200 or running-only evidence, not HTTP 503', () => {
+  for (const status of ['0','1']) {
+    const ui=loadUi();chooseStoppedSite(ui,status);
+    const pre=ui.statusClick('#ach-status-stopped-recheck');
+    const state=status==='0'?'Applied':'Armed';
+    pre.respond(stoppedAck(pre,state,{
+      site_status:status,runtime_verified:status==='0',
+      recovery_id:'f'.repeat(32)
+    }));
+    ui.statusSetChecked('#ach-status-stopped-restore-approve',true);
+    const req=ui.statusClick('#ach-status-stopped-restore');
+    req.respond(stoppedAck(req,'Restored',{
+      read_only:false,changed:true,runtime_verified:true,
+      site_status:status,recovery_id:'f'.repeat(32)
+    }));
+    const shown=ui.state().stoppedResult;
+    assert.match(shown,/Previous stopped HTML SHA-256 \(not active\)/);
+    assert.doesNotMatch(shown,/Observed HTTP 503 HTML SHA-256/);
+    if (status==='0') assert.match(shown,/Native stopped-page HTTP 200 observed after Restore/);
+    else assert.match(shown,/No claim about old Nginx workers or stopped delivery/);
+  }
+});
+
+test('Stopped Needs Review with drifted VHost permits explicit guarded Restore', () => {
+  const ui=loadUi();chooseStoppedSite(ui,'0');
+  const inspection=ui.statusClick('#ach-status-stopped-recheck');
+  inspection.respond(stoppedAck(inspection,'Needs Review',{
+    site_status:'0',runtime_verified:false,proof_kind:'none',
+    vhost_sha256:'e'.repeat(64),recovery_id:'f'.repeat(32)
+  }));
+  const shown=ui.state().stoppedResult;
+  assert.match(shown,/Needs Review/);
+  assert.match(shown,/Native VHost or stopped-route proof requires review/);
+  assert.match(shown,/Saved recovery remains available after explicit approval/);
+  assert.match(shown,/Recovery ID: f{32}/);
+  assert.doesNotMatch(shown,/Observed HTTP 503 HTML SHA-256/);
+  assert.doesNotMatch(shown,/unavailable or incompatible/);
+  assert.equal(ui.state().stoppedRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-stopped-restore-approve',true);
+  assert.equal(ui.state().stoppedRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-stopped-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'f'.repeat(32));
+  assert.equal(restore.options.data.expected_vhost_sha256,'e'.repeat(64));
+  assert.equal(restore.options.data.stopped_approval,
+    'restore_exact_native_stopped503_reload');
+  restore.respond(stoppedAck(restore,'Restored',{
+    site_status:'0',read_only:false,changed:true,runtime_verified:true,
+    recovery_id:'f'.repeat(32),proof_kind:'native_http200'
+  }));
+  assert.match(ui.state().stoppedResult,/Native stopped-page HTTP 200 observed after Restore/);
+  assert.doesNotMatch(ui.state().stoppedResult,/Observed HTTP 503 HTML SHA-256/);
+  assert.equal(ui.state().stoppedRestoreDisabled,true);
+});
+
+test('Stopped forged Applied proof cannot authorize Restore', () => {
+  for (const proof of [
+    {runtime_verified:false,proof_kind:'none'},
+    {runtime_verified:true,proof_kind:'source_only'}
+  ]) {
+    const ui=loadUi();chooseStoppedSite(ui,'0');
+    const req=ui.statusClick('#ach-status-stopped-recheck');
+    req.respond(stoppedAck(req,'Applied',{
+      site_status:'0',recovery_id:'f'.repeat(32),...proof
+    }));
+    assert.match(ui.state().stoppedResult,/unavailable or incompatible/);
+    assert.equal(ui.state().stoppedRestoreDisabled,true);
+    ui.statusSetChecked('#ach-status-stopped-restore-approve',true);
+    assert.equal(ui.state().stoppedRestoreDisabled,true);
+    assert.doesNotMatch(ui.state().stoppedResult,/Observed HTTP 503 HTML SHA-256/);
+  }
+});
+
+test('Stopped-site forged proof kind cannot be rendered as verified HTTP 503', () => {
+  const ui=loadUi();chooseStoppedSite(ui);
+  const req=ui.statusClick('#ach-status-stopped-recheck');
+  req.respond(stoppedAck(req,'Source Ready',{proof_kind:'stopped_http503',runtime_verified:true}));
+  assert.match(ui.state().stoppedResult,/incompatible/);
+  assert.doesNotMatch(ui.state().stoppedResult,/Observed HTTP 503 HTML SHA-256/);
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+});
+
+test('Stopped-site selection/branding changes invalidate prior Apply proof', () => {
+  const ui=loadUi();chooseStoppedSite(ui);
+  const ready=ui.statusClick('#ach-status-stopped-recheck');
+  ready.respond(stoppedAck(ready));
+  ui.statusSetChecked('#ach-status-stopped-apply-approve',true);
+  assert.equal(ui.state().stoppedApplyDisabled,false);
+  ui.statusSetValue('#ach-status-name','New brand','input change');
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  ui.statusSetChecked('#ach-status-stopped-apply-approve',true);
+  assert.equal(ui.state().stoppedApplyDisabled,true);
+  assert.match(ui.state().stoppedResult,/Recheck/);
 });

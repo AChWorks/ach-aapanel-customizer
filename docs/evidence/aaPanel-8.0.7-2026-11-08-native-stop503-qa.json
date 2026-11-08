@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "date": "2026-11-08",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "issue_acceptance": [
+    10,
+    21
+  ],
+  "source_branch": "feat/issue10-native-stop503-20261108",
+  "integration_base": "72e79515c999630da61abf4d3563da547245e3fa",
+  "version": "0.1.22 UNRELEASED",
+  "purpose": "Opt-in per-site native aaPanel SiteStop/Start real HTTP503 with EN/FA HTML, exact recovery and Nginx shared-service verification",
+  "package": {
+    "name": "ach_customizer_0122_reviewed.zip",
+    "sha256": "f68144deeb4372c6dcd42ef75f35ba52a3fc47d264a363601ee67c69abbd0263",
+    "members": 48,
+    "native_install": "panelPlugin.update_zip / panelPlugin.input_zip",
+    "installed_member_hashes": "48/48 PASS",
+    "published": false
+  },
+  "native_qa": {
+    "provider": "Test Server For AI",
+    "workspace": "/srv/ai-workspace/ach-aapanel-rebuild-20261105",
+    "environment": "Isolated managed QEMU guest, aaPanel 8.0.7 Nginx PHP 8.1/8.5, three native WordPress sites",
+    "authorization_context": "Synthetic Flask full-primary-admin POST, not authenticated aaPanel Browser or real CSRF acceptance",
+    "http_test_driver": "artifacts/qa_0122_reviewed_exact_native.py",
+    "http_test_driver_sha256": "31e1acc99978b0d1fd7dabd31b99df02e956375cbf109e6b323b94476c22d2e6",
+    "https_test_driver": "artifacts/qa_0122_native_https.py",
+    "https_test_driver_sha256": "d2f252493a5ff6f5eb8a5cfecfccfb6f7d41039384920fcb823005bb4884530e",
+    "selected_site": "wp1.digikalashop.top",
+    "nontarget_sites": [
+      "wp2.digikalashop.top",
+      "wp3.digikalashop.top"
+    ],
+    "observations": [
+      "Native aaPanel imported exactly this ZIP from original 0.1.12 with all 48 installed members byte-hash matched.",
+      "Native primary-admin, temporary-session, missing-approval and stale-hash denials passed.",
+      "English running-site Apply Armed, native SiteStop HTTP503 status with text/html and matching complete body SHA256 4789b1f2eb5a95ef9c2681a38e652f1fdaf8d087cf3cb0ea19797af75558d718; Recheck Applied; SiteStart/Recheck Armed; authorized Restore yielded exact original VHost bytes.",
+      "Persian running-site Apply Armed, native SiteStop HTTP503 with text/html and matching complete body SHA256 05950966ad99efb758c9783656a1031555259ef2af4a070b9d6ebf4bb24a1199; Recheck Applied; authorized Restore while stopped returned native original HTTP200, followed by SiteStart and exact original VHost bytes.",
+      "Native status_stopped_apply/restore Activity records present after end-to-end tests.",
+      "With SNI on named selected domain, HTTPS:443 returned 503 text/html and the exact English page SHA256 while stopped; after Restore/Start returned HTTPS200.",
+      "All three named WordPress sites remained healthy, non-target VHost hashes and HTTPS certificates unchanged; Nginx -t passed.",
+      "No vendor source files, global stop HTML, other VHosts or unknown-domain HTTPS catch-all were modified."
+    ]
+  },
+  "cold_restoration": {
+    "status": "PASS",
+    "method": "Cold-stop QEMU; copy verified pretest image; restore exact 37955c89e75f9085bfd90ed382d0ef3e6c13944ac529f40419077c328997233d baseline overlay; cold-boot and verify",
+    "original_plugin_version": "0.1.12",
+    "original_plugin_members": "39/39 identical to original baseline ZIP",
+    "services": "aaPanel, Nginx, PHP-FPM 8.1/8.5 and guest agent active",
+    "websites": "3/3 named WordPress HTTPS 200 after rollback",
+    "protected_snapshot": "rescue/pre-status-extension-20261107.qcow2",
+    "protected_snapshot_sha256": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "disposable_disk_snapshots_removed": true,
+    "test_package_and_driver_retained_in_test_workspace": true
+  },
+  "gates": {
+    "independent_review": "REQUIRED before merge",
+    "merge": "Not authorized for the proposed PR; fresh Owner approval required after review",
+    "release": "No public Stable or Production deployment authorization",
+    "open_work": "#10 unknown-host HTTPS/443 not implemented; #21 authenticated browser/CSRF/role and complete native lifecycle Phase B not yet completed",
+    "scope_boundary": "Native test is for aaPanel 8.0.7 Nginx, not wider aaPanel compatibility"
+  },
+  "source_validation": {
+    "python_unittest": {
+      "count": 503,
+      "failures": 0,
+      "result": "PASS"
+    },
+    "javascript_node_test": {
+      "count": 225,
+      "failures": 0,
+      "result": "PASS"
+    },
+    "chromium_layout": {
+      "section_viewports": 25,
+      "simulated_layers": 5,
+      "native_launcher_viewports": 5,
+      "other_responsive_checks": "PASS"
+    },
+    "python_compileall": "PASS",
+    "shell_syntax": "PASS",
+    "json_evidence": "PASS",
+    "git_diff_check": "PASS",
+    "package_rebuild": "2/2 byte-identical ZIP SHA256 f68144deeb4372c6dcd42ef75f35ba52a3fc47d264a363601ee67c69abbd0263"
+  }
+}
