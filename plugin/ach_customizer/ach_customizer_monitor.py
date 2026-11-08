@@ -817,13 +817,16 @@ def _verified_owned_status_extension(directory, site_id, site_key, name, text):
     return record
 
 
-def _native_extension_fingerprint(directory, *, site_id=None, site_key=None):
+def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
+                                  allowed_conf_names=None):
     """Read a single native per-site '*.conf' glob without following links.
 
     Accept inert native logging overlays or the exact verified, plugin-owned
     Status Pages 404/502 source. All other routing remains unresolved. Two
     anchored snapshots include file identities, bytes and recovery ownership.
     The digest is rechecked before an approved FPM Apply/Rollback.
+    A scoped caller may restrict the exact live .conf filenames without
+    weakening the existing FPM scanner's default accepted sources.
     """
     import os
     import stat
@@ -861,6 +864,8 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None):
             for name in entries:
                 if not name.endswith(".conf"):
                     continue
+                if allowed_conf_names is not None and name not in allowed_conf_names:
+                    raise MonitorInputError("Unexpected native extension source for this operation")
                 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,120}\.conf", name):
                     raise MonitorInputError("Unsupported native extension filename")
                 text, signature = _bounded_file_text(

@@ -125,6 +125,182 @@ class NativeSiteFileTests(unittest.TestCase):
                 self.assertEqual(list(self.state.iterdir()), [])
         self.vhost.write_bytes(self.original_vhost)
 
+    def _native_log_only_include(self):
+        """Fixture matching aaPanel's real site_total-generated include."""
+        overlay = self.vhost_root / "extension" / self.site["name"]
+        overlay.mkdir(parents=True)
+        analytics = overlay / "site_total.conf"
+        analytics.write_text(
+            "access_log syslog:server=unix:/tmp/site_total.sock,"
+            "nohostname,tag=7__access site_total;\n")
+        include = ("include " + str(overlay) + "/*.conf;").encode()
+        self.vhost.write_bytes(self.original_vhost.replace(
+            b"include enable-php-85.conf;",
+            b"include enable-php-85.conf;\n" + include))
+        return overlay, analytics
+
+    def test_inert_native_site_total_include_allows_guarded_recovery(self):
+        overlay, analytics = self._native_log_only_include()
+        source_identity = manager._source(self.site, "502", str(self.vhost_root))
+        self.assertEqual(source_identity, self.sha(self.vhost.read_bytes()))
+        self.assertTrue(analytics.is_file())
+        (overlay / "old_operation.retained").write_text("inactive recovery fixture")
+        # Inert/non-.conf forensic files are inspected but do not alter
+        # the recovery identity: the live route still points to 502.html.
+        refreshed = manager._source(self.site, "502", str(self.vhost_root))
+        self.assertEqual(refreshed, source_identity)
+        for code in ("404", "502"):
+            with self.subTest(code=code):
+                original = self.files[code].read_bytes()
+                applied = self.operate("apply", code=code, expected_vhost=refreshed)
+                self.assertEqual(applied["state"], "Applied")
+                self.assertEqual(self.operate(code=code)["state"], "Applied")
+                recovered = self.operate(
+                    "restore", code=code, expected_recovery=applied["recovery_id"])
+                self.assertEqual(recovered["state"],
+                                 "Restored" if code == "404" else "Source Restored")
+                self.assertEqual(self.files[code].read_bytes(), original)
+        self.assertFalse(any("reload" in call for call in self.commands))
+
+    def test_native_analytics_source_drift_or_foreign_conf_is_denied(self):
+        overlay, analytics = self._native_log_only_include()
+        expected = manager._source(self.site, "502", str(self.vhost_root))
+        original = self.files["502"].read_bytes()
+        analytics.write_text(
+            "access_log syslog:server=unix:/tmp/site_total.sock,"
+            "nohostname,tag=8__access site_total;\n")
+        # Native logging-only regeneration is not a change of the 502 route.
+        # It must not make a saved recovery impossible.
+        self.assertEqual(
+            manager._source(self.site, "502", str(self.vhost_root)), expected)
+        applied = self.operate("apply", code="502", expected_vhost=expected)
+        self.assertEqual(applied["state"], "Applied")
+        analytics.write_text(
+            "error_log /tmp/site_total-updated.log warn;\n")
+        self.assertEqual(self.operate(code="502")["state"], "Applied")
+        self.assertEqual(
+            self.operate("restore", code="502",
+                         expected_recovery=applied["recovery_id"])["state"],
+            "Source Restored")
+        self.assertEqual(self.files["502"].read_bytes(), original)
+        # Verify future independent negative tests without a stale journal.
+        for artifact in self.state.iterdir():
+            artifact.unlink()
+        analytics.write_text(
+            "access_log syslog:server=unix:/tmp/site_total.sock,"
+            "nohostname,tag=7__access site_total;\n")
+        (overlay / "foreign.conf").write_text(
+            "access_log /tmp/another-safe-looking-log;\n")
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        (overlay / "foreign.conf").unlink()
+        analytics.write_text("error_page 502 /other.html;\n")
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        self.assertEqual(self.files["502"].read_bytes(), original)
+
+    def test_native_analytics_overlay_symlink_permission_and_scope_guards(self):
+        overlay, analytics = self._native_log_only_include()
+        original = analytics.read_bytes()
+        stored = overlay / "site_total.fixture"
+        stored.write_bytes(original)
+        analytics.chmod(0o666)
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        analytics.chmod(0o644)
+        analytics.unlink()
+        analytics.symlink_to(stored.name)
+        with self.assertRaises((ExtensionError, OSError)):
+            manager._source(self.site, "502", str(self.vhost_root))
+        analytics.unlink()
+        analytics.write_bytes(original)
+
+        direct_vhost = self.vhost.read_bytes()
+        included = ("include " + str(overlay) + "/*.conf;").encode()
+        self.assertIn(included, direct_vhost)
+        self.vhost.write_bytes(direct_vhost.replace(
+            included, b"location /nested/ { " + included + b" }"))
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        self.vhost.write_bytes(direct_vhost.replace(
+            included, included + b"\n" + included))
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        self.assertEqual(self.files["502"].read_bytes(), b"original 502")
+        self.assertFalse(list(self.state.iterdir()))
+
+    def test_completed_restore_does_not_lock_native_regeneration(self):
+        """Native aaPanel may enable its log-only extension after Restore."""
+        for code in ("404", "502"):
+            with self.subTest(code=code):
+                original = self.files[code].read_bytes()
+                first = self.operate("apply", code=code)
+                self.operate("restore", code=code,
+                             expected_recovery=first["recovery_id"])
+                before = self.sha(self.vhost.read_bytes())
+                _, analytics = self._native_log_only_include()
+                updated = self.sha(self.vhost.read_bytes())
+                self.assertNotEqual(before, updated)
+                self.assertEqual(self.operate(code=code)["state"],
+                                 "Restored" if code == "404" else "Source Restored")
+                second = self.operate(
+                    "apply", code=code, expected_vhost=updated)
+                self.assertEqual(second["state"], "Applied")
+                self.assertNotEqual(second["recovery_id"], first["recovery_id"])
+                self.assertEqual(self.operate(code=code)["state"], "Applied")
+                self.operate("restore", code=code,
+                             expected_recovery=second["recovery_id"])
+                self.assertEqual(self.files[code].read_bytes(), original)
+                # Restart with a clean native fixture, not by mutating
+                # the product journal during an active recovery.
+                self.vhost.write_bytes(self.original_vhost)
+                analytics.unlink()
+                analytics.parent.rmdir()
+                for artifact in self.state.iterdir():
+                    artifact.unlink()
+
+    def test_changed_live_recovery_never_ignores_vendor_vhost_drift(self):
+        source = self.files["502"].read_bytes()
+        first = self.operate("apply", code="502")
+        old = self.vhost.read_bytes()
+        self._native_log_only_include()
+        self.assertEqual(self.operate(code="502")["state"], "Needs Review")
+        with self.assertRaises(ExtensionError):
+            self.operate("restore", code="502",
+                         expected_recovery=first["recovery_id"])
+        self.assertNotEqual(self.files["502"].read_bytes(), source)
+        self.vhost.write_bytes(old)
+        result = self.operate("restore", code="502",
+                              expected_recovery=first["recovery_id"])
+        self.assertEqual(result["state"], "Source Restored")
+        self.assertEqual(self.files["502"].read_bytes(), source)
+
+    def test_completed_restore_with_site_file_drift_stays_blocked(self):
+        first = self.operate("apply", code="502")
+        self.operate("restore", code="502",
+                     expected_recovery=first["recovery_id"])
+        self._native_log_only_include()
+        self.files["502"].write_bytes(b"operator changed the source")
+        self.assertEqual(self.operate(code="502")["state"], "Needs Review")
+        with self.assertRaises(ExtensionError):
+            self.operate("apply", code="502",
+                         expected_vhost=self.sha(self.vhost.read_bytes()),
+                         expected_current=self.sha(self.files["502"].read_bytes()))
+        self.assertEqual(self.files["502"].read_bytes(),
+                         b"operator changed the source")
+
+    def test_quoted_hash_extension_include_cannot_hide_unknown_route(self):
+        # Nginx treats '#' inside quotes as part of the include filename.
+        # A line-split comment scanner must not silently ignore this edge.
+        foreign = (b'include "/www/server/panel/vhost/nginx/extension/'
+                   b'demo.invalid/custom#route.conf";')
+        self.vhost.write_bytes(self.original_vhost.replace(
+            b"include enable-php-85.conf;",
+            b"include enable-php-85.conf;\n" + foreign))
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        self.assertEqual(self.files["502"].read_bytes(), b"original 502")
+
     def test_journal_mode_contract_all_supported_modes_are_recoverable(self):
         """No allowed source mode may produce an unreadable recovery journal."""
         from ach_customizer_status_site_file import _supported_mode, _record_read

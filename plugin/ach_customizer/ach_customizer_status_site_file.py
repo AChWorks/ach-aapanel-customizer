@@ -1,10 +1,12 @@
-"""Guarded native site-file 404/502 delivery when aaPanel has no extension include.
+"""Guarded native site-file 404/502 delivery with bounded source proof.
 
 This adapter changes ONLY an explicitly selected site's existing 404.html or
 502.html. The native VHost must already map that HTTP status to that filename.
 It retains the original site-owned bytes, uid/gid/mode and a root-owned
 recovery journal. No Nginx config is edited, and no service reload is needed.
 404 is verified against real HTTP/80; 502 is source-only, not a fake HTTP 502.
+An exact server-scoped aaPanel site_total logging include may coexist only
+when the complete native overlay is safely inspected and fingerprinted.
 """
 from __future__ import annotations
 
@@ -178,7 +180,15 @@ def _source(site, code, vhost_root):
     if raw is None:
         raise ExtensionError("source", "Native website VHost is missing")
     value = raw.decode("utf-8", "replace")
-    active = "\n".join(line.split("#", 1)[0] for line in value.splitlines())
+    # Use the same Nginx token-boundary comment lexer as the shared-source
+    # inspector. A literal '#' in a quoted include argument is NOT a comment:
+    # naive line splitting could otherwise conceal a foreign extension edge.
+    from ach_customizer_monitor import (
+        MonitorInputError, _active_nginx_text, _native_extension_fingerprint)
+    try:
+        active = _active_nginx_text(value)
+    except MonitorInputError as exc:
+        raise ExtensionError("source", "Ambiguous native Nginx arguments") from exc
     direct = _server_directives(value)
     server_text = "\n".join(line + ";" for line in direct)
     # The required native root, host and selected status mapping MUST belong
@@ -192,11 +202,32 @@ def _source(site, code, vhost_root):
             or len(re.findall(r"(?m)^\s*server_name\s+", active)) != 1
             or len(re.findall(r"(?m)^\s*root\s+", active)) != 1
             or _selected_error_page(active, code) != "native"
-            or re.search(r"\binclude\s+[^;]*?/extension/", active)
             or re.search(r"\blocation\s*=\s*/" + code + r"\.html\b", active)):
         raise ExtensionError(
             "source", "Exact native site-file error route is not eligible; "
                       "an extension/custom rule or incompatible VHost may be active")
+    # aaPanel's site_total service may add one server-scoped extension glob
+    # containing only inert analytics logs. Do not trust an arbitrary include
+    # or even a plugin-owned status route for native site-file adoption.
+    # Re-validate the complete bounded live overlay on every preflight,
+    # Apply and Restore. Keep its inert logging bytes OUT of the recovery
+    # identity: aaPanel may rotate/update analytics without changing routing,
+    # and such unrelated changes must not strand an operator's Restore.
+    refs = re.findall(r"\binclude\s+[^;]*?/extension/[^;]*;", active)
+    if not refs:
+        return _sha(raw)
+    native = "include " + vhost_root + "/extension/" + name + "/*.conf;"
+    if refs != [native] or direct.count(native[:-1]) != 1:
+        raise ExtensionError("source", "Unverified native extension include or context")
+    try:
+        _native_extension_fingerprint(
+            os.path.join(vhost_root, "extension", name),
+            site_id=site["id"], site_key=name,
+            allowed_conf_names=frozenset(("site_total.conf",)))
+    except (OSError, UnicodeError, MonitorInputError) as exc:
+        raise ExtensionError("source", "Native analytics extension needs review") from exc
+    # Source identity protects effective route ownership, not inert analytics.
+    # The scanner above still refuses live routing or unsafe file changes.
     return _sha(raw)
 
 
@@ -381,9 +412,16 @@ def manage_site_file(action, site, *, code, html, expected_current,
         digest, render_sha = _sha(current), _sha(payload)
         rec = _record_read(data_fd, site, code)
         if rec and rec["vhost_sha"] != current_vhost:
-            if action == "recheck":
-                return _saved_only(site, code, payload, data_fd, stopped=False)
-            raise ExtensionError("identity", "Native VHost changed; keep saved recovery")
+            # A completed Restore is retired recovery history, not a live
+            # source lock. aaPanel can regenerate a now-valid native VHost
+            # afterward; permit a fresh Recheck/Apply only if original file
+            # bytes are still exact. Active or drifted recovery stays guarded.
+            retired_and_intact = (
+                rec["phase"] == "restored" and digest == rec["before_sha"])
+            if not retired_and_intact:
+                if action == "recheck":
+                    return _saved_only(site, code, payload, data_fd, stopped=False)
+                raise ExtensionError("identity", "Native VHost changed; keep saved recovery")
         if rec and (uid, gid, mode) != (rec["uid"], rec["gid"], rec["mode"]):
             raise ExtensionError("ownership", "Original site status file ownership changed")
         if rec and rec["phase"] != "restored":
