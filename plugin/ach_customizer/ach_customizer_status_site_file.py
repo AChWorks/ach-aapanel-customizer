@@ -1,10 +1,12 @@
-"""Guarded native site-file 404/502 delivery when aaPanel has no extension include.
+"""Guarded native site-file 404/502 delivery with bounded source proof.
 
 This adapter changes ONLY an explicitly selected site's existing 404.html or
 502.html. The native VHost must already map that HTTP status to that filename.
 It retains the original site-owned bytes, uid/gid/mode and a root-owned
 recovery journal. No Nginx config is edited, and no service reload is needed.
 404 is verified against real HTTP/80; 502 is source-only, not a fake HTTP 502.
+An exact server-scoped aaPanel site_total logging include may coexist only
+when the complete native overlay is safely inspected and fingerprinted.
 """
 from __future__ import annotations
 
@@ -192,12 +194,30 @@ def _source(site, code, vhost_root):
             or len(re.findall(r"(?m)^\s*server_name\s+", active)) != 1
             or len(re.findall(r"(?m)^\s*root\s+", active)) != 1
             or _selected_error_page(active, code) != "native"
-            or re.search(r"\binclude\s+[^;]*?/extension/", active)
             or re.search(r"\blocation\s*=\s*/" + code + r"\.html\b", active)):
         raise ExtensionError(
             "source", "Exact native site-file error route is not eligible; "
                       "an extension/custom rule or incompatible VHost may be active")
-    return _sha(raw)
+    # aaPanel's site_total service may add one server-scoped extension glob
+    # containing only inert analytics logs. Do not trust an arbitrary include
+    # or even a plugin-owned status route for native site-file adoption.
+    # Fingerprint the complete bounded directory/file identity so later
+    # preflight, Apply and Restore reject a regenerated or altered include.
+    refs = re.findall(r"\binclude\s+[^;]*?/extension/[^;]*;", active)
+    if not refs:
+        return _sha(raw)
+    native = "include " + vhost_root + "/extension/" + name + "/*.conf;"
+    if refs != [native] or direct.count(native[:-1]) != 1:
+        raise ExtensionError("source", "Unverified native extension include or context")
+    from ach_customizer_monitor import MonitorInputError, _native_extension_fingerprint
+    try:
+        source_digest = _native_extension_fingerprint(
+            os.path.join(vhost_root, "extension", name),
+            site_id=site["id"], site_key=name,
+            allowed_conf_names=frozenset(("site_total.conf",)))
+    except (OSError, UnicodeError, MonitorInputError) as exc:
+        raise ExtensionError("source", "Native analytics extension needs review") from exc
+    return _sha(raw + b"\x00" + source_digest.encode("ascii"))
 
 
 def _site_dir(site):
