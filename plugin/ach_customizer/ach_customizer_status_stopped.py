@@ -155,6 +155,35 @@ def _split_safe(html, site):
     return served, parts
 
 
+def _request_host_pattern(site):
+    """Anchor the *raw* request Host to native domain rows, never $host.
+
+    Nginx $host falls back to server_name when the request omits Host; this
+    would authorize unknown/default-server traffic. The raw $http_host stays
+    empty for such requests. Include normal 80/443 authority ports and any
+    explicitly recorded site-bound ports, without accepting other hostnames.
+    """
+    domains = site.get("bound_domains")
+    if not isinstance(domains, list) or not domains:
+        raise ExtensionError("identity", "Native website Host bindings unavailable")
+    names = set()
+    ports = {80, 443}
+    for binding in domains:
+        if not isinstance(binding, dict):
+            raise ExtensionError("identity", "Invalid native website Host binding")
+        name, port = binding.get("name"), binding.get("port")
+        if (not isinstance(name, str) or not DOMAIN.fullmatch(name) or
+                type(port) is not int or not 1 <= port <= 65535):
+            raise ExtensionError("identity", "Invalid native website Host binding")
+        names.add(name.lower())
+        ports.add(port)
+    if site["name"].lower() not in names:
+        raise ExtensionError("identity", "Canonical website Host is not bound to this site")
+    patterns = "|".join(re.escape(name) for name in sorted(names))
+    allowed_ports = "|".join(str(port) for port in sorted(ports))
+    return r"^(?:" + patterns + r")\.?(?::(?:" + allowed_ports + r"))?$"
+
+
 def _managed(site, html, op):
     if not TOKEN.fullmatch(op):
         raise ExtensionError("input", "Invalid stop operation")
@@ -167,14 +196,21 @@ def _managed(site, html, op):
         value = part.replace("\\", "\\\\").replace('"', '\\"')
         lines.append('    set $' + prefix + str(index) + ' "' + value + '";')
     value = "".join("$" + prefix + str(i) for i in range(len(parts)))
+    allowed_host = _request_host_pattern(site)
     # A raw server-scope return inherits aaPanel's application/octet-stream
     # default, making real browsers download the HTML. Rewrite to an internal
     # exact location with its OWN text/html MIME while preserving HTTP503.
     # The negative lookahead excludes the internal target to prevent loops.
     basename = ".__ach_stop_doc_" + op + ".html"
     route = "/" + basename
+    # Combine the *raw* HTTP authority and current native root in a single
+    # short Nginx variable. An @ separator cannot occur in a valid bound
+    # hostname. Avoid nested ifs and long per-operation variable identifiers
+    # (native Nginx variables_hash_bucket_size remains unchanged).
+    guarded_host_and_root = _request_host_pattern(site)[:-1] + r"@/www/server/st[o]p$"
     lines.extend((
-        '    if ($document_root ~ "^/www/server/st[o]p$") {',
+        '    set $achstopgate "$http_host@$document_root";',
+        '    if ($achstopgate ~* "' + guarded_host_and_root + '") {',
         '        rewrite ^/(?!\\.' + basename[1:-5] + '\\.html$) ' + route + ' last;',
         '    }',
         '    location = ' + route + ' {',
@@ -280,6 +316,21 @@ def _publish(fd, name, before, after, op):
         raise ExtensionError("uncertain", "Published VHost identity not verified", recovery_id=op)
 
 
+def _verify_after_reload(fd, site, expected, *, nginx, conf, runner):
+    """Do not finalize a journal phase against a changed native VHost.
+
+    The disk bytes and current Nginx -T source must both match *after* the
+    reload and runtime probe. This does not assert that every old worker
+    generation has already exited.
+    """
+    actual = _bounded_file(fd, _name(site), limit=MAX_VHOST, permissions=0o600)
+    if actual != expected:
+        raise ExtensionError("concurrency", "Native VHost changed after Nginx reload")
+    _loaded(site, expected, nginx=nginx, conf=conf, runner=runner)
+    if _bounded_file(fd, _name(site), limit=MAX_VHOST, permissions=0o600) != expected:
+        raise ExtensionError("concurrency", "Native VHost changed during final Nginx inspection")
+
+
 def _response(site, record, sha, source_html, body_sha, state, *,
               read_only=True, changed=False, runtime_verified=False):
     return {"schema": 1, "mode": "native_stopped_http503",
@@ -288,7 +339,16 @@ def _response(site, record, sha, source_html, body_sha, state, *,
             "rendered_sha256": _sha(source_html.encode("utf-8")),
             "served_sha256": body_sha, "recovery_id": record["op"] if record else None,
             "read_only": read_only, "changed": changed,
-            "runtime_verified": runtime_verified, "impact": NOTE}
+            "runtime_verified": runtime_verified,
+            "proof_kind": (
+                "stopped_http503" if state == "Applied" and runtime_verified else
+                "native_http200" if state == "Restored" and runtime_verified
+                and str(site["status"]) == "0" else
+                "running_non503" if state == "Restored" and runtime_verified else
+                "source_only" if state in ("Source Ready", "Armed", "Restored")
+                else "none"
+            ),
+            "impact": NOTE}
 
 
 def manage_stopped(action, site, html, *, data_fd, expected_vhost=None,
@@ -393,6 +453,8 @@ def manage_stopped(action, site, html, *, data_fd, expected_vhost=None,
                 observed = (probe or _probe)(site, stopped=False)
                 if observed[0] == 503:
                     raise ExtensionError("postcheck", "Running website unexpectedly returns HTTP503")
+                _verify_after_reload(fd, site, new, nginx=nginx,
+                                     conf=nginx_conf, runner=runner)
                 entry["phase"] = "applied"
                 _record_save(data_fd, site, entry)
             except Exception as exc:
@@ -458,6 +520,8 @@ def manage_stopped(action, site, html, *, data_fd, expected_vhost=None,
             else:
                 if (probe or _probe)(site, stopped=False)[0] == 503:
                     raise ExtensionError("postcheck", "Restored running site returns HTTP503")
+            _verify_after_reload(fd, site, original, nginx=nginx,
+                                 conf=nginx_conf, runner=runner)
             entry["phase"] = "restored"
             _record_save(data_fd, site, entry)
             # Backup is not needed after a verified Restore; keep the journal.

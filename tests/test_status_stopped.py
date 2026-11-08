@@ -1,6 +1,7 @@
 """Stopped-site 503: native SiteStop/Start string substitutions, CAS and recovery."""
 import hashlib
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -77,12 +78,13 @@ class Fixture(unittest.TestCase):
         return 200, sha(b"running test site"), "text/html"
 
     def call(self, action="recheck", **kwargs):
+        probe = kwargs.pop("probe", self.probe)
         return subject.manage_stopped(
             action, self.site, self.html, data_fd=self.fd,
             vhost_root=str(self.vhosts),
             nginx=self.root.as_posix()+"/nginx",
             nginx_conf=self.root.as_posix()+"/nginx.conf",
-            runner=self.runner, probe=self.probe, **kwargs,
+            runner=self.runner, probe=probe, **kwargs,
         )
 
     def apply(self):
@@ -279,6 +281,88 @@ class StopTests(Fixture):
         self.assertFalse(restored["changed"])
         self.assertTrue(restored["runtime_verified"])
         self.assertEqual(self.conf.read_bytes(),self.original)
+
+    def test_request_host_identity_is_raw_host_not_server_default_fallback(self):
+        self.site["bound_domains"].append({"name": "alias.test-site.example", "port": 8080})
+        regex = subject._request_host_pattern(self.site)
+        for authority in ("test-site.example", "TEST-SITE.EXAMPLE",
+                          "test-site.example.", "test-site.example:80",
+                          "test-site.example:443", "alias.test-site.example",
+                          "alias.test-site.example:8080"):
+            self.assertIsNotNone(re.fullmatch(regex, authority, re.I), authority)
+        for authority in ("", "unknown.example", "unknown.test-site.example",
+                          "test-site.example.evil.invalid",
+                          "test-site.example:9000", "other.alias.test-site.example",
+                          "test-site.example:80.evil", "127.0.0.1"):
+            self.assertIsNone(re.fullmatch(regex, authority, re.I), authority)
+        block, _ = subject._managed(self.site, self.html, "b"*32)
+        self.assertIn(b'set $achstopgate "$http_host@$document_root";', block)
+        self.assertIn(b"if ($achstopgate ~*", block)
+        self.assertNotIn(b"$host@", block)
+        self.assertNotIn(b"ach_stop_match_", block)
+        self.assertIn(b"@/www/server/st[o]p$", block)
+
+    def test_unsafe_or_unbound_host_names_deny_arming(self):
+        for bindings in (
+            [{"name": "other.example", "port": 80}],
+            [{"name": "*.test-site.example", "port": 80}],
+            [{"name": "test-site.example", "port": True}],
+            [{"name": "test-site.example", "port": 65536}],
+            None,
+        ):
+            with self.subTest(bindings=bindings):
+                self.site["bound_domains"] = bindings
+                with self.assertRaises(subject.ExtensionError):
+                    subject._managed(self.site, self.html, "b"*32)
+
+    def test_apply_late_native_writer_preserves_prepared_recovery(self):
+        before = self.call()
+        changed = b"# NATIVE OPERATOR CHANGE AFTER RELOAD\n"
+        def late_mutation(site, *, stopped):
+            self.conf.write_bytes(self.conf.read_bytes() + changed)
+            return self.probe(site, stopped=stopped)
+        with self.assertRaises(subject.ExtensionError) as caught:
+            self.call("apply", expected_vhost=before["vhost_sha256"],
+                      expected_render=before["rendered_sha256"], probe=late_mutation)
+        self.assertEqual(caught.exception.stage, "uncertain")
+        self.assertIsNotNone(caught.exception.recovery_id)
+        record = subject._record_load(self.fd, self.site)
+        self.assertEqual(record["phase"], "prepared")
+        self.assertEqual(record["op"], caught.exception.recovery_id)
+        self.assertTrue(self.conf.read_bytes().endswith(changed))
+        self.assertEqual(self.call()["state"], "Recovery Required")
+
+    def test_restore_late_native_writer_preserves_restoring_recovery(self):
+        applied = self.apply()
+        previous = self.call()
+        changed = b"# NATIVE OPERATOR CHANGE DURING RESTORE\n"
+        def late_mutation(site, *, stopped):
+            self.conf.write_bytes(self.conf.read_bytes() + changed)
+            return self.probe(site, stopped=stopped)
+        with self.assertRaises(subject.ExtensionError) as caught:
+            self.call("restore", expected_vhost=previous["vhost_sha256"],
+                      expected_recovery=applied["recovery_id"], probe=late_mutation)
+        self.assertEqual(caught.exception.stage, "uncertain")
+        record = subject._record_load(self.fd, self.site)
+        self.assertEqual(record["phase"], "restoring")
+        self.assertEqual(record["op"], applied["recovery_id"])
+        self.assertTrue(self.conf.read_bytes().endswith(changed))
+        self.assertNotIn(b"ACh stopped503 begin", self.conf.read_bytes())
+        self.assertEqual(self.call()["state"], "Recovery Required")
+
+    def test_response_proof_kind_is_bound_to_actual_state_and_observation(self):
+        armed = self.apply()
+        self.assertEqual(armed["proof_kind"], "source_only")
+        self.assertEqual(self.call()["proof_kind"], "source_only")
+        self.stop()
+        actual = self.call()
+        self.assertEqual(actual["state"], "Applied")
+        self.assertEqual(actual["proof_kind"], "stopped_http503")
+        self.assertTrue(actual["runtime_verified"])
+        stopped = self.call("restore", expected_vhost=actual["vhost_sha256"],
+                            expected_recovery=armed["recovery_id"])
+        self.assertEqual(stopped["proof_kind"], "native_http200")
+        self.assertEqual(self.call()["proof_kind"], "source_only")
 
     def test_running_probe_ignores_large_wordpress_html_body(self):
         class FakeResponse:

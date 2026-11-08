@@ -2477,6 +2477,7 @@
         r.verified_site_snapshot !== snapshot || r.revision !== revision ||
         !token(r.request_id) || r.operation_id !== r.request_id ||
         !hash(r.vhost_sha256) || !hash(r.rendered_sha256) || !hash(r.served_sha256) ||
+        !['source_only','stopped_http503','native_http200','running_non503','none'].includes(r.proof_kind) ||
         (r.recovery_id !== null && !token(r.recovery_id)) ||
         typeof r.changed !== 'boolean' || typeof r.runtime_verified !== 'boolean' ||
         r.read_only !== (action === 'recheck') || typeof r.impact !== 'string' ||
@@ -2485,14 +2486,43 @@
       return r.changed === false &&
         ['Source Ready','Restored','Armed','Applied','Needs Review','Recovery Required','Conflict'].includes(r.state) &&
         (r.state === 'Source Ready' ? r.recovery_id === null : token(r.recovery_id)) &&
-        (r.state !== 'Applied' || r.site_status === '0' && r.runtime_verified === true) &&
-        (r.state !== 'Armed' || r.site_status === '1' && r.runtime_verified === false);
+        (r.state !== 'Applied' || r.site_status === '0' &&
+          r.runtime_verified === true && r.proof_kind === 'stopped_http503') &&
+        (r.state !== 'Armed' || r.site_status === '1' && r.runtime_verified === false) &&
+        (r.state === 'Applied' || r.runtime_verified === false) &&
+        (r.state === 'Applied' || r.proof_kind ===
+          (['Source Ready','Restored','Armed'].includes(r.state) ? 'source_only' : 'none'));
     }
     return action === 'apply' ?
       r.state === 'Armed' && r.changed === true && r.runtime_verified === false &&
-      r.site_status === '1' && token(r.recovery_id) :
+      r.proof_kind === 'source_only' && r.site_status === '1' && token(r.recovery_id) :
       r.state === 'Restored' && typeof r.changed === 'boolean' && r.runtime_verified === true &&
+      r.proof_kind === (r.site_status === '0' ? 'native_http200' : 'running_non503') &&
       token(r.recovery_id);
+  }
+  function stoppedProofSummary(r) {
+    var observed = r.proof_kind === 'stopped_http503' &&
+      r.state === 'Applied' && r.site_status === '0' && r.runtime_verified;
+    var digestLabel = observed ? 'Observed HTTP 503 HTML SHA-256' :
+      r.state === 'Source Ready' ? 'Expected stopped HTML SHA-256' :
+      r.state === 'Armed' ? 'Prepared stopped HTML SHA-256' :
+      r.state === 'Restored' ? 'Previous stopped HTML SHA-256 (not active)' :
+      'Saved stopped HTML SHA-256 (not verified)';
+    var evidence = observed ?
+      'Observed HTTP 503, exact HTML digest and text/html while stopped.' :
+      r.proof_kind === 'native_http200' ?
+        'Native stopped-page HTTP 200 observed after Restore; custom HTTP 503 is not active.' :
+      r.proof_kind === 'running_non503' ?
+        'Running HTTP response not 503; VHost source checked after reload. No claim about old Nginx workers or stopped delivery.' :
+      r.state === 'Armed' ?
+        'Rule armed while running; stopped HTTP 503 has not been observed.' :
+      r.state === 'Restored' ?
+        'Restored journal/source only in this Recheck; no live stopped HTTP result observed.' :
+      r.state === 'Source Ready' ?
+        'Source inspected; no HTTP 503 delivery observed.' :
+        'No confirmed live delivery; inspect source and recovery record.';
+    return '\n' + digestLabel + ': ' + r.served_sha256 +
+      '\nLive route evidence: ' + evidence;
   }
   function manageStoppedRequest(action) {
     var scope = statusScope(), site = selectedProbeSite(scope);
@@ -2551,9 +2581,7 @@
           '\nWebsite: ' + r.site_key + ' (#' + r.site_id + '); aaPanel status ' + r.site_status +
           '\nNative VHost SHA-256: ' + r.vhost_sha256 +
           '\nSelected HTML SHA-256: ' + r.rendered_sha256 +
-          '\nServed HTML SHA-256: ' + r.served_sha256 +
-          '\nReal HTTP 503 verified: ' + (r.runtime_verified ? 'Yes (only when stopped)' :
-            'No — Armed, restored, unverified or recovery needed') +
+          stoppedProofSummary(r) +
           '\nRecovery ID: ' + (r.recovery_id || 'None') +
           '\nRequest ID: ' + r.operation_id +
           '\nShared Nginx reload; named website only. Stop/Start using aaPanel, then refresh its inventory and Recheck. HTTPS unbound unchanged.');
