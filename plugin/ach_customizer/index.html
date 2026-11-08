@@ -137,9 +137,9 @@
   #ach-customizer .ach-main input:not([type="checkbox"]),
   #ach-customizer .ach-main select,
   #ach-customizer .ach-main textarea {
-    appearance:auto; min-width:0; max-width:100%; min-height:32px; height:32px;
+    appearance:auto; min-width:0; max-width:100%; min-height:32px; height:auto;
     padding:5px 10px; border:1px solid #d4dade; border-radius:8px;
-    background:#fff; color:var(--ach-text); font:inherit; line-height:20px;
+    background:#fff; color:var(--ach-text); font:inherit; line-height:max(20px,1.25em);
     transition:border-color .12s ease, box-shadow .12s ease;
   }
   #ach-customizer .ach-main textarea { height:auto; min-height:64px; }
