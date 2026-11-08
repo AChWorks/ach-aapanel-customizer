@@ -64,6 +64,9 @@ function loadUi() {
     '#ach-status-name', '#ach-status-tagline', '#ach-status-url', '#ach-status-label',
     '#ach-status-accent', '#ach-status-background', '#ach-status-foreground',
     '#ach-status-footer', '#ach-status-load', '#ach-status-preview-button',
+    '#ach-status-preview-surface', '#ach-status-site-audit', '#ach-status-workflow-note',
+    '#ach-status-manage-section', '#ach-status-default-section',
+    '#ach-status-unbound-section', '#ach-status-stopped-section',
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
@@ -300,6 +303,12 @@ function loadUi() {
       activitySkeletonHidden: elements.get('#ach-activity-loading').props.hidden,
       activityTableRowsHidden: elements.get('#ach-activity-rows').props.hidden,
       statusHtml: elements.get('#ach-status-iframe').props.srcdoc,
+      statusPreviewHidden: elements.get('#ach-status-preview-surface').props.hidden,
+      statusWorkflowVisible: Object.fromEntries([
+        ['audit','#ach-status-site-audit'], ['manage','#ach-status-manage-section'],
+        ['defaults','#ach-status-default-section'], ['unbound','#ach-status-unbound-section'],
+        ['stopped','#ach-status-stopped-section'], ['previewOnly','#ach-status-workflow-note']
+      ].map(([key,id]) => [key,elements.get(id).props.hidden === false])),
       statusHash: elements.get('#ach-status-sha').textContent,
       statusSaveDisabled: elements.get('#ach-status-save').props.disabled,
       statusResetDisabled: elements.get('#ach-status-reset').props.disabled,
@@ -1519,11 +1528,13 @@ test('Status Pages tab loads saved branding and safely renders sandbox-only prev
     source_sha256:'a'.repeat(64),rendered_sha256:'b'.repeat(64)
   });
   assert.match(ui.state().statusHtml,/Acme &amp; HQ/);
+  assert.equal(ui.state().statusPreviewHidden,false,'Successful preview appears next to its control');
   assert.match(ui.state().statusHash,/Rendered SHA-256: b/);
   assert.match(ui.state().statusResult,/No site changes/);
   ui.statusSetValue('#ach-status-locale','fa','change');
   assert.equal(ui.state().statusHtml,'','Changed locale invalidates stale preview');
   assert.equal(ui.state().statusHash,'');
+  assert.equal(ui.state().statusPreviewHidden,true,'Stale preview is removed on locale change');
 });
 
 test('Status Pages save is revision-bound and failed response requires recheck', () => {
@@ -1656,6 +1667,7 @@ test('Status Pages rejects malformed preview and never renders fallback HTML', (
     source_sha256:'a'.repeat(64),rendered_sha256:'b'.repeat(64)
   });
   assert.equal(ui.state().statusHtml,'');
+  assert.equal(ui.state().statusPreviewHidden,true,'Invalid preview remains hidden');
   assert.match(ui.state().statusResult,/Preview failed or response incompatible/);
 });
 
@@ -5305,4 +5317,91 @@ test('Stopped-site selection/branding changes invalidate prior Apply proof', () 
   ui.statusSetChecked('#ach-status-stopped-apply-approve',true);
   assert.equal(ui.state().stoppedApplyDisabled,true);
   assert.match(ui.state().stoppedResult,/Recheck/);
+});
+
+
+test('Status workflow shows only compatible operations and preserves recovery entry', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  const expectMode=(visible,name) => {
+    const modes=ui.state().statusWorkflowVisible;
+    for (const [mode,isVisible] of Object.entries(modes))
+      assert.equal(isVisible,visible.includes(mode),name+': '+mode);
+  };
+  expectMode(['defaults'],'global 404');
+  ui.statusSetValue('#ach-status-template','new-site','change');
+  expectMode(['defaults'],'global new-site');
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  expectMode(['unbound'],'global unbound');
+  assert.equal(ui.state().unboundRecheckDisabled,false);
+  ui.statusSetValue('#ach-status-template','50x','change');
+  expectMode(['previewOnly'],'unsupported global 50x');
+  assert.equal(ui.state().unboundRecheckDisabled,true);
+
+  ui.statusSetValue('#ach-status-scope','site','change');
+  expectMode(['manage'],'site 50x');
+  assert.equal(ui.state().statusManageRecheckDisabled,true,
+    'Selection is not a valid site until the new inventory and brand load');
+  loadNativeStatusSiteSelection(ui);
+  ui.requests.at(-1).respond(statusPrefs());
+  assert.equal(ui.state().statusManageRecheckDisabled,false,
+    'Site 50x retains the guarded extension Recheck');
+  ui.statusSetValue('#ach-status-delivery','file','change');
+  expectMode(['manage'],'50x file delivery still shows guarded site context');
+  assert.equal(ui.state().statusManageRecheckDisabled,true,
+    '50x file mode is explicitly unsupported and never grants Recheck/Apply');
+  ui.statusSetValue('#ach-status-delivery','extension','change');
+  assert.equal(ui.state().statusManageRecheckDisabled,false,
+    'Verified extension mode remains selectable without a new server action');
+  ui.statusSetValue('#ach-status-template','404','change');
+  expectMode(['audit','manage'],'site 404');
+  ui.statusSetValue('#ach-status-template','502','change');
+  expectMode(['audit','manage'],'site 502');
+  ui.statusSetValue('#ach-status-template','stopped','change');
+  expectMode(['stopped'],'site stopped');
+  assert.equal(ui.state().stoppedRecheckDisabled,false);
+  ui.statusSetValue('#ach-status-template','403','change');
+  expectMode(['previewOnly'],'site 403');
+  assert.equal(ui.state().stoppedRecheckDisabled,true);
+  ui.statusSetValue('#ach-status-template','stopped','change');
+  expectMode(['stopped'],'reselect stopped recovery');
+  assert.equal(ui.state().stoppedRestoreDisabled,true,
+    'Template changes revoke stale Restore evidence');
+  assert.equal(ui.state().stoppedRecheckDisabled,false,
+    'The current stopped-site Recovery Recheck is available');
+});
+
+test('Status contextual workflow preserves dirty branding after cancelled scope switch', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  assert.equal(ui.state().statusWorkflowVisible.unbound,true);
+  ui.statusSetValue('#ach-status-name','Unsaved unique','input change');
+  ui.statusSetValue('#ach-status-scope','site','change');
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.state().statusName,'Unsaved unique');
+  assert.equal(ui.state().statusWorkflowVisible.unbound,true);
+  assert.equal(ui.state().statusWorkflowVisible.stopped,false);
+  assert.equal(ui.state().statusSaveDisabled,false);
+});
+
+
+test('Shipped Status HTML places contextual preview near Preview and hides unused modes at startup', () => {
+  const previewButton=html.indexOf('id="ach-status-preview-button"');
+  const previewSurface=html.indexOf('id="ach-status-preview-surface"');
+  const defaultSection=html.indexOf('id="ach-status-default-section"');
+  const audit=html.indexOf('id="ach-status-site-audit"');
+  assert.ok(previewButton>0 && previewSurface>previewButton);
+  assert.ok(defaultSection>previewSurface && audit>previewSurface,
+    'Sandbox preview must be near its control, before site/global management');
+  assert.match(html, /id="ach-status-preview-surface"[^>]*hidden>/);
+  for (const name of ['site-audit','manage-section','unbound-section','stopped-section']) {
+    const selector='id="ach-status-'+name+'"';
+    assert.equal(html.split(selector).length,2,'Unique scope-specific section '+name);
+    assert.match(html.slice(html.indexOf(selector),html.indexOf(selector)+170),/hidden>/,
+      'Unselected or site-only operations must be hidden before JS initialization');
+  }
+  assert.equal(html.split('id="ach-status-iframe"').length,2,'Exactly one sandbox iframe');
+  assert.equal(html.split('id="ach-status-comparison-excerpt"').length,2,
+    'Existing source comparison must remain available for site 404/502');
 });

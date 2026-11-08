@@ -127,7 +127,7 @@
   #ach-customizer .ach-main select,
   #ach-customizer .ach-main textarea {
     appearance:auto; min-width:0; max-width:100%; min-height:32px; height:32px;
-    padding:5px 10px; border:1px solid #d4dade; border-radius:10px;
+    padding:5px 10px; border:1px solid #d4dade; border-radius:8px;
     background:#fff; color:var(--ach-text); font:inherit; line-height:20px;
     transition:border-color .12s ease, box-shadow .12s ease;
   }
@@ -147,7 +147,7 @@
   #ach-customizer .ach-main button {
     appearance:none; display:inline-flex; align-items:center; justify-content:center;
     min-height:32px; max-width:100%; padding:5px 12px; border:1px solid #cbd3d8;
-    border-radius:6px; background:#fff; color:#374151; font:inherit; line-height:20px;
+    border-radius:8px; background:#fff; color:#374151; font:inherit; line-height:20px;
     white-space:normal; text-align:center; cursor:pointer;
     transition:background-color .12s ease, border-color .12s ease;
   }
@@ -387,8 +387,8 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
-      <h4>Status Pages · Preview / Site 404/502/50x / New-site defaults / Unbound HTTP</h4>
-      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 and Nginx-generated 50x Apply/Restore use a verified plugin-owned extension and shared Nginx reload. 50x covers Nginx-produced 500/502/503/504, not arbitrary application/WordPress error bodies. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. HTTP/80 unbound-domain routing is available behind a separate guarded global Apply/Restore. Unknown-host HTTPS/443 remains unsupported. A separate, explicitly approved native VHost rule now supports actual HTTP503 for aaPanel-stopped sites; it is dormant while running and requires recovery verification.</p>
+      <h4>Status Pages · Branding / Preview / Delivery / Recovery</h4>
+      <p class="ach-note"><strong>Choose a template and scope to see its supported workflow.</strong> All eleven English/Persian templates can be previewed offline; Save/Reset affects branding preferences only. Live changes require a separate guarded Recheck, approval and Apply/Restore. Unsupported scope/template combinations remain preview-only. Unknown-host HTTPS/443 is not supported.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -434,21 +434,31 @@
         <label><input id="ach-status-reset-approve" type="checkbox" /> I approve resetting this scope to inherited or ACh defaults.</label>
         <button id="ach-status-reset" type="button" class="btn btn-warning" disabled>Reset selected branding scope</button>
       </div>
-      <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
-      <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
-      <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
-      <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check selected 404/502 source (read-only)</button></div>
-      <p class="ach-note">404: explicit loopback HTTP/80 GET plus source inspection. 502: configured-source inspection only (no artificial production 502). Neither authorizes Apply without the separate confirmed extension operation. The native proof request may appear in access logs.</p>
-      <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Live HTTP/80 404 not checked.</p>
-      <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">404 adoption preflight not checked. No change authorized.</p>
-      <div class="ach-note" aria-label="Guarded website status management">
-        <strong>Website 404/502 — guarded site delivery and recovery</strong>
+      <p id="ach-status-workflow-note" class="ach-note" role="status" hidden>Preview only for this template and scope. No live Apply is supported.</p>
+      <div id="ach-status-preview-surface" class="ach-note" aria-label="Offline status page preview" hidden>
+        <strong>Offline preview — not installed on any website</strong>
+        <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
+        <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
+      </div>
+      <div id="ach-status-site-audit" hidden>
+        <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
+        <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
+        <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
+        <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check selected 404/502 source (read-only)</button></div>
+        <p class="ach-note">404: explicit loopback HTTP/80 GET plus source inspection. 502: configured-source inspection only (no artificial production 502). Neither authorizes Apply without the separate confirmed extension operation. The native proof request may appear in access logs.</p>
+        <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Live HTTP/80 404 not checked.</p>
+        <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">404 adoption preflight not checked. No change authorized.</p>
+        <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
+        <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
+      </div>
+      <div class="ach-note" id="ach-status-manage-section" aria-label="Guarded website status management" hidden>
+        <strong>Website 404/502 or Nginx-generated 50x — guarded site delivery and recovery</strong>
         <div><label for="ach-status-delivery">Delivery method (selected website only)</label>
           <select id="ach-status-delivery">
             <option value="extension">Native Nginx extension (reload required)</option>
             <option value="file">Existing native 404.html / 502.html (no reload)</option>
           </select></div>
-        <p>aaPanel 8.0.7 + Nginx only. <strong>Nginx extension</strong> preserves native website HTML and uses a plugin-owned route with checked shared-service reload. <strong>Native site file</strong> replaces only the selected website's existing 404.html/502.html after a durable backup; requires proven native file routing with no extension include, does not edit the VHost or reload Nginx. 404 is verified by local HTTP 404 and body hash; 502 remains source-only (no synthetic HTTP 502). Each mode requires explicit approval and a recovery ID. Stopped or incompatible source allows saved-only Recheck, never Apply/Restore.</p>
+        <p>aaPanel 8.0.7 + Nginx only. <strong>Nginx extension</strong> preserves native website HTML and uses a plugin-owned route with checked shared-service reload. <strong>Native site file</strong> replaces only the selected website's existing 404.html/502.html after a durable backup; requires proven native file routing with no extension include, does not edit the VHost or reload Nginx. For 50x, select the <strong>Nginx extension</strong> delivery mode (existing-file mode is unsupported); it covers only Nginx-generated 500/502/503/504. 404 is verified by local HTTP 404 and body hash; 502 remains source-only (no synthetic HTTP 502). Each mode requires explicit approval and a recovery ID. Stopped or incompatible source allows saved-only Recheck, never Apply/Restore.</p>
         <div class="ach-controls">
           <button id="ach-status-manage-recheck" type="button" disabled>Recheck selected site status</button>
         </div>
@@ -458,7 +468,7 @@
         <div class="ach-controls"><button id="ach-status-manage-restore" type="button" class="btn btn-warning" disabled>Restore selected site status</button></div>
         <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site 404 recovery before Restore. An uncertain write must not be blindly repeated.</p>
       </div>
-      <div class="ach-note" aria-label="aaPanel new-site source defaults">
+      <div class="ach-note" id="ach-status-default-section" aria-label="aaPanel new-site source defaults">
         <strong>Panel default templates for future newly created sites</strong>
         <p>Global branding scope only. Choose <code>new-site</code>, <code>404</code> or <code>502</code> above. aaPanel copies <code>defaultDoc.html</code>, <code>404.html</code> or <code>502.html</code> when creating a new site. Changing these sources <strong>does not change existing sites or active HTTP/Nginx routing</strong>, and does not reload Nginx. Recheck first, then approve the exact source replacement; Restore uses the saved original bytes and recovery ID.</p>
         <div class="ach-controls"><button id="ach-status-default-recheck" type="button" disabled>Recheck new-site default source</button></div>
@@ -468,7 +478,7 @@
         <div class="ach-controls"><button id="ach-status-default-restore" type="button" class="btn btn-warning" disabled>Restore previous default source</button></div>
         <p id="ach-status-default-result" role="status" aria-live="polite">Choose global scope and a supported template, then Recheck. No active site is modified.</p>
       </div>
-      <div class="ach-note" aria-label="HTTP unbound default-server management">
+      <div class="ach-note" id="ach-status-unbound-section" aria-label="HTTP unbound default-server management" hidden>
         <strong>Unknown domains · global HTTP/80 catch-all (IPv4 + IPv6)</strong>
         <p>aaPanel 8.0.7 Nginx only. Select <code>unbound</code> and global branding above. A guarded plugin-owned <code>default_server</code> serves the chosen static HTML with real HTTP 404 for unmatched Host headers. This requires an explicitly approved <strong>global Nginx reload</strong>. It does not change named websites, HTTPS/443, stopped sites, or aaPanel's new-site sources. Recheck first; conflicting default servers are unsupported.</p>
         <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" disabled>Recheck HTTP unbound routing</button></div>
@@ -478,7 +488,7 @@
         <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" class="btn btn-warning" disabled>Restore previous HTTP default routing</button></div>
         <p id="ach-status-unbound-result" role="status" aria-live="polite">Select global/unbound and Recheck. HTTP/80 only; no TLS/443 changes.</p>
       </div>
-      <div class="ach-note" aria-label="Stopped-site 503 management">
+      <div class="ach-note" id="ach-status-stopped-section" aria-label="Stopped-site 503 management" hidden>
         <strong>Stopped website · real HTTP 503 (native SiteStop/Start)</strong>
         <p>aaPanel 8.0.7 Nginx only. Select a running website and the <code>stopped</code> template. An explicitly approved, recoverable rule is added to that native website VHost; it remains dormant while running and returns real HTTP 503 with the selected self-contained HTML after aaPanel SiteStop. The native site must be refreshed after Stop/Start before Recheck or Restore. Nginx reload is shared; unknown-domain HTTPS is unchanged. Restore removes only the verified owned rule, preserving unrelated native changes.</p>
         <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" disabled>Recheck native stopped-site route</button></div>
@@ -488,10 +498,6 @@
         <div class="ach-controls"><button id="ach-status-stopped-restore" type="button" class="btn btn-warning" disabled>Restore native stopped-site route</button></div>
         <p id="ach-status-stopped-result" role="status" aria-live="polite">Select a verified website, stopped template and locale, then Recheck. Native stop requires a fresh website inventory.</p>
       </div>
-      <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
-      <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
-      <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
-      <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
     </section>
     <section class="ach-view" id="ach-panel-activity" aria-labelledby="ach-tab-activity" data-view="activity" role="tabpanel" hidden>
       <h4 class="ach-sr-only">Activity / Diagnostics</h4>
@@ -1516,8 +1522,27 @@
       evidence.locale === root.find('#ach-status-locale').val() &&
       evidence.brand === JSON.stringify(statusFields());
   }
+  function statusShowWorkflow() {
+    // Presentation only. All source/recovery authorization still comes from
+    // statusLock, fresh evidence, backend validation and operator approval.
+    var site = root.find('#ach-status-scope').val() === 'site';
+    var template = root.find('#ach-status-template').val();
+    var audit = site && (template === '404' || template === '502');
+    var manage = site && (audit || template === '50x');
+    var defaults = !site && ['404','502','new-site'].includes(template);
+    var unbound = !site && template === 'unbound';
+    var stopped = site && template === 'stopped';
+    root.find('#ach-status-site-audit').prop('hidden', !audit);
+    root.find('#ach-status-manage-section').prop('hidden', !manage);
+    root.find('#ach-status-default-section').prop('hidden', !defaults);
+    root.find('#ach-status-unbound-section').prop('hidden', !unbound);
+    root.find('#ach-status-stopped-section').prop('hidden', !stopped);
+    root.find('#ach-status-workflow-note').prop('hidden',
+      manage || defaults || unbound || stopped);
+  }
   function statusLock(busy) {
     statusBusy = busy;
+    statusShowWorkflow();
     // Website inventory loads independently; their completion must not
     // release a pending branding, inspection or HTTP-probe operation.
     root.find('#ach-status-sites-more, #ach-status-sites-retry').prop(
@@ -1614,6 +1639,7 @@
     root.find('#ach-status-manage-result').text(
       'Recheck saved status recovery before Restore. Never repeat an uncertain Nginx reload blindly.');
     root.find('#ach-status-iframe').prop('srcdoc', '');
+    root.find('#ach-status-preview-surface').prop('hidden', true);
     root.find('#ach-status-sha').text('');
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
     root.find('#ach-status-probe-result').text('Live HTTP/80 404 not checked.');
@@ -1826,6 +1852,7 @@
         statusNotice('Preview failed or response incompatible. Nothing applied.', 'error');
       } else {
         root.find('#ach-status-iframe').prop('srcdoc', r.html);
+        root.find('#ach-status-preview-surface').prop('hidden', false);
         root.find('#ach-status-sha').text(
           'Bundled SHA-256: ' + r.source_sha256 + '\nRendered SHA-256: ' + r.rendered_sha256);
         statusNotice('Rendered offline ' + r.locale + '/' + r.template +
