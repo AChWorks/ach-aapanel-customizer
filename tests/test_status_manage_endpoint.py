@@ -386,5 +386,31 @@ class NativeStatusManagementTests(unittest.TestCase):
         self.assertIn("journal", result["msg"])
 
 
+    def test_50x_requires_extension_exact_approval_and_valid_site(self):
+        for bad in (
+            {"site_delivery": "file", "site_approval": "apply_exact_site_50x_site_file"},
+            {"site_approval": "apply_exact_site_502_reload"},
+            {"site_approval": ""},
+        ):
+            with self.subTest(bad=bad):
+                response, call = self.run_api(self.args(
+                    template="50x", expected_render_sha256=render_page("en", "50x")["rendered_sha256"],
+                    **bad))
+                self.assertFalse(response["status"], response)
+                self.assertIsNone(call)
+        args = self.args(
+            template="50x",
+            site_approval="apply_exact_site_50x_reload",
+            expected_render_sha256=render_page("en", "50x")["rendered_sha256"])
+        response, call = self.run_api(args)
+        self.assertTrue(response["status"], response)
+        self.assertEqual(response["template"], "50x")
+        self.assertEqual(call.kwargs["code"], "50x")
+        self.assertEqual(call.kwargs["expected_render"], render_page("en", "50x")["rendered_sha256"])
+        response, call = self.run_api(args, flask=self.flask(temporary=True))
+        self.assertFalse(response["status"], response)
+        self.assertIsNone(call)
+
+
 if __name__ == "__main__":
     unittest.main()

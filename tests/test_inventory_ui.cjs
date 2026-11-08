@@ -2032,6 +2032,80 @@ test('Native 502 source-only preview gates extension Apply and Restore with Ngin
   assert.match(ui.state().statusManage,/502.html SOURCE SHA-256/);
 });
 
+test('Generic native 50x requires extension, source preflight and verified four-code proof', () => {
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-template','50x','change');
+  assert.equal(ui.state().statusProbeDisabled,false);
+  assert.equal(ui.state().statusManageRecheckDisabled,false);
+  ui.statusSetValue('#ach-status-delivery','file','change');
+  assert.equal(ui.state().statusProbeDisabled,true);
+  assert.equal(ui.state().statusManageRecheckDisabled,true);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.requests.length,count,'50x cannot invoke unsupported native file mode');
+  ui.statusSetValue('#ach-status-delivery','extension','change');
+  const probe=ui.statusClick('#ach-status-probe-button');
+  assert.equal(probe.options.data.template,'50x');
+  assert.equal(probe.options.data.site_delivery,'extension');
+  const source=statusProbe({
+    template:'50x',state:'Source Ready',scope:'native_vhost_source_only',
+    page_file_sha256:managed404Original,
+    body_sha256:null,http_status:null,body_bytes:null,
+    body_matches_file:false,body_matches_render:false,http_404_observed:false,
+    adoption_preview:{
+      schema:1,state:'Source Ready',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,
+      requires_adoption:false,requires_backup:false,
+      ownership_verified:false,recovery_verified:false,
+      apply_supported:false,reason:'Exact 50x extension and reload approval required'
+    }
+  });
+  probe.respond(source);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  assert.equal(apply.options.data.site_approval,'apply_exact_site_50x_reload');
+  apply.respond(manage404Response('apply',{
+    template:'50x',runtime_verified:false,verification_scope:'source_and_nonce_only'
+  }));
+  assert.match(ui.state().statusManage,/unconfirmed/i);
+  const retry=ui.statusClick('#ach-status-manage-recheck');
+  retry.respond(manage404Response('recheck',{
+    template:'50x',state:'Recovery Required',changed:false,
+    runtime_verified:false,verification_scope:'source_and_nonce_only'
+  }));
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(restore.options.data.site_approval,'restore_exact_site_50x_reload');
+  restore.respond(manage404Response('restore',{
+    template:'50x',state:'Source Restored',
+    runtime_verified:false,verification_scope:'source_and_nonce_only'
+  }));
+  assert.match(ui.state().statusManage,/generic Nginx 50x route removed/);
+  assert.match(ui.state().statusManage,/502.html SOURCE/);
+});
+
+test('Native 50x rejects forged Applied proof and accepts exact body-verified Recheck', () => {
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-template','50x','change');
+  const forged=manage404Response('recheck',{
+    template:'50x',state:'Applied',changed:false,
+    runtime_verified:false,verification_scope:'source_and_nonce_only'
+  });
+  ui.statusClick('#ach-status-manage-recheck').respond(forged);
+  assert.match(ui.state().statusManage,/incomplete or incompatible/i);
+  ui.statusClick('#ach-status-manage-recheck').respond({
+    ...forged,runtime_verified:true,verification_scope:'http50x_body'
+  });
+  assert.match(ui.state().statusManage,/Applied/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageRestoreDisabled,false);
+});
+
 test('Restored 502 Recheck accepts the verified previous source hash, including absent sources', () => {
   const emptySha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
   for (const previous of [managed404Original, emptySha]) {

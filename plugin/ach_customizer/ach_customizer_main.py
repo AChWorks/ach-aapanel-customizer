@@ -809,7 +809,9 @@ class ach_customizer_main:
             delivery = self._argument(args, "site_delivery", "extension")
             if delivery not in ("extension", "file"):
                 raise StatusPageError("Unsupported site status delivery mode")
-            if (template not in ("404", "502") or
+            if template == "50x" and delivery != "extension":
+                raise StatusPageError("Generic 50x requires the native Nginx extension mode")
+            if (template not in ("404", "502", "50x") or
                     self._argument(args, "locale") not in LOCALES):
                 raise StatusPageError("Select an English/Persian site 404 or 502")
             import public
@@ -848,8 +850,8 @@ class ach_customizer_main:
                     from ach_customizer_status_site_file import preview_site_file_502
                     preview = preview_site_file_502
                 else:
-                    from ach_customizer_status_extension import preview_site_502
-                    preview = preview_site_502
+                    from ach_customizer_status_extension import preview_site_502, preview_site_50x
+                    preview = preview_site_50x if template == "50x" else preview_site_502
                 observed = preview(
                     before, locale=self._argument(args, "locale"),
                     rendered_sha256=rendered["rendered_sha256"],
@@ -894,14 +896,16 @@ class ach_customizer_main:
                 raise StatusPageError("Only explicitly selected website scope supports status extensions")
             site_id = self._status_site_id(args)
             code = self._argument(args, "template")
-            if site_id is None or code not in ("404", "502"):
-                raise StatusPageError("Select a website and the 404 or 502 template")
+            if site_id is None or code not in ("404", "502", "50x"):
+                raise StatusPageError("Select a website and a supported 404/502/50x template")
             locale = self._argument(args, "locale")
             if locale not in LOCALES:
                 raise StatusPageError("Unsupported Status Pages locale")
             delivery = self._argument(args, "site_delivery", "extension")
             if delivery not in ("extension", "file"):
                 raise StatusPageError("Unsupported site status delivery mode")
+            if code == "50x" and delivery != "extension":
+                raise StatusPageError("Generic 50x requires the native Nginx extension mode")
             suffix = "_reload" if delivery == "extension" else "_site_file"
             if action == "apply" and self._argument(args, "site_approval") != (
                     "apply_exact_site_" + code + suffix):

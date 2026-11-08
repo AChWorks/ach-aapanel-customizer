@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "date": "2026-11-08",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "issue_acceptance": [
+    10,
+    21
+  ],
+  "source_branch": "feat/issue10-native-50x-20261108",
+  "integration_base": "6bf6b17b824fa1f9014f00bf92419f227b192335",
+  "version": "0.1.20 UNRELEASED",
+  "scope": "Optional running-site native Nginx extension 500/502/503/504, excluding generic PHP/WordPress interception, stopped-site HTTP503 and unknown-host HTTPS",
+  "source_validation": {
+    "python_unittest": {
+      "count": 482,
+      "failures": 0,
+      "result": "PASS"
+    },
+    "javascript_node_test": {
+      "count": 216,
+      "failures": 0,
+      "result": "PASS"
+    },
+    "python_compileall": "PASS",
+    "shell_syntax": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "package": {
+    "name": "ach_customizer_0120_50x_required01.zip",
+    "sha256": "22343b7eaf2db2506835ea82bde37083e6688e5424f1b9cd0a7e263745eaecd5",
+    "native_install": "panelPlugin.update_zip and panelPlugin.input_zip",
+    "members": 47,
+    "installed_member_hashes": "47/47 PASS",
+    "source_version": "0.1.20",
+    "status": "SOURCE CANDIDATE ONLY, NOT RELEASED"
+  },
+  "native_qa": {
+    "provider": "Test Server For AI",
+    "workspace": "/srv/ai-workspace/ach-aapanel-rebuild-20261105",
+    "environment": "Isolated managed QEMU Debian 12, native aaPanel 8.0.7, Nginx, PHP 8.1 and 8.5",
+    "authorization_context": "Synthetic Flask primary administrator POST; NOT real authenticated aaPanel Browser/CSRF/secondary/temporary-admin acceptance",
+    "installer": "artifacts/qa_0120_50x_install_required01.py",
+    "installer_sha256": "90624c03234051af4488ba66222634104353d5e69f549a5d1f5fbc0d131adfba",
+    "driver": "artifacts/qa_0120_50x_native_required01.py",
+    "driver_sha256": "1b0de96f083ec50111e8fe39029cd6970107f583ec4384ece4b5f64a3091bbd7",
+    "site": "Existing native WordPress site wp1.digikalashop.top, with native loaded site extension include",
+    "observations": [
+      "Baseline WP1, WP2, WP3 HTTP200 and initial selected VHost/source hashes captured",
+      "Exact 0.1.20 ZIP imported through native panelPlugin and 47/47 installed members matched",
+      "Native Nginx -t accepted all five counterexample VHosts: server multiline 500, location multiline 503, inline nested multiline 504, quoted # preceding an error_page 500, and combined 500/504 multiline",
+      "All five true source conflicts returned status_manage_conflict before journal/managed-asset/extension publication or Nginx reload; selected VHost bytes restored between cases",
+      "Native Nginx -t accepted a harmless quoted # plus real comment containing an error_page 503 string; 50x source preflight remained eligible",
+      "Original native 502.html source-only preflight and per-site exact approval were used",
+      "Real Nginx localhost HTTP500, HTTP502, HTTP503, HTTP504 returned exact intended status, identical 50x rendered body SHA256 and same operation nonce",
+      "Native Apply and Recheck each reported Applied only after all four HTTP statuses and content/nonce matched",
+      "Native SiteStop preserved read-only Suspended recovery; Apply and Restore while stopped were denied",
+      "Native SiteStart restored four-code Nginx route; fresh Recheck again observed Applied",
+      "Deliberate selected-site VHost drift denied Restore and retained read-only Needs Review recovery",
+      "Exact native 50x Restore and Source Restored Recheck passed; original 502.html and all three WordPress VHosts preserved",
+      "WordPress WP1, WP2, WP3 HTTP200 and Nginx syntax PASS after Restore"
+    ]
+  },
+  "cold_restoration": {
+    "result": "PASS",
+    "method": "Cold-stop task-owned QEMU service; verify intact pretest disk; restore original active overlay; boot, verify baseline; remove only task-specific disposable test child",
+    "baseline_plugin": "0.1.12 metadata confirmed",
+    "nginx_syntax": "PASS",
+    "word_press_http": "3/3 HTTP200",
+    "active_backing": "rescue/pre-status-extension-20261107.qcow2",
+    "protected_snapshot_sha256": "79ca6e5a3ae4ac04d2501fc625a72d14899f3115824d09d17e8537a0db07d346",
+    "protected_snapshot_unchanged": true,
+    "task_disposable_qa_overlay_removed": true,
+    "historical_overlay_retained": "managed-qa/qa-0119-native-site-file-before.qcow2 (unique non-golden data)",
+    "tested_package_and_driver_scripts_retained": true
+  },
+  "gates": {
+    "independent_review": "Required on stabilized exact current GitHub candidate",
+    "merge": "Not authorized for this future PR; fresh exact Owner approval needed after review",
+    "release": "No Stable release or Production install/deployment authorization",
+    "open_work": "#10 stopped-site real HTTP503 and unknown-host HTTPS/443; #21 real authenticated Browser/CSRF/roles and complete native lifecycle/Phase B"
+  },
+  "independent_review_remediation": {
+    "prior_reviewed_head": "8bf6b159ef0d598c4f2ea78f3adfd54c51ac2bab",
+    "prior_reviewed_tree": "a07e22d2eeede342c9ea4cddbe313ce598676afb",
+    "prior_verdict": "COMPLETE / CHANGES_REQUIRED (BLOCKER 0, REQUIRED 1)",
+    "finding": "REQUIRED-01: incomplete Nginx error_page selected-status conflict detection for multiline statements and quoted hash",
+    "repair": "Bounded selected-native-VHost Nginx statement recognizer, quote/comment/escape aware, all nested contexts. Reject 500/503/504 conflicts and unreadable/ambiguous statements before any journal, asset, include or reload.",
+    "regression_red_baseline": "Seven source test subcase failures before correction (targeted 45-test module)",
+    "regression_green": "45 targeted extension tests, 482 full Python tests, 216 JavaScript tests PASS",
+    "native_validation": "Five Nginx-syntax-valid 500/503/504 conflicts rejected before Apply; benign quotes/comments eligible; real four-code HTTP Apply/Recheck/Restore and Stop/Start/drift regression PASS",
+    "remaining_gate": "Independent high-assurance exact-candidate DELTA RE-REVIEW and fresh Owner Merge approval specific to PR #36"
+  }
+}

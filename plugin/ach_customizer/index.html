@@ -387,8 +387,8 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
-      <h4>Status Pages · Preview / Site 404/502 / New-site defaults / Unbound HTTP</h4>
-      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 Apply/Restore uses a verified plugin-owned extension and shared Nginx reload. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. HTTP/80 unbound-domain routing is available behind a separate guarded global Apply/Restore. HTTPS/default TLS, stopped sites and generic 50x routing remain unsupported.</p>
+      <h4>Status Pages · Preview / Site 404/502/50x / New-site defaults / Unbound HTTP</h4>
+      <p class="ach-note"><strong>Offline preview for all eleven English/Persian templates.</strong> Branding Save/Reset changes preferences, not live websites. For aaPanel 8.0.7 Nginx, site-specific 404/502 and Nginx-generated 50x Apply/Restore use a verified plugin-owned extension and shared Nginx reload. 50x covers Nginx-produced 500/502/503/504, not arbitrary application/WordPress error bodies. Separately, global <strong>new-site source defaults</strong> manage only the templates copied into newly created sites; existing websites and live Nginx routing remain unchanged. HTTP/80 unbound-domain routing is available behind a separate guarded global Apply/Restore. HTTPS/default TLS and correct stopped-site HTTP503 remain unsupported.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -1532,7 +1532,8 @@
     var selectedReady = !busy && !!actionable && statusRevision !== null && scope &&
       scope.scope === 'site' && selected &&
       statusLoadedScope === scope.scope + ':' + scope.site_id &&
-      (template === '404' || template === '502');
+      (template === '404' || template === '502' ||
+       (template === '50x' && root.find('#ach-status-delivery').val() === 'extension'));
     var siteRunning = selectedReady && String(selected.panel_status) === '1';
     root.find('#ach-status-probe-button').prop('disabled', !siteRunning);
     // A stopped site must retain a read-only recovery inspection path.
@@ -1973,9 +1974,10 @@
   function validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot) {
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
-    if (root.find('#ach-status-template').val() === '502') {
+    if (['502','50x'].includes(root.find('#ach-status-template').val())) {
       var plan = r && r.adoption_preview;
-      return r && r.status === true && r.schema === 1 && r.template === '502' &&
+      return r && r.status === true && r.schema === 1 &&
+        r.template === root.find('#ach-status-template').val() &&
         r.state === 'Source Ready' && r.scope === 'native_vhost_source_only' &&
         r.read_only === true && r.apply_supported === false &&
         r.nginx_runtime_verified === false && r.http_status === null &&
@@ -2032,7 +2034,8 @@
     if (statusBusy || statusRevision === null || !scope || !selectedSite ||
         String(selectedSite.panel_status) !== '1' ||
         statusLoadedScope !== scope.scope + ':' + scope.site_id ||
-        !['404','502'].includes(template)) return;
+        !['404','502','50x'].includes(template) ||
+        (template === '50x' && root.find('#ach-status-delivery').val() !== 'extension')) return;
     var selectedSnapshot = nativeHostsSnapshot(selectedSite);
     var delivery = root.find('#ach-status-delivery').val();
     var ticket = statusTicket, submittedBrand = statusFields();
@@ -2042,7 +2045,7 @@
       .prop('checked', false);
     root.find('#ach-status-probe-result').text(template === '404' ?
       'Checking local HTTP/80 404 and native site source (read-only)...' :
-      'Inspecting native 502 source (read-only; no error is induced)...');
+      'Inspecting native 502 source baseline (read-only; no error is induced)...');
     root.find('#ach-status-adoption-result').text('Checking native status extension source prerequisites...');
     statusLock(true);
     request('status_probe', Object.assign({}, scope, submittedBrand, {
@@ -2078,7 +2081,7 @@
         var adoption = r.adoption_preview;
         if (((template === '404' && r.state === 'HTTP Match' &&
                r.page_file_sha256 !== r.rendered_sha256) ||
-              (template === '502' && r.state === 'Source Ready')) &&
+              (['502','50x'].includes(template) && r.state === 'Source Ready')) &&
             adoption && adoption.route_source_state === 'Native VHost' &&
             /^[0-9a-f]{64}$/.test(adoption.vhost_sha256 || '')) {
           statusProbeEvidence = {
@@ -2122,6 +2125,7 @@
     // Site-file 502 is always source-only. File 404 may assert live status
     // only after the backend actually matched HTTP 404 and body bytes.
     // Never accept extension-style nonce proof as file-mode verification.
+    if (r.template === '50x' && delivery !== 'extension') return false;
     if (delivery === 'file' && r.verification_scope !== 'saved_journal_only') {
       if (r.template === '502') {
         if (r.verification_scope !== 'source_only' || r.runtime_verified !== false)
@@ -2132,11 +2136,17 @@
           return false;
       }
     }
+    if (r.template === '50x') {
+      if (['Applied'].includes(r.state) &&
+          (r.runtime_verified !== true || r.verification_scope !== 'http50x_body')) return false;
+      if (r.state === 'Source Restored' &&
+          (r.runtime_verified !== false || r.verification_scope !== 'source_and_nonce_only')) return false;
+    }
     if (action === 'recheck') {
       if (!['Unmanaged','Restored','Source Restored','Applied','Recovery Required','Drift','Needs Review',
              'Suspended','Orphan Backup','Orphan Drift'].includes(r.state) ||
           (r.state === 'Source Restored' &&
-           (r.template !== '502' || r.runtime_verified !== false ||
+           (!['502','50x'].includes(r.template) || r.runtime_verified !== false ||
             r.verification_scope !== (delivery === 'file' ? 'source_only' : 'source_and_nonce_only'))) ||
           r.changed !== false || !hash(r.rendered_sha256)) return false;
       if (r.state === 'Suspended' || r.verification_scope === 'saved_journal_only') {
@@ -2172,7 +2182,7 @@
       (r.state === 'Already Current' || token(r.recovery_id)) :
       ['Restored','Source Restored','Already Restored'].includes(r.state) &&
       (r.state !== 'Source Restored' ||
-       (r.template === '502' && r.runtime_verified === false &&
+       (['502','50x'].includes(r.template) && r.runtime_verified === false &&
         r.verification_scope === (delivery === 'file' ? 'source_only' : 'source_and_nonce_only'))) &&
       (r.state !== 'Already Restored' || r.changed === false) && token(r.recovery_id);
   }
@@ -2182,7 +2192,8 @@
     var delivery = root.find('#ach-status-delivery').val();
     if (!['extension','file'].includes(delivery) || statusBusy || statusRevision === null || !scope || !site ||
         statusLoadedScope !== 'site:' + scope.site_id ||
-        !['404','502'].includes(template) ||
+        !['404','502','50x'].includes(template) ||
+        (template === '50x' && delivery !== 'extension') ||
         (action !== 'recheck' && String(site.panel_status) !== '1')) return;
     var proposal = statusProbeEvidence, recovery = statusManageEvidence;
     if (action === 'apply' &&
@@ -2254,7 +2265,9 @@
               ' — confirmed managed extension change') :
             (delivery === 'file' ? ' — no managed site-file change' : ' — no managed extension change')) +
           (r.state === 'Source Restored' ?
-            (delivery === 'file' ? ' — original 502.html source restored; live HTTP 502 NOT verified' :
+            (template === '50x' ?
+             ' — generic Nginx 50x route removed; original 502 source and retired nonce checked' :
+             delivery === 'file' ? ' — original 502.html source restored; live HTTP 502 NOT verified' :
              ' — original 502 response NOT verified; source and retired operation nonce checked') : '') +
           (r.verification_scope === 'saved_journal_only' ?
             ' — saved journal ONLY; current Nginx/HTTP state NOT verified; no Apply/Restore permitted' : '') +
@@ -2268,12 +2281,12 @@
           '\nWebsite ID: ' + r.site_id +
           '\n' + (r.verification_scope === 'saved_journal_only' ?
             'Saved ' + template + ' journal SHA-256 (NOT current HTTP): ' :
-            template === '502' && r.state === 'Source Restored' ?
+            ['502','50x'].includes(template) && r.state === 'Source Restored' ?
               'Current restored 502.html SOURCE SHA-256: ' :
               'Current ' + template + ' status SHA-256: ') + r.page_file_sha256 +
           (r.verification_scope === 'saved_journal_only' ?
             '\nSaved phase: ' + r.journal_phase + '\n' + r.note : '') +
-          '\n' + (template === '502' ?
+          '\n' + (['502','50x'].includes(template) ?
             'Previous site 502.html SOURCE SHA-256 (not an observed HTTP 502): ' :
             'Previous HTTP 404 baseline SHA-256: ') +
           (r.before_sha256 || recovery?.before_sha256 || 'None stored') +
@@ -2281,7 +2294,8 @@
           '\nOperation ID: ' + r.operation_id +
           (delivery === 'file' ?
             '\nOnly this selected website\'s existing status HTML was targeted. Original bytes are journal-backed. No Nginx reload was requested; verify non-target health.' :
-            '\nOnly this selected site\'s plugin-owned status extension was targeted. Nginx is shared; the guarded Apply/Restore performs a service reload. Independently validate non-target health.'));
+            '\nOnly this selected site\'s plugin-owned status extension was targeted. Nginx is shared; the guarded Apply/Restore performs a service reload. Independently validate non-target health.' +
+            (template === '50x' ? '\nGeneric 50x only covers Nginx-generated 500/502/503/504; PHP/WordPress responses are not forcibly intercepted.' : '')));
         if (action !== 'recheck') {
           root.find('#ach-status-probe-result').text(
             'Prior HTTP evidence invalidated by the write. Run a fresh 404 probe if needed.');

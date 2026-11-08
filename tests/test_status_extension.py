@@ -62,7 +62,7 @@ class ExtensionTests(unittest.TestCase):
             return (404, self.before, None)
         inc = self.ext / extension._include_name(site["id"], code)
         if inc.exists():
-            return (int(code), self.after, operation)
+            return (extension._expected_status(code), self.after, operation)
         return (404, self.before, None)
 
     def run_manager(self, action="apply", **kw):
@@ -80,7 +80,7 @@ class ExtensionTests(unittest.TestCase):
             nginx="/usr/sbin/nginx", nginx_conf=str(self.nginx_conf),
             runner=self.runner, probe=self.probe)
 
-    def test_apply_recheck_restore_for_404_and_502(self):
+    def test_apply_recheck_restore_for_404_502_and_50x(self):
         for code in extension.CODES:
             with self.subTest(code=code):
                 self.code = code
@@ -89,7 +89,11 @@ class ExtensionTests(unittest.TestCase):
                 self.assertEqual(applied["state"], "Applied")
                 self.assertEqual(self.run_manager("recheck")["state"], "Applied")
                 content = (self.ext / extension._include_name(7, code)).read_text()
-                self.assertIn("location = /" + code + ".html", content)
+                self.assertIn("location = /" + ("502" if code == "50x" else code) + ".html", content)
+                if code == "50x":
+                    self.assertIn("error_page 500 503 504", content)
+                    for status in extension.FIFTY_CODES:
+                        self.assertIn(".__ach_customizer_proof_" + applied["recovery_id"] + "_" + status, content)
                 self.assertIn("internal;", content)
                 self.assertIn("allow 127.0.0.1;", content)
                 self.assertNotIn(str(self.site_root) + "/" + code + ".html", content)
@@ -100,7 +104,7 @@ class ExtensionTests(unittest.TestCase):
                 rechecked = self.run_manager("recheck")
                 self.assertEqual(rechecked["state"], expected_state)
                 self.assertEqual(rechecked["page_file_sha256"], rechecked["before_sha256"])
-                if code == "502":
+                if code in ("502", "50x"):
                     self.assertFalse(restored["runtime_verified"])
                     self.assertFalse(rechecked["runtime_verified"])
                     self.assertEqual(restored["verification_scope"], "source_and_nonce_only")
@@ -109,7 +113,7 @@ class ExtensionTests(unittest.TestCase):
                     self.assertTrue(rechecked["runtime_verified"])
                 self.assertFalse((self.ext / extension._include_name(7, code)).exists())
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
-        self.assertEqual(sum("reload" in cmd for cmd in self.commands), 4)
+        self.assertEqual(sum("reload" in cmd for cmd in self.commands), 6)
 
     def test_native_stop_start_retains_recovery_record(self):
         applied = self.run_manager()
@@ -669,6 +673,161 @@ class ExtensionTests(unittest.TestCase):
         self.run_manager()
         self.assertEqual((self.site_root / "404.html").read_bytes(), b"operator owned")
         self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
+
+
+    def test_50x_all_statuses_must_prove_same_body_and_nonce(self):
+        op = "a" * 32
+        observed = [(int(code), self.after, op) for code in extension.FIFTY_CODES]
+        self.assertEqual(extension._assess_50x(observed, op), (500, self.after, op))
+        for index in range(4):
+            with self.subTest(status=extension.FIFTY_CODES[index]):
+                partial = list(observed)
+                partial[index] = (404, self.before, None)
+                self.assertEqual(extension._assess_50x(partial, op), (0, None, op))
+        self.assertEqual(extension._assess_50x([(404, self.before, None)] * 4, op),
+                         (0, None, None))
+
+    def test_50x_refuses_preexisting_native_500_503_504_routing(self):
+        original = self.vhost.read_text()
+        for mapping in ("error_page 500 /my500.html;", "error_page 500 503 /50x.html;",
+                        "location = /api { error_page 504 /api504.html; }"):
+            with self.subTest(mapping=mapping):
+                self.vhost.write_text(original.replace("error_page 502 /502.html;",
+                    "error_page 502 /502.html;\n" + mapping))
+                with self.assertRaises(extension.ExtensionError):
+                    self.run_manager(code="50x")
+                self.assertFalse(list(self.state.iterdir()))
+                self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
+        self.vhost.write_text(original)
+
+    def test_50x_multiline_quoted_and_nested_mapping_conflicts_are_preflight_only(self):
+        original = self.vhost.read_text()
+        cases = (
+            # Nginx recognizes newlines inside directive argument lists.
+            "error_page 500\n    /operator-500.html;",
+            "location /special/ {\n    error_page 503\n        /operator-503.html;\n}",
+            "location /special/ { error_page 504\n    /operator-504.html; }",
+            "error_page 503 # comment between Nginx directive tokens\n    /custom-503.html;",
+            "add_header X-Note \"value#part\"; error_page 500 /operator-500.html;",
+            "location /special/ { add_header X-Note 'a;#b';\n"
+            "    error_page 503 504\n    /operator-multi.html; }",
+        )
+        for content in cases:
+            with self.subTest(content=content):
+                self.vhost.write_text(original.replace(
+                    "error_page 502 /502.html;",
+                    "error_page 502 /502.html;\n" + content))
+                with self.assertRaises(extension.ExtensionError) as caught:
+                    self.run_manager(code="50x")
+                self.assertEqual(caught.exception.stage, "conflict")
+                self.assertEqual(self.commands, [], "Must reject before Nginx syntax/reload")
+                self.assertEqual(list(self.state.iterdir()), [], "No recovery journal")
+                self.assertEqual(list(self.ext.iterdir()), [], "No extension publication")
+                self.assertEqual(list(self.public.iterdir()), [], "No HTML publication")
+        self.vhost.write_text(original)
+
+    def test_50x_ignores_actual_comments_and_unrelated_quoted_text(self):
+        original = self.vhost.read_text()
+        harmless = (
+            "# error_page 500 /comment-only.html;",
+            "add_header X-Note 'text # error_page 503 /not-a-rule;';",
+            "add_header X-Hint \"value#part\"; # error_page 504 /hidden.html;",
+            "add_header X-Hint \"value\\\"#part\"; # error_page 500 /hidden.html;",
+            "rewrite ^/special/$ /special.php?token=${request_uri} last;",
+            "error_page 404 /404.html; # 500 503 504 in comment",
+            "location /special/ { # error_page 500 /nested-comment.html;\n"
+            "    add_header X-Note \"error_page 504;\"; }",
+        )
+        for content in harmless:
+            with self.subTest(content=content):
+                self.vhost.write_text(original.replace(
+                    "error_page 502 /502.html;",
+                    "error_page 502 /502.html;\n" + content))
+                self.assertEqual(self.run_manager("recheck", code="50x")["state"], "Unmanaged")
+                self.assertEqual(self.commands, [])
+        self.vhost.write_text(original)
+        applied = self.run_manager(code="50x")
+        self.assertEqual(self.run_manager("recheck", code="50x")["state"], "Applied")
+        self.assertEqual(self.run_manager("restore", code="50x",
+                                          recovery=applied["recovery_id"])["state"],
+                         "Source Restored")
+
+    def test_50x_ambiguous_vhost_cannot_create_a_journal_or_reload(self):
+        original = self.vhost.read_text()
+        cases = (
+            'add_header X-Note "unterminated quote;\nerror_page 500 /cannot-trust.html;',
+            'location /special/ { error_page 503 /unfinished',
+            'add_header X-Note valid; error_page 504',
+            'add_header X-Bad "quoted\\',
+        )
+        for content in cases:
+            with self.subTest(content=content):
+                self.vhost.write_text(original.replace(
+                    "error_page 502 /502.html;",
+                    "error_page 502 /502.html;\n" + content))
+                with self.assertRaises(extension.ExtensionError):
+                    self.run_manager(code="50x")
+                self.assertEqual(self.commands, [])
+                self.assertEqual(list(self.state.iterdir()), [])
+                self.assertEqual(list(self.ext.iterdir()), [])
+                self.assertEqual(list(self.public.iterdir()), [])
+        self.vhost.write_text(original)
+
+    def test_50x_requires_native_502_mapping_and_uses_unmodified_site_file(self):
+        current = self.vhost.read_text()
+        self.vhost.write_text(current.replace("error_page 502 /502.html;", ""))
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager(code="50x")
+        self.assertFalse(list(self.state.iterdir()))
+        self.vhost.write_text(current)
+        original = self.site_root / "502.html"
+        original.write_bytes(b"real existing 502 file")
+        source = hashlib.sha256(original.read_bytes()).hexdigest()
+        self.assertEqual(self.run_manager("recheck", code="50x")["page_file_sha256"], source)
+        applied = self.run_manager(code="50x", current=source)
+        self.assertEqual(original.read_bytes(), b"real existing 502 file")
+        self.assertTrue(applied["runtime_verified"])
+        self.assertEqual(applied["verification_scope"], "http50x_body")
+        checked = self.run_manager("recheck", code="50x")
+        self.assertEqual(checked["state"], "Applied")
+        self.assertTrue(checked["runtime_verified"])
+        self.assertEqual(checked["verification_scope"], "http50x_body")
+        restored = self.run_manager("restore", code="50x", recovery=applied["recovery_id"])
+        self.assertEqual(restored["state"], "Source Restored")
+        self.assertFalse(restored["runtime_verified"])
+        self.assertEqual(original.read_bytes(), b"real existing 502 file")
+
+    def test_502_and_50x_may_not_own_same_website_location_simultaneously(self):
+        applied_502 = self.run_manager(code="502")
+        with self.assertRaises(extension.ExtensionError) as error:
+            self.run_manager(code="50x")
+        self.assertEqual(error.exception.stage, "conflict")
+        self.assertFalse((self.ext / extension._include_name(7, "50x")).exists())
+        self.assertEqual(self.run_manager("restore", code="502",
+                                         recovery=applied_502["recovery_id"])["state"],
+                         "Source Restored")
+        applied_50x = self.run_manager(code="50x")
+        with self.assertRaises(extension.ExtensionError) as error:
+            self.run_manager(code="502")
+        self.assertEqual(error.exception.stage, "conflict")
+        self.assertFalse((self.ext / extension._include_name(7, "502")).exists())
+        self.assertEqual(self.run_manager("restore", code="50x",
+                                         recovery=applied_50x["recovery_id"])["state"],
+                         "Source Restored")
+
+    def test_50x_preserves_saved_recovery_on_stopped_site(self):
+        applied = self.run_manager(code="50x")
+        self.site["status"] = "0"
+        saved = self.run_manager("recheck", code="50x")
+        self.assertEqual(saved["state"], "Suspended")
+        self.assertEqual(saved["verification_scope"], "saved_journal_only")
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager("restore", code="50x", recovery=applied["recovery_id"])
+        self.site["status"] = "1"
+        self.assertEqual(self.run_manager("recheck", code="50x")["state"], "Applied")
+        self.assertEqual(self.run_manager("restore", code="50x",
+                                         recovery=applied["recovery_id"])["state"],
+                         "Source Restored")
 
 
 if __name__ == "__main__":
