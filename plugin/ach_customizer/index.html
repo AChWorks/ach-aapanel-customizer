@@ -2520,6 +2520,8 @@
         'Restored journal/source only in this Recheck; no live stopped HTTP result observed.' :
       r.state === 'Source Ready' ?
         'Source inspected; no HTTP 503 delivery observed.' :
+      r.state === 'Needs Review' ?
+        'Native VHost or stopped-route proof requires review; managed delivery is unconfirmed. Saved recovery remains available after explicit approval.' :
         'No confirmed live delivery; inspect source and recovery record.';
     return '\n' + digestLabel + ': ' + r.served_sha256 +
       '\nLive route evidence: ' + evidence;

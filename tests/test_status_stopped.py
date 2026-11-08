@@ -204,6 +204,41 @@ class StopTests(Fixture):
         self.assertEqual(restored["state"], "Restored")
         self.assertEqual(self.conf.read_bytes(), self.original + b"# external comment\n")
 
+    def test_stopped_verified_http503_with_outside_block_drift_keeps_guarded_restore(self):
+        armed = self.apply()
+        self.stop()
+        foreign = b"# independent native operator comment outside managed block\n"
+        self.conf.write_bytes(self.conf.read_bytes() + foreign)
+        self.active = self.conf.read_bytes()
+        response = self.probe(self.site, stopped=True)
+        self.assertEqual(response[0], 503)
+        record = subject._record_load(self.fd, self.site)
+        self.assertEqual(response[1], record["body_sha"])
+        self.assertEqual(response[2], "text/html")
+        recheck = self.call()
+        self.assertEqual(recheck["state"], "Needs Review")
+        self.assertFalse(recheck["runtime_verified"],
+                         "Verified body alone cannot approve drifted native source")
+        self.assertEqual(recheck["proof_kind"], "none")
+        self.assertEqual(recheck["recovery_id"], armed["recovery_id"])
+        self.assertEqual(recheck["vhost_sha256"], sha(self.conf.read_bytes()))
+        self.assertEqual(recheck["served_sha256"], record["body_sha"])
+        restored = self.call("restore", expected_vhost=recheck["vhost_sha256"],
+                             expected_recovery=armed["recovery_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertEqual(restored["proof_kind"], "native_http200")
+        self.assertEqual(restored["recovery_id"], armed["recovery_id"])
+        expected_stopped = (
+            self.original.replace(b"root /www/wwwroot/test-site.example",
+                                  b"root /www/server/stop")
+            .replace(b"include", b"#include") + foreign
+        )
+        self.assertEqual(self.conf.read_bytes(), expected_stopped)
+        self.start()
+        self.assertEqual(self.conf.read_bytes(), self.original + foreign)
+        self.assertEqual(self.call()["state"], "Restored")
+        self.assertEqual(len(list(self.state.glob("*.backup"))), 0)
+
     def test_reload_failure_retains_recovery_before_retry(self):
         before = self.call()
         self.fail_reload = True

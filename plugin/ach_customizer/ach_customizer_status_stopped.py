@@ -405,9 +405,14 @@ def manage_stopped(action, site, html, *, data_fd, expected_vhost=None,
                     drift = before != expected
                     if str(site["status"]) == "0":
                         observed = (probe or _probe)(site, stopped=True)
-                        verified = (observed[0] == 503 and observed[1] == record["body_sha"] and
-                                    observed[2].split(";", 1)[0].strip().lower() == "text/html")
-                        state = "Applied" if verified and not drift else "Needs Review"
+                        route_matches = (observed[0] == 503 and
+                                         observed[1] == record["body_sha"] and
+                                         observed[2].split(";", 1)[0].strip().lower() == "text/html")
+                        # A matching HTTP response alone does not prove the
+                        # managed source is unchanged. Keep Needs Review and
+                        # its Recovery ID, without claiming verified delivery.
+                        verified = route_matches and not drift
+                        state = "Applied" if verified else "Needs Review"
                     else:
                         verified, state = False, "Needs Review" if drift else "Armed"
                 except ExtensionError:
