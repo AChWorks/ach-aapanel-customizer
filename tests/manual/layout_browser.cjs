@@ -126,7 +126,7 @@ const {chromium} = require('playwright');
             const css=getComputedStyle(el);
             return r.height<31 || r.height>96 || r.width<15 ||
               r.left<edge.left-1 || r.right>edge.right+1 ||
-              css.borderRadius!==(el.tagName==='BUTTON' ? '6px' : '10px');
+              css.borderRadius!=='8px';
           }).map(el=>el.id||el.tagName);
           return {visible:found.length,failures};
         });
@@ -227,6 +227,9 @@ const {chromium} = require('playwright');
         document.querySelectorAll('[data-view]').forEach(view=>{
           view.hidden=view.getAttribute('data-view')!=='status';
         });
+        // This is the site-404 inspection context. A global template or
+        // unsupported scope must not show the comparison by default.
+        document.getElementById('ach-status-site-audit').hidden=false;
         const pre=document.getElementById('ach-status-comparison-excerpt');
         const summary=document.getElementById('ach-status-comparison-summary');
         const hostile='<img src=x onerror=alert(1)>';

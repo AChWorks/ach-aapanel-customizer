@@ -444,12 +444,15 @@
         <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
         <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
         <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
-        <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check selected 404/502 source (read-only)</button></div>
-        <p class="ach-note">404: explicit loopback HTTP/80 GET plus source inspection. 502: configured-source inspection only (no artificial production 502). Neither authorizes Apply without the separate confirmed extension operation. The native proof request may appear in access logs.</p>
-        <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Live HTTP/80 404 not checked.</p>
-        <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">404 adoption preflight not checked. No change authorized.</p>
         <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
         <pre id="ach-status-comparison-excerpt" class="ach-status-comparison" tabindex="0" dir="ltr" aria-label="Display-only current-versus-proposed HTML difference"></pre>
+      </div>
+      <div class="ach-note" id="ach-status-site-preflight" aria-label="Website status source preflight" hidden>
+        <strong>Selected website — read-only source preflight</strong>
+        <p>404 checks one local HTTP/80 response and native source. 502 and Nginx-generated 50x check source only; no artificial error is induced and no live 50x response is claimed. 50x requires the Nginx extension delivery mode. Any proof request may appear in access logs. A successful preflight alone never approves Apply.</p>
+        <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check selected 404/502/50x source (read-only)</button></div>
+        <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Selected website source not checked.</p>
+        <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">Source preflight not checked. No change authorized.</p>
       </div>
       <div class="ach-note" id="ach-status-manage-section" aria-label="Guarded website status management" hidden>
         <strong>Website 404/502 or Nginx-generated 50x — guarded site delivery and recovery</strong>
@@ -466,7 +469,7 @@
         <div class="ach-controls"><button id="ach-status-manage-apply" type="button" class="btn btn-danger" disabled>Apply selected status page</button></div>
         <label><input id="ach-status-manage-restore-approve" type="checkbox" /> I reviewed this site's saved recovery ID and approve exact Restore (extension reloads Nginx; site-file restores saved original bytes).</label>
         <div class="ach-controls"><button id="ach-status-manage-restore" type="button" class="btn btn-warning" disabled>Restore selected site status</button></div>
-        <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site 404 recovery before Restore. An uncertain write must not be blindly repeated.</p>
+        <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site recovery before Restore. An uncertain write must not be blindly repeated.</p>
       </div>
       <div class="ach-note" id="ach-status-default-section" aria-label="aaPanel new-site source defaults">
         <strong>Panel default templates for future newly created sites</strong>
@@ -1533,6 +1536,7 @@
     var unbound = !site && template === 'unbound';
     var stopped = site && template === 'stopped';
     root.find('#ach-status-site-audit').prop('hidden', !audit);
+    root.find('#ach-status-site-preflight').prop('hidden', !manage);
     root.find('#ach-status-manage-section').prop('hidden', !manage);
     root.find('#ach-status-default-section').prop('hidden', !defaults);
     root.find('#ach-status-unbound-section').prop('hidden', !unbound);
@@ -1642,8 +1646,8 @@
     root.find('#ach-status-preview-surface').prop('hidden', true);
     root.find('#ach-status-sha').text('');
     root.find('#ach-status-inspect-result').text('Read-only site inspection not run.');
-    root.find('#ach-status-probe-result').text('Live HTTP/80 404 not checked.');
-    root.find('#ach-status-adoption-result').text('404 adoption preflight not checked. Apply/Restore remain unavailable.');
+    root.find('#ach-status-probe-result').text('Selected website source not checked.');
+    root.find('#ach-status-adoption-result').text('Source preflight not checked. Apply/Restore remain unavailable.');
     root.find('#ach-status-comparison-summary').text('Content comparison not run.');
     root.find('#ach-status-comparison-excerpt').text('');
   }
@@ -2103,6 +2107,8 @@
       .prop('checked', false);
     root.find('#ach-status-probe-result').text(template === '404' ?
       'Checking local HTTP/80 404 and native site source (read-only)...' :
+      template === '50x' ?
+      'Inspecting Nginx-generated 50x source only (read-only; no error is induced)...' :
       'Inspecting native 502 source baseline (read-only; no error is induced)...');
     root.find('#ach-status-adoption-result').text('Checking native status extension source prerequisites...');
     statusLock(true);
@@ -2356,7 +2362,7 @@
             (template === '50x' ? '\nGeneric 50x only covers Nginx-generated 500/502/503/504; PHP/WordPress responses are not forcibly intercepted.' : '')));
         if (action !== 'recheck') {
           root.find('#ach-status-probe-result').text(
-            'Prior HTTP evidence invalidated by the write. Run a fresh 404 probe if needed.');
+            'Prior source/HTTP preflight invalidated by the write. Recheck before any new Apply.');
           root.find('#ach-status-adoption-result').text('Previous read-only preflight invalidated.');
         }
       }
