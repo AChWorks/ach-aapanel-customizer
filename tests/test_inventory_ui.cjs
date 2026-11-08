@@ -5065,6 +5065,93 @@ test('HTTP unbound wrong replies, brand edits and scope/locale changes revoke au
 });
 
 
+test('Native HTTP unbound read-only failure shows backend cause at its own control', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  const inspect=ui.statusClick('#ach-status-unbound-recheck');
+  inspect.respond({status:false,stage:'status_unbound_probe',
+    msg:'Unbound loopback HTTP request unavailable',request_id:'a'.repeat(32)});
+  const shown=ui.state().unboundResult;
+  assert.match(shown,/Read-only Recheck failed at status_unbound_probe/);
+  assert.match(shown,/Unbound loopback HTTP request unavailable/);
+  assert.match(shown,/127\.0\.0\.1 and \[::1\]/);
+  assert.match(shown,/No routing change was requested/);
+  assert.match(shown,/Request ID: a{32}/);
+  assert.doesNotMatch(shown,/Write outcome|saved recovery before any retry/i);
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+  assert.match(ui.state().error,/status_unbound_probe.*Unbound loopback HTTP request unavailable/);
+});
+
+test('Rejected HTTP unbound write reports recovery without authorizing blind retry', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck'));
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  assert.equal(ui.state().unboundApplyDisabled,false);
+  const write=ui.statusClick('#ach-status-unbound-apply');
+  write.respond({status:false,stage:'status_unbound_uncertain',
+    msg:'Reload outcome not verified',recovery_id:'c'.repeat(32),
+    request_id:'b'.repeat(32)});
+  const shown=ui.state().unboundResult;
+  assert.match(shown,/Write outcome not confirmed at status_unbound_uncertain/);
+  assert.match(shown,/Reload outcome not verified/);
+  assert.match(shown,/Recheck saved recovery before any retry/);
+  assert.match(shown,/Recovery ID: c{32}/);
+  assert.match(shown,/Request ID: b{32}/);
+  assert.doesNotMatch(shown,/No routing change was requested/);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-unbound-apply');
+  assert.equal(ui.requests.length,count,'Rejected Apply cannot be blindly retried');
+});
+
+test('Other native Status Pages Rechecks share inline backend-error diagnostics', () => {
+  const defaults=loadUi();
+  defaults.openStatus().respond(statusPrefs());
+  defaults.statusClick('#ach-status-default-recheck').respond({
+    status:false,stage:'status_defaults_source',msg:'Existing default file needs inspection'
+  });
+  assert.match(defaults.state().defaultSourceResult,
+    /Read-only Recheck failed at status_defaults_source: Existing default file needs inspection/);
+  assert.equal(defaults.state().defaultSourceApplyDisabled,true);
+
+  const site=statusProbeUi();
+  site.statusClick('#ach-status-manage-recheck').respond({
+    status:false,stage:'status_manage_source',msg:'Native VHost requires a fresh source check'
+  });
+  assert.match(site.state().statusManage,
+    /Read-only Recheck failed at status_manage_source: Native VHost requires a fresh source check/);
+  assert.equal(site.state().statusManageRestoreDisabled,true);
+
+  const stopped=loadUi();
+  chooseStoppedSite(stopped);
+  stopped.statusClick('#ach-status-stopped-recheck').respond({
+    status:false,stage:'status_stopped_probe',msg:'Native site state changed'
+  });
+  assert.match(stopped.state().stoppedResult,
+    /Read-only Recheck failed at status_stopped_probe: Native site state changed/);
+  assert.equal(stopped.state().stoppedApplyDisabled,true);
+  assert.equal(stopped.state().stoppedRestoreDisabled,true);
+});
+
+test('Malformed native Status Page failure remains untrusted and cannot expose approvals', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  ui.statusClick('#ach-status-unbound-recheck').respond({
+    status:false,stage:'<img onerror=alert(1)>',msg:'Unexpected hostile stage'
+  });
+  assert.doesNotMatch(ui.state().unboundResult,/img|onerror|Unexpected hostile stage/);
+  assert.match(ui.state().unboundResult,/unconfirmed/);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+});
+
 function stoppedAck(request, state='Source Ready', extras={}) {
   const fields=request.options.data;
   const action=fields.stopped_action;

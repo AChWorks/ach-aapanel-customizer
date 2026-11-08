@@ -702,6 +702,27 @@
     }
     return true;
   }
+  function statusBackendFailure(action, failure, fallback) {
+    // A rejected native POST supplies diagnostics, never positive source or
+    // recovery evidence. Render as text in the currently selected view only.
+    if (!failure || typeof failure !== 'object' || Array.isArray(failure) ||
+        failure.status !== false || typeof failure.stage !== 'string' ||
+        !/^[a-z0-9_]{1,80}$/.test(failure.stage) ||
+        typeof failure.msg !== 'string' || !failure.msg.trim()) return fallback;
+    var message = failure.msg.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 320);
+    var readOnly = action === 'recheck';
+    var summary = (readOnly ? 'Read-only Recheck failed at ' :
+      'Write outcome not confirmed at ') + failure.stage + ': ' + message;
+    var guidance = readOnly ?
+      '\nNo routing change was requested. Resolve the cause and Recheck.' :
+      '\nRecheck saved recovery before any retry; do not assume success or failure.';
+    if (readOnly && failure.stage === 'status_unbound_probe')
+      guidance += '\nCheck Nginx HTTP/80 loopback listeners at 127.0.0.1 and [::1].';
+    var id = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
+    return summary + guidance +
+      (id(failure.recovery_id) ? '\nRecovery ID: ' + failure.recovery_id : '') +
+      (id(failure.request_id) ? '\nRequest ID: ' + failure.request_id : '');
+  }
   function request(method, data, done, shouldReport, expectedRestoreSha) {
     // Multiple independent panels may load in parallel. Preserve the global
     // status of the latest initiated request; stale callbacks still complete
@@ -726,7 +747,9 @@
               (response.audit_warning ? ' Audit: ' + response.audit_warning : '') +
               (response.activity_warning ? ' Activity: ' + response.activity_warning : '')) || t.error, true);
           }
-          done(null);
+          // Keep safe backend failure diagnostics available to the owning inline
+          // view, without ever treating the rejected response as success.
+          done(null, !incompatible && response && response.status === false ? response : null);
           if (hasPotentialActivity(method)) invalidateActivitySnapshot();
         } else {
           if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
@@ -2304,7 +2327,7 @@
           (delivery === 'file' ? '_site_file' : '_reload') :
         action === 'restore' ? 'restore_exact_site_' + template +
           (delivery === 'file' ? '_site_file' : '_reload') : ''
-    }), function (r) {
+    }), function (r, failure) {
       if (ticket !== statusTicket) return;
       var same = site === selectedProbeSite(statusScope()) &&
         statusScope()?.site_id === scope.site_id &&
@@ -2320,10 +2343,11 @@
           (action === 'restore' && r &&
             (r.page_file_sha256 !== recovery.before_sha256 ||
              r.recovery_id !== recovery.recovery_id))) {
-        root.find('#ach-status-manage-result').text(
+        root.find('#ach-status-manage-result').text(statusBackendFailure(
+          action, same ? failure : null,
           action === 'recheck' ?
-          'Recheck incomplete or incompatible. No managed status is asserted.' :
-          'Write outcome unconfirmed. Recheck saved site recovery before any retry; do not assume success.');
+            'Recheck incomplete or incompatible. No managed status is asserted.' :
+            'Write outcome unconfirmed. Recheck saved site recovery before any retry; do not assume success.'));
       } else {
         if (action === 'recheck' && r.recovery_id) {
           statusManageEvidence = {
@@ -2452,7 +2476,7 @@
       expected_recovery_id:previous ? previous.recovery : '',
       default_approval:action === 'recheck' ? '' :
         action + '_new_site_default_' + template
-    }), function (r) {
+    }), function (r, failure) {
       if (ticket !== statusTicket) return;
       var same = statusLoadedScope === 'global:' &&
         statusScope()?.scope === 'global' &&
@@ -2466,8 +2490,9 @@
           action === 'restore' && r &&
           (r.recovery_id !== previous.recovery ||
            r.current_sha256 !== previous.before)) {
-        root.find('#ach-status-default-result').text(
-          'New-site default outcome unconfirmed; Recheck persisted recovery before retrying.');
+        root.find('#ach-status-default-result').text(statusBackendFailure(
+          action, same ? failure : null,
+          'New-site default outcome unconfirmed; Recheck persisted recovery before retrying.'));
       } else {
         if (action === 'recheck') {
           statusDefaultEvidence = {
@@ -2602,7 +2627,7 @@
       expected_render_sha256:previous ? previous.rendered : '',
       expected_recovery_id:previous ? previous.recovery : '',
       stopped_approval:action === 'recheck' ? '' : action + '_exact_native_stopped503_reload'
-    }), function (r) {
+    }), function (r, failure) {
       if (ticket !== statusTicket) return;
       var same = sameStoppedSelection({ticket:ticket,revision:revision,
         site_id:scope.site_id,snapshot:snapshot,locale:locale,brand:JSON.stringify(brand)});
@@ -2610,11 +2635,12 @@
           (action === 'apply' && r &&
            (r.rendered_sha256 !== previous.rendered || r.recovery_id === previous.recovery)) ||
           (action === 'restore' && r && r.recovery_id !== previous.recovery)) {
-        root.find('#ach-status-stopped-result').text(
+        root.find('#ach-status-stopped-result').text(statusBackendFailure(
+          action, same ? failure : null,
           action === 'recheck' ? 'Native stopped-site Recheck unavailable or incompatible. Reload inventory and Recheck.' :
           'Outcome unknown. Refresh website inventory and Recheck saved recovery before any retry.' +
             (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') +
-            (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : ''));
+            (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : '')));
       } else {
         if (action === 'recheck') {
           statusStoppedEvidence = {ticket:ticket,revision:revision,site_id:scope.site_id,
@@ -2701,7 +2727,7 @@
       expected_ipv4_status:previous ? String(previous.v4) : '',
       expected_ipv6_status:previous ? String(previous.v6) : '',
       unbound_approval:action === 'recheck' ? '' : action + '_global_http_unbound_reload'
-    }), function (r) {
+    }), function (r, failure) {
       if (ticket !== statusTicket) return;
       var same = statusLoadedScope === 'global:' &&
         statusScope()?.scope === 'global' &&
@@ -2714,10 +2740,11 @@
            r.recovery_id === previous.recovery && previous.state !== 'Restored') ||
           action === 'restore' && r &&
           (r.recovery_id !== previous.recovery || r.source_sha256 !== previous.source)) {
-        root.find('#ach-status-unbound-result').text(
+        root.find('#ach-status-unbound-result').text(statusBackendFailure(
+          action, same ? failure : null,
           'Unbound routing outcome unconfirmed. Recheck saved recovery before any retry.' +
-          (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') +
-          (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : ''));
+            (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') +
+            (r && r.operation_id ? '\nRequest ID: ' + r.operation_id : '')));
       } else {
         if (action === 'recheck') {
           statusUnboundEvidence = {
