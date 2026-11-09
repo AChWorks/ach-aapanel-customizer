@@ -619,6 +619,126 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("cache_inspection", exc, request_id)
 
+    def fpm_policy_get(self, args):
+        """Read operator-saved shared PHP intent, not a live/runtime verdict."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("php_fpm_file_preview")
+            from ach_customizer_fpm_policy import get_policy
+            version = self._argument(args, "php_version")
+            result = get_policy(version, directory=_STATE_DIR)
+            return self._activity_result(
+                {"status": True, "operation_id": request_id, **result},
+                "php_fpm", "fpm_policy_get", target=str(version), level="DEBUG")
+        except PermissionError as exc:
+            return self._fail("fpm_policy_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("fpm_policy_read", exc, request_id)
+
+    def fpm_policy_recheck(self, args):
+        """Compare saved service intent with fresh native file and site evidence.
+
+        A recheck is not an Apply preview, a host mutation, or a runtime verdict.
+        Never accept desired values from the caller on this route.
+        """
+        request_id = uuid4().hex
+        version = self._argument(args, "php_version")
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("php_fpm_file_preview")
+            from ach_customizer_fpm_policy import get_policy
+            before = get_policy(version, directory=_STATE_DIR)
+            baseline = {
+                "status": True, "schema": 1, "operation_id": request_id,
+                "version": version, "policy_revision": before["policy_revision"],
+                "monitor_revision": before["monitor_revision"],
+                "saved": before["saved"], "desired": before["desired"],
+                "read_only": True, "runtime_verified": False, "auto_enforce": False,
+                "apply_eligible": False, "scope": "shared_service", "pool": "www",
+                "changes": [], "shared_impact": None,
+                "note": "Desired values compared against PHP files/defaults only; no host action.",
+            }
+            if not before["saved"]:
+                return self._activity_result(
+                    {**baseline, "state": "No Policy",
+                     "reason": "No reviewed PHP-FPM desired policy is saved for this version."},
+                    "php_fpm", "fpm_policy_recheck", target=str(version), level="INFO")
+
+            # The existing Preview is the only owner of site-file attribution.
+            # Compose its bounded observation, not a second ad-hoc parser.
+            desired_args = {"php_version": version}
+            for key, value in before["desired"].items():
+                desired_args[key.removeprefix("pm.")] = value
+            inspected = self.preview_php_fpm(desired_args)
+            if inspected.get("status") is not True:
+                raise MonitorInputError(
+                    "Native PHP-FPM source inspection failed; see Activity and retry")
+            after = get_policy(version, directory=_STATE_DIR)
+            if before != after or inspected.get("fpm_saved_policy") != before:
+                return self._activity_result(
+                    {**baseline, "state": "Needs Review",
+                     "reason": "Saved policy or Monitor changed during inspection; recheck again."},
+                    "php_fpm", "fpm_policy_recheck", target=str(version), level="WARNING")
+            if (inspected.get("state") not in ("File Match", "File Drift")
+                    or not isinstance(inspected.get("fpm_observation_sha256"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}",
+                                        inspected["fpm_observation_sha256"])):
+                return self._activity_result(
+                    {**baseline, "state": "Needs Review",
+                     "reason": inspected.get("fpm_policy_reason") or
+                     inspected.get("reason") or
+                     "Native PHP source needs review; saved policy was not changed."},
+                    "php_fpm", "fpm_policy_recheck", target=str(version), level="WARNING")
+            impact = inspected["shared_impact"]
+            response = {
+                **baseline, "state": inspected["state"], "reason": inspected.get("reason") or "",
+                "changes": inspected["changes"], "shared_impact": impact,
+                "source": inspected["source"],
+                "source_observation_sha256": inspected["fpm_observation_sha256"],
+                "note": ("Point-in-time desired-versus-file comparison only. "
+                         "Shared site-file attribution is separately classified. "
+                         "To restore, load the saved values then independently Preview, "
+                         "Prepare, approve and Apply the guarded PHP 8.1/8.5 service."),
+            }
+            return self._activity_result(
+                response, "php_fpm", "fpm_policy_recheck", target=str(version),
+                level="INFO" if inspected["state"] == "File Drift" else "DEBUG")
+        except PermissionError as exc:
+            return self._fail("fpm_policy_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("fpm_policy_recheck", exc, request_id)
+
+    def fpm_policy_save(self, args):
+        """Store reviewed Monitor-only desired values; never touch PHP service."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("php_fpm_file_preview")
+            from ach_customizer_fpm_policy import save_policy
+            version = self._argument(args, "php_version")
+            desired = {
+                "pm.max_children": self._argument(args, "max_children"),
+                "pm.start_servers": self._argument(args, "start_servers"),
+                "pm.min_spare_servers": self._argument(args, "min_spare_servers"),
+                "pm.max_spare_servers": self._argument(args, "max_spare_servers"),
+                "pm.max_requests": self._argument(args, "max_requests"),
+            }
+            result = save_policy(
+                "/www/server/php", version, desired, directory=_STATE_DIR,
+                expected_revision=self._argument(args, "expected_policy_revision"),
+                expected_monitor_revision=self._argument(args, "expected_monitor_revision"),
+                expected_observation_sha256=self._argument(args, "expected_observation_sha256"),
+                reviewed=self._argument(args, "reviewed"),
+            )
+            return self._activity_result(
+                {"status": True, "operation_id": request_id, **result},
+                "php_fpm", "fpm_policy_save", target=str(version))
+        except PermissionError as exc:
+            return self._fail("fpm_policy_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("fpm_policy_save", exc, request_id)
+
     def preview_php_fpm(self, args):
         operation_id = uuid4().hex
         try:
@@ -631,7 +751,24 @@ class ach_customizer_main:
                 "pm.max_spare_servers": self._argument(args, "max_spare_servers"),
                 "pm.max_requests": self._argument(args, "max_requests"),
             }
-            result = preview_php_fpm("/www/server/php", version, desired)
+            from ach_customizer_fpm_policy import observe, get_policy
+            policy_error = None
+            try:
+                result, evidence_sha256 = observe("/www/server/php", version, desired)
+            except (MonitorInputError, OSError) as exc:
+                # A strict policy-fingerprint failure must not erase the older
+                # bounded file preview or accidentally permit saving policy.
+                result = preview_php_fpm("/www/server/php", version, desired)
+                evidence_sha256 = None
+                policy_error = exc
+            try:
+                saved_policy = get_policy(version, directory=_STATE_DIR)
+            except (StateError, MonitorInputError, OSError) as exc:
+                # An unreadable/malformed policy store is a visible degraded
+                # subfeature, not grounds to hide usable source drift.
+                saved_policy = None
+                if policy_error is None:
+                    policy_error = exc
             # Keep file/default drift available even when site ownership cannot
             # be attributed. This second bounded read never authorizes Apply.
             impact_error = None
@@ -658,12 +795,22 @@ class ach_customizer_main:
                     "note": "No site-to-pool inference was attempted.",
                 }
             response = {"status": True, "operation_id": operation_id,
-                        **result, "shared_impact": impact}
+                        **result, "shared_impact": impact,
+                        "fpm_observation_sha256": evidence_sha256,
+                        "fpm_saved_policy": saved_policy}
+            if policy_error is not None:
+                response["fpm_policy_reason"] = (
+                    "Saved policy/source fingerprint unavailable; use Operation ID "
+                    + operation_id + " in Activity. Existing source preview is read-only; "
+                    "no policy save is authorized.")
             if impact_error is not None:
                 response["stage"] = "php_fpm_site_impact"
+            elif policy_error is not None:
+                response["stage"] = "fpm_policy_observation"
             return self._activity_result(
                 response, "php_fpm", "preview_php_fpm", target=str(version),
-                error=impact_error, allow_error_detail=False)
+                error=impact_error or policy_error, level="WARNING" if policy_error else "INFO",
+                allow_error_detail=False)
         except Exception as exc:
             return self._fail("php_fpm_file_preview", exc, operation_id)
 
