@@ -1402,6 +1402,21 @@ test('Partial FastCGI cache source and Needs Review never claim verified isolati
   assert.doesNotMatch(ui.state().cacheResult,/Direct cache zone: WORDPRESS/);
 });
 
+test('Different canonical cache paths remain Unknown; UI never grants site purge', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    purge_scope:'Unknown',
+    other_sites_same_directory:[],
+    other_sites_same_zone:[],
+    findings:['PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED']
+  }));
+  const result=ui.state().cacheResult;
+  assert.match(result,/Observed cache directory usage: Unknown/);
+  assert.match(result,/site-scoped filesystem purge: NEVER inferred/);
+  assert.doesNotMatch(result,/safe to purge|private content protected/);
+});
+
 test('Forged FastCGI cache source responses fail closed and do not enable mutation', () => {
   const forged = [
     {site_id:8},{site_key:'other.test'},{fix_supported:true},
@@ -1411,7 +1426,10 @@ test('Forged FastCGI cache source responses fail closed and do not enable mutati
     {state:'Source Observed',unresolved_other_sites:1},
     {state:'Partial',unresolved_other_sites:0},
     {findings:['PERSONAL_DATA_LEAK']},
-    {cache_directory:'../unauthorized'}, {global_ignore_headers:['Unsafe']},
+    {cache_directory:'../unauthorized'},
+    {cache_directory:'/www/server/fastcgi_cache/'},
+    {cache_directory:'/www/server/./fastcgi_cache'},
+    {global_ignore_headers:['Unsafe']},
     {other_sites_same_directory:[{id:7,site_key:'forged.test'}]},
     {purge_scope:'Shared Registered Directory',other_sites_same_directory:[]},
     {purge_scope:'No Registered Directory Peer'},

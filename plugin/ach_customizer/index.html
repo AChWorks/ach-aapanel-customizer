@@ -1490,6 +1490,8 @@
           typeof r.cache_directory === 'string' && r.cache_directory.length <= 241 &&
           /^\/[A-Za-z0-9_./-]+$/.test(r.cache_directory) &&
           !r.cache_directory.includes('//') &&
+          !r.cache_directory.endsWith('/') &&
+          !r.cache_directory.split('/').includes('.') &&
           !r.cache_directory.split('/').includes('..')) ||
         !['Unknown','Shared Registered Directory','No Registered Directory Peer'].includes(r.purge_scope) ||
         !Array.isArray(r.global_ignore_headers) || r.global_ignore_headers.length > 5 ||
