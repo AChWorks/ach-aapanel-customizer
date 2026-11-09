@@ -1,5 +1,6 @@
 """Isolated reference-only FastCGI safety template and native endpoint tests."""
 import json
+import re
 import sys
 import tempfile
 import types
@@ -43,11 +44,42 @@ class CachePolicyRenderTests(unittest.TestCase):
         self.assertIn("max-age", a["global_http_fragment"])
         self.assertIn("wp-json", a["site_server_fragment"])
         self.assertIn("checkout", a["site_server_fragment"])
+        self.assertIn('if ($request_uri ~ "(?:%|//|/', a["site_server_fragment"])
+        self.assertIn("fastcgi_ignore_headers Set-Cookie;", a["site_server_fragment"])
+        # Unlike inherited global aaPanel defaults, this reference does not
+        # ignore Expires or Cache-Control in its final PHP handler.
+        self.assertNotIn("fastcgi_ignore_headers Cache-Control", a["site_server_fragment"])
         self.assertEqual(a["proposal_sha256"],
                          policy.generate_reference(7, "81")["proposal_sha256"])
         self.assertNotEqual(a["proposal_sha256"], b["proposal_sha256"])
         self.assertNotIn("site-8", a["global_http_fragment"])
         self.assertNotIn("$achfc_8", a["global_http_fragment"])
+
+    def test_original_uri_alias_escape_and_expires_override(self):
+        fragment = policy.generate_reference(7, "85")["site_server_fragment"]
+        guards = [
+            line for line in fragment.splitlines()
+            if line.strip().startswith("if ($request_uri ~ ")
+        ]
+        self.assertEqual(len(guards), 1, guards)
+        match = re.search(r'if \(\$request_uri ~ "([^"]+)"\)', guards[0])
+        self.assertIsNotNone(match, guards)
+        conservative = re.compile(match.group(1))
+        for alias in ("/ch%65ckout/", "/%63art/", "//checkout/",
+                      "/./checkout/", "/shop/../checkout/",
+                      "/checkout/%2e%2e/checkout/"):
+            with self.subTest(alias=alias):
+                self.assertIsNotNone(conservative.search(alias))
+        for canonical in ("/", "/public-canonical/", "/about/"):
+            with self.subTest(canonical=canonical):
+                self.assertIsNone(conservative.search(canonical))
+        directives = [
+            line.strip() for line in fragment.splitlines()
+            if line.strip().startswith("fastcgi_ignore_headers ")
+        ]
+        self.assertEqual(directives, ["fastcgi_ignore_headers Set-Cookie;"])
+        self.assertIn("fastcgi_no_cache", fragment)
+        self.assertIn("$upstream_http_set_cookie", fragment)
 
     def test_invalid_inputs_rejected_without_config_interpolation(self):
         for bad in (None, "1", 0, -1, True, 2147483648, 1.0, "7; include /etc/passwd"):

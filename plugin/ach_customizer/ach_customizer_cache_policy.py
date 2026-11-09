@@ -75,6 +75,12 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         + "if ($args != \"\") { set $%s_skip 1; }\n" % var
         + "if ($http_cache_control ~* \"(?:no-cache|no-store)\") { set $%s_skip 1; }\n" % var
         + "if ($request_uri ~* \"^/(?:wp-admin(?:/|$)|wp-login\\.php(?:/|$)|xmlrpc\\.php(?:/|$)|wp-cron\\.php(?:/|$)|wp-json(?:/|$)|wc-api(?:/|$)|wc-ajax(?:/|$)|(?:cart|checkout|my-account|order-pay|order-received|api|webhook)(?:/|$))\") { set $%s_skip 1; }\n" % var
+        # Keep the original-URI route guard (internal redirects can change
+        # $uri), but skip all encoded/noncanonical original paths as well.
+        # Nginx location routing decodes %XX, compresses adjacent slashes and
+        # resolves /./ and /../. These alternate forms must not evade a
+        # private-route guard. Query-string hits are already bypassed.
+        + r'if ($request_uri ~ "(?:%%|//|/\.\.?(?:/|$))") { set $%s_skip 1; }' % var + "\n"
         + "location ~ [^/]\\.php(/|$) {\n"
         + "    try_files $uri $uri/ /index.php?$args;\n"
         + "    fastcgi_pass unix:/tmp/php-cgi-%s.sock;\n" % php_version
@@ -83,6 +89,12 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         + "    fastcgi_cache %s;\n" % zone
         + "    fastcgi_cache_key \"$scheme$request_method$host$request_uri\";\n"
         + "    fastcgi_cache_valid 200 10m;\n"
+        # aaPanel 8.0.7 can inherit 'fastcgi_ignore_headers Cache-Control
+        # Expires Set-Cookie'. At this location, override that list with only
+        # Set-Cookie: normal Nginx caching honors upstream Cache-Control and
+        # Expires again, while $upstream_http_set_cookie in fastcgi_no_cache
+        # still rejects *every* Set-Cookie response for storage.
+        + "    fastcgi_ignore_headers Set-Cookie;\n"
         + "    fastcgi_cache_bypass $%s_skip;\n" % var
         + "    fastcgi_no_cache $%s_skip $upstream_http_set_cookie $upstream_http_vary $upstream_http_www_authenticate $%s_private_response $%s_expired_response;\n" % (var, var, var)
         + "    add_header X-ACh-Cache $upstream_cache_status always;\n"

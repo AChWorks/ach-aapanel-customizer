@@ -44,7 +44,33 @@ if (strpos($_SERVER['REQUEST_URI'], '/vary-response') === 0) {
 if (strpos($_SERVER['REQUEST_URI'], '/expires-zero') === 0) {
     header('X-Accel-Expires: 0');
 }
-echo $_SERVER['HTTP_HOST'] . ':' . $_SERVER['REQUEST_URI'] . ':' .
+// No Cache-Control or Set-Cookie headers: Expires must be honored despite
+// the aaPanel-style parent fastcgi_ignore_headers fixture.
+if (strpos($_SERVER['REQUEST_URI'], '/expires-past') === 0) {
+    header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
+}
+if (strpos($_SERVER['REQUEST_URI'], '/expires-future') === 0) {
+    header('Expires: Thu, 01 Jan 2099 00:00:00 GMT');
+}
+// Model an application/router that resolves %-encoding, duplicate slashes
+// and dot segments before routing, as Nginx's location normalization does.
+// The test MUST prove the alias reaches a synthetic private route; returning
+// two random responses alone would not demonstrate the intended failure path.
+// REQUEST_URI is an origin-form path here, even when it begins with //.
+// parse_url('//checkout/') would incorrectly treat 'checkout' as a host.
+$path = rawurldecode(explode('?', $_SERVER['REQUEST_URI'], 2)[0]);
+$parts = array();
+foreach (explode('/', $path) as $segment) {
+    if ($segment === '' || $segment === '.') continue;
+    if ($segment === '..') { array_pop($parts); continue; }
+    $parts[] = $segment;
+}
+$normalized = '/' . implode('/', $parts);
+if (str_ends_with($path, '/') && $normalized !== '/') $normalized .= '/';
+if (preg_match('~^/(?:cart|checkout|my-account|wp-admin)(?:/|$)~i', $normalized)) {
+    header('X-QA-Private-Route: yes');
+}
+echo $_SERVER['HTTP_HOST'] . ':' . $normalized . ':' .
      bin2hex(random_bytes(8));
 '''
 
@@ -88,7 +114,8 @@ def request(port, hostname, path="/", *, method="GET", headers=None):
         "http://127.0.0.1:%d%s" % (port, path),
         headers=hdr, method=method)
     with urllib.request.urlopen(req, timeout=5) as resp:
-        return resp.status, resp.headers.get("X-ACh-Cache"), resp.read().decode()
+        return (resp.status, resp.headers.get("X-ACh-Cache"),
+                resp.read().decode(), resp.headers)
 
 
 def assert_pair(port, host, path, expected, *, headers=None):
@@ -183,9 +210,46 @@ def run(nginx, php_version):
             for path, headers in private:
                 assert_pair(port,"qa-cache-a.test",path,
                             ("BYPASS","BYPASS"),headers=headers)
+            # The synthetic PHP router normalizes *its own* received URI.
+            # An encoded, repeated-slash or dot-segment alias must resolve
+            # to the same PRIVATE backend route, yet be BYPASS on repeated
+            # unauthenticated GETs (no query, Cookie or Authorization).
+            aliases = {
+                "/ch%65ckout/": "/checkout/",
+                "/%63art/": "/cart/",
+                "/%77p-admin/": "/wp-admin/",
+                "//checkout/": "/checkout/",
+                "/./checkout/": "/checkout/",
+                "/shop/../checkout/": "/checkout/",
+                "/checkout/%2e%2e/checkout/": "/checkout/",
+            }
+            for alias, expected_route in aliases.items():
+                left, right = assert_pair(
+                    port, "qa-cache-a.test", alias, ("BYPASS", "BYPASS"))
+                assert (":" + expected_route + ":") in left[2], (
+                    "PHP backend did not route alias as private", alias, left)
+                assert (":" + expected_route + ":") in right[2], (
+                    "PHP backend did not route alias as private", alias, right)
+            assert_pair(port,"qa-cache-a.test","/pu%62lic-encoded/",
+                        ("BYPASS","BYPASS"))
+            # Canonical public pages must remain eligible for caching.
+            assert_pair(port,"qa-cache-a.test","/public-canonical/",
+                        ("MISS","HIT"))
             for path in ("/cookie-response", "/private-response",
                          "/max-age-zero", "/vary-response", "/expires-zero"):
                 assert_pair(port,"qa-cache-a.test",path,("MISS","MISS"))
+            # Expires must work with no accompanying upstream
+            # Cache-Control or Set-Cookie (despite the inherited ignore list).
+            for path, expires, expected in (
+                ("/expires-past", "Thu, 01 Jan 1970 00:00:00 GMT", ("MISS","MISS")),
+                ("/expires-future", "Thu, 01 Jan 2099 00:00:00 GMT", ("MISS","HIT")),
+            ):
+                responses = assert_pair(port, "qa-cache-a.test", path, expected)
+                for response in responses:
+                    headers = response[3]
+                    assert headers.get("Expires") == expires, (path, headers)
+                    assert headers.get("Set-Cookie") is None, (path, headers)
+                    assert headers.get("Cache-Control") is None, (path, headers)
             # A POST must bypass even the warm public URL.
             first = request(port,"qa-cache-a.test","/",method="POST")
             assert first[1] in ("BYPASS", None), first
@@ -208,9 +272,11 @@ def run(nginx, php_version):
             assert a_after[1] == "MISS", a_after
             assert b_after[1] == "HIT" and b_after[2] == b_hit[2], b_after
             print("NATIVE PASS: nginx -t; independent site A/B MISS-HIT; private "
-                  "authorization/cookie/route/query BYPASS; upstream response "
-                  "Set-Cookie/private/max-age=0/Vary/X-Accel-Expires MISS-MISS; "
-                  "POST bypass; physical A-only removal left B HIT.")
+                  "authorization/cookie/route/query and encoded/normalized "
+                  "private aliases BYPASS; upstream Set-Cookie/private/max-age=0/"
+                  "Vary/X-Accel-Expires and Expires-past MISS-MISS; Expires-future "
+                  "MISS-HIT; public canonical MISS-HIT; POST bypass; physical "
+                  "A-only removal left B HIT.")
             print("POLICY IDs:", plans[0]["proposal_sha256"],
                   plans[1]["proposal_sha256"])
         finally:
