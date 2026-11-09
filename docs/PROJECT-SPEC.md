@@ -100,6 +100,8 @@ The engine distinguishes desired configuration, generated files, current runtime
 
 A policy must not assume that changing shared PHP-FPM settings is the same as changing one website. Ambiguous ownership, conflicting policies, and unknown versions require review rather than destructive guesses.
 
+For shared PHP-FPM, the operator's **desired** `[www]` settings are a service/version-scoped policy, independently durable from the aaPanel-managed configuration file. A Monitor save only records intent after reviewing a current file/default comparison; it does not mean the effective worker state matches, nor constitute authorization for Manual Apply or Auto-enforce. Reconciliation should compare the saved desired values against refreshed generated/source evidence and separately verified runtime/service/affected-site behavior when available; the operator must retain control of approval and recovery.
+
 ## 6. Discovery, persistence, and reconciliation
 
 - Discover supported sites, modules, service instances, and relationships from authoritative aaPanel/host/application sources; never rely on a fixed list of domains or WordPress-only markers.

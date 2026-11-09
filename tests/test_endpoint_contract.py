@@ -436,7 +436,9 @@ class EntrypointTests(unittest.TestCase):
             'reason': '', 'note': 'File-only evidence.',
         }
         fake_public = types.ModuleType('public')
-        with patch.object(MODULE, 'preview_php_fpm', return_value=preview), \
+        with patch('ach_customizer_fpm_policy.observe', return_value=(preview, 'a'*64)), \
+                patch('ach_customizer_fpm_policy.get_policy',
+                      return_value={'saved':False, 'policy_revision':0}), \
                 patch.object(MODULE, 'inspect_php_fpm_site_impact', return_value=impact) as mapping, \
                 patch.dict(sys.modules, {'public': fake_public}):
             result = self.plugin.preview_php_fpm(payload)
@@ -449,9 +451,10 @@ class EntrypointTests(unittest.TestCase):
     def test_unsupported_php_file_layout_never_guesses_shared_site_scope(self):
         payload = dict(php_version='85', max_children='20', start_servers='5',
                        min_spare_servers='5', max_spare_servers='10', max_requests='300')
-        with patch.object(MODULE, 'preview_php_fpm', return_value={
+        with patch('ach_customizer_fpm_policy.observe', return_value=({
             'state': 'Needs Review', 'scope': 'shared_service', 'reason': 'Unknown layout',
-        }), patch.object(MODULE, 'inspect_php_fpm_site_impact',
+        }, None)), patch('ach_customizer_fpm_policy.get_policy',
+                     return_value={'saved': False, 'policy_revision': 0}), patch.object(MODULE, 'inspect_php_fpm_site_impact',
                          side_effect=AssertionError("unsafe inference")) as mapping:
             result = self.plugin.preview_php_fpm(payload)
         self.assertTrue(result['status'])
@@ -463,7 +466,10 @@ class EntrypointTests(unittest.TestCase):
     def test_fpm_preview_is_read_only_and_reports_unsupported_layout(self):
         payload = dict(php_version='85', max_children='20', start_servers='5',
                        min_spare_servers='5', max_spare_servers='10', max_requests='300')
-        with patch.object(MODULE, 'preview_php_fpm', return_value={'state': 'Needs Review', 'scope': 'shared_service'}) as call:
+        with patch('ach_customizer_fpm_policy.observe', return_value=(
+                {'state': 'Needs Review', 'scope': 'shared_service'}, None)) as call, \
+                patch('ach_customizer_fpm_policy.get_policy',
+                      return_value={'saved': False, 'policy_revision': 0}):
             result = self.plugin.preview_php_fpm(payload)
         self.assertTrue(result['status'])
         self.assertEqual(result['scope'], 'shared_service')

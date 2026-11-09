@@ -215,8 +215,11 @@ class ActivityTests(unittest.TestCase):
         secret = "SYNTHETIC-PASSWORD-DO-NOT-EXPOSE"
         data = {"state": "File Drift", "source": "/www/server/php/85/etc/php-fpm.conf",
                 "version": "85", "changes": []}
-        with patch.object(main, "_STATE_DIR", self.directory), patch.object(
-                main, "preview_php_fpm", return_value=data), patch.object(
+        from ach_customizer_fpm_policy import observe, get_policy
+        with patch.object(main, "_STATE_DIR", self.directory), patch(
+                "ach_customizer_fpm_policy.observe", return_value=(data, "a"*64)), patch(
+                "ach_customizer_fpm_policy.get_policy",
+                return_value={"saved": False, "policy_revision": 0}), patch.object(
                 main, "inspect_php_fpm_site_impact",
                 side_effect=RuntimeError(secret)), patch.dict(
                 sys.modules, {"public": types.ModuleType("public")}):

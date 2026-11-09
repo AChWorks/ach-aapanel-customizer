@@ -53,6 +53,10 @@ function loadUi() {
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
+    '#ach-fpm-policy-load', '#ach-fpm-policy-reviewed', '#ach-fpm-policy-save',
+    '#ach-fpm-policy-status',
+    '#ach-max-children', '#ach-start-servers', '#ach-min-spare',
+    '#ach-max-spare', '#ach-max-requests',
     '#ach-impact-summary', '#ach-impact-rows',
     '#ach-php-version', '#ach-php-discover', '#ach-php-discovery-status',
     '#ach-php-runtime-check', '#ach-php-runtime-result',
@@ -189,11 +193,31 @@ function loadUi() {
       },
       val(value) {
         if (arguments.length === 0) return nodes[0]?.props.value;
-        for (const node of nodes) node.props.value = value;
+        for (const node of nodes) {
+          node.props.value = value;
+          for (const [selector, item] of elements) {
+            if (item !== node) continue;
+            const field = /^#ach-(max-children|start-servers|min-spare|max-spare|max-requests)$/.exec(selector);
+            if (field) {
+              const current = elements.get('#ach-php-form').props.fields || [];
+              const name = { 'min-spare':'min_spare_servers',
+                'max-spare':'max_spare_servers' }[field[1]] || field[1].replace(/-/g, '_');
+              const target = current.find(entry => entry.name === name);
+              if (target) target.value = String(value);
+            }
+          }
+        }
         return this;
       },
       serializeArray() {
         return nodes[0]?.props.fields || [];
+      },
+      trigger(event) {
+        for (const node of nodes) {
+          const callback = node.handlers[event] || node.handlers['input change'];
+          if (callback) callback.call(node, {preventDefault() {}});
+        }
+        return this;
       }
     };
   }
@@ -351,6 +375,8 @@ function loadUi() {
         tr.children.map(td => td.textContent)),
       phpRuntimeDisabled: elements.get('#ach-php-runtime-check').props.disabled,
       phpVersion: elements.get('#ach-php-version').props.value,
+      fpmFormFields: Object.fromEntries((elements.get('#ach-php-form').props.fields || [])
+        .map(field => [field.name, field.value])),
       phpVersionDisabled: elements.get('#ach-php-version').props.disabled,
       phpOptions: elements.get('#ach-php-version').children.map(option => ({
         value:option.props.value, disabled:option.props.disabled, text:option.textContent
@@ -360,6 +386,10 @@ function loadUi() {
       fpmDetails: elements.get('#ach-fpm-details').textContent,
       fpmReviewHidden: elements.get('#ach-fpm-review').props.hidden,
       fpmPrepareDisabled: elements.get('#ach-fpm-prepare').props.disabled,
+      fpmPolicyStatus: elements.get('#ach-fpm-policy-status').textContent,
+      fpmPolicySaveDisabled: elements.get('#ach-fpm-policy-save').props.disabled,
+      fpmPolicyLoadDisabled: elements.get('#ach-fpm-policy-load').props.disabled,
+      fpmPolicyReviewedDisabled: elements.get('#ach-fpm-policy-reviewed').props.disabled,
       fpmCommitDisabled: elements.get('#ach-fpm-commit').props.disabled,
       fpmRecovery: elements.get('#ach-fpm-recovery-status').textContent,
       fpmRecoveryImpact: elements.get('#ach-fpm-recovery-impact').textContent,
@@ -466,6 +496,12 @@ function loadUi() {
     }),
     openStatus, statusSetValue, statusSetChecked, statusClick, openActivity,
     openPhp,
+    loadFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-load'),'click'); return requests.at(-1); },
+    saveFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-save'),'click'); return requests.at(-1); },
+    reviewFpmPolicy:checked => {
+      elements.get('#ach-fpm-policy-reviewed').props.checked=checked;
+      trigger(elements.get('#ach-fpm-policy-reviewed'),'change');
+    },
     inspectPhpRuntime: () => { trigger(elements.get('#ach-php-runtime-check'), 'click'); return requests.at(-1); },
     selectPhpVersion: v => { elements.get('#ach-php-version').props.value=v; trigger(elements.get('#ach-php-version'), 'change'); },
     refreshPhp: () => { trigger(elements.get('#ach-php-discover'), 'click'); return requests.at(-1); }, phpVersions,
@@ -861,6 +897,94 @@ const phpPreview = (impact = phpImpact()) => ({
   changes: [{setting:'pm.max_children', desired:50, actual:80}],
   shared_impact: impact
 });
+
+const fpmPolicyPreview = (overrides = {}) => ({
+  ...phpPreview(),
+  fpm_observation_sha256: 'c'.repeat(64),
+  fpm_saved_policy: {
+    schema:1, version:'85', policy_revision:0, monitor_revision:0,
+    saved:false, desired:null, read_only:true, runtime_verified:false,
+    auto_enforce:false, scope:'shared_service', pool:'www', note:'Monitor only'
+  },
+  ...overrides
+});
+
+test('Fresh PHP preview permits reviewed desired-policy save without invoking FPM Apply', () => {
+  const ui = loadUi();
+  const preview = ui.submitPhp();
+  preview.respond(fpmPolicyPreview());
+  assert.equal(ui.state().fpmPolicyReviewedDisabled,false);
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  ui.reviewFpmPolicy(true);
+  assert.equal(ui.state().fpmPolicySaveDisabled,false);
+  const saving = ui.saveFpmPolicy();
+  assert.match(saving.options.url, /s=fpm_policy_save$/);
+  assert.equal(saving.options.data.expected_policy_revision,0);
+  assert.equal(saving.options.data.expected_monitor_revision,0);
+  assert.equal(saving.options.data.expected_observation_sha256,'c'.repeat(64));
+  assert.equal(saving.options.data.reviewed,'true');
+  assert.equal(saving.options.data.php_version,'85');
+  saving.respond({status:true,schema:1,state:'Policy Saved',version:'85',
+    scope:'shared_service',auto_enforce:false,runtime_verified:false,
+    policy_revision:1, changed:true});
+  assert.match(ui.state().fpmPolicyStatus,/Policy Saved \(revision 1\)/);
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.equal(ui.requests.filter(r=>/s=fpm_apply$/.test(r.options.url)).length,0);
+});
+
+test('Changing PHP values or missing a trusted source token revokes policy-save authorization', () => {
+  const ui = loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.reviewFpmPolicy(true);
+  ui.changePhp('max_children','81');
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
+  const count = ui.requests.length;
+  ui.saveFpmPolicy();
+  assert.equal(ui.requests.length,count);
+  ui.submitPhp('85',false).respond(fpmPolicyPreview({
+    fpm_observation_sha256:'not-a-hash'
+  }));
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
+});
+
+test('A stale policy save cannot claim a completed host operation or restore review', () => {
+  const ui = loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.reviewFpmPolicy(true);
+  const pending = ui.saveFpmPolicy();
+  ui.changePhp('max_children','101');
+  pending.respond({status:true,schema:1,state:'Policy Saved',version:'85',
+    scope:'shared_service',auto_enforce:false,runtime_verified:false,
+    policy_revision:1,changed:true});
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
+  assert.doesNotMatch(ui.state().fpmPolicyStatus,/Policy Saved/);
+});
+
+test('Saved PHP policy loads reviewed values as draft and requires a new Preview', () => {
+  const ui = loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  assert.equal(ui.state().fpmPolicyLoadDisabled,false);
+  const load = ui.loadFpmPolicy();
+  assert.match(load.options.url,/s=fpm_policy_get$/);
+  load.respond({status:true,schema:1,version:'85',policy_revision:4,
+    monitor_revision:0,saved:true,
+    desired:{'pm.max_children':30,'pm.start_servers':5,
+      'pm.min_spare_servers':5,'pm.max_spare_servers':10,'pm.max_requests':300},
+    read_only:true,runtime_verified:false,auto_enforce:false,
+    scope:'shared_service',pool:'www'});
+  assert.match(ui.state().fpmPolicyStatus,/Loaded saved shared PHP 85 desired values/);
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.equal(ui.state().fpmFormFields.max_children,'30');
+  assert.equal(ui.state().fpmFormFields.max_requests,'300');
+  assert.equal(ui.requests.filter(r=>/s=fpm_apply$/.test(r.options.url)).length,0);
+});
+
 
 test('Native PHP preview shows two shared file-linked websites safely without implying Apply', () => {
   const ui = loadUi();
