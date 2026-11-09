@@ -345,7 +345,7 @@
       <div class="ach-controls"><button id="ach-nginx-candidate-button" type="button" disabled>Check Nginx candidate and local HTTP</button></div>
       <p id="ach-nginx-candidate-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website to inspect the next-load Nginx source and optional local HTTP/80 response.</p>
       <hr />
-      <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines known Nginx VHost and PHP snippet text for cache-zone reuse, missing direct bypass/write-guard statements, cache-key host tokens, response-header ignore and purge directives. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
+      <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines native VHost/PHP snippets and aaPanel's known top-level 0.fastcgi_cache.conf include for cache-zone paths, shared-directory Purge All risk, bypass/write guards, host-key tokens and ignored response headers. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
       <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
     </section>
@@ -1586,6 +1586,18 @@
         !(r.cache_zone === null || typeof r.cache_zone === 'string' &&
           /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(r.cache_zone)) ||
         typeof r.global_zone_directly_declared !== 'boolean' ||
+        typeof r.aaPanel_global_include_observed !== 'boolean' ||
+        !(r.cache_directory === null ||
+          typeof r.cache_directory === 'string' && r.cache_directory.length <= 241 &&
+          /^\/[A-Za-z0-9_./-]+$/.test(r.cache_directory) &&
+          !r.cache_directory.includes('//') &&
+          !r.cache_directory.endsWith('/') &&
+          !r.cache_directory.split('/').includes('.') &&
+          !r.cache_directory.split('/').includes('..')) ||
+        !['Unknown','Shared Registered Directory','No Registered Directory Peer'].includes(r.purge_scope) ||
+        !Array.isArray(r.global_ignore_headers) || r.global_ignore_headers.length > 5 ||
+        !Array.isArray(r.other_sites_same_directory) ||
+        r.other_sites_same_directory.length > 99 ||
         typeof r.bypass_directive_seen !== 'boolean' ||
         typeof r.no_cache_directive_seen !== 'boolean' ||
         typeof r.host_key_variable_seen !== 'boolean' ||
@@ -1605,13 +1617,17 @@
       'KEY_NOT_DIRECTLY_OBSERVED','HOST_PARTITION_NOT_OBSERVED',
       'ZONE_DECLARATION_NOT_IN_MAIN_FILE','SHARED_ZONE_REFERENCES',
       'RESPONSE_CACHE_HEADER_IGNORED','NON_GET_CACHE_METHOD',
-      'PURGE_DIRECTIVE_OBSERVED','PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED'
+      'PURGE_DIRECTIVE_OBSERVED','PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED',
+      'SHARED_CACHE_DIRECTORY_PURGE_RISK','GLOBAL_RESPONSE_CACHE_HEADER_IGNORED'
     ]);
     if (new Set(r.findings).size !== r.findings.length ||
         !r.findings.every(x => codes.has(x)) ||
         !r.ignore_headers.every(x =>
           ['Set-Cookie','Cache-Control','Expires','Vary','X-Accel-Expires'].includes(x)) ||
-        new Set(r.ignore_headers).size !== r.ignore_headers.length) return false;
+        new Set(r.ignore_headers).size !== r.ignore_headers.length ||
+        !r.global_ignore_headers.every(x =>
+          ['Set-Cookie','Cache-Control','Expires','Vary','X-Accel-Expires'].includes(x)) ||
+        new Set(r.global_ignore_headers).size !== r.global_ignore_headers.length) return false;
     var ids = new Set([Number(id)]);
     for (var peer of r.other_sites_same_zone) {
       if (!peer || !Number.isSafeInteger(peer.id) || peer.id < 1 ||
@@ -1620,8 +1636,22 @@
           peer.site_key.length > 255) return false;
       ids.add(peer.id);
     }
+    var directoryPeerIds = new Set([Number(id)]);
+    for (var directoryPeer of r.other_sites_same_directory) {
+      if (!directoryPeer || !Number.isSafeInteger(directoryPeer.id) ||
+          directoryPeer.id < 1 || directoryPeer.id > 2147483647 ||
+          directoryPeerIds.has(directoryPeer.id) ||
+          typeof directoryPeer.site_key !== 'string' ||
+          !directoryPeer.site_key || directoryPeer.site_key.length > 255) return false;
+      directoryPeerIds.add(directoryPeer.id);
+    }
+    if (!r.other_sites_same_zone.every(x => directoryPeerIds.has(x.id) ||
+        r.cache_directory === null)) return false;
     if (r.state === 'Needs Review')
-      return r.zone_state === 'Needs Review' && r.cache_zone === null &&
+      return r.cache_directory === null && r.purge_scope === 'Unknown' &&
+        r.global_ignore_headers.length === 0 &&
+        r.other_sites_same_directory.length === 0 &&
+        r.zone_state === 'Needs Review' && r.cache_zone === null &&
         r.inspected_sites === 0 && r.source_sha256 === null &&
         r.reason.length > 0 && r.other_sites_same_zone.length === 0 &&
         r.unresolved_other_sites === 0 && r.findings.length === 0;
@@ -1631,6 +1661,15 @@
           r.cache_zone === null : r.cache_zone !== null) ||
         (r.zone_state !== 'Direct Zone' && r.other_sites_same_zone.length !== 0) ||
         (r.global_zone_directly_declared && r.zone_state !== 'Direct Zone') ||
+        (r.zone_state !== 'Direct Zone' &&
+          (r.cache_directory !== null || r.purge_scope !== 'Unknown' ||
+           r.other_sites_same_directory.length !== 0)) ||
+        (r.purge_scope === 'Shared Registered Directory' ?
+          r.other_sites_same_directory.length === 0 :
+          r.purge_scope === 'No Registered Directory Peer' ?
+            r.cache_directory === null || r.other_sites_same_directory.length !== 0 ||
+              r.unresolved_other_sites !== 0 :
+            r.other_sites_same_directory.length !== 0) ||
         (r.state === 'Partial' ? !(r.unresolved_other_sites > 0 && r.reason) :
           r.unresolved_other_sites !== 0 || r.reason !== '')) return false;
     return true;
@@ -1664,10 +1703,18 @@
       root.find('#ach-cache-result').text(
         'Cache source: ' + r.state + '; direct directive: ' + r.zone_state +
         '\nDirect cache zone: ' + (r.cache_zone || 'Not established') +
-        '; declared in inspected main nginx.conf: ' + r.global_zone_directly_declared +
+        '; declared directly in main nginx.conf: ' + r.global_zone_directly_declared +
+        '; aaPanel global include inspected: ' + r.aaPanel_global_include_observed +
+        '\nSelected cache directory (source only): ' + (r.cache_directory || 'Not established') +
+        '; site-scoped filesystem purge: NEVER inferred' +
+        '\nObserved cache directory usage: ' + r.purge_scope +
+        '; other registered sites sharing that directory: ' +
+        (r.other_sites_same_directory.map(x=>x.id+': '+x.site_key).join(', ') || 'None observed') +
+        '\nGlobal ignored response headers (source only): ' +
+        (r.global_ignore_headers.join(', ') || 'None observed') +
         '\nDirect fastcgi_cache_bypass: ' + r.bypass_directive_seen +
         '; direct fastcgi_no_cache: ' + r.no_cache_directive_seen +
-        '\nDirect key contains host variable: ' + r.host_key_variable_seen +
+        '\nObserved source cache key contains host variable: ' + r.host_key_variable_seen +
         '; purge directive observed: ' + r.purge_directive_seen +
         '\nIgnored response-cache headers: ' + (r.ignore_headers.join(', ') || 'None observed') +
         '\nOther registered sites with same directly observed zone: ' +
