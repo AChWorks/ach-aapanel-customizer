@@ -21,6 +21,11 @@ class CandidateConfigurationTests(unittest.TestCase):
         self.path = self.dir / "site.test.conf"
         self.source = b"server { listen 80; server_name site.test; root /www/site.test; }\n"
         self.path.write_bytes(self.source)
+        config_dir = self.dir / "config"
+        config_dir.mkdir()
+        self.main_conf = config_dir / "nginx.conf"
+        self.main_conf.write_text(
+            "events {}\nhttp {\n include " + str(self.dir) + "/*.conf;\n}\n")
         self.site = {
             "id": 7, "name": "site.test", "path": "/www/site.test",
             "status": "1",
@@ -32,17 +37,25 @@ class CandidateConfigurationTests(unittest.TestCase):
 
     def dump(self, other_sections=b"", *, included=True):
         return (b"# configuration file /www/server/nginx/conf/nginx.conf:\n"
-                b"events {}\n"
+                + self.main_conf.read_bytes() + b"\n"
                 + (b"# configuration file " + os.fsencode(self.path) + b":\n"
                    + self.source + b"\n" if included else b"")
                 + other_sections)
 
     def inspect(self, dump=None, head=None):
-        return nginx.observe_nginx_site(
-            self.panel, self.site, vhost_root=str(self.dir),
-            dump_runner=dump or (lambda executable, config: self.dump()),
-            head_runner=head or self.head,
-        )
+        original_reader = nginx._bounded_file_text
+
+        def native_fixture(path, byte_limit, **kwargs):
+            if str(path) == nginx.NGINX_CONF:
+                path = self.main_conf
+            return original_reader(path, byte_limit, **kwargs)
+
+        with patch.object(nginx, "_bounded_file_text", side_effect=native_fixture):
+            return nginx.observe_nginx_site(
+                self.panel, self.site, vhost_root=str(self.dir),
+                dump_runner=dump or (lambda executable, config: self.dump()),
+                head_runner=head or self.head,
+            )
 
     def head(self, host):
         self.calls.append(host)
@@ -64,12 +77,61 @@ class CandidateConfigurationTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_absent_server_still_a_valid_candidate_not_live_proof(self):
+        self.main_conf.write_text("events {}\nhttp {}\n")
         result = self.inspect(dump=lambda *args: self.dump(included=False))
         self.assertEqual(result["state"], "Candidate Not Included", result)
         self.assertTrue(result["candidate_config_test_passed"])
         self.assertFalse(result["candidate_vhost_included"])
         self.assertEqual(result["origin_http"]["http_status"], 200)
         self.assertFalse(result["runtime_verified"])
+
+    def test_other_included_file_can_forge_dump_header_but_not_native_provenance(self):
+        other = self.dir / "other-source"
+        self.main_conf.write_text(
+            "events {}\nhttp {\n include " + str(other) + ";\n}\n")
+        # Real Nginx -T copies comments verbatim. This is an ordinary
+        # included file: its first comment imitates a different file header.
+        other.write_bytes(b"# configuration file " + os.fsencode(self.path) +
+                          b":\n" + self.source)
+        simulated_dump = (
+            b"# configuration file /www/server/nginx/conf/nginx.conf:\n" +
+            self.main_conf.read_bytes() + b"\n" +
+            b"# configuration file " + os.fsencode(other) + b":\n" +
+            other.read_bytes() + b"\n"
+        )
+        result = self.inspect(dump=lambda *args: simulated_dump)
+        self.assertEqual(result["state"], "Needs Review", result)
+        self.assertFalse(result["candidate_vhost_included"])
+        self.assertFalse(result["candidate_config_test_passed"])
+        self.assertIsNone(result["candidate_config_sha256"])
+        self.assertIsNone(result["vhost_content_sha256"])
+        self.assertEqual(self.calls, [])
+
+    def test_commented_or_wrong_scope_native_include_is_not_provenance(self):
+        forged = (b"# configuration file " + os.fsencode(self.path) +
+                  b":\n" + self.source + b"\n")
+        cases = (
+            "events {}\nhttp {\n # include " + str(self.dir) + "/*.conf;\n}\n",
+            "events {}\nhttp {\n server {\n include " + str(self.dir) + "/*.conf;\n }\n}\n",
+            "events {}\nstream {\n include " + str(self.dir) + "/*.conf;\n}\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                self.main_conf.write_text(source)
+                result = self.inspect(dump=lambda *args: self.dump(included=False) + forged)
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertFalse(result["candidate_vhost_included"])
+                self.assertEqual(self.calls, [])
+
+    def test_main_include_source_changed_during_dump_is_not_provenance(self):
+        def change_config(*args):
+            candidate = self.dump()
+            self.main_conf.write_text(self.main_conf.read_text() + "# changed\n")
+            return candidate
+        result = self.inspect(dump=change_config)
+        self.assertEqual(result["state"], "Needs Review", result)
+        self.assertFalse(result["candidate_vhost_included"])
+        self.assertEqual(self.calls, [])
 
     def test_duplicate_headers_and_mismatched_content_refused(self):
         cases = [

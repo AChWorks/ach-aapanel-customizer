@@ -17,8 +17,10 @@ import time
 from pathlib import Path
 
 from ach_customizer_monitor import (
-    MonitorInputError, _bounded_file_text, MAX_NGINX_SITE_BYTES,
+    MonitorInputError, _active_nginx_text, _bounded_file_text,
+    MAX_NGINX_SITE_BYTES,
 )
+from ach_customizer_cache_audit import _direct_http_scope_at
 from ach_customizer_vhost_drift import SITE_KEY, _canonical_host
 
 NGINX_BIN = "/www/server/nginx/sbin/nginx"
@@ -96,11 +98,29 @@ def _run_bounded_dump(executable, config, *, deadline=TIMEOUT):
         process.stderr.close()
 
 
+def _native_http_include(main_source, vhost_root):
+    """Verify the aaPanel native VHost glob in the actual main HTTP source.
+
+    Nginx -T section markers are plain text: comments inside other included
+    files can forge them. A dump match is not include provenance by itself.
+    """
+    active = _active_nginx_text(main_source)
+    pattern = re.compile(
+        r"(?m)^[ \t]*include[ \t]+" + re.escape(str(Path(vhost_root))) +
+        r"/\*\.conf[ \t]*;[ \t]*(?=\r?$)"
+    )
+    if not any(_direct_http_scope_at(active, match.start())
+               for match in pattern.finditer(active)):
+        raise NginxObservationError(
+            "Selected VHost has no verified direct native HTTP include source")
+
+
 def _candidate_site_section(dump, expected_path, source):
-    """Require exactly one literal matching Nginx -T section for this site.
+    """Compare literal Nginx -T sections; this alone is not provenance.
 
     -T expands includes but cannot attest active workers or server precedence.
-    The whole selected file body is compared, not just a forged path/header.
+    Nginx may deduplicate dumped filenames; a section count does not prove
+    the number of include operations. Compare complete body/framing strictly.
     """
     markers = list(SECTION.finditer(dump))
     if not markers or len(markers) > 512:
@@ -180,14 +200,23 @@ def observe_nginx_site(panel_public, site, *, vhost_root=VHOST_DIR,
         path = Path(vhost_root) / (site["name"] + ".conf")
         source, signature = _bounded_file_text(path, MAX_NGINX_SITE_BYTES,
                                                  with_fingerprint=True)
+        main_source, main_signature = _bounded_file_text(
+            Path(nginx_conf), MAX_NGINX_SITE_BYTES, with_fingerprint=True)
         raw = source.encode("utf-8")
         dump = dump_runner(nginx_bin, nginx_conf)
         if not isinstance(dump, bytes) or len(dump) > MAX_DUMP_BYTES:
             raise NginxObservationError("Nginx candidate output is oversized or malformed")
         included_state, included = _candidate_site_section(dump, path, raw)
-        # Ensure selected file and platform did not change during nginx -T.
-        if (signature != _bounded_file_text(path, MAX_NGINX_SITE_BYTES,
-                                             with_fingerprint=True)[1] or
+        if included:
+            # A forged section header in another file is not proof that this
+            # native VHost was opened by the successful config test.
+            _native_http_include(main_source, vhost_root)
+        # Check both independent include source and selected VHost for drift.
+        if (main_signature != _bounded_file_text(
+                Path(nginx_conf), MAX_NGINX_SITE_BYTES,
+                with_fingerprint=True)[1] or
+                signature != _bounded_file_text(path, MAX_NGINX_SITE_BYTES,
+                                                 with_fingerprint=True)[1] or
                 panel_public.get_webserver() != "nginx" or
                 str(panel_public.get_panel_version()).strip() != "8.0.7"):
             raise NginxObservationError("Nginx or native VHost source changed during inspection")
