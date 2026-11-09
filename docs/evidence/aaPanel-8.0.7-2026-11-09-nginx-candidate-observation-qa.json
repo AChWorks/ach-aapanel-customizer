@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-09",
+  "status": "executed_read_only_native_source_smoke",
+  "scope": "issue-2-development-only-new-observer-module",
+  "source_sha256": "fb27057a0f82f763a6e6fc7a04543d64a98d60415edd4389496a2a3e522ee0be",
+  "installed_plugin_updated": false,
+  "native_browser_ui_tested_for_this_candidate": false,
+  "guest": {
+    "incus_project": "ach-aapanel-qa",
+    "name": "aac-native-qa",
+    "uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "generation": "ba97cfa3-c6c6-475b-8215-8f2cc108d2fc",
+    "aapanel": "8.0.7",
+    "nginx": "1.28.3"
+  },
+  "method": "Exact staged module source hash in guest, imported alongside existing installed plugin helper sources; read-only native SQLite site/domain records; on-demand nginx -T -c native config and localhost HTTP/80 HEAD; no installation, reload, cache purge or VHost mutation.",
+  "sites": [
+    {"id": 2, "key": "wpqa21.test", "candidate": "Candidate Included", "http_head_status": 200},
+    {"id": 3, "key": "qa-status21.test", "candidate": "Candidate Included", "http_head_status": 200},
+    {"id": 4, "key": "qa-php81.test", "candidate": "Candidate Included", "http_head_status": 200}
+  ],
+  "negative_claims_preserved": {
+    "all_observations_runtime_verified": false,
+    "all_observations_fix_supported": false,
+    "selected_site_identity_from_http_verified": false,
+    "worker_loaded_configuration_verified": false,
+    "fastcgi_private_cache_isolation_verified": false
+  },
+  "final_health": {
+    "nginx_syntax": "PASS",
+    "site_http_200": "3/3",
+    "qa_status_vhost_sha256": "ace54c929d5dae768985d4dc237ac7710e0853ef095e485373b1d880b75ed5a5"
+  },
+  "limitations": [
+    "Staged single module, not imported or clicked as the exact full 0.1.24 ZIP through authenticated aaPanel Browser",
+    "Nginx -T is an on-disk next-load configuration check, not running-worker attestation",
+    "Local Host: HEAD status does not prove which server/site produced it",
+    "No FastCGI cache HIT/MISS/BYPASS, WooCommerce/private-data or purge-scope acceptance"
+  ]
+}

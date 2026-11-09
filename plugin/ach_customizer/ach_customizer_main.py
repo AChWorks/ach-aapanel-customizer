@@ -545,6 +545,42 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("website_vhost_inspection", exc, request_id)
 
+    def inspect_nginx_candidate(self, args):
+        """On-demand prospective Nginx -T + local HTTP/80 observation.
+
+        This action NEVER signals a reload and never treats candidate file
+        inclusion or a HEAD status as proof of the worker's loaded policy.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_nginx_observation import observe_nginx_site
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Nginx observer not loaded after plugin update; restart "
+                    "aaPanel panel service and refresh website inventory"
+                ) from exc
+            public, before, current_site = self._selected_native_website(args)
+            result = observe_nginx_site(public, before)
+            if current_site() != before:
+                raise MonitorInputError(
+                    "Native website/root/bindings changed during Nginx observation; recheck")
+            problem = result["reason"] or result["origin_http"].get("reason", "")
+            issue = MonitorInputError(problem) if problem else None
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "inspect_nginx_candidate", target=str(before["id"]),
+                error=issue,
+                level="DEBUG" if result["state"] == "Candidate Included"
+                    and result["origin_http"]["state"] != "Unavailable"
+                    else "WARNING")
+        except PermissionError as exc:
+            return self._fail("website_nginx_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("website_nginx_observation", exc, request_id)
+
     def inspect_fastcgi_cache(self, args):
         """Full-primary-admin, read-only native FastCGI source audit.
 

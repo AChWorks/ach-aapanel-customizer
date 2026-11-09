@@ -341,6 +341,10 @@
       <div class="ach-controls"><button id="ach-vhost-inspect-button" type="button" disabled>Compare selected website VHost</button></div>
       <p id="ach-vhost-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website to compare native records with generated VHost source.</p>
       <hr />
+      <p class="ach-note"><strong>Nginx next-load candidate and origin HTTP/80 (read-only):</strong> Run a bounded native <code>nginx -T</code> syntax/include check to see whether the selected website VHost belongs to the configuration a future reload would use, then observe a localhost HTTP/80 HEAD with its registered Host. This is NOT proof of the configuration in already-running Nginx workers, which site served the response, effective cache safety or DNS/TLS behavior. No reload or configuration/cache changes.</p>
+      <div class="ach-controls"><button id="ach-nginx-candidate-button" type="button" disabled>Check Nginx candidate and local HTTP</button></div>
+      <p id="ach-nginx-candidate-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website to inspect the next-load Nginx source and optional local HTTP/80 response.</p>
+      <hr />
       <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines known Nginx VHost and PHP snippet text for cache-zone reuse, missing direct bypass/write-guard statements, cache-key host tokens, response-header ignore and purge directives. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
       <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
@@ -1243,14 +1247,20 @@
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
   var cacheBusy = false, cacheTicket = 0;
   var vhostBusy = false, vhostTicket = 0;
+  var nginxCandidateBusy = false, nginxCandidateTicket = 0;
   function vhostLock() {
-    root.find('#ach-vhost-inspect-button').prop('disabled',
-      vhostBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+    var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
+    root.find('#ach-vhost-inspect-button').prop('disabled', vhostBusy || unready);
+    root.find('#ach-nginx-candidate-button').prop('disabled', nginxCandidateBusy || unready);
   }
   function invalidateVhostInspection(note) {
     ++vhostTicket;
     vhostBusy = false;
+    ++nginxCandidateTicket;
+    nginxCandidateBusy = false;
     root.find('#ach-vhost-result').text(note || 'Select a website for a new VHost comparison.');
+    root.find('#ach-nginx-candidate-result').text(
+      'Website selection or inventory changed; recheck Nginx candidate and local HTTP.');
     vhostLock();
   }
   function invalidateCacheAudit(note) {
@@ -1469,6 +1479,97 @@
           (r.listen_ports.join(', ') || 'None observed') +
         '\nReview signals: ' + (r.findings.join(', ') || 'None') +
         '\nSource identity SHA-256: ' + r.vhost_sha256 +
+        '\n' + r.note);
+    });
+  });
+  function validNginxCandidate(r, id) {
+    var selected = hostsPageSites.get(id);
+    if (!selected || !r || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== selected.name ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.fix_supported !== false || typeof r.note !== 'string' ||
+        r.note.length > 900 || typeof r.reason !== 'string' ||
+        r.reason.length > 350 ||
+        !['Candidate Included', 'Candidate Not Included', 'Needs Review'].includes(r.state) ||
+        typeof r.candidate_config_test_passed !== 'boolean' ||
+        typeof r.candidate_vhost_included !== 'boolean' ||
+        !r.origin_http || typeof r.origin_http !== 'object' ||
+        r.origin_http.site_identity_verified !== false ||
+        !['Response Observed', 'Unavailable', 'No HTTP/80 Binding', 'Not Attempted']
+          .includes(r.origin_http.state)) return false;
+    var probe = r.origin_http;
+    var native = JSON.parse(selected.snapshot);
+    var boundHttpHosts = new Set(native[4].filter(function (binding) {
+      return binding[1] === 80;
+    }).map(function (binding) { return binding[0].toLowerCase().replace(/\.$/,''); }));
+    var hostOK = typeof probe.host === 'string' && probe.host.length <= 253 &&
+      /^[a-z0-9.-]+$/.test(probe.host) &&
+      !probe.host.endsWith('.') && !probe.host.includes('..') &&
+      boundHttpHosts.has(probe.host);
+    if (probe.state === 'Response Observed') {
+      if (!hostOK || !Number.isSafeInteger(probe.http_status) ||
+          probe.http_status < 100 || probe.http_status > 599) return false;
+    } else if (probe.http_status !== null) return false;
+    if (probe.state === 'Unavailable' && (!hostOK ||
+        typeof probe.reason !== 'string' || probe.reason.length > 160)) return false;
+    if (['Not Attempted','No HTTP/80 Binding'].includes(probe.state) &&
+        (probe.host !== null || probe.http_status !== null)) return false;
+    if (probe.state === 'No HTTP/80 Binding' && boundHttpHosts.size !== 0) return false;
+    if (r.state === 'Needs Review') {
+      return r.reason.length > 0 && !r.candidate_config_test_passed &&
+        !r.candidate_vhost_included && r.candidate_config_sha256 === null &&
+        r.vhost_content_sha256 === null && probe.state === 'Not Attempted';
+    }
+    return r.reason === '' && r.candidate_config_test_passed &&
+      r.candidate_vhost_included === (r.state === 'Candidate Included') &&
+      /^[a-f0-9]{64}$/.test(r.candidate_config_sha256 || '') &&
+      /^[a-f0-9]{64}$/.test(r.vhost_content_sha256 || '');
+  }
+  root.find('#ach-nginx-candidate-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || nginxCandidateBusy || hostsBusy || siteBusy ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++nginxCandidateTicket;
+    nginxCandidateBusy = true;
+    vhostLock();
+    root.find('#ach-nginx-candidate-result').text(
+      'Testing next-load Nginx configuration and observing optional localhost HEAD...');
+    request('inspect_nginx_candidate', {
+      site_id:id,
+      expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r, failure) {
+      if (ticket !== nginxCandidateTicket) return;
+      nginxCandidateBusy = false;
+      vhostLock();
+      if (id !== hostsSiteId()) return;
+      if (!r) {
+        root.find('#ach-nginx-candidate-result').text(statusBackendFailure('inspect', failure,
+          'Nginx candidate inspection failed or timed out. No candidate/HTTP conclusion.'));
+        return;
+      }
+      if (!validNginxCandidate(r, id)) {
+        root.find('#ach-nginx-candidate-result').text(
+          'Nginx candidate response incompatible or unconfirmed; inspect again.');
+        return;
+      }
+      if (r.state === 'Needs Review') {
+        root.find('#ach-nginx-candidate-result').text(
+          'Nginx candidate: Needs Review — ' + r.reason + '\n' + r.note);
+        return;
+      }
+      var probe = r.origin_http;
+      root.find('#ach-nginx-candidate-result').text(
+        'Nginx next-load candidate: ' + r.state +
+        '\nSyntax check: PASS; selected VHost in candidate: ' +
+          (r.candidate_vhost_included ? 'Yes' : 'No') +
+        '\nCandidate output SHA-256: ' + r.candidate_config_sha256 +
+        '\nSelected VHost content SHA-256: ' + r.vhost_content_sha256 +
+        '\nOrigin HTTP/80 HEAD: ' + probe.state +
+          (probe.host ? ' (Host ' + probe.host + ')' : '') +
+          (probe.http_status !== null ? ', HTTP ' + probe.http_status : '') +
+          (probe.reason ? ' — ' + probe.reason : '') +
+        '\nRunning-worker config verified: NO; responding site identity verified: NO' +
         '\n' + r.note);
     });
   });
