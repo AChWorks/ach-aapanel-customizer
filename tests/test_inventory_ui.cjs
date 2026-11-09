@@ -50,6 +50,7 @@ function loadUi() {
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
+    '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -276,6 +277,8 @@ function loadUi() {
       hostsResult: elements.get('#ach-hosts-result').textContent,
       cacheResult: elements.get('#ach-cache-result').textContent,
       vhostResult: elements.get('#ach-vhost-result').textContent,
+      nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
+      nginxCandidateDisabled: elements.get('#ach-nginx-candidate-button').props.disabled,
       vhostInspectDisabled: elements.get('#ach-vhost-inspect-button').props.disabled,
       cacheInspectDisabled: elements.get('#ach-cache-inspect-button').props.disabled,
       hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
@@ -1231,6 +1234,94 @@ const vhostInspection = (overrides={}) => ({
   vhost_root:'/www/site.test',native_names:['site.test'],
   vhost_names:['site.test'],listen_ports:[80],findings:[],reason:'',
   note:'Generated file only; no active Nginx routing proof.',...overrides
+});
+
+const nginxCandidate = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  state:'Candidate Included',read_only:true,runtime_verified:false,fix_supported:false,
+  candidate_config_test_passed:true,candidate_vhost_included:true,
+  candidate_config_sha256:'a'.repeat(64),vhost_content_sha256:'b'.repeat(64),
+  origin_http:{state:'Response Observed',host:'site.test',
+    http_status:200,site_identity_verified:false},
+  reason:'',note:'Next-load source only; localhost HEAD does not identify selected site.',
+  ...overrides
+});
+
+test('Selected native Nginx candidate check separates prospective config and HTTP status', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  assert.equal(ui.state().nginxCandidateDisabled,false);
+  const req=ui.statusClick('#ach-nginx-candidate-button');
+  assert.match(req.options.url,/s=inspect_nginx_candidate$/);
+  assert.equal(req.options.type,'POST');
+  assert.deepEqual(Object.keys(req.options.data).sort(),[
+    'expected_site_key','expected_site_snapshot','site_id']);
+  assert.deepEqual(JSON.parse(req.options.data.expected_site_snapshot),[
+    7,'site.test','/www/site.test','1',[['site.test',80]]]);
+  assert.equal(ui.state().nginxCandidateDisabled,true);
+  req.respond(nginxCandidate());
+  assert.equal(ui.state().nginxCandidateDisabled,false);
+  assert.match(ui.state().nginxCandidateResult,/Candidate Included/);
+  assert.match(ui.state().nginxCandidateResult,/HTTP 200/);
+  assert.match(ui.state().nginxCandidateResult,/Running-worker config verified: NO/);
+  assert.match(ui.state().nginxCandidateResult,/responding site identity verified: NO/);
+  assert.doesNotMatch(ui.state().nginxCandidateResult,/safe to purge|enforcement enabled/);
+});
+
+test('Nginx candidate errors, missing native HTTP and invalid claims fail closed', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-nginx-candidate-button').respond(nginxCandidate({
+    state:'Candidate Not Included',candidate_vhost_included:false,
+    origin_http:{state:'Unavailable',host:'site.test',http_status:null,
+      site_identity_verified:false,reason:'localhost HTTP/80 HEAD unavailable (ConnectionRefusedError)'}
+  }));
+  assert.match(ui.state().nginxCandidateResult,/Candidate Not Included/);
+  assert.doesNotMatch(ui.state().nginxCandidateResult,/HTTP 200/);
+  ui.statusClick('#ach-nginx-candidate-button').respond(nginxCandidate({
+    state:'Needs Review',reason:'Unstable included source',
+    candidate_config_test_passed:false,candidate_vhost_included:false,
+    candidate_config_sha256:null,vhost_content_sha256:null,
+    origin_http:{state:'Not Attempted',host:null,http_status:null,
+      site_identity_verified:false}
+  }));
+  assert.match(ui.state().nginxCandidateResult,/Needs Review/);
+  assert.doesNotMatch(ui.state().nginxCandidateResult,/Candidate Included/);
+  const forged = [
+    {runtime_verified:true},{fix_supported:true},
+    {candidate_config_sha256:'notsha'},
+    {candidate_vhost_included:false},{candidate_config_test_passed:false},
+    {origin_http:{state:'Response Observed',host:'other.test',
+      http_status:200,site_identity_verified:true}},
+    {origin_http:{state:'Response Observed',host:'site.test',
+      http_status:700,site_identity_verified:false}}
+  ];
+  for (const change of forged) {
+    ui.statusClick('#ach-nginx-candidate-button').respond(nginxCandidate(change));
+    assert.match(ui.state().nginxCandidateResult,/incompatible or unconfirmed/);
+    assert.doesNotMatch(ui.state().nginxCandidateResult,/Syntax check: PASS/);
+  }
+  const down=ui.statusClick('#ach-nginx-candidate-button');
+  down.respond({status:false,stage:'website_nginx_observation',msg:'Native Nginx unavailable',
+    operation_id:'e'.repeat(32)});
+  assert.match(ui.state().nginxCandidateResult,/Read-only inspection failed at website_nginx_observation/);
+  assert.match(ui.state().nginxCandidateResult,/Operation ID:/);
+  assert.doesNotMatch(ui.state().nginxCandidateResult,/Syntax check: PASS/);
+});
+
+test('Nginx candidate discards stale selection responses and locks on page refresh', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const pending=ui.statusClick('#ach-nginx-candidate-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(nginxCandidate());
+  assert.match(ui.state().nginxCandidateResult,/selection or inventory changed/);
+  assert.doesNotMatch(ui.state().nginxCandidateResult,/Candidate Included/);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-nginx-candidate-button').respond(nginxCandidate());
+  assert.match(ui.state().nginxCandidateResult,/Candidate Included/);
+  const refreshing=ui.refreshSites();
+  assert.equal(ui.state().nginxCandidateDisabled,true);
+  assert.doesNotMatch(ui.state().nginxCandidateResult,/Candidate Included/);
+  refreshing.respond(hostsInventory());
+  assert.equal(ui.state().nginxCandidateDisabled,true);
 });
 
 test('Generated VHost comparison binds native site snapshot, shows drift without offering writes', () => {
