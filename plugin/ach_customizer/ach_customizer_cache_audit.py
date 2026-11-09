@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import re
 from pathlib import Path
 
@@ -42,7 +43,8 @@ NOTE = (
     "Read-only Nginx file-text clues, not a loaded/effective cache policy. "
     "No proof of private-data caching, user isolation, runtime request "
     "bypass, safe purge scope, or a working cache. The aaPanel Nginx Helper "
-    "may also purge shared cache files outside Nginx configuration."
+    "may also purge shared cache files outside Nginx configuration. "
+    "A host token in a cache key does not isolate filesystem-based Purge All."
 )
 
 
@@ -194,19 +196,148 @@ def _cache_zone(directives):
     return "Direct Zone", cache[0]
 
 
-def _global_zones(source):
-    parsed = _statements(source)
-    names = []
-    for declaration in parsed["fastcgi_cache_path"]:
-        zones = re.findall(r"(?<!\S)keys_zone=([A-Za-z_][A-Za-z0-9_]*):[0-9]+[kKmMgG](?=\s|$)",
-                           declaration)
-        if len(zones) != 1 or not ZONE.fullmatch(zones[0]) or zones[0] in names:
-            raise CacheAuditError("Ambiguous Nginx FastCGI cache-path zone declaration")
-        names.append(zones[0])
-    return names
+def _direct_http_scope_at(source, offset):
+    """Recognize only direct http { ... } membership for one include.
+
+    Braces inside quoted Nginx arguments/escaped tokens are not block
+    delimiters. This only tracks lexical scope; it does not evaluate the
+    complete Nginx configuration or arbitrary include expansion.
+    """
+    blocks = []
+    start = 0
+    quote = None
+    escaped = False
+    for position, char in enumerate(source[:offset]):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+            continue
+        if char == "{":
+            heading = source[start:position].strip()
+            blocks.append("http" if not blocks and heading == "http" else "other")
+            start = position + 1
+        elif char == "}":
+            if not blocks:
+                return False
+            blocks.pop()
+            start = position + 1
+        elif char == ";":
+            start = position + 1
+    return quote is None and not escaped and blocks == ["http"]
 
 
-def _analyze_selected(directives, zone_state, zone, global_zones, peers):
+# A deliberately narrow contract for the aaPanel 8.0.7 global cache file:
+# every active statement must match one of these complete single-line forms.
+GLOBAL_CACHE_STATEMENT = re.compile(
+    r"(?m)^[ \t]*(fastcgi_cache_key|fastcgi_cache_path|"
+    r"fastcgi_cache_use_stale|fastcgi_ignore_headers)[ \t]+"
+    r"([^;{}\r\n]{1,1024});[ \t]*(?=\r?$)"
+)
+SUPPORTED_STALE_OPTIONS = frozenset({
+    "off", "error", "timeout", "invalid_header", "updating",
+    "http_500", "http_503", "http_403", "http_404", "http_429",
+})
+
+
+def _known_global_statements(source):
+    """Reject every unmodelled active directive, including nested includes."""
+    matched = list(GLOBAL_CACHE_STATEMENT.finditer(source))
+    if GLOBAL_CACHE_STATEMENT.sub("", source).strip():
+        raise CacheAuditError("Uninspected directive in aaPanel global cache file")
+    parsed = {name: [] for name in DIRECTIVES}
+    for match in matched:
+        name, arguments = match.group(1), match.group(2).strip()
+        tokens = _argument_tokens(arguments)
+        if name == "fastcgi_cache_use_stale":
+            if (len(tokens) != len(set(tokens))
+                    or any(option not in SUPPORTED_STALE_OPTIONS for option in tokens)
+                    or ("off" in tokens and len(tokens) != 1)):
+                raise CacheAuditError("Unsupported global fastcgi_cache_use_stale option")
+        else:
+            parsed[name].append(arguments)
+    return parsed
+
+
+def _known_global_cache(nginx_root, vhost_root):
+    """Inspect direct main directives and aaPanel's one known top-level cache include.
+
+    Unlike Nginx -T, this is a bounded *source* observation, never a claim
+    about loaded workers, full inheritance or arbitrary included files.
+    """
+    main_source, main_sig = _text_and_signature(Path(nginx_root) / "nginx.conf")
+    main = _statements(main_source)
+    sources = [("nginx.conf", "main", main_sig)]
+    cache_file = Path(vhost_root) / "0.fastcgi_cache.conf"
+    extra = None
+    if cache_file.exists() or cache_file.is_symlink():
+        marker = re.compile(
+            r"(?m)^[ \t]*include[ \t]+" +
+            re.escape(str(Path(vhost_root))) +
+            r"/\*\.conf[ \t]*;[ \t]*(?=\r?$)"
+        )
+        matches = list(marker.finditer(main_source))
+        if (len(matches) != 1 or
+                not _direct_http_scope_at(main_source, matches[0].start())):
+            raise CacheAuditError(
+                "aaPanel global FastCGI cache file has unverified Nginx include HTTP scope"
+            )
+        cache_text, cache_sig = _text_and_signature(cache_file)
+        extra = _known_global_statements(cache_text)
+        sources.append(("aaPanel-cache-global", cache_file.name, cache_sig))
+    # Keep the actual source owner for every declared zone. Two cache zones
+    # with one filesystem path are NOT two isolated purge domains.
+    paths = {}
+    direct = set()
+    ignored = set()
+    cache_keys = []
+    for owner, parsed in (("main", main), ("aaPanel include", extra)):
+        if parsed is None:
+            continue
+        if parsed["fastcgi_cache"]:
+            raise CacheAuditError("Unexpected global fastcgi_cache setting requires review")
+        for declaration in parsed["fastcgi_cache_path"]:
+            tokens = _argument_tokens(declaration)
+            names = re.findall(
+                r"(?<!\S)keys_zone=([A-Za-z_][A-Za-z0-9_]*):[0-9]+[kKmMgG](?=\s|$)",
+                declaration,
+            )
+            if (len(names) != 1 or not ZONE.fullmatch(names[0])
+                    or names[0] in paths or not tokens or
+                    not re.fullmatch(r"/[A-Za-z0-9_./-]{1,240}", tokens[0])
+                    or "//" in tokens[0]
+                    or posixpath.normpath(tokens[0]) != tokens[0]):
+                # Refuse /./, trailing /, /../, and duplicate separators:
+                # they cannot create a false "no peer" from equivalent text.
+                raise CacheAuditError("Ambiguous global FastCGI cache zone or directory")
+            paths[names[0]] = (tokens[0], owner)
+            if owner == "main":
+                direct.add(names[0])
+        for entry in parsed["fastcgi_ignore_headers"]:
+            ignored.update(
+                name for field in _argument_tokens(entry)
+                for name in ("Cache-Control", "Expires", "Set-Cookie", "Vary", "X-Accel-Expires")
+                if field.lower() == name.lower()
+            )
+        cache_keys.extend(parsed["fastcgi_cache_key"])
+    if len(cache_keys) > 1:
+        raise CacheAuditError("Multiple global FastCGI cache-key sources require review")
+    return {
+        "paths": paths, "direct_zones": direct,
+        "ignored": sorted(ignored), "global_key": cache_keys[0] if cache_keys else None,
+        "include_observed": extra is not None, "signatures": sources,
+    }
+
+
+def _analyze_selected(directives, zone_state, zone, globals_, peers, directory_peers):
     findings = []
     def add(name):
         if name not in findings and len(findings) < MAX_FINDINGS:
@@ -225,23 +356,30 @@ def _analyze_selected(directives, zone_state, zone, global_zones, peers):
             add("NO_DIRECT_CACHE_WRITE_GUARD")
         if not directives["fastcgi_cache_key"]:
             add("KEY_NOT_DIRECTLY_OBSERVED")
-        else:
-            key = directives["fastcgi_cache_key"][0]
-            if not re.search(r"\$(?:host|http_host|server_name)(?![A-Za-z0-9_])", key):
-                add("HOST_PARTITION_NOT_OBSERVED")
-        if zone not in global_zones:
+        key = (directives["fastcgi_cache_key"][0]
+               if directives["fastcgi_cache_key"] else globals_["global_key"])
+        if not key or not re.search(r"\$(?:host|http_host|server_name)(?![A-Za-z0-9_])", key):
+            add("HOST_PARTITION_NOT_OBSERVED")
+        if zone not in globals_["paths"]:
             add("ZONE_DECLARATION_NOT_IN_MAIN_FILE")
         if peers:
             add("SHARED_ZONE_REFERENCES")
+        if directory_peers:
+            add("SHARED_CACHE_DIRECTORY_PURGE_RISK")
+        if globals_["ignored"]:
+            add("GLOBAL_RESPONSE_CACHE_HEADER_IGNORED")
     recognized_headers = {
         "set-cookie": "Set-Cookie", "cache-control": "Cache-Control",
         "expires": "Expires", "vary": "Vary",
         "x-accel-expires": "X-Accel-Expires",
     }
-    ignored = {
+    direct_ignored = {
         recognized_headers[field.lower()] for entry in directives["fastcgi_ignore_headers"]
         for field in _argument_tokens(entry) if field.lower() in recognized_headers
     }
+    # Lower-level directives may override inheritance. Both remain warnings
+    # rather than an assertion about Nginx's effective/loaded value.
+    ignored = direct_ignored | (set(globals_["ignored"]) if active else set())
     methods = [_argument_tokens(entry) for entry in directives["fastcgi_cache_methods"]]
     if active and ignored:
         add("RESPONSE_CACHE_HEADER_IGNORED")
@@ -268,6 +406,9 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         "purge_supported": False, "fix_supported": False,
         "zone_state": "Needs Review", "cache_zone": None,
         "global_zone_directly_declared": False,
+        "aaPanel_global_include_observed": False,
+        "global_ignore_headers": [], "cache_directory": None,
+        "other_sites_same_directory": [], "purge_scope": "Unknown",
         "bypass_directive_seen": False, "no_cache_directive_seen": False,
         "host_key_variable_seen": False, "purge_directive_seen": False,
         "ignore_headers": [], "findings": [],
@@ -287,15 +428,19 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             sites = _native_sites(panel_public)
             if (site_id, site_key) not in sites:
                 raise CacheAuditError("Selected native site identity has changed")
-            global_text, global_sig = _text_and_signature(
-                Path(nginx_root) / "nginx.conf")
-            global_zones = _global_zones(global_text)
+            globals_ = _known_global_cache(nginx_root, vhost_root)
             selected_directives, selected_files, _ = _site_source(
                 site_id, site_key, vhost_root, nginx_root, rewrite_root)
             zone_state, zone = _cache_zone(selected_directives)
             peers = []
+            directory_peers = []
+            different_directory_peer = False
             unresolved = 0
-            fingerprints = [("nginx.conf", "global", global_sig)] + selected_files
+            selected_directory = (
+                globals_["paths"].get(zone, (None, None))[0]
+                if zone is not None else None
+            )
+            fingerprints = globals_["signatures"] + selected_files
             for ident, key in sites:
                 if ident == site_id:
                     continue
@@ -309,8 +454,19 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                 fingerprints.extend(files)
                 if zone is not None and peer_zone == zone:
                     peers.append({"id": ident, "site_key": key})
-            return (sites, global_zones, selected_directives, zone_state,
-                    zone, peers, unresolved, fingerprints)
+                peer_directory = (globals_["paths"].get(peer_zone, (None, None))[0]
+                                  if peer_zone is not None else None)
+                if selected_directory is not None and peer_directory is not None:
+                    if peer_directory == selected_directory:
+                        directory_peers.append({"id": ident, "site_key": key})
+                    else:
+                        # Distinct canonical strings may still alias via symlinks
+                        # or mounts. Source-only diagnostics cannot certify that
+                        # they are separate physical directories.
+                        different_directory_peer = True
+            return (sites, globals_, selected_directives, zone_state,
+                    zone, peers, directory_peers, different_directory_peer,
+                    unresolved, fingerprints)
 
         first = scan()
         if first != scan():
@@ -318,18 +474,32 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         if (panel_public.get_webserver() != "nginx" or
                 str(panel_public.get_panel_version()).strip() != "8.0.7"):
             raise CacheAuditError("Native web engine or panel version changed during audit")
-        sites, globals_, directives, zone_state, zone, peers, unresolved, fingerprints = first
-        findings, ignored = _analyze_selected(directives, zone_state, zone, globals_, peers)
-        host_seen = any(re.search(
-            r"\$(?:host|http_host|server_name)(?![A-Za-z0-9_])", value)
-            for value in directives["fastcgi_cache_key"])
+        (sites, globals_, directives, zone_state, zone, peers,
+         directory_peers, different_directory_peer, unresolved, fingerprints) = first
+        findings, ignored = _analyze_selected(
+            directives, zone_state, zone, globals_, peers, directory_peers)
+        observed_key = (directives["fastcgi_cache_key"][0]
+                        if directives["fastcgi_cache_key"] else globals_["global_key"])
+        host_seen = bool(observed_key and re.search(
+            r"\$(?:host|http_host|server_name)(?![A-Za-z0-9_])", observed_key))
+        selected_directory = (globals_["paths"].get(zone, (None, None))[0]
+                              if zone is not None else None)
         source_sha = hashlib.sha256(json.dumps(
             {"sites": sites, "source": fingerprints}, sort_keys=True,
             separators=(",", ":")).encode("utf-8")).hexdigest()
         result.update(
             state="Partial" if unresolved else "Source Observed",
             zone_state=zone_state, cache_zone=zone,
-            global_zone_directly_declared=zone is not None and zone in globals_,
+            global_zone_directly_declared=zone is not None and
+                zone in globals_["direct_zones"],
+            aaPanel_global_include_observed=globals_["include_observed"],
+            global_ignore_headers=globals_["ignored"],
+            cache_directory=selected_directory,
+            other_sites_same_directory=directory_peers,
+            purge_scope=("Shared Registered Directory" if directory_peers else
+                         "No Registered Directory Peer" if selected_directory and
+                             not unresolved and not different_directory_peer
+                         else "Unknown"),
             bypass_directive_seen=bool(directives["fastcgi_cache_bypass"]),
             no_cache_directive_seen=bool(directives["fastcgi_no_cache"]),
             host_key_variable_seen=bool(host_seen),

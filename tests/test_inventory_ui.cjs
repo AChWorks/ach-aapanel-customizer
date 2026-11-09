@@ -1206,11 +1206,17 @@ const cacheInspection = (overrides={}) => ({
   read_only:true,runtime_verified:false,cache_safe_verified:false,
   purge_supported:false,fix_supported:false,
   state:'Source Observed',zone_state:'Direct Zone',cache_zone:'WORDPRESS',
-  global_zone_directly_declared:true,
+  global_zone_directly_declared:false,
+  aaPanel_global_include_observed:true,
+  cache_directory:'/www/server/fastcgi_cache',
+  global_ignore_headers:['Set-Cookie','Cache-Control'],
+  purge_scope:'Shared Registered Directory',
+  other_sites_same_directory:[{id:8,site_key:'other.test'}],
   bypass_directive_seen:true,no_cache_directive_seen:true,
   host_key_variable_seen:true,purge_directive_seen:true,
   ignore_headers:['Set-Cookie'],
-  findings:['SHARED_ZONE_REFERENCES','RESPONSE_CACHE_HEADER_IGNORED',
+  findings:['SHARED_ZONE_REFERENCES','SHARED_CACHE_DIRECTORY_PURGE_RISK',
+    'GLOBAL_RESPONSE_CACHE_HEADER_IGNORED','RESPONSE_CACHE_HEADER_IGNORED',
     'PURGE_DIRECTIVE_OBSERVED','PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED'],
   other_sites_same_zone:[{id:8,site_key:'other.test'}],
   unresolved_other_sites:0,inspected_sites:2,source_sha256:'b'.repeat(64),
@@ -1365,6 +1371,11 @@ test('FastCGI cache audit binds exact native website snapshot and never grants A
   assert.match(state,/Direct cache zone: WORDPRESS/);
   assert.match(state,/SHARED_ZONE_REFERENCES/);
   assert.match(state,/RESPONSE_CACHE_HEADER_IGNORED/);
+  assert.match(state,/SHARED_CACHE_DIRECTORY_PURGE_RISK/);
+  assert.match(state,/GLOBAL_RESPONSE_CACHE_HEADER_IGNORED/);
+  assert.match(state,/aaPanel global include inspected: true/);
+  assert.match(state,/other registered sites sharing that directory: 8: other.test/);
+  assert.match(state,/site-scoped filesystem purge: NEVER inferred/);
   assert.match(state,/8: other.test/);
   assert.match(state,/DO NOT infer/);
   assert.doesNotMatch(state,/safe to purge|private content protected/);
@@ -1382,11 +1393,28 @@ test('Partial FastCGI cache source and Needs Review never claim verified isolati
   assert.match(ui.state().cacheResult,/No loaded cache or Nginx Helper safety claim/);
   ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
     state:'Needs Review',zone_state:'Needs Review',cache_zone:null,
-    global_zone_directly_declared:false,findings:[],other_sites_same_zone:[],
+    global_zone_directly_declared:false,aaPanel_global_include_observed:false,
+    global_ignore_headers:[],cache_directory:null,purge_scope:'Unknown',
+    other_sites_same_directory:[],findings:[],other_sites_same_zone:[],
     inspected_sites:0,source_sha256:null,reason:'Unsupported site Nginx include'
   }));
   assert.match(ui.state().cacheResult,/Needs Review/);
   assert.doesNotMatch(ui.state().cacheResult,/Direct cache zone: WORDPRESS/);
+});
+
+test('Different canonical cache paths remain Unknown; UI never grants site purge', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    purge_scope:'Unknown',
+    other_sites_same_directory:[],
+    other_sites_same_zone:[],
+    findings:['PRIVATE_ROUTE_RUNTIME_TEST_REQUIRED']
+  }));
+  const result=ui.state().cacheResult;
+  assert.match(result,/Observed cache directory usage: Unknown/);
+  assert.match(result,/site-scoped filesystem purge: NEVER inferred/);
+  assert.doesNotMatch(result,/safe to purge|private content protected/);
 });
 
 test('Forged FastCGI cache source responses fail closed and do not enable mutation', () => {
@@ -1398,6 +1426,14 @@ test('Forged FastCGI cache source responses fail closed and do not enable mutati
     {state:'Source Observed',unresolved_other_sites:1},
     {state:'Partial',unresolved_other_sites:0},
     {findings:['PERSONAL_DATA_LEAK']},
+    {cache_directory:'../unauthorized'},
+    {cache_directory:'/www/server/fastcgi_cache/'},
+    {cache_directory:'/www/server/./fastcgi_cache'},
+    {global_ignore_headers:['Unsafe']},
+    {other_sites_same_directory:[{id:7,site_key:'forged.test'}]},
+    {purge_scope:'Shared Registered Directory',other_sites_same_directory:[]},
+    {purge_scope:'No Registered Directory Peer'},
+    {aaPanel_global_include_observed:'yes'},
     {ignore_headers:['xss<script>']},
     {other_sites_same_zone:[{id:7,site_key:'selected.test'}]},
     {other_sites_same_zone:[{id:8,site_key:'other.test'},{id:8,site_key:'again.test'}]},

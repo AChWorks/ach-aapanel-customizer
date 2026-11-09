@@ -89,6 +89,232 @@ class FastCgiCacheSourceTests(unittest.TestCase):
             vhost_root=str(self.vhost), nginx_root=str(self.nginx),
             rewrite_root=str(self.rewrites))
 
+    def global_cache_fixture(self):
+        # Models the actual aaPanel 8.0.7 main -> top-level *.conf inclusion.
+        (self.nginx / "nginx.conf").write_text(
+            "events {}\nhttp {\n include " + str(self.vhost) + "/*.conf;\n}\n"
+        )
+        cache = self.vhost / "0.fastcgi_cache.conf"
+        cache.write_text(
+            'fastcgi_cache_key "$scheme$request_method$host$request_uri";\n'
+            'fastcgi_cache_path /www/server/fastcgi_cache levels=1:2 '
+            'keys_zone=WORDPRESS:100m inactive=60m max_size=1g;\n'
+            'fastcgi_cache_use_stale error timeout invalid_header http_500;\n'
+            'fastcgi_ignore_headers Cache-Control Expires Set-Cookie;\n'
+        )
+        return cache
+
+    def test_global_aaPanel_cache_include_is_fingerprinted_and_flags_shared_physical_purge(self):
+        cache = self.global_cache_fixture()
+        result = self.inspect()
+        self.assertEqual(result["state"], "Source Observed", result)
+        self.assertEqual(result["cache_zone"], "WORDPRESS")
+        self.assertFalse(result["global_zone_directly_declared"])
+        self.assertTrue(result["aaPanel_global_include_observed"])
+        self.assertEqual(result["cache_directory"],"/www/server/fastcgi_cache")
+        self.assertEqual(result["global_ignore_headers"],
+                         ["Cache-Control","Expires","Set-Cookie"])
+        self.assertEqual(result["ignore_headers"],["Cache-Control","Expires","Set-Cookie"])
+        self.assertEqual(result["purge_scope"],"Shared Registered Directory")
+        self.assertEqual(result["other_sites_same_zone"],
+                         [{"id":6,"site_key":"shop.test"}])
+        self.assertEqual(result["other_sites_same_directory"],
+                         [{"id":6,"site_key":"shop.test"}])
+        self.assertIn("GLOBAL_RESPONSE_CACHE_HEADER_IGNORED",result["findings"])
+        self.assertIn("SHARED_CACHE_DIRECTORY_PURGE_RISK",result["findings"])
+        self.assertNotIn("ZONE_DECLARATION_NOT_IN_MAIN_FILE",result["findings"])
+        self.assertFalse(result["purge_supported"])
+        self.assertFalse(result["cache_safe_verified"])
+        before=result["source_sha256"]
+        cache.write_text(cache.read_text().replace("inactive=60m","inactive=20m"))
+        self.assertNotEqual(self.inspect()["source_sha256"],before)
+
+    def test_global_include_does_not_make_uncached_site_look_active(self):
+        self.global_cache_fixture()
+        (self.nginx / "enable-php-85-wpfastcgi.conf").write_text(
+            self.native_snippet.replace(" fastcgi_cache WORDPRESS;",""))
+        observed=self.inspect()
+        self.assertEqual(observed["state"],"Source Observed")
+        self.assertEqual(observed["zone_state"],"No Direct Directive")
+        self.assertIsNone(observed["cache_zone"])
+        self.assertIsNone(observed["cache_directory"])
+        self.assertEqual(observed["purge_scope"],"Unknown")
+        self.assertEqual(observed["other_sites_same_directory"],[])
+        self.assertEqual(observed["global_ignore_headers"],
+                         ["Cache-Control","Expires","Set-Cookie"])
+        self.assertNotIn("GLOBAL_RESPONSE_CACHE_HEADER_IGNORED",observed["findings"])
+        self.assertTrue(observed["host_key_variable_seen"])  # observed global source only
+
+    def test_global_cache_include_requires_known_literal_main_reference(self):
+        cache=self.global_cache_fixture()
+        (self.nginx/"nginx.conf").write_text("events {}\nhttp {}\n")
+        self.assertEqual(self.inspect()["state"],"Needs Review")
+        self.assertIn("unverified Nginx include",self.inspect()["reason"])
+        (self.nginx/"nginx.conf").write_text(
+            "events {}\nhttp {\n include " + str(self.vhost) + "/*.conf;\n}\n")
+        cache.unlink()
+        cache.symlink_to("/etc/hosts")
+        got=self.inspect()
+        self.assertEqual(got["state"],"Needs Review")
+        self.assertIsNone(got["source_sha256"])
+        self.assertIsNone(got["cache_directory"])
+
+    def test_unmodelled_global_cache_control_remains_needs_review(self):
+        cache=self.global_cache_fixture()
+        for extra in ("fastcgi_cache_background_update on;",
+                      "fastcgi_cache_path /tmp/reused keys_zone=WORDPRESS:1m;",
+                      "fastcgi_cache_use_stale error; fastcgi_ignore_headers Set-Cookie;"):
+            with self.subTest(extra=extra):
+                cache.write_text(
+                    'fastcgi_cache_key "$scheme$request_method$host$request_uri";\n'
+                    'fastcgi_cache_path /www/server/fastcgi_cache keys_zone=WORDPRESS:100m;\n'
+                    +extra+"\n"
+                )
+                got=self.inspect()
+                self.assertEqual(got["state"],"Needs Review",got)
+                self.assertFalse(got["purge_supported"])
+                self.assertIsNone(got["cache_directory"])
+
+    def test_global_cache_directory_collision_reports_other_zone_peer(self):
+        self.global_cache_fixture()
+        # A different zone label does not establish a different directory.
+        cache=self.vhost/"0.fastcgi_cache.conf"
+        cache.write_text(cache.read_text() +
+            'fastcgi_cache_path /www/server/fastcgi_cache keys_zone=ALTERNATE:50m;\n')
+        php=self.nginx/"enable-php-81-wpfastcgi.conf"
+        php.write_text(self.native_snippet.replace(
+            "fastcgi_cache WORDPRESS;","fastcgi_cache ALTERNATE;").replace(
+            "php-cgi-85.sock","php-cgi-81.sock"))
+        self.make_vhost("shop.test","enable-php-81-wpfastcgi.conf")
+        got=self.inspect()
+        self.assertEqual(got["state"],"Source Observed",got)
+        self.assertEqual(got["other_sites_same_zone"],[])
+        self.assertEqual(got["other_sites_same_directory"],
+                         [{"id":6,"site_key":"shop.test"}])
+        self.assertEqual(got["purge_scope"],"Shared Registered Directory")
+        self.assertIn("SHARED_CACHE_DIRECTORY_PURGE_RISK",got["findings"])
+
+    def test_global_cache_include_must_be_direct_http_child(self):
+        self.global_cache_fixture()
+        include = " include " + str(self.vhost) + "/*.conf;\n"
+        for content in (
+                "events {\n" + include + "}\nhttp {}\n",
+                "stream {\n" + include + "}\nhttp {}\n",
+                "http {\n server {\n" + include + " }\n}\n",
+                "http {\n map $uri $key {\n" + include + " }\n}\n",
+                "server {\n" + include + "}\nhttp {}\n",
+        ):
+            with self.subTest(config=content):
+                (self.nginx / "nginx.conf").write_text(content)
+                result = self.inspect()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertIsNone(result["source_sha256"])
+                self.assertIsNone(result["cache_directory"])
+                self.assertEqual(result["purge_scope"], "Unknown")
+        # A literal brace in a quoted log format is not an Nginx block.
+        (self.nginx / "nginx.conf").write_text(
+            "events {}\nstream { server { listen 1111; } }\n"
+            "http {\n log_format test '$uri {literal}';\n"
+            + include + "}\n"
+        )
+        result = self.inspect()
+        self.assertEqual(result["state"], "Source Observed", result)
+        self.assertTrue(result["aaPanel_global_include_observed"])
+
+    def test_global_file_rejects_uninspected_nested_or_secondary_active_directives(self):
+        global_file = self.global_cache_fixture()
+        original = global_file.read_text()
+        for extra in (
+                "include /etc/nginx/cache-other.conf;",
+                "include /etc/nginx/cache-extra/*.conf;",
+                "fastcgi_cache_lock on;",
+                "server { fastcgi_ignore_headers Set-Cookie; }",
+                "map $http_cookie $private { default 0; }",
+                "fastcgi_cache_key '$scheme$host'; include another.conf;",
+                "some_extension ignored;",
+        ):
+            with self.subTest(extra=extra):
+                global_file.write_text(original + extra + "\n")
+                result = self.inspect()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertIsNone(result["source_sha256"])
+                self.assertIsNone(result["cache_directory"])
+                self.assertEqual(result["other_sites_same_directory"], [])
+                self.assertFalse(result["purge_supported"])
+        global_file.write_text(original + "# inert comment\n")
+        self.assertEqual(self.inspect()["state"], "Source Observed")
+
+    def test_global_stale_options_require_supported_nginx_literals(self):
+        global_file = self.global_cache_fixture()
+        original = global_file.read_text()
+        previous = "fastcgi_cache_use_stale error timeout invalid_header http_500;"
+        for valid in ("off", "error", "timeout updating http_500 http_503",
+                      "http_403 http_404 http_429 invalid_header"):
+            with self.subTest(valid=valid):
+                global_file.write_text(original.replace(
+                    previous, "fastcgi_cache_use_stale " + valid + ";"))
+                result = self.inspect()
+                self.assertEqual(result["state"], "Source Observed", result)
+                self.assertIsNotNone(result["source_sha256"])
+        for invalid in ("http_502", "off error", "error error", "bogus",
+                        "error http_999", "off timeout"):
+            with self.subTest(invalid=invalid):
+                global_file.write_text(original.replace(
+                    previous, "fastcgi_cache_use_stale " + invalid + ";"))
+                result = self.inspect()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertIsNone(result["source_sha256"])
+                self.assertIsNone(result["cache_directory"])
+                self.assertEqual(result["purge_scope"], "Unknown")
+
+    def test_cache_directory_aliases_never_report_no_peer(self):
+        global_file = self.global_cache_fixture()
+        original = global_file.read_text()
+        php = self.nginx / "enable-php-81-wpfastcgi.conf"
+        php.write_text(self.native_snippet.replace(
+            "fastcgi_cache WORDPRESS;", "fastcgi_cache ALTERNATE;"
+        ).replace("php-cgi-85.sock", "php-cgi-81.sock"))
+        self.make_vhost("shop.test", "enable-php-81-wpfastcgi.conf")
+        for alias in ("/www/server/fastcgi_cache/",
+                      "/www/server/./fastcgi_cache",
+                      "/www/server/fastcgi_cache/.",
+                      "/www/server/cache/../fastcgi_cache",
+                      "/www/server//fastcgi_cache",
+                      "//www/server/fastcgi_cache"):
+            with self.subTest(alias=alias):
+                global_file.write_text(original +
+                    "fastcgi_cache_path " + alias +
+                    " keys_zone=ALTERNATE:50m;\n")
+                result = self.inspect()
+                self.assertEqual(result["state"], "Needs Review", result)
+                self.assertIsNone(result["source_sha256"])
+                self.assertIsNone(result["cache_directory"])
+                self.assertEqual(result["purge_scope"], "Unknown")
+                self.assertFalse(result["purge_supported"])
+        # Two different canonical path strings may alias via a mount or
+        # symlink, so source-only data cannot certify physical isolation.
+        global_file.write_text(original +
+            "fastcgi_cache_path /www/server/another-cache keys_zone=ALTERNATE:50m;\n")
+        result = self.inspect()
+        self.assertEqual(result["state"], "Source Observed", result)
+        self.assertEqual(result["other_sites_same_zone"], [])
+        self.assertEqual(result["other_sites_same_directory"], [])
+        self.assertEqual(result["cache_directory"], "/www/server/fastcgi_cache")
+        self.assertEqual(result["purge_scope"], "Unknown")
+        self.assertFalse(result["purge_supported"])
+
+    def test_double_leading_slash_selected_cache_directory_needs_review(self):
+        global_file = self.global_cache_fixture()
+        global_file.write_text(global_file.read_text().replace(
+            "fastcgi_cache_path /www/server/fastcgi_cache ",
+            "fastcgi_cache_path //www/server/fastcgi_cache "))
+        result = self.inspect()
+        self.assertEqual(result["state"], "Needs Review", result)
+        self.assertIsNone(result["source_sha256"])
+        self.assertIsNone(result["cache_directory"])
+        self.assertEqual(result["purge_scope"], "Unknown")
+        self.assertFalse(result["purge_supported"])
+
     def test_exact_native_cache_sources_and_shared_zone_are_observations_only(self):
         files = [self.nginx / "nginx.conf",
                  self.nginx / "enable-php-85-wpfastcgi.conf",
