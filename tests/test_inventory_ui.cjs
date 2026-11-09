@@ -49,6 +49,7 @@ function loadUi() {
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-rows',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-cache-inspect-button', '#ach-cache-result',
+    '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -274,6 +275,8 @@ function loadUi() {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
       cacheResult: elements.get('#ach-cache-result').textContent,
+      vhostResult: elements.get('#ach-vhost-result').textContent,
+      vhostInspectDisabled: elements.get('#ach-vhost-inspect-button').props.disabled,
       cacheInspectDisabled: elements.get('#ach-cache-inspect-button').props.disabled,
       hostsInspectDisabled: elements.get('#ach-hosts-inspect-button').props.disabled,
       hostsSelectorDisabled: elements.get('#ach-hosts-site-id').props.disabled,
@@ -1213,6 +1216,132 @@ const cacheInspection = (overrides={}) => ({
   unresolved_other_sites:0,inspected_sites:2,source_sha256:'b'.repeat(64),
   reason:'',note:'Source-only observation. No loaded cache or Nginx Helper safety claim.',
   ...overrides
+});
+
+const vhostInspection = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  state:'File Match',read_only:true,runtime_verified:false,fix_supported:false,
+  vhost_sha256:'a'.repeat(64),native_root:'/www/site.test',
+  vhost_root:'/www/site.test',native_names:['site.test'],
+  vhost_names:['site.test'],listen_ports:[80],findings:[],reason:'',
+  note:'Generated file only; no active Nginx routing proof.',...overrides
+});
+
+test('Generated VHost comparison binds native site snapshot, shows drift without offering writes', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  assert.equal(ui.state().vhostInspectDisabled,false);
+  const req=ui.statusClick('#ach-vhost-inspect-button');
+  assert.match(req.options.url,/s=inspect_native_vhost$/);
+  assert.equal(req.options.type,'POST');
+  assert.deepEqual(Object.keys(req.options.data).sort(),[
+    'expected_site_key','expected_site_snapshot','site_id']);
+  assert.deepEqual(JSON.parse(req.options.data.expected_site_snapshot),[
+    7,'site.test','/www/site.test','1',[['site.test',80]]]);
+  assert.equal(ui.state().vhostInspectDisabled,true);
+  req.respond(vhostInspection({
+    state:'File Drift',vhost_root:'/www/stale',vhost_names:['old.site.test'],
+    findings:['DOCUMENT_ROOT_MISMATCH','BOUND_HOST_MISSING_IN_VHOST',
+      'VHOST_HOST_NOT_IN_NATIVE_BINDINGS']
+  }));
+  assert.equal(ui.state().vhostInspectDisabled,false);
+  assert.match(ui.state().vhostResult,/Generated VHost: File Drift/);
+  assert.match(ui.state().vhostResult,/DOCUMENT_ROOT_MISMATCH/);
+  assert.match(ui.state().vhostResult,/generated|Generated/);
+  assert.doesNotMatch(ui.state().vhostResult,/Apply change|Fix automatically|runtime verified/);
+});
+
+test('VHost uncertain source and invalid replies never claim a matching file', () => {
+  const invalid=[{site_id:8},{site_key:'other.test'},{runtime_verified:true},
+    {fix_supported:true},{vhost_sha256:'forged'},
+    {state:'File Match',findings:['DOCUMENT_ROOT_MISMATCH']},
+    {state:'File Match',vhost_root:'/www/stale'},
+    {state:'File Match',vhost_names:['other.site.test']},
+    {state:'File Match',native_names:[],vhost_names:[]},
+    {state:'File Match',native_names:['site.test..'],vhost_names:['site.test..']},
+    {state:'File Drift',vhost_root:'/www/stale',findings:['BOUND_HOST_MISSING_IN_VHOST']},
+    {state:'File Drift',vhost_names:['other.site.test'],
+     findings:['VHOST_HOST_NOT_IN_NATIVE_BINDINGS','BOUND_HOST_MISSING_IN_VHOST']},
+    {state:'File Drift',vhost_names:['site.test'],findings:['DOCUMENT_ROOT_MISMATCH']},
+    {state:'File Drift',findings:[]},
+    {native_names:['<img src=x onerror=alert(1)>']},
+    {listen_ports:[99999]},
+    {state:'Needs Review',reason:'Unsupported',vhost_sha256:'a'.repeat(64)}];
+  for(const reply of invalid) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection(reply));
+    assert.match(ui.state().vhostResult,/unavailable or incompatible/,JSON.stringify(reply));
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+    state:'Needs Review',vhost_sha256:null,native_root:null,vhost_root:null,
+    native_names:[],vhost_names:[],listen_ports:[],findings:[],
+    reason:'Unsupported third-party Nginx extension'
+  }));
+  assert.match(ui.state().vhostResult,/Needs Review/);
+  assert.doesNotMatch(ui.state().vhostResult,/File Match/);
+});
+
+test('VHost controlled backend failures keep stage, reason and correlation beside inspect', () => {
+  const cases=[
+    {stage:'website_vhost_inspection',msg:'Native site/root/bindings changed; refresh website inventory',
+      operation_id:'a'.repeat(32)},
+    {stage:'website_vhost_authorization',msg:'Full primary aaPanel administrator session and POST are required',
+      operation_id:'b'.repeat(32)},
+    {stage:'website_vhost_inspection',msg:'Native site changed during VHost comparison',
+      operation_id:'c'.repeat(32)}
+  ];
+  for (const rejected of cases) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-vhost-inspect-button').respond({status:false,...rejected});
+    const info=ui.state().vhostResult;
+    assert.match(info,/Read-only inspection failed at/);
+    assert.ok(info.includes(rejected.stage),info);
+    assert.ok(info.includes(rejected.msg),info);
+    assert.ok(info.includes('Operation ID: ' + rejected.operation_id),info);
+    assert.doesNotMatch(info,/Generated VHost: File Match/);
+    assert.equal(ui.state().vhostInspectDisabled,false);
+  }
+});
+
+test('VHost invalid backend reply and network failures are not mistaken for authoritative inspection', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-vhost-inspect-button').respond({status:false,
+    stage:'<script>',msg:'unsafe',operation_id:'invalid'});
+  assert.match(ui.state().vhostResult,/failed or timed out/);
+  assert.doesNotMatch(ui.state().vhostResult,/<script>/);
+  const request=ui.statusClick('#ach-vhost-inspect-button');
+  request.reject(null,'timeout');
+  assert.match(ui.state().vhostResult,/failed or timed out/);
+  assert.doesNotMatch(ui.state().vhostResult,/File Match/);
+  assert.equal(ui.state().vhostInspectDisabled,false);
+});
+
+test('VHost stale rejection after site selection change never resurfaces old error detail', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const old=ui.statusClick('#ach-vhost-inspect-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  old.respond({status:false,stage:'website_vhost_inspection',
+    msg:'stale-private-error',operation_id:'d'.repeat(32)});
+  assert.doesNotMatch(ui.state().vhostResult,/stale-private-error|Operation ID:/);
+  assert.match(ui.state().vhostResult,/changed/);
+});
+
+test('VHost results are revoked on selection changes and inventory refresh', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const pending=ui.statusClick('#ach-vhost-inspect-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(vhostInspection());
+  assert.match(ui.state().vhostResult,/changed/);
+  assert.doesNotMatch(ui.state().vhostResult,/File Match/);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection());
+  assert.match(ui.state().vhostResult,/File Match/);
+  const refresh=ui.refreshSites();
+  assert.equal(ui.state().vhostInspectDisabled,true);
+  assert.doesNotMatch(ui.state().vhostResult,/File Match/);
+  refresh.respond(hostsInventory());
+  assert.equal(ui.state().vhostInspectDisabled,true);
 });
 
 test('FastCGI cache audit binds exact native website snapshot and never grants Apply/purge', () => {

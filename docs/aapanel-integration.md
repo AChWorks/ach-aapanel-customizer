@@ -39,6 +39,39 @@ Initially no baseline exists: Compare displays all current candidate records (in
 
 This feature is source-only and does not establish effective/healthy Nginx website routing, guarantee identification of a reused native site ID with identical records, prevent changes after the final database read, schedule automated scans or provide repair/Apply/Auto-enforce. Background reconciliation, policy migration and native installed test evidence are separate acceptance work; do not mistake Source checks for Issue #21 acceptance.
 
+## Generated Nginx VHost/database drift comparison (Issue #2)
+
+**Unreleased source candidate, not native installed acceptance.** `inspect_native_vhost`
+provides an explicit Websites action for one selected aaPanel site. The primary
+administrator must use the native authenticated POST; the server re-reads the
+native site ID, key, root, status and all current bound domain/port records and
+requires them to match the browser's bounded inventory precondition. None of
+the submitted names, files or roots select a host filesystem path. A second
+native read prevents a changed/rebound site from returning a stale positive.
+
+For aaPanel **8.0.7 + Nginx** only, the inspector opens the fixed generated
+`vhost/nginx/<native-site-key>.conf` beneath the trusted root. Both read passes
+use the existing size/identity/no-symlink and source-fingerprint controls.
+The conservative server-block parser looks only at the unique top-level
+`root`, `server_name`, and observed `listen` statements. It ignores comments
+and nested routing *for the purpose of positive source metadata*, refusing
+unsupported duplicate, overridden or ambiguous native directives. Any root
+or bound-domain difference returns `File Drift` with category codes; missing,
+modified, ambiguous or incompatible sources return `Needs Review` rather
+than a fabricated matching site. The UI renders validated response fields as
+plain text, invalidates old results on selection/refresh/Monitor changes, and
+shows the operation next to the selected site.
+
+This is **not** a desired-policy configuration, VHost repair, direct inspection
+of Nginx's loaded effective `nginx -T` graph, runtime HTTP/TLS test, WordPress
+Toolkit state, evidence of certificate coverage, or a scheduled observer. It
+neither creates a replacement source nor writes/reloads/clears anything. Native
+site DB drift versus saved Monitor baseline is a **separate** comparison.
+Loaded-source behavior, regeneration after native site actions, legitimate
+third-party includes and protected Browser acceptance still require Issue #21
+isolated-guest tests. The broader P0 automatic inventory/adoption policy and
+cache isolation remain Issue #2 work, not claimed completed here.
+
 ## Native aaPanel dialog UI (unreleased UI refinement)
 
 The ACh Customizer management surface follows the compact Nginx-management
