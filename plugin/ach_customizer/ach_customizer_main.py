@@ -636,6 +636,79 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("fpm_policy_read", exc, request_id)
 
+    def fpm_policy_recheck(self, args):
+        """Compare saved service intent with fresh native file and site evidence.
+
+        A recheck is not an Apply preview, a host mutation, or a runtime verdict.
+        Never accept desired values from the caller on this route.
+        """
+        request_id = uuid4().hex
+        version = self._argument(args, "php_version")
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("php_fpm_file_preview")
+            from ach_customizer_fpm_policy import get_policy
+            before = get_policy(version, directory=_STATE_DIR)
+            baseline = {
+                "status": True, "schema": 1, "operation_id": request_id,
+                "version": version, "policy_revision": before["policy_revision"],
+                "monitor_revision": before["monitor_revision"],
+                "saved": before["saved"], "desired": before["desired"],
+                "read_only": True, "runtime_verified": False, "auto_enforce": False,
+                "apply_eligible": False, "scope": "shared_service", "pool": "www",
+                "changes": [], "shared_impact": None,
+                "note": "Desired values compared against PHP files/defaults only; no host action.",
+            }
+            if not before["saved"]:
+                return self._activity_result(
+                    {**baseline, "state": "No Policy",
+                     "reason": "No reviewed PHP-FPM desired policy is saved for this version."},
+                    "php_fpm", "fpm_policy_recheck", target=str(version), level="INFO")
+
+            # The existing Preview is the only owner of site-file attribution.
+            # Compose its bounded observation, not a second ad-hoc parser.
+            desired_args = {"php_version": version}
+            for key, value in before["desired"].items():
+                desired_args[key.removeprefix("pm.")] = value
+            inspected = self.preview_php_fpm(desired_args)
+            if inspected.get("status") is not True:
+                raise MonitorInputError(
+                    "Native PHP-FPM source inspection failed; see Activity and retry")
+            after = get_policy(version, directory=_STATE_DIR)
+            if before != after or inspected.get("fpm_saved_policy") != before:
+                return self._activity_result(
+                    {**baseline, "state": "Needs Review",
+                     "reason": "Saved policy or Monitor changed during inspection; recheck again."},
+                    "php_fpm", "fpm_policy_recheck", target=str(version), level="WARNING")
+            if (inspected.get("state") not in ("File Match", "File Drift")
+                    or not isinstance(inspected.get("fpm_observation_sha256"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}",
+                                        inspected["fpm_observation_sha256"])):
+                return self._activity_result(
+                    {**baseline, "state": "Needs Review",
+                     "reason": inspected.get("fpm_policy_reason") or
+                     inspected.get("reason") or
+                     "Native PHP source needs review; saved policy was not changed."},
+                    "php_fpm", "fpm_policy_recheck", target=str(version), level="WARNING")
+            impact = inspected["shared_impact"]
+            response = {
+                **baseline, "state": inspected["state"], "reason": inspected.get("reason") or "",
+                "changes": inspected["changes"], "shared_impact": impact,
+                "source": inspected["source"],
+                "source_observation_sha256": inspected["fpm_observation_sha256"],
+                "note": ("Point-in-time desired-versus-file comparison only. "
+                         "Shared site-file attribution is separately classified. "
+                         "To restore, load the saved values then independently Preview, "
+                         "Prepare, approve and Apply the guarded PHP 8.1/8.5 service."),
+            }
+            return self._activity_result(
+                response, "php_fpm", "fpm_policy_recheck", target=str(version),
+                level="INFO" if inspected["state"] == "File Drift" else "DEBUG")
+        except PermissionError as exc:
+            return self._fail("fpm_policy_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("fpm_policy_recheck", exc, request_id)
+
     def fpm_policy_save(self, args):
         """Store reviewed Monitor-only desired values; never touch PHP service."""
         request_id = uuid4().hex

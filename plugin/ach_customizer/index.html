@@ -374,13 +374,18 @@
       </form>
       <div class="ach-note" aria-label="Saved shared PHP-FPM Monitor policy">
         <strong>Saved shared PHP-FPM intent — Monitor only</strong>
-        <p>Explicitly save the five desired [www] settings for this PHP service after inspecting a fresh file preview. Later, load them and Preview again to detect aaPanel site-provisioning drift. This changes only plugin-owned settings, not PHP files, services, sites or enforcement. The saved policy is not an Apply approval.</p>
+        <p>Save five reviewed desired [www] settings; later use <strong>Recheck saved policy</strong> to compare current native files and see the shared-site mapping without changing the form. To recover from drift, Load saved values, Preview, Prepare and explicitly approve the existing guarded PHP 8.1/8.5 Apply. No automatic enforcement; source comparison does not prove loaded PHP settings.</p>
         <div class="ach-controls">
+          <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>
           <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
           <label><input id="ach-fpm-policy-reviewed" type="checkbox" disabled /> I reviewed the shared service, desired values and latest source preview.</label>
           <button id="ach-fpm-policy-save" type="button" disabled>Save desired policy (Monitor)</button>
         </div>
         <p id="ach-fpm-policy-status" role="status" aria-live="polite">Select an installed version and Preview to compare or save an explicit policy.</p>
+        <p id="ach-fpm-policy-recheck-status" class="ach-status-metadata" role="status" aria-live="polite">Select a version and recheck saved policy against current PHP files.</p>
+        <div class="ach-scroll" aria-label="Saved-policy file changes"><table><thead><tr><th>Setting</th><th>Saved desired</th><th>Current file/default</th></tr></thead><tbody id="ach-fpm-policy-diff-rows"></tbody></table></div>
+        <p id="ach-fpm-policy-impact" class="ach-status-metadata" role="status" aria-live="polite">No affected-site file mapping checked.</p>
+        <div class="ach-scroll" aria-label="Saved-policy impacted site assignments"><table><thead><tr><th>Site ID</th><th>Native site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-fpm-policy-impact-rows"></tbody></table></div>
       </div>
       <p id="ach-fpm-result" role="status" aria-live="polite"></p>
       <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Configured / PHP default</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
@@ -568,6 +573,7 @@
   var fpmBusy = false, phpPreviewEligible = false, fpmPlan = null, fpmFields = null, fpmRecovery = null;
   var fpmFormGeneration = 0, fpmPreviewTicket = 0, fpmPrepareTicket = 0;
   var fpmPolicyEvidence = null, fpmPolicyBusy = false, fpmPolicyLoadTicket = 0;
+  var fpmRecheckTicket = 0, fpmRecheckBusy = false;
   var fpmPolicyKeys = ['pm.max_children','pm.start_servers','pm.min_spare_servers',
                        'pm.max_spare_servers','pm.max_requests'];
   var fpmActivePrepareTicket = 0;
@@ -3329,6 +3335,7 @@
     root.find('#ach-php-version').empty().val('').prop('disabled', true);
     ++fpmPolicyLoadTicket;
     root.find('#ach-fpm-policy-load').prop('disabled', true);
+    resetFpmRecheck('PHP inventory changed; select a service to recheck saved policy.');
     $('<option>').val('').text('Select installed PHP').appendTo(root.find('#ach-php-version'));
     root.find('#ach-php-discover').prop('disabled', true);
     root.find('#ach-php-discovery-status').text('Discovering native PHP versioned files...');
@@ -3360,6 +3367,7 @@
       root.find('#ach-php-version').prop('disabled', !selectable);
       root.find('#ach-fpm-policy-load').prop('disabled', !selectable ||
         !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+      resetFpmRecheck('PHP inventory ready; recheck saved policy for the selected service.');
       phpRuntimeLock();
       root.find('#ach-php-discovery-status').text(
         r.versions.length + ' PHP version(s) observed; ' + selectable +
@@ -3370,6 +3378,7 @@
   root.find('#ach-php-discover').on('click', loadPhpInventory);
   root.find('#ach-php-version').on('change', function () {
     ++fpmPolicyLoadTicket;
+    resetFpmRecheck('PHP version changed; recheck this service against saved intent.');
     root.find('#ach-fpm-policy-load').prop('disabled',
       !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
     invalidatePhpRuntime('PHP version changed. Inspect the selected version again.');
@@ -3490,6 +3499,104 @@
     root.find('#ach-php-form').serializeArray().forEach(function (field) { data[field.name] = field.value; });
     return data;
   }
+  function resetFpmRecheck(note) {
+    ++fpmRecheckTicket;
+    fpmRecheckBusy = false;
+    root.find('#ach-fpm-policy-diff-rows').empty();
+    root.find('#ach-fpm-policy-impact-rows').empty();
+    root.find('#ach-fpm-policy-impact').text('No verified saved-policy site-file mapping.');
+    root.find('#ach-fpm-policy-recheck-status').text(note ||
+      'Recheck saved desired policy against native source and impacted site files.');
+    root.find('#ach-fpm-policy-recheck').prop('disabled',
+      phpInventoryBusy || fpmPolicyBusy ||
+      !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+  }
+  function validFpmRecheck(r, version) {
+    if (!r || r.status !== true || r.schema !== 1 || r.version !== version ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.auto_enforce !== false || r.apply_eligible !== false ||
+        r.scope !== 'shared_service' || r.pool !== 'www' ||
+        typeof r.reason !== 'string' || r.reason.length > 1000 ||
+        !['No Policy','Needs Review','File Match','File Drift'].includes(r.state) ||
+        !Array.isArray(r.changes) || r.changes.length > fpmPolicyKeys.length ||
+        !validSavedFpmPolicy(r,version)) return false;
+    if (r.state === 'No Policy') return r.saved === false &&
+      r.changes.length === 0 && r.shared_impact === null;
+    if (r.saved !== true) return false;
+    if (r.state === 'Needs Review') return r.reason.length > 0 &&
+      r.changes.length === 0 && r.shared_impact === null;
+    if (!validImpact(r.shared_impact, version) ||
+        typeof r.source_observation_sha256 !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(r.source_observation_sha256)) return false;
+    var seen = new Set();
+    var changesOk = r.changes.every(function (item) {
+      if (!item || !fpmPolicyKeys.includes(item.setting) || seen.has(item.setting) ||
+          !Number.isSafeInteger(item.actual) || item.actual < 0 || item.actual > 9999999 ||
+          item.desired !== r.desired[item.setting] || item.actual === item.desired)
+        return false;
+      seen.add(item.setting);
+      return true;
+    });
+    return changesOk &&
+      (r.state === 'File Match' ? r.changes.length === 0 : r.changes.length > 0);
+  }
+  root.find('#ach-fpm-policy-recheck').on('click', function () {
+    var version = String(root.find('#ach-php-version').val() || '');
+    if (fpmRecheckBusy || fpmPolicyBusy || phpInventoryBusy ||
+        !phpInventory.get(version)?.preview_candidate) return;
+    resetFpmRecheck('Checking saved desired policy against native PHP and site files...');
+    var ticket = ++fpmRecheckTicket;
+    fpmRecheckBusy = true;
+    root.find('#ach-fpm-policy-recheck').prop('disabled',true);
+    request('fpm_policy_recheck', {php_version:version}, function (r,failure) {
+      if (ticket !== fpmRecheckTicket ||
+          version !== String(root.find('#ach-php-version').val() || '')) return;
+      fpmRecheckBusy = false;
+      root.find('#ach-fpm-policy-recheck').prop('disabled',false);
+      if (!validFpmRecheck(r,version)) {
+        root.find('#ach-fpm-policy-recheck-status').text(fpmPolicyFailure(
+          'read', failure, 'Saved policy recheck unavailable or incompatible. No source or site match inferred.'));
+        return;
+      }
+      root.find('#ach-fpm-policy-recheck-status').text(
+        'PHP '+version+' shared [www]: '+r.state+
+        ' (saved revision '+r.policy_revision+'). '+(r.reason||r.note||'')+
+        (r.state === 'File Drift' ?
+          ' Load the saved values, Preview, Prepare, and separately approve guarded Apply to restore; no automatic enforcement.' : '')+
+        ' Point-in-time file/default evidence, not loaded PHP-FPM proof.');
+      if (r.state === 'No Policy' || r.state === 'Needs Review') return;
+      r.changes.forEach(function (item) {
+        var tr=$('<tr>');
+        $('<td>').text(item.setting).appendTo(tr);
+        $('<td>').text(item.desired).appendTo(tr);
+        $('<td>').text(item.actual).appendTo(tr);
+        root.find('#ach-fpm-policy-diff-rows').append(tr);
+      });
+      var impact = r.shared_impact;
+      root.find('#ach-fpm-policy-impact').text(
+        impact.state+': '+impact.matched_sites.length+' PHP '+version+' file-linked site(s), '+
+        impact.unresolved_sites.length+' unresolved, '+impact.other_php_sites_count+
+        ' on other PHP. '+(impact.reason||'')+' '+impact.note+
+        ' Not proof of live routing or authorization to Apply.');
+      impact.matched_sites.forEach(function (site) {
+        var tr=$('<tr>');
+        $('<td>').text(site.id).appendTo(tr);
+        $('<td>').text(site.site_key).appendTo(tr);
+        $('<td>').text('PHP '+version+' (file only)').appendTo(tr);
+        root.find('#ach-fpm-policy-impact-rows').append(tr);
+      });
+      impact.unresolved_sites.forEach(function (site) {
+        var tr=$('<tr>');
+        $('<td>').text(site.id).appendTo(tr);
+        $('<td>').text(site.site_key).appendTo(tr);
+        $('<td>').text('Needs Review: '+site.reason).appendTo(tr);
+        root.find('#ach-fpm-policy-impact-rows').append(tr);
+      });
+    }, function () {
+      return ticket === fpmRecheckTicket &&
+        version === String(root.find('#ach-php-version').val() || '');
+    });
+  });
   function validSavedFpmPolicy(policy, version) {
     if (!policy || policy.schema !== 1 || policy.version !== version ||
         policy.scope !== 'shared_service' || policy.pool !== 'www' ||
@@ -3575,8 +3682,9 @@
     if (!evidence || fpmPolicyBusy || !root.find('#ach-fpm-policy-reviewed').prop('checked') ||
         JSON.stringify(data) !== evidence.form ||
         data.php_version !== evidence.version) return;
-    resetFpmPolicyEvidence('Saving desired PHP policy; host PHP files are not changed...');
     fpmPolicyBusy = true;
+    resetFpmRecheck('Saved policy write attempted; recheck to compare latest desired values.');
+    resetFpmPolicyEvidence('Saving desired PHP policy; host PHP files are not changed...');
     var generation = fpmFormGeneration;
     request('fpm_policy_save', Object.assign({}, data, {
       reviewed:'true',
@@ -3585,6 +3693,8 @@
       expected_observation_sha256:evidence.digest
     }), function (r, failure) {
       fpmPolicyBusy = false;
+      root.find('#ach-fpm-policy-recheck').prop('disabled',
+        phpInventoryBusy || !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
       if (generation !== fpmFormGeneration ||
           data.php_version !== String(root.find('#ach-php-version').val() || '')) return;
       if (!r || r.schema !== 1 || r.version !== data.php_version ||

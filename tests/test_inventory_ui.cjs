@@ -53,6 +53,8 @@ function loadUi() {
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
+    '#ach-fpm-policy-recheck', '#ach-fpm-policy-recheck-status',
+    '#ach-fpm-policy-diff-rows', '#ach-fpm-policy-impact', '#ach-fpm-policy-impact-rows',
     '#ach-fpm-policy-load', '#ach-fpm-policy-reviewed', '#ach-fpm-policy-save',
     '#ach-fpm-policy-status',
     '#ach-max-children', '#ach-start-servers', '#ach-min-spare',
@@ -387,6 +389,13 @@ function loadUi() {
       fpmReviewHidden: elements.get('#ach-fpm-review').props.hidden,
       fpmPrepareDisabled: elements.get('#ach-fpm-prepare').props.disabled,
       fpmPolicyStatus: elements.get('#ach-fpm-policy-status').textContent,
+      fpmPolicyRecheckStatus: elements.get('#ach-fpm-policy-recheck-status').textContent,
+      fpmPolicyRecheckDisabled: elements.get('#ach-fpm-policy-recheck').props.disabled,
+      fpmPolicyRecheckDiffRows: elements.get('#ach-fpm-policy-diff-rows').children.map(tr =>
+        tr.children.map(td => td.textContent)),
+      fpmPolicyRecheckImpact: elements.get('#ach-fpm-policy-impact').textContent,
+      fpmPolicyRecheckSiteRows: elements.get('#ach-fpm-policy-impact-rows').children.map(tr =>
+        tr.children.map(td => td.textContent)),
       fpmPolicySaveDisabled: elements.get('#ach-fpm-policy-save').props.disabled,
       fpmPolicyLoadDisabled: elements.get('#ach-fpm-policy-load').props.disabled,
       fpmPolicyReviewedDisabled: elements.get('#ach-fpm-policy-reviewed').props.disabled,
@@ -497,6 +506,7 @@ function loadUi() {
     openStatus, statusSetValue, statusSetChecked, statusClick, openActivity,
     openPhp,
     loadFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-load'),'click'); return requests.at(-1); },
+    recheckFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-recheck'),'click'); return requests.at(-1); },
     saveFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-save'),'click'); return requests.at(-1); },
     reviewFpmPolicy:checked => {
       elements.get('#ach-fpm-policy-reviewed').props.checked=checked;
@@ -907,6 +917,102 @@ const fpmPolicyPreview = (overrides = {}) => ({
     auto_enforce:false, scope:'shared_service', pool:'www', note:'Monitor only'
   },
   ...overrides
+});
+
+const fpmPolicyRecheck = (overrides = {}) => ({
+  status:true, schema:1, version:'85', policy_revision:4, monitor_revision:2,
+  scope:'shared_service', pool:'www', saved:true, read_only:true,
+  runtime_verified:false, auto_enforce:false, apply_eligible:false,
+  state:'File Drift', reason:'', note:'Point-in-time file only',
+  desired:{'pm.max_children':50,'pm.start_servers':5,
+    'pm.min_spare_servers':5,'pm.max_spare_servers':10,'pm.max_requests':300},
+  source:'/www/server/php/85/etc/php-fpm.conf',
+  source_observation_sha256:'f'.repeat(64),
+  changes:[{setting:'pm.max_children',desired:50,actual:80}],
+  shared_impact:phpImpact(), ...overrides
+});
+
+test('Recheck saved PHP service intent reports real drift and affected file-linked sites', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  assert.equal(ui.state().fpmPolicyRecheckDisabled,false);
+  const request=ui.recheckFpmPolicy();
+  assert.match(request.options.url,/s=fpm_policy_recheck$/);
+  assert.equal(request.options.data.php_version,'85');
+  assert.equal(request.options.data.max_children,undefined,
+    'browser must never supply desired policy values for a saved-policy recheck');
+  request.respond(fpmPolicyRecheck());
+  const actual=ui.state();
+  assert.match(actual.fpmPolicyRecheckStatus,/PHP 85 shared \[www\]: File Drift/);
+  assert.match(actual.fpmPolicyRecheckStatus,/separately approve guarded Apply/);
+  assert.match(actual.fpmPolicyRecheckImpact,/2 PHP 85 file-linked site\(s\)/);
+  assert.deepEqual(actual.fpmPolicyRecheckDiffRows,
+    [['pm.max_children','50','80']]);
+  assert.deepEqual(actual.fpmPolicyRecheckSiteRows,[
+    ['3','site-a.test','PHP 85 (file only)'],
+    ['6','<img src=x onerror=alert(1)>','PHP 85 (file only)']]);
+  assert.equal(actual.fpmCommitDisabled,true);
+  assert.equal(ui.requests.filter(req=>/s=fpm_apply$/.test(req.options.url)).length,0);
+});
+
+test('No saved PHP policy is distinguished from File Match and does not invent impact', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  ui.recheckFpmPolicy().respond(fpmPolicyRecheck({
+    state:'No Policy', saved:false, desired:null, changes:[],
+    shared_impact:null, reason:'No reviewed policy for this PHP version'
+  }));
+  assert.match(ui.state().fpmPolicyRecheckStatus,/No Policy/);
+  assert.deepEqual(ui.state().fpmPolicyRecheckSiteRows,[]);
+  assert.deepEqual(ui.state().fpmPolicyRecheckDiffRows,[]);
+  ui.recheckFpmPolicy().respond(fpmPolicyRecheck({state:'File Match',changes:[]}));
+  assert.match(ui.state().fpmPolicyRecheckStatus,/File Match/);
+  assert.match(ui.state().fpmPolicyRecheckImpact,/file-linked site/);
+});
+
+test('Unresolved shared mapping stays visible, but recheck never enables Apply', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  ui.recheckFpmPolicy().respond(fpmPolicyRecheck({
+    shared_impact:phpImpact({state:'Needs Review',site_count:4,
+      unresolved_sites:[{id:99,site_key:'other.example',reason:'Unknown PHP include'}]})
+  }));
+  assert.match(ui.state().fpmPolicyRecheckImpact,/Needs Review/);
+  assert.deepEqual(ui.state().fpmPolicyRecheckSiteRows.at(-1),
+    ['99','other.example','Needs Review: Unknown PHP include']);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+});
+
+test('Stale version callback or forged recheck response cannot infer PHP policy status', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  const slow=ui.recheckFpmPolicy();
+  ui.selectPhpVersion('81');
+  slow.respond(fpmPolicyRecheck());
+  assert.doesNotMatch(ui.state().fpmPolicyRecheckStatus,/File Drift/);
+  assert.deepEqual(ui.state().fpmPolicyRecheckSiteRows,[]);
+  ui.selectPhpVersion('85');
+  ui.recheckFpmPolicy().respond(fpmPolicyRecheck({apply_eligible:true}));
+  assert.match(ui.state().fpmPolicyRecheckStatus,/unavailable or incompatible/);
+  assert.deepEqual(ui.state().fpmPolicyRecheckDiffRows,[]);
+  assert.equal(ui.state().fpmCommitDisabled,true);
+});
+
+test('Saved PHP policy read failure preserves stage and Operation ID inline', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  ui.recheckFpmPolicy().respond({status:false,stage:'fpm_policy_recheck',
+    msg:'Native PHP source changed during inspection',
+    operation_id:'b'.repeat(32)});
+  assert.match(ui.state().fpmPolicyRecheckStatus,/Saved policy read failed at fpm_policy_recheck/);
+  assert.match(ui.state().fpmPolicyRecheckStatus,/Native PHP source changed/);
+  assert.match(ui.state().fpmPolicyRecheckStatus,/Operation ID: b{32}/);
+  assert.deepEqual(ui.state().fpmPolicyRecheckSiteRows,[]);
 });
 
 test('Fresh PHP preview permits reviewed desired-policy save without invoking FPM Apply', () => {

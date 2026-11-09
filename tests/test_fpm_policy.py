@@ -204,6 +204,115 @@ class FpmPolicyEntrypointTests(unittest.TestCase):
             self.assertEqual(kwargs["expected_observation_sha256"], "b"*64)
             self.assertTrue(response["auto_enforce"] is False)
 
+    def _save_fixture_policy(self, version="85", revision=1):
+        content = {"schema":1, "revision":revision, "profiles":{version: dict(VALUES)}}
+        path = Path(self.store.name)/policy.POLICY_FILE
+        path.write_text(json.dumps(content))
+        path.chmod(0o600)
+
+    def _recheck_file(self, state_value="File Drift", impact=None):
+        if impact is None:
+            impact = {
+                "schema":1, "state":"File Mapping", "scope":"shared_service",
+                "version":"85", "matched_sites":[{"id":3,"site_key":"wordpress.test"}],
+                "unresolved_sites":[], "site_count":1, "other_php_sites_count":0,
+                "dependency_sha256":"d"*64, "manual_apply_eligible":True,
+                "reason":"", "note":"Native file-only scope",
+            }
+        changes = ([{"setting":"pm.max_children","desired":20,"actual":80}]
+                   if state_value == "File Drift" else [])
+        return {
+            "status":True, "state":state_value, "version":"85", "scope":"shared_service",
+            "changes":changes, "source":"/www/server/php/85/etc/php-fpm.conf",
+            "fpm_observation_sha256":"f"*64, "fpm_saved_policy":
+                policy.get_policy("85",directory=self.store.name),
+            "shared_impact":impact, "note":"File/default preview only"
+        }
+
+    def test_recheck_no_policy_has_no_source_or_runtime_actions(self):
+        with patch.object(self.plugin, "preview_php_fpm") as preview:
+            value = self.plugin.fpm_policy_recheck({"php_version":"85",
+                                                   "max_children":"999999"})
+        self.assertTrue(value["status"], value)
+        self.assertEqual(value["state"],"No Policy")
+        self.assertFalse(value["saved"])
+        self.assertEqual(value["changes"],[])
+        self.assertFalse(value["auto_enforce"])
+        self.assertFalse(value["runtime_verified"])
+        self.assertFalse(value["apply_eligible"])
+        preview.assert_not_called()
+
+    def test_recheck_uses_saved_values_not_untrusted_browser_desired(self):
+        self._save_fixture_policy()
+        with patch.object(self.plugin, "preview_php_fpm",
+                          return_value=self._recheck_file()) as preview:
+            value=self.plugin.fpm_policy_recheck({
+                "php_version":"85", "max_children":"999999",
+                "start_servers":"999999", "approved_scope":"fake"
+            })
+        self.assertTrue(value["status"],value)
+        self.assertEqual(value["state"],"File Drift")
+        self.assertEqual(value["changes"][0]["actual"],80)
+        self.assertEqual(value["desired"],VALUES)
+        self.assertEqual(value["shared_impact"]["matched_sites"][0]["id"],3)
+        self.assertFalse(value["auto_enforce"])
+        self.assertFalse(value["apply_eligible"])
+        self.assertFalse(value["runtime_verified"])
+        assert_args=preview.call_args.args[0]
+        self.assertEqual(assert_args["php_version"],"85")
+        self.assertEqual(set(assert_args),
+                         {"php_version","max_children","start_servers",
+                          "min_spare_servers","max_spare_servers","max_requests"})
+        self.assertEqual(assert_args["max_children"],20)
+        self.assertEqual(assert_args["max_requests"],300)
+
+    def test_recheck_match_is_distinct_from_effective_php_runtime_verification(self):
+        self._save_fixture_policy()
+        with patch.object(self.plugin, "preview_php_fpm",
+                          return_value=self._recheck_file("File Match")):
+            result=self.plugin.fpm_policy_recheck({"php_version":"85"})
+        self.assertEqual(result["state"],"File Match")
+        self.assertEqual(result["changes"],[])
+        self.assertFalse(result["runtime_verified"])
+        self.assertFalse(result["apply_eligible"])
+
+    def test_recheck_invalid_source_and_midflight_policy_revision_do_not_infer_sites(self):
+        self._save_fixture_policy()
+        before=policy.get_policy("85",directory=self.store.name)
+        after=dict(before,policy_revision=before["policy_revision"]+1)
+        inspected = self._recheck_file()
+        with patch.object(policy, "get_policy", side_effect=[before,after]), patch.object(
+                self.plugin, "preview_php_fpm",
+                return_value={**inspected, "fpm_saved_policy":before}) as preview:
+            result=self.plugin.fpm_policy_recheck({"php_version":"85"})
+        self.assertTrue(result["status"])
+        self.assertEqual(result["state"],"Needs Review")
+        self.assertIsNone(result["shared_impact"])
+        self.assertEqual(result["changes"],[])
+        preview.assert_called_once()
+        with patch.object(self.plugin,"preview_php_fpm",return_value={
+            **self._recheck_file(), "state":"Needs Review",
+            "fpm_observation_sha256":None, "reason":"Untrusted pool source"
+        }):
+            fail=self.plugin.fpm_policy_recheck({"php_version":"85"})
+        self.assertEqual(fail["state"],"Needs Review")
+        self.assertIn("Untrusted",fail["reason"])
+        self.assertIsNone(fail["shared_impact"])
+
+    def test_recheck_unsupported_or_failed_preview_returns_actionable_stage(self):
+        self._save_fixture_policy()
+        with patch.object(self.plugin, "preview_php_fpm",return_value={
+            "status":False,"stage":"php_fpm_file_preview", "msg":"Cannot read source"
+        }):
+            fail=self.plugin.fpm_policy_recheck({"php_version":"85"})
+        self.assertFalse(fail["status"])
+        self.assertEqual(fail["stage"],"fpm_policy_recheck")
+        self.assertRegex(fail["operation_id"],r"^[a-f0-9]{32}$")
+        for version in ("74","85/../bad"):
+            invalid=self.plugin.fpm_policy_recheck({"php_version":version})
+            self.assertFalse(invalid["status"])
+            self.assertEqual(invalid["stage"],"fpm_policy_recheck")
+
     def test_corrupt_saved_policy_does_not_hide_file_preview(self):
         payload = {"php_version":"85", "max_children":"20", "start_servers":"5",
                    "min_spare_servers":"5", "max_spare_servers":"10",
@@ -239,7 +348,7 @@ class FpmPolicyEntrypointTests(unittest.TestCase):
                 self.flask.session = actor
                 self.flask.request.method = method
                 self.flask.has_request_context = lambda:context
-                for name in ("fpm_policy_get", "fpm_policy_save"):
+                for name in ("fpm_policy_get", "fpm_policy_save", "fpm_policy_recheck"):
                     response = getattr(self.plugin, name)({"php_version":"85"})
                     self.assertFalse(response["status"])
                     self.assertEqual(response["stage"], "fpm_policy_authorization")
