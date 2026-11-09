@@ -106,6 +106,34 @@ class GeneratedVhostDriftTests(unittest.TestCase):
                 self.assertIsNone(got["vhost_sha256"])
                 self.assertEqual(got["findings"], [])
 
+    def test_noncanonical_trailing_dots_never_produce_file_match(self):
+        original = self.path.read_text()
+        for invalid in ("alpha.test..", "alpha.test...", "www.alpha.test..",
+                        "alpha..test", "*.alpha.test"):
+            with self.subTest(generated=invalid):
+                self.write(original.replace("server_name alpha.test www.alpha.test;",
+                    "server_name " + invalid + " www.alpha.test;"))
+                report = self.inspect()
+                self.assertEqual(report["state"], "Needs Review", report)
+                self.assertEqual(report["findings"], [])
+                self.assertIsNone(report["vhost_sha256"])
+        self.write(original)
+        for invalid in ("alpha.test..", "alpha.test..."):
+            with self.subTest(registered=invalid):
+                self.site["bound_domains"][0]["name"] = invalid
+                report = self.inspect()
+                self.assertEqual(report["state"], "Needs Review", report)
+                self.assertEqual(report["findings"], [])
+        self.site["bound_domains"][0]["name"] = "alpha.test"
+        # Only one terminal root dot is a supported DNS spelling variant.
+        self.write(original.replace("server_name alpha.test www.alpha.test;",
+                                    "server_name ALPHA.TEST. www.alpha.test;"))
+        self.site["bound_domains"][0]["name"] = "alpha.test."
+        report = self.inspect()
+        self.assertEqual(report["state"], "File Match", report)
+        self.assertEqual(report["native_names"], ["alpha.test", "www.alpha.test"])
+        self.assertEqual(report["vhost_names"], report["native_names"])
+
     def test_no_untrusted_source_paths_or_hostnames(self):
         for key in ("../other", "a/b", "*.example.com", "bad site"):
             with self.subTest(key=key):

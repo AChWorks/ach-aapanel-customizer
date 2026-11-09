@@ -1255,6 +1255,14 @@ test('VHost uncertain source and invalid replies never claim a matching file', (
   const invalid=[{site_id:8},{site_key:'other.test'},{runtime_verified:true},
     {fix_supported:true},{vhost_sha256:'forged'},
     {state:'File Match',findings:['DOCUMENT_ROOT_MISMATCH']},
+    {state:'File Match',vhost_root:'/www/stale'},
+    {state:'File Match',vhost_names:['other.site.test']},
+    {state:'File Match',native_names:[],vhost_names:[]},
+    {state:'File Match',native_names:['site.test..'],vhost_names:['site.test..']},
+    {state:'File Drift',vhost_root:'/www/stale',findings:['BOUND_HOST_MISSING_IN_VHOST']},
+    {state:'File Drift',vhost_names:['other.site.test'],
+     findings:['VHOST_HOST_NOT_IN_NATIVE_BINDINGS','BOUND_HOST_MISSING_IN_VHOST']},
+    {state:'File Drift',vhost_names:['site.test'],findings:['DOCUMENT_ROOT_MISMATCH']},
     {state:'File Drift',findings:[]},
     {native_names:['<img src=x onerror=alert(1)>']},
     {listen_ports:[99999]},
@@ -1272,6 +1280,51 @@ test('VHost uncertain source and invalid replies never claim a matching file', (
   }));
   assert.match(ui.state().vhostResult,/Needs Review/);
   assert.doesNotMatch(ui.state().vhostResult,/File Match/);
+});
+
+test('VHost controlled backend failures keep stage, reason and correlation beside inspect', () => {
+  const cases=[
+    {stage:'website_vhost_inspection',msg:'Native site/root/bindings changed; refresh website inventory',
+      operation_id:'a'.repeat(32)},
+    {stage:'website_vhost_authorization',msg:'Full primary aaPanel administrator session and POST are required',
+      operation_id:'b'.repeat(32)},
+    {stage:'website_vhost_inspection',msg:'Native site changed during VHost comparison',
+      operation_id:'c'.repeat(32)}
+  ];
+  for (const rejected of cases) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-vhost-inspect-button').respond({status:false,...rejected});
+    const info=ui.state().vhostResult;
+    assert.match(info,/Read-only inspection failed at/);
+    assert.ok(info.includes(rejected.stage),info);
+    assert.ok(info.includes(rejected.msg),info);
+    assert.ok(info.includes('Operation ID: ' + rejected.operation_id),info);
+    assert.doesNotMatch(info,/Generated VHost: File Match/);
+    assert.equal(ui.state().vhostInspectDisabled,false);
+  }
+});
+
+test('VHost invalid backend reply and network failures are not mistaken for authoritative inspection', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-vhost-inspect-button').respond({status:false,
+    stage:'<script>',msg:'unsafe',operation_id:'invalid'});
+  assert.match(ui.state().vhostResult,/failed or timed out/);
+  assert.doesNotMatch(ui.state().vhostResult,/<script>/);
+  const request=ui.statusClick('#ach-vhost-inspect-button');
+  request.reject(null,'timeout');
+  assert.match(ui.state().vhostResult,/failed or timed out/);
+  assert.doesNotMatch(ui.state().vhostResult,/File Match/);
+  assert.equal(ui.state().vhostInspectDisabled,false);
+});
+
+test('VHost stale rejection after site selection change never resurfaces old error detail', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const old=ui.statusClick('#ach-vhost-inspect-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  old.respond({status:false,stage:'website_vhost_inspection',
+    msg:'stale-private-error',operation_id:'d'.repeat(32)});
+  assert.doesNotMatch(ui.state().vhostResult,/stale-private-error|Operation ID:/);
+  assert.match(ui.state().vhostResult,/changed/);
 });
 
 test('VHost results are revoked on selection changes and inventory refresh', () => {

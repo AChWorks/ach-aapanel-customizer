@@ -21,7 +21,8 @@ NOTE = (
     "Comparison of registered aaPanel site/domain records with the generated "
     "Nginx VHost file only. It is not an active nginx -T, effective location, "
     "TLS/DNS, WordPress Toolkit ownership, runtime or desired-policy check. "
-    "No files, settings or services were changed."
+    "No website configuration, generated VHost, cache or service state "
+    "was changed; this inspection may append a plugin Activity entry."
 )
 
 
@@ -32,7 +33,11 @@ class VhostDriftError(MonitorInputError):
 def _canonical_host(raw):
     if not isinstance(raw, str) or not HOSTNAME.fullmatch(raw):
         raise VhostDriftError("Unrecognized native website hostname")
-    name = raw.lower().rstrip(".")
+    # Exactly one terminal DNS root dot is an accepted spelling variant;
+    # multiple trailing dots are malformed and must never normalize to a match.
+    if raw.endswith(".."):
+        raise VhostDriftError("Noncanonical trailing dots in website hostname")
+    name = (raw[:-1] if raw.endswith(".") else raw).lower()
     if name.startswith("*.") or ".." in name or "_" in name or any(
         not part or len(part) > 63 or part.startswith("-") or part.endswith("-")
         for part in name.split(".")

@@ -714,11 +714,13 @@
         !/^[a-z0-9_]{1,80}$/.test(failure.stage) ||
         typeof failure.msg !== 'string' || !failure.msg.trim()) return fallback;
     var message = failure.msg.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 320);
-    var readOnly = action === 'recheck';
-    var summary = (readOnly ? 'Read-only Recheck failed at ' :
+    var readOnly = action === 'recheck' || action === 'inspect';
+    var summary = (action === 'inspect' ? 'Read-only inspection failed at ' :
+      readOnly ? 'Read-only Recheck failed at ' :
       'Write outcome not confirmed at ') + failure.stage + ': ' + message;
-    var guidance = readOnly ?
-      '\nNo routing change was requested. Resolve the cause and Recheck.' :
+    var guidance = action === 'inspect' ?
+      '\nNo website configuration was changed. Resolve the cause and inspect again.' :
+      readOnly ? '\nNo routing change was requested. Resolve the cause and Recheck.' :
       '\nRecheck saved recovery before any retry; do not assume success or failure.';
     if (readOnly && failure.stage === 'status_unbound_probe')
       guidance += '\nCheck Nginx HTTP/80 loopback listeners at 127.0.0.1 and [::1].';
@@ -731,7 +733,8 @@
       operationId : (requestId || operationId);
     return summary + guidance +
       (id(failure.recovery_id) ? '\nRecovery ID: ' + failure.recovery_id : '') +
-      (correlationId ? '\nRequest ID: ' + correlationId : '');
+      (correlationId ? '\n' + (action === 'inspect' ? 'Operation ID: ' : 'Request ID: ') +
+        correlationId : '');
   }
   function request(method, data, done, shouldReport, expectedRestoreSha) {
     // Multiple independent panels may load in parallel. Preserve the global
@@ -1399,7 +1402,7 @@
         !Array.isArray(r.listen_ports) || r.listen_ports.length > 20 ||
         !r.listen_ports.every(x => Number.isSafeInteger(x) && x >= 1 && x <= 65535)) return false;
     var hostOK = x => typeof x === 'string' && x.length > 0 && x.length <= 253 &&
-      /^[a-z0-9.-]+$/.test(x);
+      /^[a-z0-9.-]+$/.test(x) && !x.endsWith('.') && !x.includes('..');
     if (!r.native_names.every(hostOK) || !r.vhost_names.every(hostOK) ||
         new Set(r.native_names).size !== r.native_names.length ||
         new Set(r.vhost_names).size !== r.vhost_names.length) return false;
@@ -1408,11 +1411,23 @@
         r.vhost_root === null && r.findings.length === 0 &&
         r.native_names.length === 0 && r.vhost_names.length === 0 &&
         r.listen_ports.length === 0 && r.reason.length > 0;
-    return /^[0-9a-f]{64}$/.test(r.vhost_sha256 || '') &&
-      typeof r.native_root === 'string' && r.native_root.length <= 2048 &&
-      typeof r.vhost_root === 'string' && r.vhost_root.length <= 2048 &&
-      r.reason === '' &&
-      (r.state === 'File Match' ? r.findings.length === 0 : r.findings.length > 0);
+    if (r.native_names.length === 0 || r.vhost_names.length === 0 ||
+        !/^[0-9a-f]{64}$/.test(r.vhost_sha256 || '') ||
+        typeof r.native_root !== 'string' || !r.native_root || r.native_root.length > 2048 ||
+        typeof r.vhost_root !== 'string' || !r.vhost_root || r.vhost_root.length > 2048 ||
+        r.reason !== '') return false;
+    // Treat findings and state as corroborated source evidence, never as
+    // independent labels. Reject internally contradictory backend replies.
+    var nativeNames = new Set(r.native_names), vhostNames = new Set(r.vhost_names);
+    var expected = [];
+    if (r.native_root !== r.vhost_root) expected.push('DOCUMENT_ROOT_MISMATCH');
+    if (r.native_names.some(x => !vhostNames.has(x)))
+      expected.push('BOUND_HOST_MISSING_IN_VHOST');
+    if (r.vhost_names.some(x => !nativeNames.has(x)))
+      expected.push('VHOST_HOST_NOT_IN_NATIVE_BINDINGS');
+    return expected.length === r.findings.length &&
+      expected.every((code, i) => r.findings[i] === code) &&
+      r.state === (expected.length ? 'File Drift' : 'File Match');
   }
   root.find('#ach-vhost-inspect-button').on('click', function () {
     var id = hostsSiteId();
@@ -1425,11 +1440,17 @@
       site_id:id,
       expected_site_key:hostsPageSites.get(id).name,
       expected_site_snapshot:hostsPageSites.get(id).snapshot
-    }, function (r) {
+    }, function (r, failure) {
       if (ticket !== vhostTicket) return;
       vhostBusy = false;
       vhostLock();
-      if (id !== hostsSiteId() || !validVhostInspection(r, id)) {
+      if (id !== hostsSiteId()) return;
+      if (!r) {
+        root.find('#ach-vhost-result').text(statusBackendFailure('inspect', failure,
+          'VHost inspection failed or timed out. No source comparison is confirmed; inspect again.'));
+        return;
+      }
+      if (!validVhostInspection(r, id)) {
         root.find('#ach-vhost-result').text(
           'VHost comparison unavailable or incompatible. No file-state conclusion is available.');
         return;
