@@ -337,6 +337,10 @@
       <p class="ach-note">Select a discovered website above, or use Previous / Next to inspect another page. The same selection also supports the separate read-only FastCGI cache source audit below. Neither diagnosis tests a remote host or authorizes changing Nginx/cache files.</p>
       <p id="ach-hosts-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website from the inventory for read-only inspection.</p>
       <hr />
+      <p class="ach-note"><strong>Generated Nginx VHost comparison (read-only):</strong> Compare the selected aaPanel site's bound hostnames and document root with the generated VHost file. This cannot prove active Nginx routing, TLS, WordPress Toolkit policy or effective runtime.</p>
+      <div class="ach-controls"><button id="ach-vhost-inspect-button" type="button" disabled>Compare selected website VHost</button></div>
+      <p id="ach-vhost-result" class="ach-status-metadata" role="status" aria-live="polite">Select a website to compare native records with generated VHost source.</p>
+      <hr />
       <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines known Nginx VHost and PHP snippet text for cache-zone reuse, missing direct bypass/write-guard statements, cache-key host tokens, response-header ignore and purge directives. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
       <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
@@ -1235,7 +1239,19 @@
   });
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
   var cacheBusy = false, cacheTicket = 0;
+  var vhostBusy = false, vhostTicket = 0;
+  function vhostLock() {
+    root.find('#ach-vhost-inspect-button').prop('disabled',
+      vhostBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+  }
+  function invalidateVhostInspection(note) {
+    ++vhostTicket;
+    vhostBusy = false;
+    root.find('#ach-vhost-result').text(note || 'Select a website for a new VHost comparison.');
+    vhostLock();
+  }
   function invalidateCacheAudit(note) {
+    invalidateVhostInspection('Website selection or inventory changed; compare VHost again.');
     ++cacheTicket;
     cacheBusy = false;
     root.find('#ach-cache-result').text(note ||
@@ -1245,6 +1261,7 @@
   function cacheLock() {
     root.find('#ach-cache-inspect-button').prop('disabled',
       cacheBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+    vhostLock();
   }
   function nativeHostsSnapshot(site) {
     var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
@@ -1361,6 +1378,77 @@
           '\nFile SHA-256: ' + r.hosts_sha256 + '\n' + r.note);
       }
       hostsLock(false);
+    });
+  });
+  function validVhostInspection(r, id) {
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== hostsPageSites.get(id)?.name ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.fix_supported !== false ||
+        !['File Match','File Drift','Needs Review'].includes(r.state) ||
+        typeof r.reason !== 'string' || r.reason.length > 250 ||
+        typeof r.note !== 'string' || r.note.length > 700 ||
+        !Array.isArray(r.findings) || r.findings.length > 3 ||
+        !r.findings.every(x => [
+          'DOCUMENT_ROOT_MISMATCH','BOUND_HOST_MISSING_IN_VHOST',
+          'VHOST_HOST_NOT_IN_NATIVE_BINDINGS'
+        ].includes(x)) ||
+        new Set(r.findings).size !== r.findings.length ||
+        !Array.isArray(r.native_names) || r.native_names.length > 100 ||
+        !Array.isArray(r.vhost_names) || r.vhost_names.length > 100 ||
+        !Array.isArray(r.listen_ports) || r.listen_ports.length > 20 ||
+        !r.listen_ports.every(x => Number.isSafeInteger(x) && x >= 1 && x <= 65535)) return false;
+    var hostOK = x => typeof x === 'string' && x.length > 0 && x.length <= 253 &&
+      /^[a-z0-9.-]+$/.test(x);
+    if (!r.native_names.every(hostOK) || !r.vhost_names.every(hostOK) ||
+        new Set(r.native_names).size !== r.native_names.length ||
+        new Set(r.vhost_names).size !== r.vhost_names.length) return false;
+    if (r.state === 'Needs Review')
+      return r.vhost_sha256 === null && r.native_root === null &&
+        r.vhost_root === null && r.findings.length === 0 &&
+        r.native_names.length === 0 && r.vhost_names.length === 0 &&
+        r.listen_ports.length === 0 && r.reason.length > 0;
+    return /^[0-9a-f]{64}$/.test(r.vhost_sha256 || '') &&
+      typeof r.native_root === 'string' && r.native_root.length <= 2048 &&
+      typeof r.vhost_root === 'string' && r.vhost_root.length <= 2048 &&
+      r.reason === '' &&
+      (r.state === 'File Match' ? r.findings.length === 0 : r.findings.length > 0);
+  }
+  root.find('#ach-vhost-inspect-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || vhostBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var ticket = ++vhostTicket;
+    vhostBusy = true;
+    vhostLock();
+    root.find('#ach-vhost-result').text('Comparing native site records to generated VHost file...');
+    request('inspect_native_vhost', {
+      site_id:id,
+      expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r) {
+      if (ticket !== vhostTicket) return;
+      vhostBusy = false;
+      vhostLock();
+      if (id !== hostsSiteId() || !validVhostInspection(r, id)) {
+        root.find('#ach-vhost-result').text(
+          'VHost comparison unavailable or incompatible. No file-state conclusion is available.');
+        return;
+      }
+      if (r.state === 'Needs Review') {
+        root.find('#ach-vhost-result').text('Generated VHost: Needs Review — ' +
+          r.reason + '\n' + r.note);
+        return;
+      }
+      root.find('#ach-vhost-result').text(
+        'Generated VHost: ' + r.state +
+        '\nNative root: ' + r.native_root + '; VHost root: ' + r.vhost_root +
+        '\nNative bound names: ' + (r.native_names.join(', ') || 'None') +
+        '\nGenerated server_name: ' + (r.vhost_names.join(', ') || 'None') +
+        '\nGenerated listen ports (not compared to native domain ports): ' +
+          (r.listen_ports.join(', ') || 'None observed') +
+        '\nReview signals: ' + (r.findings.join(', ') || 'None') +
+        '\nSource identity SHA-256: ' + r.vhost_sha256 +
+        '\n' + r.note);
     });
   });
   function validCacheAudit(r, id) {
