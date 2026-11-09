@@ -109,6 +109,7 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         result = self.inspect()
         self.assertEqual(result["state"], "Source Observed", result)
         self.assertEqual(result["cache_zone"], "WORDPRESS")
+        self.assertEqual(result["php_version"], "85")
         self.assertFalse(result["global_zone_directly_declared"])
         self.assertTrue(result["aaPanel_global_include_observed"])
         self.assertEqual(result["cache_directory"],"/www/server/fastcgi_cache")
@@ -562,6 +563,7 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         with patch.object(audit, "_site_source", side_effect=reconfigure):
             got = self.inspect()
         self.assertEqual(got["state"], "Needs Review")
+        self.assertIsNone(got["php_version"])
         self.assertIsNone(got["source_sha256"])
         self.assertEqual(got["other_sites_same_zone"], [])
 
