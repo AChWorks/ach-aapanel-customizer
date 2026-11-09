@@ -3509,6 +3509,20 @@
       policy.desired['pm.start_servers'] <= policy.desired['pm.max_spare_servers'] &&
       policy.desired['pm.max_spare_servers'] <= policy.desired['pm.max_children'];
   }
+  function fpmPolicyFailure(action, failure, fallback) {
+    if (!failure || failure.status !== false || typeof failure.stage !== 'string' ||
+        !/^[a-z0-9_]{1,80}$/.test(failure.stage) ||
+        typeof failure.msg !== 'string' || !failure.msg.trim()) return fallback;
+    var reason = failure.msg.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 320);
+    var operationId = typeof failure.operation_id === 'string' &&
+      /^[0-9a-f]{32}$/.test(failure.operation_id) ? failure.operation_id : null;
+    return (action === 'save' ? 'Policy save rejected at ' : 'Saved policy read failed at ') +
+      failure.stage + ': ' + reason +
+      (operationId ? '\nOperation ID: ' + operationId : '') +
+      (action === 'save' ?
+        '\nReload saved policy state before another save; PHP service/configuration is unchanged.' :
+        '\nNo desired values were loaded or changed.');
+  }
   function resetFpmPolicyEvidence(note) {
     fpmPolicyEvidence = null;
     root.find('#ach-fpm-policy-reviewed').prop('checked', false).prop('disabled', true);
@@ -3525,13 +3539,13 @@
     var generation = fpmFormGeneration, ticket = ++fpmPolicyLoadTicket;
     root.find('#ach-fpm-policy-load').prop('disabled', true);
     root.find('#ach-fpm-policy-status').text('Reading saved shared PHP policy...');
-    request('fpm_policy_get', {php_version:version}, function (r) {
+    request('fpm_policy_get', {php_version:version}, function (r, failure) {
       if (ticket !== fpmPolicyLoadTicket || generation !== fpmFormGeneration ||
           version !== String(root.find('#ach-php-version').val() || '')) return;
       root.find('#ach-fpm-policy-load').prop('disabled', false);
       if (!validSavedFpmPolicy(r, version)) {
-        root.find('#ach-fpm-policy-status').text(
-          'Saved policy unavailable or incompatible. No values have been changed.');
+        root.find('#ach-fpm-policy-status').text(fpmPolicyFailure(
+          'read', failure, 'Saved policy unavailable or incompatible. No values have been changed.'));
         return;
       }
       if (!r.saved) {
@@ -3569,7 +3583,7 @@
       expected_policy_revision:evidence.policy_revision,
       expected_monitor_revision:evidence.monitor_revision,
       expected_observation_sha256:evidence.digest
-    }), function (r) {
+    }), function (r, failure) {
       fpmPolicyBusy = false;
       if (generation !== fpmFormGeneration ||
           data.php_version !== String(root.find('#ach-php-version').val() || '')) return;
@@ -3578,8 +3592,9 @@
           r.auto_enforce !== false || r.runtime_verified !== false ||
           r.scope !== 'shared_service' ||
           !Number.isSafeInteger(r.policy_revision)) {
-        root.find('#ach-fpm-policy-status').text(
-          'Policy save outcome unconfirmed. Use Load saved desired values to reconcile before trying again.');
+        root.find('#ach-fpm-policy-status').text(fpmPolicyFailure(
+          'save', failure,
+          'Policy save outcome unconfirmed. Use Load saved desired values to reconcile before trying again.'));
       } else {
         invalidatePhpPreview('Saved desired shared PHP policy; run a fresh file preview before Prepare/Apply.');
         root.find('#ach-fpm-policy-status').text(

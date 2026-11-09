@@ -950,6 +950,46 @@ test('Changing PHP values or missing a trusted source token revokes policy-save 
   assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
 });
 
+test('Rejected PHP policy save preserves actionable backend stage and Operation ID inline', () => {
+  const ui = loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.reviewFpmPolicy(true);
+  const req = ui.saveFpmPolicy();
+  req.respond({status:false, stage:'fpm_policy_save',
+    msg:'Saved PHP policy changed; reload and inspect again',
+    operation_id:'a'.repeat(32)});
+  assert.match(ui.state().fpmPolicyStatus, /Policy save rejected at fpm_policy_save/);
+  assert.match(ui.state().fpmPolicyStatus, /Saved PHP policy changed/);
+  assert.match(ui.state().fpmPolicyStatus, /Operation ID: a{32}/);
+  assert.match(ui.state().fpmPolicyStatus, /Reload saved policy state before another save/);
+  assert.doesNotMatch(ui.state().fpmPolicyStatus, /outcome unconfirmed/);
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+});
+
+test('Policy read authorization failure explains cause instead of a generic empty result', () => {
+  const ui = loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  const req = ui.loadFpmPolicy();
+  req.respond({status:false,stage:'fpm_policy_authorization',
+    msg:'Full primary aaPanel administrator POST is required',
+    operation_id:'b'.repeat(32)});
+  assert.match(ui.state().fpmPolicyStatus,/Saved policy read failed at fpm_policy_authorization/);
+  assert.match(ui.state().fpmPolicyStatus,/Full primary aaPanel administrator POST/);
+  assert.match(ui.state().fpmPolicyStatus,/Operation ID: b{32}/);
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+});
+
+test('Transport-unknown policy save never pretends rejection or successful persistence', () => {
+  const ui = loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.reviewFpmPolicy(true);
+  const req = ui.saveFpmPolicy();
+  req.reject(null,'timeout');
+  assert.match(ui.state().fpmPolicyStatus,/Policy save outcome unconfirmed/);
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+});
+
 test('A stale policy save cannot claim a completed host operation or restore review', () => {
   const ui = loadUi();
   ui.submitPhp().respond(fpmPolicyPreview());
