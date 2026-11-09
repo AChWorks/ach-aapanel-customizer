@@ -279,7 +279,8 @@ class FastCgiCacheSourceTests(unittest.TestCase):
                       "/www/server/./fastcgi_cache",
                       "/www/server/fastcgi_cache/.",
                       "/www/server/cache/../fastcgi_cache",
-                      "/www/server//fastcgi_cache"):
+                      "/www/server//fastcgi_cache",
+                      "//www/server/fastcgi_cache"):
             with self.subTest(alias=alias):
                 global_file.write_text(original +
                     "fastcgi_cache_path " + alias +
@@ -289,6 +290,7 @@ class FastCgiCacheSourceTests(unittest.TestCase):
                 self.assertIsNone(result["source_sha256"])
                 self.assertIsNone(result["cache_directory"])
                 self.assertEqual(result["purge_scope"], "Unknown")
+                self.assertFalse(result["purge_supported"])
         # Two different canonical path strings may alias via a mount or
         # symlink, so source-only data cannot certify physical isolation.
         global_file.write_text(original +
@@ -298,6 +300,18 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         self.assertEqual(result["other_sites_same_zone"], [])
         self.assertEqual(result["other_sites_same_directory"], [])
         self.assertEqual(result["cache_directory"], "/www/server/fastcgi_cache")
+        self.assertEqual(result["purge_scope"], "Unknown")
+        self.assertFalse(result["purge_supported"])
+
+    def test_double_leading_slash_selected_cache_directory_needs_review(self):
+        global_file = self.global_cache_fixture()
+        global_file.write_text(global_file.read_text().replace(
+            "fastcgi_cache_path /www/server/fastcgi_cache ",
+            "fastcgi_cache_path //www/server/fastcgi_cache "))
+        result = self.inspect()
+        self.assertEqual(result["state"], "Needs Review", result)
+        self.assertIsNone(result["source_sha256"])
+        self.assertIsNone(result["cache_directory"])
         self.assertEqual(result["purge_scope"], "Unknown")
         self.assertFalse(result["purge_supported"])
 

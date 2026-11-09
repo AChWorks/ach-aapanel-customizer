@@ -313,6 +313,7 @@ def _known_global_cache(nginx_root, vhost_root):
             if (len(names) != 1 or not ZONE.fullmatch(names[0])
                     or names[0] in paths or not tokens or
                     not re.fullmatch(r"/[A-Za-z0-9_./-]{1,240}", tokens[0])
+                    or "//" in tokens[0]
                     or posixpath.normpath(tokens[0]) != tokens[0]):
                 # Refuse /./, trailing /, /../, and duplicate separators:
                 # they cannot create a false "no peer" from equivalent text.
