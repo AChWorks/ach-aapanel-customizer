@@ -351,6 +351,19 @@
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
       <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
+      <div class="ach-note" aria-label="Guarded site-specific FastCGI Cache activation">
+        <strong>Site-owned FastCGI Cache — manual Apply / Restore</strong>
+        <p>For a matching aaPanel 8.0.7 Nginx HTTP/80 site using standard PHP 8.1/8.5. Writes an isolated HTTP cache zone and site-owned PHP handler extension, checks Nginx syntax, requests an explicit reload and verifies an origin-local PHP marker. Existing WORDPRESS cache files are never touched. This is not a WooCommerce/Nginx Helper safety certification. No automatic Apply or Purge All.</p>
+        <div class="ach-controls">
+          <button type="button" id="ach-cache-activation-preview" disabled>Check site-specific Cache Apply readiness</button>
+          <button type="button" id="ach-cache-activation-recheck" disabled>Recheck Cache / recovery</button>
+        </div>
+        <p id="ach-cache-activation-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to check Apply readiness or inspect recovery.</p>
+        <label><input id="ach-cache-activation-reviewed" type="checkbox" disabled /> I reviewed the selected site's cache zone, physical directory, Nginx service reload, and current source hashes.</label>
+        <div class="ach-controls"><button type="button" id="ach-cache-activation-apply" class="btn btn-warning" disabled>Apply site-specific Cache (reload Nginx)</button></div>
+        <label><input id="ach-cache-restore-reviewed" type="checkbox" disabled /> I approve restoring this site's saved Cache state. Nginx may reload; verified unactivated recovery does not.</label>
+        <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
+      </div>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
@@ -697,7 +710,7 @@
       method === 'status_manage' || method === 'status_defaults' ||
       method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
-      method === 'fpm_policy_save';
+      method === 'fpm_policy_save' || method === 'manage_cache_policy';
   }
   function validInventoryPage(r, expectedPage) {
     if (!r || typeof r !== 'object' || Array.isArray(r) ||
@@ -769,10 +782,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save))$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy)$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -1273,6 +1286,25 @@
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
   var cacheBusy = false, cacheTicket = 0;
   var cachePlanBusy = false, cachePlanTicket = 0;
+  var cacheActivationBusy = false, cacheActivationTicket = 0;
+  var cacheActivationSnapshot = null, cacheRecoveryIdentity = null;
+  function cacheActivationLock() {
+    var id = hostsSiteId(), unready = hostsBusy || siteBusy ||
+      websitePolicyState !== 'stable' || !id;
+    root.find('#ach-cache-activation-preview,#ach-cache-activation-recheck')
+      .prop('disabled', cacheActivationBusy || unready);
+    root.find('#ach-cache-activation-reviewed')
+      .prop('disabled', cacheActivationBusy || !cacheActivationSnapshot || unready);
+    root.find('#ach-cache-activation-apply')
+      .prop('disabled', cacheActivationBusy || unready ||
+        !cacheActivationSnapshot ||
+        root.find('#ach-cache-activation-reviewed').prop('checked') !== true);
+    root.find('#ach-cache-restore-reviewed')
+      .prop('disabled', cacheActivationBusy || unready || !cacheRecoveryIdentity);
+    root.find('#ach-cache-activation-restore')
+      .prop('disabled', cacheActivationBusy || unready || !cacheRecoveryIdentity ||
+        root.find('#ach-cache-restore-reviewed').prop('checked') !== true);
+  }
   var vhostBusy = false, vhostTicket = 0;
   var nginxCandidateBusy = false, nginxCandidateTicket = 0;
   function vhostLock() {
@@ -1296,6 +1328,14 @@
     cacheBusy = false;
     ++cachePlanTicket;
     cachePlanBusy = false;
+    ++cacheActivationTicket;
+    cacheActivationBusy = false;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+      .prop('checked', false);
+    root.find('#ach-cache-activation-result').text(
+      'Native website selection changed; recheck Cache readiness and recovery.');
     root.find('#ach-cache-result').text(note ||
       'Select a native website to inspect source-only FastCGI cache clues.');
     root.find('#ach-cache-plan-result').text(
@@ -1306,6 +1346,7 @@
     var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
     root.find('#ach-cache-inspect-button').prop('disabled', cacheBusy || unready);
     root.find('#ach-cache-plan-button').prop('disabled', cachePlanBusy || unready);
+    cacheActivationLock();
     vhostLock();
   }
   function nativeHostsSnapshot(site) {
@@ -1824,6 +1865,219 @@
         '\n\nHTTP-scope reference:\n' + r.global_http_fragment +
         '\nServer-scope reference:\n' + r.site_server_fragment +
         '\n' + r.note);
+    });
+  });
+  function cacheNativeArgs(id) {
+    var selected = hostsPageSites.get(id);
+    return {site_id:id, expected_site_key:selected.name,
+      expected_site_snapshot:selected.snapshot};
+  }
+  function cacheActivationNotice(message) {
+    root.find('#ach-cache-activation-result').text(message);
+  }
+  function validCacheActivationReady(response, id) {
+    var site = hostsPageSites.get(id), hash = /^[0-9a-f]{64}$/;
+    return !!(response && site && response.status === true &&
+      response.schema === 1 && response.state === 'Ready for Review' &&
+      response.site_id === Number(id) && response.site_key === site.name &&
+      response.read_only === true && response.apply_supported === true &&
+      response.runtime_verified === false &&
+      hash.test(response.source_sha256 || '') &&
+      hash.test(response.proposal_sha256 || '') &&
+      /^[0-9a-f]{32}$/.test(response.cache_generation || '') &&
+      Number.isInteger(response.php_probe_status) &&
+      response.php_probe_status >= 200 && response.php_probe_status < 400 &&
+      ['81','85'].includes(response.php_version) &&
+      response.cache_zone === 'ACHFC_' + id &&
+      response.cache_directory === '/www/server/ach-customizer-fastcgi/site-' + id &&
+      typeof response.impact === 'string' && response.impact.length < 500);
+  }
+  root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+    .on('change', cacheActivationLock);
+  root.find('#ach-cache-activation-preview').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cacheActivationBusy || hostsBusy || siteBusy ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++cacheActivationTicket;
+    cacheActivationBusy = true;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+      .prop('checked', false);
+    cacheActivationNotice('Inspecting current native sources for manual Cache approval...');
+    cacheActivationLock();
+    request('preview_cache_activation', cacheNativeArgs(id), function (r) {
+      if (ticket !== cacheActivationTicket) return;
+      cacheActivationBusy = false;
+      if (id !== hostsSiteId() || !validCacheActivationReady(r,id)) {
+        cacheActivationNotice('Cache Apply is not ready: ' +
+          (r && typeof r.msg === 'string' ? r.msg :
+            'The site, source or response could not be verified. Recheck native setup.'));
+        cacheActivationLock();
+        return;
+      }
+      cacheActivationSnapshot = {
+        site_id:id, source_sha256:r.source_sha256,
+        proposal_sha256:r.proposal_sha256,
+        cache_generation:r.cache_generation
+      };
+      cacheActivationNotice(
+        'Manual Cache Apply preflight ready (NOT activated or runtime-safe-verified).' +
+        '\nSelected site #'+id+' / PHP '+r.php_version+
+        '\nOrigin PHP route: HTTP '+r.php_probe_status+
+        '\nZone: '+r.cache_zone+'; directory: '+r.cache_directory+
+        '\nCurrent source SHA-256: '+r.source_sha256+
+        '\nReference SHA-256: '+r.proposal_sha256+
+        '\nCache generation: '+r.cache_generation+
+        '\nImpact: '+r.impact+'\n'+r.note);
+      cacheActivationLock();
+    });
+  });
+  function validCacheRecoveryRecheck(r, id) {
+    var site = hostsPageSites.get(id), token = /^[0-9a-f]{32}$/;
+    if (!r || !site || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.read_only !== true ||
+        r.purge_supported !== false ||
+        (r.site_key !== undefined && r.site_key !== site.name)) return false;
+    var phase = r.journal_phase, scope = r.recovery_scope;
+    if (r.state === 'Unmanaged')
+      return r.runtime_verified === false && r.recovery_id == null &&
+        phase == null && scope == null;
+    if (r.state === 'Needs Review')
+      return r.runtime_verified === false && scope == null &&
+        (phase == null || ['prepared','applied','restored'].includes(phase)) &&
+        (r.recovery_id == null || token.test(r.recovery_id));
+    if (!token.test(r.recovery_id || '') || r.site_key !== site.name) return false;
+    if (r.state === 'Applied')
+      return phase === 'applied' && scope == null && r.runtime_verified === true;
+    if (r.state === 'Recovery Required')
+      return ['prepared','applied'].includes(phase) &&
+        (scope == null || (scope === 'prepublication' && phase === 'prepared')) &&
+        r.runtime_verified === false;
+    if (r.state === 'Restored')
+      return phase === 'restored' &&
+        ((scope === 'prepublication' && r.runtime_verified === false) ||
+         (scope == null && r.runtime_verified === true));
+    return false;
+  }
+  function validCacheRestoreReply(r, id, recovery) {
+    var site = hostsPageSites.get(id);
+    if (!r || !site || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== site.name ||
+        r.recovery_id !== recovery || r.state !== 'Restored' ||
+        r.journal_phase !== 'restored' || r.purge_supported !== false) return false;
+    return ((r.recovery_scope === 'prepublication' &&
+             r.changed === false && r.runtime_verified === false) ||
+            (r.recovery_scope == null &&
+             r.changed === true && r.runtime_verified === true));
+  }
+  root.find('#ach-cache-activation-recheck').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cacheActivationBusy || hostsBusy || siteBusy ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++cacheActivationTicket;
+    cacheActivationBusy = true;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+      .prop('checked', false);
+    cacheActivationNotice('Rechecking site-specific Cache journal and worker marker...');
+    cacheActivationLock();
+    request('manage_cache_policy',
+      Object.assign(cacheNativeArgs(id),{cache_action:'recheck'}), function (r) {
+        if (ticket !== cacheActivationTicket) return;
+        cacheActivationBusy = false;
+        var stable = id === hostsSiteId() && validCacheRecoveryRecheck(r,id);
+        if (!stable) {
+          cacheActivationNotice('Cache recovery state not verified: ' +
+            (r && typeof r.msg === 'string' ? r.msg : 'Recheck unavailable'));
+        } else {
+          var op = r.recovery_id;
+          if (typeof op === 'string' && /^[0-9a-f]{32}$/.test(op) &&
+              ['Applied','Recovery Required'].includes(r.state)) {
+            cacheRecoveryIdentity = op;
+          }
+          cacheActivationNotice('Cache state: '+r.state+
+            (cacheRecoveryIdentity ? '\nRecovery ID: '+cacheRecoveryIdentity : '')+
+            '\nRuntime marker verified: '+r.runtime_verified+
+            '\nSite-scoped Purge All: unavailable until native compatibility acceptance.'+
+            '\n'+(r.note || 'Source and worker observations do not certify WooCommerce safety.'));
+        }
+        cacheActivationLock();
+      });
+  });
+  root.find('#ach-cache-activation-apply').on('click', function () {
+    var id = hostsSiteId(), plan = cacheActivationSnapshot;
+    if (!id || cacheActivationBusy || !plan || plan.site_id !== id ||
+        root.find('#ach-cache-activation-reviewed').prop('checked') !== true ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++cacheActivationTicket;
+    cacheActivationBusy = true;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+      .prop('checked', false);
+    cacheActivationNotice('Applying approved site cache and verifying Nginx reload; do not retry uncertain operations...');
+    cacheActivationLock();
+    request('manage_cache_policy', Object.assign(cacheNativeArgs(id),{
+      cache_action:'apply', expected_source_sha256:plan.source_sha256,
+      expected_proposal_sha256:plan.proposal_sha256,
+      cache_generation:plan.cache_generation, approved:'true'
+    }), function (r) {
+      if (ticket !== cacheActivationTicket) return;
+      cacheActivationBusy = false;
+      var success = id === hostsSiteId() && r && r.status === true &&
+        r.schema === 1 && r.site_id === Number(id) &&
+        r.site_key === hostsPageSites.get(id).name &&
+        r.state === 'Applied' && r.journal_phase === 'applied' &&
+        r.recovery_scope == null && r.changed === true &&
+        r.runtime_verified === true &&
+        r.purge_supported === false && /^[0-9a-f]{32}$/.test(r.recovery_id || '');
+      if (success) {
+        cacheRecoveryIdentity = r.recovery_id;
+        cacheActivationNotice('Cache Apply observed on origin PHP handler.'+
+          '\nRecovery ID: '+r.recovery_id+
+          '\nThis does not certify actual WordPress/WooCommerce private routes.'+
+          '\nRecheck the saved generation before any Restore.');
+      } else {
+        cacheActivationNotice('Cache Apply NOT CONFIRMED; do not retry blindly. '+
+          (r && typeof r.msg === 'string' ? r.msg : 'Inspect Activity and Recheck recovery.')+
+          (r && /^[0-9a-f]{32}$/.test(r.recovery_id || '') ?
+            '\nPossible recovery ID: '+r.recovery_id : ''));
+      }
+      cacheActivationLock();
+    });
+  });
+  root.find('#ach-cache-activation-restore').on('click', function () {
+    var id = hostsSiteId(), recovery = cacheRecoveryIdentity;
+    if (!id || cacheActivationBusy || !recovery ||
+        root.find('#ach-cache-restore-reviewed').prop('checked') !== true ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++cacheActivationTicket;
+    cacheActivationBusy = true;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+      .prop('checked', false);
+    cacheActivationNotice('Restoring saved Cache generation; do not retry until Recheck...');
+    cacheActivationLock();
+    request('manage_cache_policy', Object.assign(cacheNativeArgs(id),{
+      cache_action:'restore', recovery_id:recovery, approved:'true'
+    }), function (r) {
+      if (ticket !== cacheActivationTicket) return;
+      cacheActivationBusy = false;
+      var neverActivated = r && r.recovery_scope === 'prepublication';
+      var success = id === hostsSiteId() &&
+        validCacheRestoreReply(r,id,recovery);
+      cacheActivationNotice(success ? (neverActivated ?
+        'Prepared Cache recovery finalized; no Cache was activated or Nginx reloaded.'+
+        '\nRecovery ID: '+recovery+'\nRecheck to confirm the restored journal.' :
+        'Cache Restore observed. Nginx handler removed; recovery files retained.'+
+        '\nRecovery ID: '+recovery+
+        '\nNo shared WORDPRESS cache files were deleted.') :
+        'Cache Restore NOT CONFIRMED; Recheck recovery before another action. '+
+        (r && typeof r.msg === 'string' ? r.msg : 'Inspect Activity and saved journal.'));
+      cacheActivationLock();
     });
   });
   root.find('#ach-sites-refresh').on('click', function () {

@@ -159,6 +159,20 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
         sig = _native_extension_fingerprint(
             extension, site_id=site_id, site_key=site_key)
         fingerprints.append(("extension", site_key, sig))
+        # The native scanner verified the exact journal-owned Cache source.
+        # Audit its real directives too: otherwise a successfully activated
+        # site would appear uncached just because its PHP handler is in the
+        # extension glob rather than the original versioned PHP include.
+        managed_name = "ach_customizer_cache_%d.conf" % site_id
+        managed_path = extension / managed_name
+        if managed_path.exists() or managed_path.is_symlink():
+            managed_raw, managed_sig = _bounded_file_text(
+                managed_path, MAX_NGINX_SITE_BYTES, with_fingerprint=True)
+            from ach_customizer_cache_manage import verified_cache_extension
+            verified_cache_extension(
+                extension, site_id, site_key, managed_name, managed_raw)
+            sources.append(_active_nginx_text(managed_raw))
+            fingerprints.append(("managed-cache-extension", managed_name, managed_sig))
     return _merge_directives(*sources), fingerprints, version
 
 
@@ -293,13 +307,47 @@ def _known_global_cache(nginx_root, vhost_root):
         cache_text, cache_sig = _text_and_signature(cache_file)
         extra = _known_global_statements(cache_text)
         sources.append(("aaPanel-cache-global", cache_file.name, cache_sig))
+    # Accept only the EXACT journal-owned global Cache fragments in the
+    # native aaPanel VHost http{} glob; a forged file or a deleted journal
+    # must never be treated as a trusted alternate cache zone.
+    managed = []
+    try:
+        entries = list(Path(vhost_root).iterdir())
+    except OSError as exc:
+        raise CacheAuditError("Cannot enumerate native Nginx global sources") from exc
+    if len(entries) > PHP_IMPACT_SITE_LIMIT + 100:
+        raise CacheAuditError("Native Nginx source directory inventory is too large")
+    for entry in entries:
+        if (not entry.name.startswith("0.ach_customizer_cache_")
+                or not entry.name.endswith(".conf")):
+            continue
+        match = re.fullmatch(r"0\.ach_customizer_cache_([1-9][0-9]*)\.conf", entry.name)
+        if match is None or len(match.group(1)) > 10:
+            raise CacheAuditError("Unknown ACh global Cache source requires review")
+        site_id = int(match.group(1))
+        try:
+            from ach_customizer_cache_manage import verified_cache_global
+            from ach_customizer_cache_policy import generate_reference
+            journal = verified_cache_global(str(vhost_root), site_id, entry.name)
+            reference = generate_reference(site_id, journal["php_version"])
+            managed.append(("ACh managed", {
+                "fastcgi_cache_path": [line[len("fastcgi_cache_path "):-1]
+                    for line in reference["global_http_fragment"].splitlines()
+                    if line.startswith("fastcgi_cache_path ")],
+                "fastcgi_cache": [], "fastcgi_ignore_headers": [],
+                "fastcgi_cache_key": [],
+            }))
+            _, signature = _text_and_signature(entry)
+            sources.append(("ACh-cache-global", entry.name, signature))
+        except (OSError, ValueError, TypeError) as exc:
+            raise CacheAuditError("Unverified ACh global Cache source") from exc
     # Keep the actual source owner for every declared zone. Two cache zones
     # with one filesystem path are NOT two isolated purge domains.
     paths = {}
     direct = set()
     ignored = set()
     cache_keys = []
-    for owner, parsed in (("main", main), ("aaPanel include", extra)):
+    for owner, parsed in [("main", main), ("aaPanel include", extra), *managed]:
         if parsed is None:
             continue
         if parsed["fastcgi_cache"]:

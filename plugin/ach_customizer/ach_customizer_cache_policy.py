@@ -1,9 +1,9 @@
-"""Deterministic, read-only *reference* for an isolated per-site FastCGI cache.
+"""Deterministic, side-effect-free per-site FastCGI cache policy generator.
 
-This is not an aaPanel Apply implementation. In particular, emitting two
-Nginx fragments cannot prove include order, existing location precedence,
-physical ownership, the loaded worker policy, or the behavior of an installed
-WordPress/Nginx Helper purge operation. No configuration or cache is written.
+This generator only renders reviewable Nginx fragments. The separate guarded
+native Cache manager owns source checks, physical directories, approval,
+reload and recovery; generating a reference never activates caching or
+establishes WordPress/WooCommerce safety or Nginx Helper purge compatibility.
 """
 
 import hashlib
@@ -29,7 +29,8 @@ NOTE = (
 )
 
 
-def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
+def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
+                       cache_generation=None):
     """Render reviewable http/server fragments with no side effects.
 
     Only a caller that has independently established a native website, PHP
@@ -46,6 +47,10 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
             cache_root.endswith(("/.", "/.."))):
         raise CachePolicyError("Cache reference root must be a canonical absolute path")
 
+    if cache_generation is not None and (
+            type(cache_generation) is not str or
+            not re.fullmatch(r"[0-9a-f]{32}", cache_generation)):
+        raise CachePolicyError("Invalid cache generation")
     zone = "ACHFC_%d" % site_id
     var = "achfc_%d" % site_id
     directory = "%s/site-%d" % (cache_root, site_id)
@@ -82,12 +87,17 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         # private-route guard. Query-string hits are already bypassed.
         + r'if ($request_uri ~ "(?:%%|//|/\.\.?(?:/|$))") { set $%s_skip 1; }' % var + "\n"
         + "location ~ [^/]\\.php(/|$) {\n"
-        + "    try_files $uri $uri/ /index.php?$args;\n"
+        + "    try_files $uri =404;\n"
         + "    fastcgi_pass unix:/tmp/php-cgi-%s.sock;\n" % php_version
         + "    fastcgi_index index.php;\n"
         + "    include fastcgi.conf;\n"
+        + "    include pathinfo.conf;\n"
         + "    fastcgi_cache %s;\n" % zone
-        + "    fastcgi_cache_key \"$scheme$request_method$host$request_uri\";\n"
+        # A fresh per-Apply cache key namespace prevents a later Reapply
+        # from serving stale objects left by a completed Restore. Keep the
+        # physical site-owned tree for forensic recovery and safe retention.
+        + '    fastcgi_cache_key "$scheme$request_method$host$request_uri%s";\n' %
+          (("|" + cache_generation) if cache_generation is not None else "")
         + "    fastcgi_cache_valid 200 10m;\n"
         # aaPanel 8.0.7 can inherit 'fastcgi_ignore_headers Cache-Control
         # Expires Set-Cookie'. At this location, override that list with only
@@ -98,6 +108,7 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         + "    fastcgi_cache_bypass $%s_skip;\n" % var
         + "    fastcgi_no_cache $%s_skip $upstream_http_set_cookie $upstream_http_vary $upstream_http_www_authenticate $%s_private_response $%s_expired_response;\n" % (var, var, var)
         + "    add_header X-ACh-Cache $upstream_cache_status always;\n"
+        + "    add_header X-ACh-Cache-Site %d always;\n" % site_id
         + "}\n"
     )
     digest = hashlib.sha256(json.dumps(
@@ -109,7 +120,8 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         "installed": False, "runtime_verified": False,
         "safe_verified": False, "apply_supported": False,
         "purge_supported": False, "cache_directory": directory,
-        "cache_zone": zone, "global_http_fragment": http_fragment,
+        "cache_zone": zone, "cache_generation": cache_generation,
+        "global_http_fragment": http_fragment,
         "site_server_fragment": server_fragment,
         "proposal_sha256": digest, "note": NOTE,
     }

@@ -126,8 +126,10 @@ def read_state(directory=DATA_DIR):
         os.close(directory_fd)
 
 
-def _exclusive_lock(directory_fd):
-    fd = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+def _exclusive_lock(directory_fd, *, create=True):
+    """Serialize operations; readers may lock an existing file without creating it."""
+    access = (os.O_RDWR | os.O_CREAT) if create else os.O_RDONLY
+    fd = os.open(LOCK_FILE, access | os.O_NOFOLLOW | os.O_CLOEXEC,
                  0o600, dir_fd=directory_fd)
     try:
         _owned_file(fd, kind="lock")
