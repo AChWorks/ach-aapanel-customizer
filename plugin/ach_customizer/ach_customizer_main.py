@@ -712,7 +712,9 @@ class ach_customizer_main:
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
-            action = self._argument(args, "action")
+            # aaPanel reserves the POST 'action' key for its own plugin router.
+            # A body 'action' would override query action=a before this handler.
+            action = self._argument(args, "cache_action")
             from ach_customizer_cache_manage import manage_cache
             if action not in ("apply", "recheck", "restore"):
                 raise MonitorInputError("Unsupported Cache operation")

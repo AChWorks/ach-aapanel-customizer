@@ -1946,7 +1946,7 @@
     cacheActivationNotice('Rechecking site-specific Cache journal and worker marker...');
     cacheActivationLock();
     request('manage_cache_policy',
-      Object.assign(cacheNativeArgs(id),{action:'recheck'}), function (r) {
+      Object.assign(cacheNativeArgs(id),{cache_action:'recheck'}), function (r) {
         if (ticket !== cacheActivationTicket) return;
         cacheActivationBusy = false;
         var stable = id === hostsSiteId() && r && r.status === true &&
@@ -1986,7 +1986,7 @@
     cacheActivationNotice('Applying approved site cache and verifying Nginx reload; do not retry uncertain operations...');
     cacheActivationLock();
     request('manage_cache_policy', Object.assign(cacheNativeArgs(id),{
-      action:'apply', expected_source_sha256:plan.source_sha256,
+      cache_action:'apply', expected_source_sha256:plan.source_sha256,
       expected_proposal_sha256:plan.proposal_sha256,
       cache_generation:plan.cache_generation, approved:'true'
     }), function (r) {
@@ -2025,7 +2025,7 @@
     cacheActivationNotice('Restoring saved Cache generation; do not retry until Recheck...');
     cacheActivationLock();
     request('manage_cache_policy', Object.assign(cacheNativeArgs(id),{
-      action:'restore', recovery_id:recovery, approved:'true'
+      cache_action:'restore', recovery_id:recovery, approved:'true'
     }), function (r) {
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;

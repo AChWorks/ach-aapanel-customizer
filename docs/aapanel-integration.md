@@ -30,6 +30,10 @@ explicitly plugin-owned form key for both actions. Keep `action`, `name`, and
 `s` reserved for native aaPanel dispatch in all plugin AJAX payloads.
 Retain the normal aaPanel `x-http-token`, primary-administrator authorization
 and optimistic preference revision; this is not permission to weaken any gate.
+The 0.1.30 native Browser exercise also caught the same collision in the
+Cache `manage_cache_policy` endpoint: the form must send
+`cache_action=apply|recheck|restore`, **never** `action`. The backend accepts
+only `cache_action`; a regression test checks the exact outgoing UI form key.
 
 ## Native site lifecycle drift and reviewed baseline (Issue #1, development only)
 

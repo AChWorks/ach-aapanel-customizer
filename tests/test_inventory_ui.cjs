@@ -1801,7 +1801,8 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   const apply=ui.statusClick('#ach-cache-activation-apply');
   assert.match(apply.options.url,/s=manage_cache_policy$/);
   assert.equal(apply.options.type,'POST');
-  assert.equal(apply.options.data.action,'apply');
+  assert.equal(apply.options.data.cache_action,'apply');
+  assert.equal(apply.options.data.action,undefined,'aaPanel reserves form action for routing');
   assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
   assert.equal(apply.options.data.expected_proposal_sha256,'b'.repeat(64));
   assert.equal(apply.options.data.cache_generation,'c'.repeat(32));
@@ -1812,7 +1813,8 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   assert.match(ui.state().cacheActivationResult,/Cache Apply observed/);
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
   const recheck=ui.statusClick('#ach-cache-activation-recheck');
-  assert.equal(recheck.options.data.action,'recheck');
+  assert.equal(recheck.options.data.cache_action,'recheck');
+  assert.equal(recheck.options.data.action,undefined);
   assert.equal(recheck.options.data.approved,undefined);
   recheck.respond({status:true,schema:1,state:'Applied',site_id:7,
     site_key:'site.test',recovery_id:'f'.repeat(32),read_only:true,
@@ -1821,7 +1823,8 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   ui.statusSetChecked('#ach-cache-restore-reviewed',true);
   assert.equal(ui.state().cacheActivationRestoreDisabled,false);
   const restore=ui.statusClick('#ach-cache-activation-restore');
-  assert.equal(restore.options.data.action,'restore');
+  assert.equal(restore.options.data.cache_action,'restore');
+  assert.equal(restore.options.data.action,undefined);
   assert.equal(restore.options.data.recovery_id,'f'.repeat(32));
   assert.equal(restore.options.data.approved,'true');
   restore.respond(cacheOperationRestored());

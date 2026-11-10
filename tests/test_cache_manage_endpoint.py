@@ -56,7 +56,7 @@ class CacheEndpointTests(unittest.TestCase):
                      patch.object(manager,'preview_cache_activation') as readiness:
                     for endpoint, payload in (
                          ('preview_cache_activation',self.args()),
-                         ('manage_cache_policy',{**self.args(),'action':'apply','approved':'true'})):
+                         ('manage_cache_policy',{**self.args(),'cache_action':'apply','approved':'true'})):
                         result=getattr(self.plugin,endpoint)(payload)
                         self.assertFalse(result['status'],result)
                         self.assertEqual(result['stage'],'cache_authorization')
@@ -74,7 +74,7 @@ class CacheEndpointTests(unittest.TestCase):
                           side_effect=self.selected),\
              patch.object(manager,'manage_cache',return_value=sample) as operation:
             result=self.plugin.manage_cache_policy({
-                **self.args(),'action':'apply',
+                **self.args(),'cache_action':'apply',
                 'expected_source_sha256':'a'*64,
                 'expected_proposal_sha256':'b'*64,
                 'cache_generation':'c'*32,
@@ -94,6 +94,30 @@ class CacheEndpointTests(unittest.TestCase):
             self.assertNotIn('cache_root',kw)
             self.assertNotIn('site_key',kw)
 
+    def test_native_route_action_is_not_reused_as_cache_operation(self):
+        sample={'schema':1,'state':'Unmanaged','site_id':7,
+                'recovery_id':None,'read_only':True,'runtime_verified':False,
+                'purge_supported':False}
+        with patch.dict(sys.modules,{'flask':self.flask()}),\
+             patch.object(self.plugin,'_require_enabled'),\
+             patch.object(self.plugin,'_selected_native_website',
+                          side_effect=self.selected),\
+             patch.object(manager,'manage_cache',return_value=sample) as operation:
+            valid=self.plugin.manage_cache_policy(
+                {**self.args(),'cache_action':'recheck'})
+            self.assertTrue(valid['status'],valid)
+            self.assertEqual(valid['state'],'Unmanaged')
+            self.assertEqual(operation.call_count,1)
+            self.assertEqual(operation.call_args.args[0],'recheck')
+            operation.reset_mock()
+            # The aaPanel router rejects a posted 'action' before our method.
+            # Even direct invocation must not interpret the obsolete form key.
+            invalid=self.plugin.manage_cache_policy(
+                {**self.args(),'action':'recheck'})
+            self.assertFalse(invalid['status'])
+            self.assertEqual(invalid['stage'],'cache_manage')
+            operation.assert_not_called()
+
     def test_uncertain_cache_operation_preserves_distinct_diagnostic_recovery_id(self):
         op='c'*32
         problem=manager.CacheManageError(
@@ -106,7 +130,7 @@ class CacheEndpointTests(unittest.TestCase):
              patch.object(manager,'manage_cache',side_effect=problem),\
              patch.object(main,'append_activity',side_effect=lambda data,entry:entries.append(entry) or True):
             reply=self.plugin.manage_cache_policy(
-                {**self.args(),'action':'apply','approved':'true'})
+                {**self.args(),'cache_action':'apply','approved':'true'})
             self.assertFalse(reply['status'])
             self.assertEqual(reply['stage'],'cache_manage')
             self.assertEqual(reply['recovery_id'],op)
