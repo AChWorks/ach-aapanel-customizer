@@ -70,7 +70,10 @@ class ach_customizer_main:
             # FPM's operation_id is a durable recovery identity. The Status
             # Pages manager uses a separate recovery_id; its operation_id is
             # only the request correlation, NEVER the recovery journal ID.
-            recovery = (response.get("recovery_id") if module == "status_pages" else
+            cache_recovery = (module == "websites" and
+                              action in ("manage_cache_policy", "cache_manage"))
+            recovery = (response.get("recovery_id")
+                        if module == "status_pages" or cache_recovery else
                         response.get("operation_id"))
             if (not response.get("request_id") or not isinstance(recovery, str)
                     or re.fullmatch(r"[0-9a-f]{32}", recovery) is None):
@@ -82,7 +85,8 @@ class ach_customizer_main:
                 outcome=outcome,
                 target=target, error_class=type(error).__name__ if error else "",
                 detail=detail,
-                recovery_id=recovery if (not failed or module == "status_pages") else "",
+                recovery_id=recovery if (not failed or module == "status_pages" or
+                                           cache_recovery) else "",
             )
             persisted = append_activity(_STATE_DIR, entry)
             # None means below verbosity threshold, NOT a persistence failure.
@@ -681,6 +685,60 @@ class ach_customizer_main:
             return self._fail("cache_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("cache_reference_preview", exc, request_id)
+
+    def preview_cache_activation(self, args):
+        """Explicit per-site Cache Apply preflight; no host or cache mutations."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            from ach_customizer_cache_manage import preview_cache_activation
+            public, before, current_site = self._selected_native_website(args)
+            result = preview_cache_activation(before, public)
+            if current_site() != before:
+                raise MonitorInputError("Native website changed during Cache activation preflight")
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "preview_cache_activation",
+                target=str(before["id"]), level="WARNING")
+        except PermissionError as exc:
+            return self._fail("cache_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("cache_activation_preview", exc, request_id)
+
+    def manage_cache_policy(self, args):
+        """Primary-admin manual Cache Apply/Recheck/Restore; never implicit Purge."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            action = self._argument(args, "action")
+            from ach_customizer_cache_manage import manage_cache
+            if action not in ("apply", "recheck", "restore"):
+                raise MonitorInputError("Unsupported Cache operation")
+            public, before, current_site = self._selected_native_website(args)
+            result = manage_cache(
+                action, before, public,
+                expected_source=self._argument(args, "expected_source_sha256"),
+                expected_proposal=self._argument(args, "expected_proposal_sha256"),
+                recovery_id=self._argument(args, "recovery_id"),
+                approved=self._argument(args, "approved") == "true",
+            )
+            if current_site() != before:
+                # The operation could already have committed. Preserve its
+                # recovery identity and report uncertainty, never auto-retry.
+                from ach_customizer_cache_manage import CacheManageError
+                raise CacheManageError("uncertain",
+                    "Native site changed during Cache operation; Recheck before next action",
+                    recovery_id=result.get("recovery_id"))
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "manage_cache_policy", target=str(before["id"]),
+                level="WARNING")
+        except PermissionError as exc:
+            return self._fail("cache_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("cache_manage", exc, request_id)
 
     def fpm_policy_get(self, args):
         """Read operator-saved shared PHP intent, not a live/runtime verdict."""

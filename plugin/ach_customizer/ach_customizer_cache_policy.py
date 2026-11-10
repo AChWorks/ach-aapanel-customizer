@@ -1,9 +1,9 @@
-"""Deterministic, read-only *reference* for an isolated per-site FastCGI cache.
+"""Deterministic, side-effect-free per-site FastCGI cache policy generator.
 
-This is not an aaPanel Apply implementation. In particular, emitting two
-Nginx fragments cannot prove include order, existing location precedence,
-physical ownership, the loaded worker policy, or the behavior of an installed
-WordPress/Nginx Helper purge operation. No configuration or cache is written.
+This generator only renders reviewable Nginx fragments. The separate guarded
+native Cache manager owns source checks, physical directories, approval,
+reload and recovery; generating a reference never activates caching or
+establishes WordPress/WooCommerce safety or Nginx Helper purge compatibility.
 """
 
 import hashlib
@@ -98,6 +98,7 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         + "    fastcgi_cache_bypass $%s_skip;\n" % var
         + "    fastcgi_no_cache $%s_skip $upstream_http_set_cookie $upstream_http_vary $upstream_http_www_authenticate $%s_private_response $%s_expired_response;\n" % (var, var, var)
         + "    add_header X-ACh-Cache $upstream_cache_status always;\n"
+        + "    add_header X-ACh-Cache-Site %d always;\n" % site_id
         + "}\n"
     )
     digest = hashlib.sha256(json.dumps(

@@ -871,7 +871,22 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
                 text, signature = _bounded_file_text(
                     directory / name, MAX_NGINX_SITE_BYTES, with_fingerprint=True,
                 )
-                if name.startswith("ach_customizer_"):
+                if re.fullmatch(r"ach_customizer_cache_[1-9][0-9]*\.conf", name):
+                    # Exactly one site-owned Cache routing source is allowed,
+                    # only with its independently persisted prepared/applied
+                    # journal and byte-identical generated content. Never
+                    # relax the inert-extension rule for foreign routes.
+                    from ach_customizer_cache_manage import verified_cache_extension
+                    if name != "ach_customizer_cache_" + str(site_id) + ".conf":
+                        raise MonitorInputError("Another site's Cache extension requires review")
+                    try:
+                        journal = verified_cache_extension(
+                            directory, site_id, site_key, name, text)
+                    except (ValueError, OSError) as exc:
+                        raise MonitorInputError("Native Cache extension ownership needs review") from exc
+                    files.append({"name": name, "signature": signature,
+                                  "cache_journal": journal})
+                elif name.startswith("ach_customizer_"):
                     journal = _verified_owned_status_extension(
                         directory, site_id, site_key, name, text)
                     files.append({"name": name, "signature": signature,

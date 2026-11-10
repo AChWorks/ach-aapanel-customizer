@@ -75,7 +75,7 @@ echo $_SERVER['HTTP_HOST'] . ':' . $normalized . ':' .
 '''
 
 
-def render_config(tmp, port, plans):
+def render_config(tmp, port, plans, php_version):
     http = "\n".join(p["global_http_fragment"] for p in plans)
     sites = []
     for site_id, hostname, plan in ((7, "qa-cache-a.test", plans[0]),
@@ -88,8 +88,8 @@ def render_config(tmp, port, plans):
             "server {\n listen 127.0.0.1:%d;\n server_name %s;\n"
             " root %s;\n index index.php;\n"
             " location / { try_files $uri $uri/ /index.php?$args; }\n"
-            "%s\n}\n" % (
-                port, hostname, docroot, plan["site_server_fragment"]))
+            "%s\n include /www/server/nginx/conf/enable-php-%s.conf;\n}\n" % (
+                port, hostname, docroot, plan["site_server_fragment"], php_version))
     return (
         "user www www;\nworker_processes 1;\n"
         "pid %s;\nerror_log %s notice;\n"
@@ -140,6 +140,8 @@ def run(nginx, php_version):
     if php_version not in ("81", "85"):
         raise SystemExit("Only QA-verified PHP 8.1/8.5 adapters supported")
     for path in (Path(nginx), Path("/www/server/nginx/conf/fastcgi.conf"),
+                 Path("/www/server/nginx/conf/pathinfo.conf"),
+                 Path("/www/server/nginx/conf/enable-php-" + php_version + ".conf"),
                  Path("/tmp/php-cgi-" + php_version + ".sock")):
         if not path.exists():
             raise SystemExit("Required guest Nginx/PHP85 file/socket missing: " + str(path))
@@ -151,6 +153,7 @@ def run(nginx, php_version):
         copy = tmp / "fastcgi.conf"
         shutil.copyfile("/www/server/nginx/conf/fastcgi.conf", copy)
         copy.chmod(0o644)
+        shutil.copyfile("/www/server/nginx/conf/pathinfo.conf", tmp / "pathinfo.conf")
         cache_root = str(tmp / "cache")
         (tmp / "cache").mkdir(mode=0o755)
         plans = [
@@ -167,7 +170,7 @@ def run(nginx, php_version):
         port = listener.getsockname()[1]
         listener.close()
         conf = tmp / "nginx.conf"
-        conf.write_text(render_config(tmp, port, plans), encoding="utf-8")
+        conf.write_text(render_config(tmp, port, plans, php_version), encoding="utf-8")
         config_args = [nginx, "-p", str(tmp) + "/", "-c", str(conf)]
         checked = subprocess.run([*config_args, "-t"],
                                  capture_output=True, text=True)
@@ -271,7 +274,7 @@ def run(nginx, php_version):
             b_after = request(port, "qa-cache-b.test")
             assert a_after[1] == "MISS", a_after
             assert b_after[1] == "HIT" and b_after[2] == b_hit[2], b_after
-            print("NATIVE PASS: nginx -t; independent site A/B MISS-HIT; private "
+            print("NATIVE PASS: nginx -t; first-matching extension PHP handler before native aaPanel PHP include; independent site A/B MISS-HIT; private "
                   "authorization/cookie/route/query and encoded/normalized "
                   "private aliases BYPASS; upstream Set-Cookie/private/max-age=0/"
                   "Vary/X-Accel-Expires and Expires-past MISS-MISS; Expires-future "

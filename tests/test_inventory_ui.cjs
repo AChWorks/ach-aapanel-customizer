@@ -50,6 +50,10 @@ function loadUi() {
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-cache-plan-button', '#ach-cache-plan-result',
+    '#ach-cache-activation-preview', '#ach-cache-activation-recheck',
+    '#ach-cache-activation-result', '#ach-cache-activation-reviewed',
+    '#ach-cache-activation-apply', '#ach-cache-restore-reviewed',
+    '#ach-cache-activation-restore',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
@@ -141,9 +145,9 @@ function loadUi() {
         if (query === '#ach-prev, #ach-next') {
           return selection([elements.get('#ach-prev'), elements.get('#ach-next')]);
         }
-        if (query.startsWith('#ach-status-') && query.includes(', ')) {
-          const selected = query.split(', ').map(key => elements.get(key));
-          assert.ok(selected.every(Boolean), 'Unknown Status Pages selector group: ' + query);
+        if (query.includes(',') && query.startsWith('#ach-')) {
+          const selected = query.split(',').map(key => elements.get(key.trim()));
+          assert.ok(selected.every(Boolean), 'Unknown plugin selector group: ' + query);
           return selection(selected);
         }
         const view = /^\[data-view="([^"]+)"\]$/.exec(query);
@@ -305,6 +309,11 @@ function loadUi() {
       cacheResult: elements.get('#ach-cache-result').textContent,
       cachePlanResult: elements.get('#ach-cache-plan-result').textContent,
       cachePlanDisabled: elements.get('#ach-cache-plan-button').props.disabled,
+      cacheActivationResult: elements.get('#ach-cache-activation-result').textContent,
+      cacheActivationPreviewDisabled: elements.get('#ach-cache-activation-preview').props.disabled,
+      cacheActivationRecheckDisabled: elements.get('#ach-cache-activation-recheck').props.disabled,
+      cacheActivationApplyDisabled: elements.get('#ach-cache-activation-apply').props.disabled,
+      cacheActivationRestoreDisabled: elements.get('#ach-cache-activation-restore').props.disabled,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       nginxCandidateDisabled: elements.get('#ach-nginx-candidate-button').props.disabled,
@@ -1745,6 +1754,119 @@ test('Isolated cache reference is native-site bound and rendered as inert text o
   assert.match(ui.state().cachePlanResult,/ACHFC_7/);
   assert.match(ui.state().cachePlanResult,/NO PURGE/);
   assert.doesNotMatch(ui.state().cachePlanResult,/SAFE-VERIFIED: YES/);
+});
+
+const cacheActivationReady = (overrides={}) => ({
+  status:true, schema:1, state:'Ready for Review', read_only:true,
+  apply_supported:true, runtime_verified:false, site_id:7,
+  site_key:'site.test', source_sha256:'a'.repeat(64),
+  proposal_sha256:'b'.repeat(64), php_version:'85', cache_zone:'ACHFC_7',
+  cache_directory:'/www/server/ach-customizer-fastcgi/site-7',
+  impact:'One selected HTTP/80 VHost and Nginx service reload',
+  note:'Runtime WordPress and WooCommerce acceptance remains separate',
+  ...overrides
+});
+const cacheOperationApplied = (overrides={}) => ({
+  status:true,schema:1,state:'Applied',changed:true,site_id:7,
+  recovery_id:'f'.repeat(32),runtime_verified:true,
+  purge_supported:false, ...overrides
+});
+const cacheOperationRestored = (overrides={}) => ({
+  status:true,schema:1,state:'Restored',changed:true,site_id:7,
+  recovery_id:'f'.repeat(32),runtime_verified:true,
+  purge_supported:false, ...overrides
+});
+
+test('Site Cache Apply and Restore require exact approval and recovery identity', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  assert.equal(ui.state().cacheActivationPreviewDisabled,false);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  const preflight=ui.statusClick('#ach-cache-activation-preview');
+  assert.match(preflight.options.url,/s=preview_cache_activation$/);
+  assert.equal(preflight.options.type,'POST');
+  assert.deepEqual(Object.keys(preflight.options.data).sort(),[
+    'expected_site_key','expected_site_snapshot','site_id'
+  ]);
+  assert.equal(ui.state().cacheActivationPreviewDisabled,true);
+  preflight.respond(cacheActivationReady());
+  assert.match(ui.state().cacheActivationResult,/Ready|preflight ready/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  const attempts=ui.requests.length;
+  ui.statusClick('#ach-cache-activation-apply');
+  assert.equal(ui.requests.length,attempts,'Apply cannot start before review');
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,false);
+  const apply=ui.statusClick('#ach-cache-activation-apply');
+  assert.match(apply.options.url,/s=manage_cache_policy$/);
+  assert.equal(apply.options.type,'POST');
+  assert.equal(apply.options.data.action,'apply');
+  assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
+  assert.equal(apply.options.data.expected_proposal_sha256,'b'.repeat(64));
+  assert.equal(apply.options.data.approved,'true');
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  apply.respond(cacheOperationApplied());
+  assert.match(ui.state().cacheActivationResult,/Cache Apply observed/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  const recheck=ui.statusClick('#ach-cache-activation-recheck');
+  assert.equal(recheck.options.data.action,'recheck');
+  assert.equal(recheck.options.data.approved,undefined);
+  recheck.respond({status:true,schema:1,state:'Applied',site_id:7,
+    site_key:'site.test',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false,note:'Site-managed PHP marker'});
+  assert.match(ui.state().cacheActivationResult,/Cache state: Applied/);
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-cache-activation-restore');
+  assert.equal(restore.options.data.action,'restore');
+  assert.equal(restore.options.data.recovery_id,'f'.repeat(32));
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond(cacheOperationRestored());
+  assert.match(ui.state().cacheActivationResult,/Cache Restore observed/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Forged Cache readiness never permits Apply, HTML text stays inert', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  for (const bad of [
+    {site_id:8},{site_key:'foreign.test'},{apply_supported:false},
+    {runtime_verified:true},{cache_zone:'WORDPRESS'},
+    {cache_directory:'/var/cache/shared'},
+    {source_sha256:'broken'},{proposal_sha256:'broken'},
+    {state:'Needs Review'},{php_version:'86'}
+  ]) {
+    ui.statusClick('#ach-cache-activation-preview').respond(
+      cacheActivationReady(bad));
+    ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+    assert.equal(ui.state().cacheActivationApplyDisabled,true,JSON.stringify(bad));
+  }
+  const malicious='<img src=x onerror=evil()>';
+  ui.statusClick('#ach-cache-activation-preview').respond(
+    cacheActivationReady({note:malicious}));
+  assert.match(ui.state().cacheActivationResult,/<img src=x onerror=evil\(\)>/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+});
+
+test('A changed native website revokes in-flight Cache Apply approval and recovery', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  const pending=ui.statusClick('#ach-cache-activation-preview');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(cacheActivationReady());
+  assert.match(ui.state().cacheActivationResult,/changed/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  const before=ui.requests.length;
+  ui.statusClick('#ach-cache-activation-apply');
+  assert.equal(ui.requests.length,before);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady());
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,false);
+  const next=ui.statusClick('#ach-cache-activation-apply');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  next.respond(cacheOperationApplied());
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.doesNotMatch(ui.state().cacheActivationResult,/Cache Apply observed/);
 });
 
 test('Cache reference rejects forged writer claims and never renders raw HTML', () => {
