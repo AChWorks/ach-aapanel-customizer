@@ -1832,6 +1832,12 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
 });
 
+test('Cache Restore consent distinguishes conditional reload from no-op recovery', () => {
+  assert.match(html,/I approve restoring this site's saved Cache state\. Nginx may reload; verified unactivated recovery does not\./);
+  assert.match(html,/id="ach-cache-activation-restore"[^>]*>Restore saved Cache \/ recovery<\/button>/);
+  assert.doesNotMatch(html,/Restore saved Cache \(reload Nginx\)/);
+});
+
 test('Prepublication Cache journal is recoverable from UI without false activation proof', () => {
   const ui=loadUi(); selectHostsSite(ui);
   const id='e'.repeat(32);

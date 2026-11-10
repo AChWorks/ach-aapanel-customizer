@@ -361,8 +361,8 @@
         <p id="ach-cache-activation-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to check Apply readiness or inspect recovery.</p>
         <label><input id="ach-cache-activation-reviewed" type="checkbox" disabled /> I reviewed the selected site's cache zone, physical directory, Nginx service reload, and current source hashes.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-activation-apply" class="btn btn-warning" disabled>Apply site-specific Cache (reload Nginx)</button></div>
-        <label><input id="ach-cache-restore-reviewed" type="checkbox" disabled /> I approve restoring this site's saved Cache generation and reloading Nginx.</label>
-        <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache (reload Nginx)</button></div>
+        <label><input id="ach-cache-restore-reviewed" type="checkbox" disabled /> I approve restoring this site's saved Cache state. Nginx may reload; verified unactivated recovery does not.</label>
+        <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
