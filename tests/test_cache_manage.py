@@ -110,6 +110,32 @@ class CacheManageTests(unittest.TestCase):
                 approved=True,**self.kwargs())
         self.assertFalse((self.ext/'ach_customizer_cache_7.conf').exists())
 
+    def test_unmanaged_recheck_never_creates_a_lock_or_recovery_state(self):
+        self.assertFalse(list(self.state.iterdir()))
+        before_commands = list(self.commands)
+        observed = cache.manage_cache('recheck', self.site, **self.kwargs())
+        self.assertEqual(observed['state'], 'Unmanaged')
+        self.assertTrue(observed['read_only'])
+        self.assertFalse(observed['runtime_verified'])
+        self.assertFalse(list(self.state.iterdir()))
+        self.assertEqual(self.commands, before_commands)
+
+    def test_recheck_with_missing_lock_preserves_existing_recovery(self):
+        applied = self.apply()
+        lock = self.state/'ach_customizer.state.lock'
+        self.assertTrue(lock.exists())
+        lock.unlink()  # Isolated fixture for an inconsistent lock/journal pair.
+        journal = self.state/cache._names(7)[2]
+        before_journal = journal.read_bytes()
+        before_commands = list(self.commands)
+        observed = cache.manage_cache('recheck', self.site, **self.kwargs())
+        self.assertEqual(observed['state'], 'Needs Review')
+        self.assertEqual(observed['recovery_id'], applied['recovery_id'])
+        self.assertFalse(observed['runtime_verified'])
+        self.assertFalse(lock.exists())
+        self.assertEqual(journal.read_bytes(), before_journal)
+        self.assertEqual(self.commands, before_commands)
+
     def test_preflight_requires_healthy_php_route_before_operator_consent(self):
         def php_404(site, *, marker=None):
             raise cache.CacheManageError('probe','Registered PHP /index.php is not healthy')

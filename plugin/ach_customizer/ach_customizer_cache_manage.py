@@ -701,7 +701,22 @@ def manage_cache(action, site, public=None, *, expected_source=None,
         raise CacheManageError('identity', 'Unverified site identity')
     statefd = _open_state_dir(data_dir)
     try:
-        lockfd = _exclusive_lock(statefd)
+        try:
+            # An Unmanaged Recheck must not create Monitor's shared lock file.
+            # A managed operation already created that file under the writer lock.
+            lockfd = _exclusive_lock(statefd, create=(action != 'recheck'))
+        except FileNotFoundError:
+            if action != 'recheck':
+                raise
+            record = _record_read(statefd, site['id'])
+            if record is not None:
+                return {'schema': 1, 'state': 'Needs Review', 'read_only': True,
+                        'site_id': site['id'], 'recovery_id': record['op'],
+                        'runtime_verified': False, 'purge_supported': False,
+                        'note': 'Existing recovery journal has no operation lock; manual review required.'}
+            return {'schema': 1, 'state': 'Unmanaged', 'read_only': True,
+                    'site_id': site['id'], 'recovery_id': None,
+                    'runtime_verified': False, 'purge_supported': False}
         try:
             record = _record_read(statefd, site['id'])
             if action == 'recheck':
