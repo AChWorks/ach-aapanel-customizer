@@ -61,7 +61,7 @@ class CacheManageTests(unittest.TestCase):
             patch.object(cache,'inspect_site_fastcgi_cache',return_value={
                 'state':'Source Observed','zone_state':'Direct Zone',
                 'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
-                'unresolved_other_sites':0}),
+                'unresolved_other_sites':0,'source_sha256':'a'*64}),
         ]
         for p in self.patchers:
             p.start();self.addCleanup(p.stop)
@@ -376,7 +376,7 @@ class CacheManageTests(unittest.TestCase):
         journal=self.state/cache._names(7)[2]
         saved=journal.read_bytes()
         before=list(self.commands)
-        result=cache.manage_cache('recheck',self.site,**self.kwargs())
+        result=cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())
         self.assertEqual(result['state'],'Recovery Required')
         self.assertEqual(result['journal_phase'],'prepared')
         self.assertEqual(result['recovery_scope'],'prepublication')
@@ -389,7 +389,7 @@ class CacheManageTests(unittest.TestCase):
             cache.manage_cache('restore',self.site,approved=False,
                 recovery_id=record['op'],**self.kwargs())
         self.assertEqual(journal.read_bytes(),saved)
-        restored=cache.manage_cache('restore',self.site,approved=True,
+        restored=cache.manage_cache('restore',self.site,public=object(),approved=True,
                 recovery_id=record['op'],**self.kwargs())
         self.assertEqual(restored['state'],'Restored')
         self.assertEqual(restored['recovery_scope'],'prepublication')
@@ -398,7 +398,7 @@ class CacheManageTests(unittest.TestCase):
         self.assertFalse(restored['runtime_verified'])
         self.assertEqual(self.commands,before)
         finalized=journal.read_bytes()
-        recheck=cache.manage_cache('recheck',self.site,**self.kwargs())
+        recheck=cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())
         self.assertEqual(recheck['state'],'Restored')
         self.assertEqual(recheck['journal_phase'],'restored')
         self.assertEqual(recheck['recovery_scope'],'prepublication')
@@ -432,7 +432,7 @@ class CacheManageTests(unittest.TestCase):
                     path.chmod(mode)
                 else:
                     self.cache_created=True
-                observed=cache.manage_cache('recheck',self.site,**self.kwargs())
+                observed=cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())
                 self.assertEqual(observed['state'],'Needs Review')
                 self.assertEqual(observed['recovery_id'],record['op'])
                 self.assertFalse(observed['runtime_verified'])
@@ -440,7 +440,7 @@ class CacheManageTests(unittest.TestCase):
                 self.assertEqual(journal.read_bytes(),saved)
                 self.assertEqual(self.commands,before)
                 with self.assertRaises(cache.CacheManageError):
-                    cache.manage_cache('restore',self.site,approved=True,
+                    cache.manage_cache('restore',self.site,public=object(),approved=True,
                         recovery_id=record['op'],**self.kwargs())
                 self.assertEqual(journal.read_bytes(),saved)
                 self.assertEqual(self.commands,before)
@@ -448,8 +448,8 @@ class CacheManageTests(unittest.TestCase):
                     path.unlink()
                 else:
                     self.cache_created=False
-        self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
-                         'Recovery Required')
+        self.assertEqual(cache.manage_cache('recheck',self.site,public=object(),
+                                           **self.kwargs())['state'],'Recovery Required')
 
     def test_restored_fragments_reappearing_are_never_reported_applied(self):
         applied=self.apply()
@@ -483,6 +483,67 @@ class CacheManageTests(unittest.TestCase):
                     path.unlink()
                 self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
                                  'Restored')
+
+    def test_foreign_extension_fragment_blocks_prepublication_and_restored_recovery(self):
+        foreign=self.ext/'foreign_routing.conf'
+        journal=self.state/cache._names(7)[2]
+        record=self.prepared_without_directory()
+        saved=journal.read_bytes()
+        commands=list(self.commands)
+        foreign.write_text('location / { return 200; }\n')
+        foreign.chmod(0o600)
+        result=cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())
+        self.assertEqual(result['state'],'Needs Review')
+        self.assertEqual(result['recovery_id'],record['op'])
+        self.assertFalse(result['runtime_verified'])
+        self.assertIn('extension inventory',result['note'])
+        with self.assertRaisesRegex(cache.CacheManageError,'extension inventory'):
+            cache.manage_cache('restore',self.site,public=object(),approved=True,
+                recovery_id=record['op'],**self.kwargs())
+        self.assertEqual(saved,journal.read_bytes())
+        self.assertEqual(commands,self.commands)
+        foreign.unlink()
+        self.assertEqual(cache.manage_cache('recheck',self.site,public=object(),
+                                          **self.kwargs())['state'],'Recovery Required')
+        cache.manage_cache('restore',self.site,public=object(),approved=True,
+                           recovery_id=record['op'],**self.kwargs())
+        applied=self.apply()
+        cache.manage_cache('restore',self.site,approved=True,
+                           recovery_id=applied['recovery_id'],**self.kwargs())
+        restored_bytes=journal.read_bytes()
+        previous=list(self.commands)
+        foreign.write_text('location ~ \\.php { fastcgi_cache WORDPRESS; }\n')
+        foreign.chmod(0o600)
+        result=cache.manage_cache('recheck',self.site,**self.kwargs())
+        self.assertEqual(result['state'],'Needs Review')
+        self.assertEqual(result['journal_phase'],'restored')
+        self.assertEqual(result['recovery_id'],applied['recovery_id'])
+        self.assertFalse(result['runtime_verified'])
+        self.assertEqual(restored_bytes,journal.read_bytes())
+        self.assertEqual(previous,self.commands)
+        foreign.unlink()
+        self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
+                         'Restored')
+
+    def test_prepublication_full_source_inventory_drift_cannot_finalize(self):
+        record=self.prepared_without_directory()
+        journal=self.state/cache._names(7)[2]
+        saved=journal.read_bytes()
+        before=list(self.commands)
+        with patch.object(cache,'inspect_site_fastcgi_cache',return_value={
+                'state':'Source Observed','source_sha256':'b'*64,
+                'unresolved_other_sites':0}):
+            result=cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())
+            self.assertEqual(result['state'],'Needs Review')
+            self.assertEqual(result['recovery_id'],record['op'])
+            self.assertFalse(result['runtime_verified'])
+            with self.assertRaisesRegex(cache.CacheManageError,'inventory changed'):
+                cache.manage_cache('restore',self.site,public=object(),approved=True,
+                    recovery_id=record['op'],**self.kwargs())
+        self.assertEqual(saved,journal.read_bytes())
+        self.assertEqual(before,self.commands)
+        self.assertEqual(cache.manage_cache('recheck',self.site,public=object(),
+                                          **self.kwargs())['state'],'Recovery Required')
 
     def test_stock_php_and_header_preflight_guards(self):
         def inspect():

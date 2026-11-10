@@ -20,7 +20,10 @@ from uuid import uuid4
 
 from ach_customizer_cache_policy import generate_reference, CACHE_ROOT
 from ach_customizer_cache_audit import inspect_site_fastcgi_cache
-from ach_customizer_monitor import _active_nginx_text, _bounded_file_text, MAX_NGINX_SITE_BYTES
+from ach_customizer_monitor import (
+    _active_nginx_text, _bounded_file_text, _native_extension_fingerprint,
+    MAX_NGINX_SITE_BYTES,
+)
 from ach_customizer_state import DATA_DIR, _open_state_dir, _exclusive_lock
 from ach_customizer_status_extension import (
     _bounded_file, _directory, _owned_dir, _publish_complete,
@@ -602,6 +605,40 @@ def _same_site_sources(site, record, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_
             'Native Cache source changed since approval: ' + ', '.join(drift))
 
 
+def _same_native_source_inventory(site, record, public, *,
+                                  vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
+                                  data_dir=DATA_DIR):
+    """Guard the native extension glob in every recovery phase.
+
+    The ordinary Apply/Restore lifecycle intentionally changes the managed
+    fragment and directory metadata, so a blanket comparison with the saved
+    full audit hash is invalid after publication. Still reject foreign routing
+    from the included glob. Before any publication, the full original audit
+    must also remain byte/fingerprint-identical to the approved snapshot.
+    """
+    try:
+        _native_extension_fingerprint(
+            Path(vhost_root) / 'extension' / site['name'],
+            site_id=site['id'], site_key=site['name'],
+            cache_state_dir=data_dir)
+    except (OSError, ValueError) as exc:
+        raise CacheManageError('concurrency',
+            'Native Cache extension inventory changed or has unverified routing') from exc
+    if record['schema'] == 2 and record['cache_identity'] is None:
+        if public is None:
+            raise CacheManageError('recovery',
+                'Registered native website inventory is unavailable for empty Cache recovery')
+        observed = inspect_site_fastcgi_cache(
+            public, site['id'], site['name'], vhost_root=vhost_root,
+            nginx_root=nginx_root,
+            rewrite_root=str(Path(vhost_root).parent / 'rewrite'))
+        if (observed.get('state') != 'Source Observed' or
+                observed.get('source_sha256') != record['source_sha'] or
+                observed.get('unresolved_other_sites') != 0):
+            raise CacheManageError('concurrency',
+                'Native Cache source inventory changed since prepared approval')
+
+
 def _same_cache_identity(site_id, record):
     """The path is not enough: a valid-looking replacement inode is drift."""
     identity = _path_owned(site_id)
@@ -661,8 +698,8 @@ def _empty_prepublication(site, record, *, vhost_root=VHOST_ROOT):
         os.close(efd)
 
 
-def _cache_observation(site, record, *, vhost_root=VHOST_ROOT,
-                       nginx_root=NGINX_ROOT, probe=None):
+def _cache_observation(site, record, public, *, vhost_root=VHOST_ROOT,
+                       nginx_root=NGINX_ROOT, data_dir=DATA_DIR, probe=None):
     """Read-only full recovery identity, file and PHP observation."""
     state = 'Needs Review'
     reason = None
@@ -671,6 +708,9 @@ def _cache_observation(site, record, *, vhost_root=VHOST_ROOT,
     try:
         _same_site_sources(site, record,
                            vhost_root=vhost_root, nginx_root=nginx_root)
+        _same_native_source_inventory(
+            site, record, public, vhost_root=vhost_root,
+            nginx_root=nginx_root, data_dir=data_dir)
         if record['schema'] == 2 and record['cache_identity'] is None:
             # Before directory creation, there is no inode to compare. Prove
             # absence of BOTH managed files and the physical cache directory.
@@ -772,8 +812,9 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     return {'schema': 1, 'state': 'Needs Review', 'read_only': True,
                             'site_id': site['id'], 'recovery_id': record['op'],
                             'runtime_verified': False, 'purge_supported': False}
-                return _cache_observation(site, record, vhost_root=vhost_root,
-                                          nginx_root=nginx_root, probe=probe)
+                return _cache_observation(site, record, public,
+                                          vhost_root=vhost_root, nginx_root=nginx_root,
+                                          data_dir=data_dir, probe=probe)
 
             if approved is not True:
                 raise CacheManageError('authorization', 'Explicit current Cache approval required')
@@ -887,7 +928,8 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                         'Cache activated; final journal commit unconfirmed',
                         recovery_id=record['op']) from exc
                 return {'schema': 1, 'state': 'Applied', 'changed': True,
-                        'site_id': site['id'], 'recovery_id': record['op'],
+                        'site_id': site['id'], 'site_key': site['name'],
+                        'journal_phase': 'applied', 'recovery_id': record['op'],
                         'runtime_verified': True, 'purge_supported': False,
                         'cache_directory': record['cache_directory']}
 
@@ -898,6 +940,9 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     'Unknown, changed or already-restored Cache operation')
             _same_site_sources(site, record,
                                vhost_root=vhost_root, nginx_root=nginx_root)
+            _same_native_source_inventory(
+                site, record, public, vhost_root=vhost_root,
+                nginx_root=nginx_root, data_dir=data_dir)
             if record['schema'] == 2 and record['cache_identity'] is None:
                 # The same read-only physical proof used by Recheck permits
                 # journal-only recovery; no Cache source or reload is touched.
@@ -906,7 +951,8 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 record['phase'] = 'restored'
                 _record_save(statefd, record)
                 return {'schema': 1, 'state': 'Restored', 'changed': False,
-                        'site_id': site['id'], 'recovery_id': record['op'],
+                        'site_id': site['id'], 'site_key': site['name'],
+                        'recovery_id': record['op'],
                         'journal_phase': 'restored',
                         'runtime_verified': False, 'purge_supported': False,
                         'recovery_scope': 'prepublication',
@@ -940,7 +986,8 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     'Restore observed but journal finalization unconfirmed',
                     recovery_id=record['op']) from exc
             return {'schema': 1, 'state': 'Restored', 'changed': True,
-                    'site_id': site['id'], 'recovery_id': record['op'],
+                    'site_id': site['id'], 'site_key': site['name'],
+                    'journal_phase': 'restored', 'recovery_id': record['op'],
                     'runtime_verified': True, 'purge_supported': False,
                     'note': 'Per-site cache bytes are retained. Shared WORDPRESS cache is untouched.'}
         finally:

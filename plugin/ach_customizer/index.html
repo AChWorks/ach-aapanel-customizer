@@ -1933,6 +1933,44 @@
       cacheActivationLock();
     });
   });
+  function validCacheRecoveryRecheck(r, id) {
+    var site = hostsPageSites.get(id), token = /^[0-9a-f]{32}$/;
+    if (!r || !site || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.read_only !== true ||
+        r.purge_supported !== false ||
+        (r.site_key !== undefined && r.site_key !== site.name)) return false;
+    var phase = r.journal_phase, scope = r.recovery_scope;
+    if (r.state === 'Unmanaged')
+      return r.runtime_verified === false && r.recovery_id == null &&
+        phase == null && scope == null;
+    if (r.state === 'Needs Review')
+      return r.runtime_verified === false && scope == null &&
+        (phase == null || ['prepared','applied','restored'].includes(phase)) &&
+        (r.recovery_id == null || token.test(r.recovery_id));
+    if (!token.test(r.recovery_id || '') || r.site_key !== site.name) return false;
+    if (r.state === 'Applied')
+      return phase === 'applied' && scope == null && r.runtime_verified === true;
+    if (r.state === 'Recovery Required')
+      return ['prepared','applied'].includes(phase) &&
+        (scope == null || (scope === 'prepublication' && phase === 'prepared')) &&
+        r.runtime_verified === false;
+    if (r.state === 'Restored')
+      return phase === 'restored' &&
+        ((scope === 'prepublication' && r.runtime_verified === false) ||
+         (scope == null && r.runtime_verified === true));
+    return false;
+  }
+  function validCacheRestoreReply(r, id, recovery) {
+    var site = hostsPageSites.get(id);
+    if (!r || !site || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== site.name ||
+        r.recovery_id !== recovery || r.state !== 'Restored' ||
+        r.journal_phase !== 'restored' || r.purge_supported !== false) return false;
+    return ((r.recovery_scope === 'prepublication' &&
+             r.changed === false && r.runtime_verified === false) ||
+            (r.recovery_scope == null &&
+             r.changed === true && r.runtime_verified === true));
+  }
   root.find('#ach-cache-activation-recheck').on('click', function () {
     var id = hostsSiteId();
     if (!id || cacheActivationBusy || hostsBusy || siteBusy ||
@@ -1949,18 +1987,7 @@
       Object.assign(cacheNativeArgs(id),{cache_action:'recheck'}), function (r) {
         if (ticket !== cacheActivationTicket) return;
         cacheActivationBusy = false;
-        var neverActivated = r && r.state === 'Restored' &&
-          r.journal_phase === 'restored' && r.recovery_scope === 'prepublication' &&
-          r.runtime_verified === false;
-        var coherentPhase = r && (['Unmanaged','Needs Review'].includes(r.state) ||
-          (r.state === 'Applied' && r.journal_phase === 'applied') ||
-          (r.state === 'Restored' && r.journal_phase === 'restored') ||
-          (r.state === 'Recovery Required' &&
-            ['prepared','applied'].includes(r.journal_phase)));
-        var stable = id === hostsSiteId() && r && r.status === true &&
-          r.schema === 1 && r.site_id === Number(id) && coherentPhase &&
-          r.read_only === true && (r.runtime_verified ===
-            ['Applied','Restored'].includes(r.state) || neverActivated);
+        var stable = id === hostsSiteId() && validCacheRecoveryRecheck(r,id);
         if (!stable) {
           cacheActivationNotice('Cache recovery state not verified: ' +
             (r && typeof r.msg === 'string' ? r.msg : 'Recheck unavailable'));
@@ -2000,8 +2027,11 @@
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
       var success = id === hostsSiteId() && r && r.status === true &&
-        r.schema === 1 && r.site_id === Number(id) && r.state === 'Applied' &&
-        r.changed === true && r.runtime_verified === true &&
+        r.schema === 1 && r.site_id === Number(id) &&
+        r.site_key === hostsPageSites.get(id).name &&
+        r.state === 'Applied' && r.journal_phase === 'applied' &&
+        r.recovery_scope == null && r.changed === true &&
+        r.runtime_verified === true &&
         r.purge_supported === false && /^[0-9a-f]{32}$/.test(r.recovery_id || '');
       if (success) {
         cacheRecoveryIdentity = r.recovery_id;
@@ -2036,13 +2066,9 @@
     }), function (r) {
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
-      var neverActivated = r && r.recovery_scope === 'prepublication' &&
-        r.journal_phase === 'restored' &&
-        r.changed === false && r.runtime_verified === false;
-      var success = id === hostsSiteId() && r && r.status === true &&
-        r.schema === 1 && r.site_id === Number(id) &&
-        r.state === 'Restored' && r.recovery_id === recovery &&
-        ((r.changed === true && r.runtime_verified === true) || neverActivated);
+      var neverActivated = r && r.recovery_scope === 'prepublication';
+      var success = id === hostsSiteId() &&
+        validCacheRestoreReply(r,id,recovery);
       cacheActivationNotice(success ? (neverActivated ?
         'Prepared Cache recovery finalized; no Cache was activated or Nginx reloaded.'+
         '\nRecovery ID: '+recovery+'\nRecheck to confirm the restored journal.' :

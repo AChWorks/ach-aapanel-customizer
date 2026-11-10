@@ -1769,11 +1769,13 @@ const cacheActivationReady = (overrides={}) => ({
 });
 const cacheOperationApplied = (overrides={}) => ({
   status:true,schema:1,state:'Applied',changed:true,site_id:7,
+  site_key:'site.test',journal_phase:'applied',
   recovery_id:'f'.repeat(32),runtime_verified:true,
   purge_supported:false, ...overrides
 });
 const cacheOperationRestored = (overrides={}) => ({
   status:true,schema:1,state:'Restored',changed:true,site_id:7,
+  site_key:'site.test',journal_phase:'restored',
   recovery_id:'f'.repeat(32),runtime_verified:true,
   purge_supported:false, ...overrides
 });
@@ -1859,7 +1861,8 @@ test('Prepublication Cache journal is recoverable from UI without false activati
   assert.equal(restore.options.data.recovery_id,id);
   assert.equal(restore.options.data.approved,'true');
   restore.respond({status:true,schema:1,state:'Restored',site_id:7,
-    journal_phase:'restored',recovery_id:id,changed:false,runtime_verified:false,
+    site_key:'site.test',journal_phase:'restored',recovery_id:id,
+    changed:false,runtime_verified:false,
     recovery_scope:'prepublication',purge_supported:false});
   assert.match(ui.state().cacheActivationResult,/recovery finalized/);
   assert.match(ui.state().cacheActivationResult,/no Cache was activated or Nginx reloaded/);
@@ -1879,7 +1882,8 @@ test('Restored Cache journal with resurrected files stays Needs Review and canno
   const id='e'.repeat(32);
   const recheck=ui.statusClick('#ach-cache-activation-recheck');
   recheck.respond({status:true,schema:1,state:'Needs Review',site_id:7,
-    journal_phase:'restored',recovery_id:id,read_only:true,runtime_verified:false,
+    site_key:'site.test',journal_phase:'restored',recovery_id:id,
+    read_only:true,runtime_verified:false,purge_supported:false,
     note:'Restored Cache sources reappeared without an approved Apply'});
   assert.match(ui.state().cacheActivationResult,/Needs Review/);
   ui.statusSetChecked('#ach-cache-restore-reviewed',true);
@@ -1901,11 +1905,80 @@ test('Restored Cache journal with resurrected files stays Needs Review and canno
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
 });
 
+test('Cache Recheck rejects contradictory phase, recovery scope, runtime and site identity', () => {
+  const id='e'.repeat(32);
+  const applied={status:true,schema:1,site_id:7,site_key:'site.test',
+    state:'Applied',journal_phase:'applied',recovery_id:id,
+    read_only:true,runtime_verified:true,purge_supported:false};
+  const invalid=[
+    {recovery_scope:'prepublication'},
+    {journal_phase:'restored'},
+    {site_key:'other.test'},
+    {site_id:8},
+    {runtime_verified:false},
+    {state:'Restored',journal_phase:'restored',recovery_scope:'prepublication'},
+    {state:'Restored',journal_phase:'restored',runtime_verified:false},
+    {state:'Recovery Required',journal_phase:'applied',
+      recovery_scope:'prepublication',runtime_verified:false},
+    {state:'Recovery Required',journal_phase:'restored',runtime_verified:false},
+    {state:'Recovery Required',journal_phase:'prepared',runtime_verified:true},
+    {state:'Unmanaged',journal_phase:'applied',runtime_verified:false},
+    {purge_supported:true},
+  ];
+  for(const bad of invalid){
+    const ui=loadUi(); selectHostsSite(ui);
+    ui.statusClick('#ach-cache-activation-recheck').respond({...applied,...bad});
+    assert.match(ui.state().cacheActivationResult,/not verified|unavailable/i,
+      'reject contradictory response '+JSON.stringify(bad));
+    ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+    assert.equal(ui.state().cacheActivationRestoreDisabled,true,JSON.stringify(bad));
+  }
+  const valid=loadUi();selectHostsSite(valid);
+  valid.statusClick('#ach-cache-activation-recheck').respond({...applied,
+    state:'Restored',journal_phase:'restored',
+    recovery_scope:'prepublication',runtime_verified:false});
+  assert.match(valid.state().cacheActivationResult,/Cache state: Restored/);
+  assert.equal(valid.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Cache Restore refuses contradictory scope, phase, site identity and runtime', () => {
+  const id='e'.repeat(32);
+  const normal={status:true,schema:1,state:'Restored',site_id:7,
+    site_key:'site.test',journal_phase:'restored',recovery_id:id,
+    changed:true,runtime_verified:true,purge_supported:false};
+  const badReplies=[
+    {recovery_scope:'prepublication'},
+    {journal_phase:'applied'},
+    {site_key:'other.test'},
+    {site_id:8},
+    {changed:false},
+    {runtime_verified:false},
+    {recovery_id:'f'.repeat(32)},
+    {purge_supported:true},
+    {recovery_scope:'prepublication',changed:false,runtime_verified:true},
+    {recovery_scope:'prepublication',changed:true,runtime_verified:false},
+  ];
+  for(const bad of badReplies){
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-cache-activation-recheck').respond({
+      status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+      journal_phase:'applied',recovery_id:id,read_only:true,
+      runtime_verified:true,purge_supported:false});
+    ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+    assert.equal(ui.state().cacheActivationRestoreDisabled,false);
+    const response=ui.statusClick('#ach-cache-activation-restore');
+    assert.equal(response.options.data.recovery_id,id);
+    response.respond({...normal,...bad});
+    assert.match(ui.state().cacheActivationResult,/NOT CONFIRMED/,JSON.stringify(bad));
+    assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  }
+});
+
 test('Cache no-op Restore response without prepublication proof is not confirmed', () => {
   const ui=loadUi(); selectHostsSite(ui);
   const id='e'.repeat(32);
   ui.statusClick('#ach-cache-activation-recheck').respond({status:true,schema:1,
-    state:'Recovery Required',site_id:7,journal_phase:'prepared',
+    state:'Recovery Required',site_id:7,site_key:'site.test',journal_phase:'prepared',
     recovery_id:id,read_only:true,runtime_verified:false,purge_supported:false});
   ui.statusSetChecked('#ach-cache-restore-reviewed',true);
   assert.equal(ui.state().cacheActivationRestoreDisabled,false);

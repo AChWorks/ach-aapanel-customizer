@@ -818,7 +818,7 @@ def _verified_owned_status_extension(directory, site_id, site_key, name, text):
 
 
 def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
-                                  allowed_conf_names=None):
+                                  allowed_conf_names=None, cache_state_dir=None):
     """Read a single native per-site '*.conf' glob without following links.
 
     Accept inert native logging overlays or the exact verified, plugin-owned
@@ -881,7 +881,8 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
                         raise MonitorInputError("Another site's Cache extension requires review")
                     try:
                         journal = verified_cache_extension(
-                            directory, site_id, site_key, name, text)
+                            directory, site_id, site_key, name, text,
+                            state_dir=cache_state_dir)
                     except (ValueError, OSError) as exc:
                         raise MonitorInputError("Native Cache extension ownership needs review") from exc
                     files.append({"name": name, "signature": signature,
