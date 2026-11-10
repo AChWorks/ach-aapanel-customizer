@@ -405,6 +405,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         "runtime_verified": False, "cache_safe_verified": False,
         "purge_supported": False, "fix_supported": False,
         "zone_state": "Needs Review", "cache_zone": None,
+        "php_version": None,
         "global_zone_directly_declared": False,
         "aaPanel_global_include_observed": False,
         "global_ignore_headers": [], "cache_directory": None,
@@ -429,7 +430,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             if (site_id, site_key) not in sites:
                 raise CacheAuditError("Selected native site identity has changed")
             globals_ = _known_global_cache(nginx_root, vhost_root)
-            selected_directives, selected_files, _ = _site_source(
+            selected_directives, selected_files, version = _site_source(
                 site_id, site_key, vhost_root, nginx_root, rewrite_root)
             zone_state, zone = _cache_zone(selected_directives)
             peers = []
@@ -464,7 +465,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                         # or mounts. Source-only diagnostics cannot certify that
                         # they are separate physical directories.
                         different_directory_peer = True
-            return (sites, globals_, selected_directives, zone_state,
+            return (sites, globals_, selected_directives, version, zone_state,
                     zone, peers, directory_peers, different_directory_peer,
                     unresolved, fingerprints)
 
@@ -474,7 +475,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         if (panel_public.get_webserver() != "nginx" or
                 str(panel_public.get_panel_version()).strip() != "8.0.7"):
             raise CacheAuditError("Native web engine or panel version changed during audit")
-        (sites, globals_, directives, zone_state, zone, peers,
+        (sites, globals_, directives, php_version, zone_state, zone, peers,
          directory_peers, different_directory_peer, unresolved, fingerprints) = first
         findings, ignored = _analyze_selected(
             directives, zone_state, zone, globals_, peers, directory_peers)
@@ -489,7 +490,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             separators=(",", ":")).encode("utf-8")).hexdigest()
         result.update(
             state="Partial" if unresolved else "Source Observed",
-            zone_state=zone_state, cache_zone=zone,
+            zone_state=zone_state, cache_zone=zone, php_version=php_version,
             global_zone_directly_declared=zone is not None and
                 zone in globals_["direct_zones"],
             aaPanel_global_include_observed=globals_["include_observed"],

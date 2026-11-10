@@ -619,6 +619,69 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("cache_inspection", exc, request_id)
 
+    def preview_cache_safety(self, args):
+        """Reference-only per-site cache layout; no site, service or cache write.
+
+        Only an explicitly selected current native site with an unambiguous
+        *direct* cache zone gets reference fragments. An existing zone and
+        source signatures do not prove that the active workers use it, or
+        that the replacement snippet can be safely installed.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_cache_audit import inspect_site_fastcgi_cache
+                from ach_customizer_cache_policy import generate_reference
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Cache reference helper is outdated after plugin update; restart "
+                    "the aaPanel panel service and refresh native website inventory"
+                ) from exc
+            public, before, current_site = self._selected_native_website(args)
+            observed = inspect_site_fastcgi_cache(
+                public, before["id"], before["name"])
+            if current_site() != before:
+                raise MonitorInputError(
+                    "Native website/root/bindings changed during cache proposal")
+            baseline = {
+                "schema": 1, "site_id": before["id"],
+                "site_key": before["name"], "read_only": True,
+                "installed": False, "runtime_verified": False,
+                "safe_verified": False, "apply_supported": False,
+                "purge_supported": False, "cache_zone": None,
+                "cache_directory": None, "proposal_sha256": None,
+                "global_http_fragment": "", "site_server_fragment": "",
+                "php_version": None,
+                "source_sha256": observed.get("source_sha256"),
+            }
+            if (observed.get("state") != "Source Observed"
+                    or observed.get("zone_state") != "Direct Zone"
+                    or observed.get("php_version") not in ("81", "85")):
+                reason = (
+                    "Selected site requires a verified PHP 8.1/8.5 native "
+                    "FastCGI-cache source before a reference is available"
+                )
+                reply = {"status": True, "request_id": request_id,
+                         **baseline, "state": "Needs Review",
+                         "reason": reason,
+                         "note": "No policy generated, installed or enabled."}
+            else:
+                plan = generate_reference(
+                    before["id"], observed["php_version"])
+                reply = {"status": True, "request_id": request_id,
+                         "site_key": before["name"],
+                         "source_sha256": observed["source_sha256"],
+                         **plan, "reason": ""}
+            return self._activity_result(
+                reply, "websites", "preview_cache_safety",
+                target=str(before["id"]), level="WARNING")
+        except PermissionError as exc:
+            return self._fail("cache_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("cache_reference_preview", exc, request_id)
+
     def fpm_policy_get(self, args):
         """Read operator-saved shared PHP intent, not a live/runtime verdict."""
         request_id = uuid4().hex

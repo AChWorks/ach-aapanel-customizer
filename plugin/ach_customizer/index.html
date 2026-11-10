@@ -348,6 +348,9 @@
       <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines native VHost/PHP snippets and aaPanel's known top-level 0.fastcgi_cache.conf include for cache-zone paths, shared-directory Purge All risk, bypass/write guards, host-key tokens and ignored response headers. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
       <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
+      <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
+      <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
+      <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>Shared PHP-FPM · Preview / Apply / Recovery</h4>
@@ -1269,6 +1272,7 @@
   });
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
   var cacheBusy = false, cacheTicket = 0;
+  var cachePlanBusy = false, cachePlanTicket = 0;
   var vhostBusy = false, vhostTicket = 0;
   var nginxCandidateBusy = false, nginxCandidateTicket = 0;
   function vhostLock() {
@@ -1290,13 +1294,18 @@
     invalidateVhostInspection('Website selection or inventory changed; compare VHost again.');
     ++cacheTicket;
     cacheBusy = false;
+    ++cachePlanTicket;
+    cachePlanBusy = false;
     root.find('#ach-cache-result').text(note ||
       'Select a native website to inspect source-only FastCGI cache clues.');
+    root.find('#ach-cache-plan-result').text(
+      'Website selection or inventory changed; refresh the isolated reference preview.');
     cacheLock();
   }
   function cacheLock() {
-    root.find('#ach-cache-inspect-button').prop('disabled',
-      cacheBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+    var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
+    root.find('#ach-cache-inspect-button').prop('disabled', cacheBusy || unready);
+    root.find('#ach-cache-plan-button').prop('disabled', cachePlanBusy || unready);
     vhostLock();
   }
   function nativeHostsSnapshot(site) {
@@ -1748,6 +1757,73 @@
         '\nSource snapshot SHA-256: ' + r.source_sha256 +
         '\n' + r.note +
         '\nDO NOT infer that private routes are safe or that site-scoped Purge All is isolated.');
+    });
+  });
+  function validCachePlan(r, id) {
+    var same = hostsPageSites.get(id);
+    var sha = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+    if (!r || r.status !== true || r.schema !== 1 || !same ||
+        r.site_id !== Number(id) || r.site_key !== same.name ||
+        !['Reference Only', 'Needs Review'].includes(r.state) ||
+        r.read_only !== true || r.installed !== false ||
+        r.runtime_verified !== false || r.safe_verified !== false ||
+        r.apply_supported !== false || r.purge_supported !== false ||
+        typeof r.note !== 'string' || r.note.length > 750 ||
+        typeof r.reason !== 'string' || r.reason.length > 300 ||
+        !(r.source_sha256 === null || sha(r.source_sha256)) ||
+        typeof r.global_http_fragment !== 'string' ||
+        typeof r.site_server_fragment !== 'string' ||
+        r.global_http_fragment.length > 4000 ||
+        r.site_server_fragment.length > 5000) return false;
+    if (r.state === 'Needs Review') {
+      return r.php_version === null && r.cache_zone === null &&
+        r.cache_directory === null && r.proposal_sha256 === null &&
+        r.global_http_fragment === '' && r.site_server_fragment === '' &&
+        r.reason.length > 0;
+    }
+    return ['81','85'].includes(r.php_version) && sha(r.source_sha256) &&
+      sha(r.proposal_sha256) && r.reason === '' &&
+      r.cache_zone === 'ACHFC_' + id &&
+      r.cache_directory === '/www/server/ach-customizer-fastcgi/site-' + id &&
+      r.global_http_fragment.length > 100 &&
+      r.site_server_fragment.length > 100;
+  }
+  root.find('#ach-cache-plan-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cachePlanBusy || hostsBusy || siteBusy ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++cachePlanTicket;
+    cachePlanBusy = true;
+    cacheLock();
+    root.find('#ach-cache-plan-result').text(
+      'Preparing reference only: NO Apply, NO Reload, NO Purge...');
+    request('preview_cache_safety', {
+      site_id:id, expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r) {
+      if (ticket !== cachePlanTicket) return;
+      cachePlanBusy = false;
+      cacheLock();
+      if (id !== hostsSiteId() || !validCachePlan(r, id)) {
+        root.find('#ach-cache-plan-result').text(
+          'Cache reference unavailable or incompatible; no policy was installed.');
+        return;
+      }
+      if (r.state === 'Needs Review') {
+        root.find('#ach-cache-plan-result').text(
+          'No reference generated: ' + r.reason + '\n' + r.note);
+        return;
+      }
+      // Render snippets as text, never HTML or actionable Apply requests.
+      root.find('#ach-cache-plan-result').text(
+        'REFERENCE ONLY — NOT INSTALLED / NOT SAFE-VERIFIED / NO PURGE' +
+        '\nSite #' + id + ', PHP ' + r.php_version +
+        ', separate cache directory: ' + r.cache_directory +
+        '\nSource SHA256: ' + r.source_sha256 +
+        '; Reference SHA256: ' + r.proposal_sha256 +
+        '\n\nHTTP-scope reference:\n' + r.global_http_fragment +
+        '\nServer-scope reference:\n' + r.site_server_fragment +
+        '\n' + r.note);
     });
   });
   root.find('#ach-sites-refresh').on('click', function () {

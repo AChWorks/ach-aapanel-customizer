@@ -49,6 +49,7 @@ function loadUi() {
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-rows',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-cache-inspect-button', '#ach-cache-result',
+    '#ach-cache-plan-button', '#ach-cache-plan-result',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
@@ -302,6 +303,8 @@ function loadUi() {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
       cacheResult: elements.get('#ach-cache-result').textContent,
+      cachePlanResult: elements.get('#ach-cache-plan-result').textContent,
+      cachePlanDisabled: elements.get('#ach-cache-plan-button').props.disabled,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       nginxCandidateDisabled: elements.get('#ach-nginx-candidate-button').props.disabled,
@@ -1497,6 +1500,20 @@ const cacheInspection = (overrides={}) => ({
   ...overrides
 });
 
+const cachePlan = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',source_sha256:'a'.repeat(64),
+  state:'Reference Only',read_only:true,installed:false,runtime_verified:false,
+  safe_verified:false,apply_supported:false,purge_supported:false,
+  cache_zone:'ACHFC_7',cache_directory:'/www/server/ach-customizer-fastcgi/site-7',
+  php_version:'85',proposal_sha256:'b'.repeat(64),reason:'',
+  global_http_fragment:'fastcgi_cache_path /www/server/ach-customizer-fastcgi/site-7 ' +
+    'keys_zone=ACHFC_7:10m;' + ' '.repeat(90),
+  site_server_fragment:'location ~ \.php$ { fastcgi_no_cache $upstream_http_set_cookie; }' +
+    ' '.repeat(90),
+  note:'Preview only. No Apply, Reload or Purge.',
+  ...overrides
+});
+
 const vhostInspection = (overrides={}) => ({
   status:true,schema:1,site_id:7,site_key:'site.test',
   state:'File Match',read_only:true,runtime_verified:false,fix_supported:false,
@@ -1709,6 +1726,64 @@ test('VHost results are revoked on selection changes and inventory refresh', () 
   assert.doesNotMatch(ui.state().vhostResult,/File Match/);
   refresh.respond(hostsInventory());
   assert.equal(ui.state().vhostInspectDisabled,true);
+});
+
+test('Isolated cache reference is native-site bound and rendered as inert text only', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  assert.equal(ui.state().cachePlanDisabled,false);
+  const req=ui.statusClick('#ach-cache-plan-button');
+  assert.match(req.options.url,/s=preview_cache_safety$/);
+  assert.equal(req.options.type,'POST');
+  assert.deepEqual(Object.keys(req.options.data).sort(),[
+    'expected_site_key','expected_site_snapshot','site_id'
+  ]);
+  assert.equal(ui.state().cachePlanDisabled,true);
+  req.respond(cachePlan());
+  assert.equal(ui.state().cachePlanDisabled,false);
+  assert.match(ui.state().cachePlanResult,/REFERENCE ONLY — NOT INSTALLED/);
+  assert.match(ui.state().cachePlanResult,/ACHFC_7/);
+  assert.match(ui.state().cachePlanResult,/NO PURGE/);
+  assert.doesNotMatch(ui.state().cachePlanResult,/SAFE-VERIFIED: YES/);
+});
+
+test('Cache reference rejects forged writer claims and never renders raw HTML', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  for(const x of [
+    {apply_supported:true},{purge_supported:true},{installed:true},
+    {safe_verified:true},{runtime_verified:true},{site_key:'other.test'},
+    {site_id:8},{cache_zone:'WORDPRESS'},{cache_directory:'/var/cache/other'},
+    {global_http_fragment:'<img src=x onerror=evil()>'},
+    {php_version:'86'},{proposal_sha256:'bad'},
+    {state:'Needs Review',global_http_fragment:'real data'}
+  ]) {
+    ui.statusClick('#ach-cache-plan-button').respond(cachePlan(x));
+    assert.match(ui.state().cachePlanResult,/unavailable or incompatible/,JSON.stringify(x));
+  }
+  const literal='<img src=x onerror=evil()>';
+  ui.statusClick('#ach-cache-plan-button').respond(cachePlan({
+    site_server_fragment:literal + ' '.repeat(150)
+  }));
+  assert.match(ui.state().cachePlanResult,/<img src=x onerror=evil\(\)>/);
+});
+
+test('Cache reference revokes stale async response after native-site navigation', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const old=ui.statusClick('#ach-cache-plan-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  old.respond(cachePlan());
+  assert.match(ui.state().cachePlanResult,/changed/);
+  assert.doesNotMatch(ui.state().cachePlanResult,/ACHFC_7/);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-cache-plan-button').respond(cachePlan({
+    state:'Needs Review',cache_zone:null,cache_directory:null,php_version:null,
+    proposal_sha256:null,global_http_fragment:'',site_server_fragment:'',
+    reason:'No verified direct cache zone'
+  }));
+  assert.match(ui.state().cachePlanResult,/No reference generated/);
+  assert.doesNotMatch(ui.state().cachePlanResult,/HTTP-scope reference/);
 });
 
 test('FastCGI cache audit binds exact native website snapshot and never grants Apply/purge', () => {
