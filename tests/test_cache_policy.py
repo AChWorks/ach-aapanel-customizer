@@ -55,6 +55,15 @@ class CachePolicyRenderTests(unittest.TestCase):
         self.assertNotIn("site-8", a["global_http_fragment"])
         self.assertNotIn("$achfc_8", a["global_http_fragment"])
 
+    def test_managed_php_handler_keeps_native_stock_routing_and_pathinfo(self):
+        for version in ('81','85'):
+            with self.subTest(version=version):
+                fragment=policy.generate_reference(7,version)['site_server_fragment']
+                self.assertIn('try_files $uri =404;',fragment)
+                self.assertIn('include fastcgi.conf;\n    include pathinfo.conf;',fragment)
+                self.assertNotIn('try_files $uri $uri/ /index.php?$args;',fragment)
+                self.assertIn('fastcgi_pass unix:/tmp/php-cgi-'+version+'.sock;',fragment)
+
     def test_operational_cache_generations_never_reuse_old_cache_keys(self):
         initial = policy.generate_reference(7, "85", cache_generation="a"*32)
         next_gen = policy.generate_reference(7, "85", cache_generation="b"*32)

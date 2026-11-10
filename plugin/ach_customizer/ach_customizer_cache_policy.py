@@ -87,10 +87,11 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         # private-route guard. Query-string hits are already bypassed.
         + r'if ($request_uri ~ "(?:%%|//|/\.\.?(?:/|$))") { set $%s_skip 1; }' % var + "\n"
         + "location ~ [^/]\\.php(/|$) {\n"
-        + "    try_files $uri $uri/ /index.php?$args;\n"
+        + "    try_files $uri =404;\n"
         + "    fastcgi_pass unix:/tmp/php-cgi-%s.sock;\n" % php_version
         + "    fastcgi_index index.php;\n"
         + "    include fastcgi.conf;\n"
+        + "    include pathinfo.conf;\n"
         + "    fastcgi_cache %s;\n" % zone
         # A fresh per-Apply cache key namespace prevents a later Reapply
         # from serving stale objects left by a completed Restore. Keep the

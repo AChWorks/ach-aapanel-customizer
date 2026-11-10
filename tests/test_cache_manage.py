@@ -31,10 +31,17 @@ class CacheManageTests(unittest.TestCase):
         (self.nginx/'nginx.conf').write_text(
             'events {}\nhttp {\n include '+str(self.vhost)+'/*.conf;\n}\n')
         (self.nginx/'enable-php-85.conf').write_text(
-            'location ~ [^/]\\.php(/|$) {\n fastcgi_pass unix:/tmp/php-cgi-85.sock;\n'
-            ' include fastcgi.conf;\n}\n')
+            'location ~ [^/]\\.php(/|$) {\n try_files $uri =404;\n'
+            ' fastcgi_pass unix:/tmp/php-cgi-85.sock;\n'
+            ' fastcgi_index index.php;\n include fastcgi.conf;\n'
+            ' include pathinfo.conf;\n}\n')
         (self.nginx/'fastcgi.conf').write_text(
             'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n')
+        (self.nginx/'pathinfo.conf').write_text(
+            'fastcgi_param SCRIPT_FILENAME $document_root$real_script_name;\n'
+            'fastcgi_param SCRIPT_NAME $real_script_name;\n'
+            'fastcgi_param PATH_INFO $path_info;\n')
+        self.cache_created=False
         self.sources=cache._site_sources(self.site,'85',vhost_root=str(self.vhost),
                                          nginx_root=str(self.nginx))
         self.ref=cache.generate_reference(7,'85')
@@ -46,8 +53,11 @@ class CacheManageTests(unittest.TestCase):
             patch.object(cache,'_compatibility',side_effect=lambda site,public,**kw:
                 (self.native,cache.generate_reference(
                     7,'85',cache_generation=kw.get('cache_generation')),self.sources)),
-            patch.object(cache,'_path_owned',return_value=None),
-            patch.object(cache,'_create_site_cache',return_value=None),
+            patch.object(cache,'_path_owned',
+                side_effect=lambda site_id, **kw:
+                (19,23) if self.cache_created else None),
+            patch.object(cache,'_create_site_cache',
+                side_effect=lambda site_id: setattr(self,'cache_created',True)),
             patch.object(cache,'inspect_site_fastcgi_cache',return_value={
                 'state':'Source Observed','zone_state':'Direct Zone',
                 'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
@@ -209,6 +219,178 @@ class CacheManageTests(unittest.TestCase):
                              'Applied')
             self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
                 recovery_id=second['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_recheck_detects_each_native_source_drift_without_writing(self):
+        applied=self.apply()
+        global_path=self.vhost/cache._names(7)[0]
+        extension_path=self.ext/cache._names(7)[1]
+        journal=self.state/cache._names(7)[2]
+        for path, label in (
+            (self.nginx/'nginx.conf','main Nginx'),
+            (self.vhost/'qa.test.conf','VHost/rewrite'),
+            (self.nginx/'enable-php-85.conf','PHP handler/parameters'),
+            (self.nginx/'pathinfo.conf','PHP handler/parameters'),
+            (self.nginx/'fastcgi.conf','PHP handler/parameters'),
+        ):
+            with self.subTest(path=str(path)):
+                original=path.read_bytes()
+                path.write_bytes(original+b'\n# native regeneration\n')
+                previous=(journal.read_bytes(), global_path.read_bytes(),
+                          extension_path.read_bytes(), len(self.commands))
+                observed=cache.manage_cache('recheck',self.site,**self.kwargs())
+                self.assertEqual(observed['state'],'Needs Review')
+                self.assertFalse(observed['runtime_verified'])
+                self.assertEqual(observed['recovery_id'],applied['recovery_id'])
+                self.assertIn(label, observed['note'])
+                self.assertEqual(previous,
+                    (journal.read_bytes(),global_path.read_bytes(),
+                     extension_path.read_bytes(),len(self.commands)))
+                with self.assertRaisesRegex(cache.CacheManageError, 'changed since approval'):
+                    cache.manage_cache('restore',self.site,approved=True,
+                        recovery_id=applied['recovery_id'],**self.kwargs())
+                path.write_bytes(original)
+                self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
+                                 'Applied')
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=applied['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_recheck_detects_physical_directory_replacement_and_alias(self):
+        applied=self.apply()
+        journal=self.state/cache._names(7)[2]
+        saved=journal.read_bytes()
+        self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
+                         'Applied')
+        for observed, label in ((lambda *_a,**_k:(19,24),'physical identity'),
+                                (lambda *_a,**_k:(_ for _ in ()).throw(
+                                    cache.CacheManageError('ownership','Unexpected bind mount')),
+                                 'Unexpected bind mount')):
+            with self.subTest(label=label):
+                with patch.object(cache,'_path_owned',side_effect=observed):
+                    result=cache.manage_cache('recheck',self.site,**self.kwargs())
+                    self.assertEqual(result['state'],'Needs Review')
+                    self.assertFalse(result['runtime_verified'])
+                    self.assertEqual(result['recovery_id'],applied['recovery_id'])
+                    self.assertIn(label, result['note'])
+                    with self.assertRaises(cache.CacheManageError):
+                        cache.manage_cache('restore',self.site,approved=True,
+                            recovery_id=applied['recovery_id'],**self.kwargs())
+                self.assertEqual(journal.read_bytes(),saved)
+        self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
+                         'Applied')
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=applied['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_old_archived_generation_cannot_reactivate_before_any_write(self):
+        first_plan=self.preview()
+        first=cache.manage_cache('apply',self.site,public=object(),
+            expected_source=first_plan['source_sha256'],
+            expected_proposal=first_plan['proposal_sha256'],
+            cache_generation=first_plan['cache_generation'],
+            approved=True,**self.kwargs())
+        cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=first['recovery_id'],**self.kwargs())
+        second=self.apply()
+        cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=second['recovery_id'],**self.kwargs())
+        archive=self.state/(cache._names(7)[2]+'.'+first['recovery_id']+'.restored')
+        self.assertTrue(archive.is_file())
+        before={str(path):path.read_bytes() for path in self.state.iterdir() if path.is_file()}
+        before_commands=list(self.commands)
+        with self.assertRaisesRegex(cache.CacheManageError, 'already activated'):
+            cache.preview_cache_activation(self.site,object(),
+                cache_generation=first_plan['cache_generation'],
+                vhost_root=str(self.vhost),nginx_root=str(self.nginx),
+                data_dir=str(self.state),probe=self.probe)
+        with self.assertRaisesRegex(cache.CacheManageError, 'already activated'):
+            cache.manage_cache('apply',self.site,public=object(),
+                expected_source=first_plan['source_sha256'],
+                expected_proposal=first_plan['proposal_sha256'],
+                cache_generation=first_plan['cache_generation'],
+                approved=True,**self.kwargs())
+        self.assertEqual(before,{str(path):path.read_bytes()
+                                for path in self.state.iterdir() if path.is_file()})
+        self.assertEqual(self.commands,before_commands)
+        self.assertFalse((self.ext/cache._names(7)[1]).exists())
+        third=self.apply()
+        self.assertEqual(third['state'],'Applied')
+        self.assertNotEqual(third['recovery_id'],second['recovery_id'])
+        self.assertIn('fastcgi_cache_key', (self.ext/cache._names(7)[1]).read_text())
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=third['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_prepublication_journal_can_be_safely_reconciled_without_reload(self):
+        plan=self.preview()
+        reference,gb,eb=cache._fragments(7,'85',plan['cache_generation'])
+        identity=self.sources
+        record={
+            'schema':2,'site_id':7,'site_key':'qa.test','php_version':'85',
+            'op':'e'*32,'phase':'prepared','cache_identity':None,
+            'cache_generation':plan['cache_generation'],
+            'source_sha':plan['source_sha256'],
+            'proposal_sha':plan['proposal_sha256'],
+            'vhost_sha':identity['vhost_sha'],
+            'main_sha':identity['main_sha'],'php_sha':identity['php_sha'],
+            'global_sha':cache._hash(gb),'extension_sha':cache._hash(eb),
+            'cache_directory':reference['cache_directory'],
+            'probe_status':200,
+        }
+        fd=cache._open_state_dir(str(self.state))
+        try:
+            cache._record_save(fd,record)
+        finally:
+            os.close(fd)
+        before=list(self.commands)
+        result=cache.manage_cache('recheck',self.site,**self.kwargs())
+        self.assertEqual(result['state'],'Needs Review')
+        self.assertEqual(result['recovery_id'],'e'*32)
+        restored=cache.manage_cache('restore',self.site,approved=True,
+                recovery_id='e'*32,**self.kwargs())
+        self.assertEqual(restored['state'],'Restored')
+        self.assertFalse(restored['changed'])
+        self.assertEqual(self.commands,before)
+        applied=self.apply()
+        self.assertEqual(applied['state'],'Applied')
+        self.assertTrue(self.cache_created)
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=applied['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_stock_php_and_header_preflight_guards(self):
+        def inspect():
+            return cache._site_sources(self.site,'85',vhost_root=str(self.vhost),
+                                       nginx_root=str(self.nginx))
+        original=inspect()
+        cases=(
+            (self.nginx/'enable-php-85.conf', ' include pathinfo.conf;\n',
+             'Native PHP handler'),
+            (self.nginx/'pathinfo.conf', 'fastcgi_param PATH_INFO $path_info;',
+             'PATH_INFO parameters'),
+        )
+        for path, needle, message in cases:
+            with self.subTest(path=str(path)):
+                data=path.read_text()
+                self.assertIn(needle,data)
+                path.write_text(data.replace(needle,''))
+                with self.assertRaisesRegex(cache.CacheManageError,message):
+                    inspect()
+                path.write_text(data)
+        self.assertEqual(inspect(),original)
+        for path, addition, message in (
+            (self.vhost/'qa.test.conf',' add_header Content-Security-Policy "default-src self";\n',
+             'VHost response headers'),
+            (self.nginx/'nginx.conf',' add_header X-Frame-Options SAMEORIGIN always;\n',
+             'HTTP-level response headers'),
+        ):
+            with self.subTest(path=str(path)):
+                data=path.read_text()
+                if path.name == 'nginx.conf':
+                    path.write_text(data.replace(' include '+str(self.vhost)+'/*.conf;',
+                        addition+' include '+str(self.vhost)+'/*.conf;'))
+                else:
+                    path.write_text(data.replace('}\n',addition+'}\n',1))
+                with self.assertRaisesRegex(cache.CacheManageError,message):
+                    inspect()
+                path.write_text(data)
+        self.assertEqual(inspect(),original)
 
     def test_reapply_rejects_tampered_retained_source_without_mutation(self):
         first=self.apply()

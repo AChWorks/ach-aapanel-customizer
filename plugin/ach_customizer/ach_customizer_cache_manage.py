@@ -58,11 +58,7 @@ def _names(site_id):
             JOURNAL_PREFIX + str(site_id) + '.json')
 
 
-def _record_read(state_fd, site_id):
-    raw = _bounded_file(state_fd, _names(site_id)[2], limit=8192,
-                        permissions=0o600)
-    if raw is None:
-        return None
+def _record_decode(raw, site_id):
     try:
         record = json.loads(raw)
     except (ValueError, UnicodeError) as exc:
@@ -71,8 +67,17 @@ def _record_read(state_fd, site_id):
               'source_sha', 'proposal_sha', 'vhost_sha', 'main_sha', 'php_sha',
               'global_sha', 'extension_sha', 'cache_directory',
               'cache_generation', 'probe_status'}
-    if (not isinstance(record, dict) or set(record) != needed
-            or record['schema'] != 1 or record['site_id'] != site_id
+    if not isinstance(record, dict):
+        raise CacheManageError('recovery', 'Untrusted Cache journal')
+    schema = record.get('schema')
+    expected = needed | ({'cache_identity'} if schema == 2 else set())
+    identity = record.get('cache_identity')
+    valid_identity = (identity is None and record.get('phase') in ('prepared', 'restored') or
+                      isinstance(identity, list) and len(identity) == 2 and
+                      all(type(value) is int and value > 0 for value in identity))
+    if (schema not in (1, 2) or set(record) != expected
+            or (schema == 2 and not valid_identity)
+            or record['site_id'] != site_id
             or not isinstance(record['site_key'], str)
             or not SITE_KEY.fullmatch(record['site_key'])
             or record['php_version'] not in ('81','85')
@@ -88,6 +93,34 @@ def _record_read(state_fd, site_id):
             or not 100 <= record['probe_status'] <= 599):
         raise CacheManageError('recovery', 'Untrusted Cache journal; do not modify Nginx')
     return record
+
+
+def _record_read(state_fd, site_id):
+    raw = _bounded_file(state_fd, _names(site_id)[2], limit=8192,
+                        permissions=0o600)
+    return None if raw is None else _record_decode(raw, site_id)
+
+
+def _generation_unused(state_fd, site_id, generation):
+    """Read all retained activation journals; never trust only the latest one."""
+    name = _names(site_id)[2]
+    prefix = name + '.'
+    suffix = '.restored'
+    for entry in os.listdir(state_fd):
+        if not (entry.startswith(prefix) and entry.endswith(suffix)):
+            continue
+        op = entry[len(prefix):-len(suffix)]
+        if not TOKEN.fullmatch(op):
+            raise CacheManageError('recovery', 'Unexpected Cache recovery archive name')
+        raw = _bounded_file(state_fd, entry, limit=8192, permissions=0o600)
+        if raw is None:
+            raise CacheManageError('recovery', 'Cache recovery archive disappeared')
+        old = _record_decode(raw, site_id)
+        if old['op'] != op or old['phase'] != 'restored':
+            raise CacheManageError('recovery', 'Cache archive identity is inconsistent')
+        if old['cache_generation'] == generation:
+            raise CacheManageError('recovery',
+                'Cache generation was already activated and cannot be reused')
 
 
 def _record_save(state_fd, record):
@@ -128,7 +161,32 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     vhost, sig = _read_source(vhost_root+'/'+site['name']+'.conf')
     main, _ = _read_source(nginx_root+'/nginx.conf')
     php_include, _ = _read_source(nginx_root+'/enable-php-'+php+'.conf')
+    fastcgi, _ = _read_source(nginx_root+'/fastcgi.conf')
+    pathinfo, _ = _read_source(nginx_root+'/pathinfo.conf')
     active = _active_nginx_text(vhost.decode())
+    php_active = re.sub(r'\s+', ' ', _active_nginx_text(php_include.decode())).strip()
+    stock = (r'location ~ [^/]\.php(/|$) { try_files $uri =404; '
+             'fastcgi_pass unix:/tmp/php-cgi-'+php+'.sock; '
+             'fastcgi_index index.php; include fastcgi.conf; '
+             'include pathinfo.conf; }')
+    if php_active != stock:
+        raise CacheManageError('compatibility',
+            'Native PHP handler has unverified routing or FastCGI parameters')
+    params = _active_nginx_text(pathinfo.decode())
+    if (any(not re.search(r'\bfastcgi_param\s+'+key+r'\s+'+value+r'\s*;', params)
+            for key, value in (
+                ('SCRIPT_FILENAME', r'\$document_root\$real_script_name'),
+                ('SCRIPT_NAME', r'\$real_script_name'),
+                ('PATH_INFO', r'\$path_info'))) or
+            re.search(r'\b(?:include|add_header|fastcgi_pass)\s', params)):
+        raise CacheManageError('compatibility',
+            'Native PHP PATH_INFO parameters need manual compatibility review')
+    # The managed location defines Cache diagnostics via add_header. On Nginx
+    # 1.28 this suppresses inherited http/server-level response headers.
+    # Only the bounded stock shape without site-level header overrides is safe.
+    if re.search(r'\badd_header\s', active):
+        raise CacheManageError('compatibility',
+            'Selected VHost response headers cannot be inherited by Cache handler')
     ext = 'include '+vhost_root+'/extension/'+site['name']+'/*.conf;'
     php_line = 'include enable-php-'+php+'.conf;'
     if (active.count(ext) != 1 or active.count(php_line) != 1
@@ -142,8 +200,22 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     if len(matches) != 1 or not _direct_http_scope_at(main.decode(),matches[0].start()):
         raise CacheManageError('compatibility',
                                'Direct native http{} VHost include glob is unverified')
-    return {'vhost_sha':_hash(vhost), 'main_sha':_hash(main),
-            'php_sha':_hash(php_include)}
+    active_main = _active_nginx_text(main.decode())
+    if any(_direct_http_scope_at(active_main, item.start())
+           for item in re.finditer(r'\badd_header\s', active_main)):
+        raise CacheManageError('compatibility',
+            'HTTP-level response headers cannot be inherited by Cache handler')
+    rewrite_include = ('include '+str(Path(vhost_root).parent/'rewrite'/
+                                      (site['name']+'.conf'))+';')
+    rewrite = b''
+    if rewrite_include in active:
+        rewrite, _ = _read_source(str(Path(vhost_root).parent/'rewrite'/
+                                      (site['name']+'.conf')))
+        if re.search(r'\badd_header\s', _active_nginx_text(rewrite.decode())):
+            raise CacheManageError('compatibility',
+                'Native rewrite response headers need manual Cache review')
+    return {'vhost_sha':_hash(vhost+b'\0'+rewrite), 'main_sha':_hash(main),
+            'php_sha':_hash(php_include+b'\0'+fastcgi+b'\0'+pathinfo)}
 
 
 def _path_owned(site_id, *, cache_root=CACHE_ROOT, allow_missing=False):
@@ -368,19 +440,30 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
             'Existing Cache generation cannot be reused without policy-specific recovery')
     global_name, ext_name, _ = _names(site['id'])
     expected_global, expected_ext = _expected_files(old)
+    incomplete_setup = old['schema'] == 2 and old['cache_identity'] is None
     gfd, efd, g, e = _cache_files(None, site, vhost_root=vhost_root)
     try:
+        previous_global = _bounded_file(gfd, global_name+'.'+old['op']+'.retained',
+                                        limit=4096, permissions=0o600)
+        previous_ext = _bounded_file(efd, ext_name+'.'+old['op']+'.retained',
+                                     limit=8192, permissions=0o600)
         if (g is not None or e is not None or
-                _bounded_file(gfd, global_name+'.'+old['op']+'.retained',
-                              limit=4096, permissions=0o600) != expected_global or
-                _bounded_file(efd, ext_name+'.'+old['op']+'.retained',
-                              limit=8192, permissions=0o600) != expected_ext):
+                (previous_global,previous_ext) !=
+                ((None,None) if incomplete_setup else (expected_global,expected_ext))):
             raise CacheManageError('recovery',
                 'Previously restored Cache snippets are not byte-identical')
     finally:
         os.close(gfd)
         os.close(efd)
-    if _path_owned(site['id'],allow_missing=True) is None:
+    if incomplete_setup:
+        if _path_owned(site['id'], allow_missing=True) is not None:
+            raise CacheManageError('ownership',
+                'Incomplete Cache setup has an unexpected physical directory')
+    elif old['schema'] == 2:
+        _same_cache_identity(site['id'], old)
+    elif _path_owned(site['id'], allow_missing=True) is None:
+        # Historical unreleased journals did not store physical identities;
+        # validate path ownership rather than silently adopting a missing tree.
         raise CacheManageError('ownership',
             'Prior managed Cache directory is missing, not safe to reuse')
 
@@ -407,6 +490,10 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
     statefd=_open_state_dir(data_dir)
     try:
         old = _record_read(statefd,site['id'])
+        _generation_unused(statefd, site['id'], cache_generation)
+        if old is not None and old['cache_generation'] == cache_generation:
+            raise CacheManageError('recovery',
+                'Cache generation was already activated and cannot be reused')
         if old is not None and old['phase'] != 'restored':
             raise CacheManageError('recovery','Existing Cache record requires Recheck/Restore')
         native,reference,sources=_compatibility(
@@ -506,8 +593,22 @@ def verified_cache_global(vhost_root, site_id, name, *, state_dir=None):
 def _same_site_sources(site, record, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     source = _site_sources(site, record['php_version'],
                            vhost_root=vhost_root, nginx_root=nginx_root)
-    if any(source[key] != record[key] for key in ('vhost_sha', 'main_sha', 'php_sha')):
-        raise CacheManageError('concurrency', 'Native source changed since approval')
+    drift = [label for key, label in (
+        ('vhost_sha', 'VHost/rewrite'), ('main_sha', 'main Nginx'),
+        ('php_sha', 'PHP handler/parameters'))
+        if source[key] != record[key]]
+    if drift:
+        raise CacheManageError('concurrency',
+            'Native Cache source changed since approval: ' + ', '.join(drift))
+
+
+def _same_cache_identity(site_id, record):
+    """The path is not enough: a valid-looking replacement inode is drift."""
+    identity = _path_owned(site_id)
+    if (not isinstance(identity, tuple) or len(identity) != 2 or
+            record['schema'] != 2 or record['cache_identity'] != list(identity)):
+        raise CacheManageError('ownership',
+            'Saved Cache directory physical identity is missing or has changed')
 
 
 def _safe_retire(fd, name, expected, operation):
@@ -535,41 +636,52 @@ def _expected_files(record):
     return global_bytes, extension_bytes
 
 
-def _cache_observation(site, record, *, vhost_root=VHOST_ROOT, probe=None):
-    """Read-only file/journal/HTTP comparison with no Nginx reload."""
-    global_name, ext_name, _ = _names(site['id'])
-    gfd, efd, g, e = _cache_files(None, site, vhost_root=vhost_root)
+def _cache_observation(site, record, *, vhost_root=VHOST_ROOT,
+                       nginx_root=NGINX_ROOT, probe=None):
+    """Read-only full recovery identity, file and PHP observation."""
+    state = 'Needs Review'
+    reason = None
+    gfd = efd = None
     try:
-        try:
-            gb, eb = _expected_files(record)
-            if (g is not None and g != gb) or (e is not None and e != eb):
-                state = 'Needs Review'
-            elif record['phase'] == 'restored' and g is None and e is None:
-                state = 'Restored'
-            elif g == gb and e == eb:
-                state = 'Recovery Required' if record['phase'] == 'prepared' else 'Applied'
-            else:
-                state = 'Recovery Required'
-        except CacheManageError:
-            state = 'Needs Review'
+        _same_site_sources(site, record,
+                           vhost_root=vhost_root, nginx_root=nginx_root)
+        _same_cache_identity(site['id'], record)
+        global_name, ext_name, _ = _names(site['id'])
+        gfd, efd, g, e = _cache_files(None, site, vhost_root=vhost_root)
+        gb, eb = _expected_files(record)
+        if (g is not None and g != gb) or (e is not None and e != eb):
+            raise CacheManageError('ownership',
+                'Managed Cache source differs from saved recovery')
+        if record['phase'] == 'restored' and g is None and e is None:
+            state = 'Restored'
+        elif g == gb and e == eb:
+            state = 'Recovery Required' if record['phase'] == 'prepared' else 'Applied'
+        else:
+            state = 'Recovery Required'
         if state in ('Applied', 'Restored'):
-            try:
-                result = (probe or _probe)(site, marker=site['id'] if state == 'Applied' else None)
-                if record['phase'] == 'applied' and result != record['probe_status']:
-                    state = 'Needs Review'
-            except CacheManageError:
-                state = 'Needs Review'
-        return {'schema': 1, 'state': state, 'read_only': True,
-                'site_id': site['id'], 'site_key': site['name'],
-                'recovery_id': record['op'], 'journal_phase': record['phase'],
-                'runtime_verified': state in ('Applied', 'Restored'),
-                'purge_supported': False,
-                'cache_directory': record['cache_directory'],
-                'cache_zone': 'ACHFC_' + str(site['id']),
-                'note': 'File and loopback PHP evidence only; real WP/Woo and Nginx Helper compatibility remains unverified.'}
+            result = (probe or _probe)(site, marker=site['id'] if state == 'Applied' else None)
+            if record['phase'] == 'applied' and result != record['probe_status']:
+                raise CacheManageError('probe',
+                    'PHP response status differs from saved recovery')
+    except (CacheManageError, OSError, ValueError) as exc:
+        state = 'Needs Review'
+        reason = ('Recovery ownership/source verification: ' + str(exc))[:250]
     finally:
-        os.close(gfd)
-        os.close(efd)
+        if gfd is not None:
+            os.close(gfd)
+        if efd is not None:
+            os.close(efd)
+    return {'schema': 1, 'state': state, 'read_only': True,
+            'site_id': site['id'], 'site_key': site['name'],
+            'recovery_id': record['op'], 'journal_phase': record['phase'],
+            'runtime_verified': state in ('Applied', 'Restored'),
+            'purge_supported': False,
+            'cache_directory': record['cache_directory'],
+            'cache_zone': 'ACHFC_' + str(site['id']),
+            'note': reason or
+            'File, physical directory and loopback PHP evidence only; '
+            'real WP/Woo and Nginx Helper compatibility remains unverified.'}
+
 
 def manage_cache(action, site, public=None, *, expected_source=None,
                  expected_proposal=None, recovery_id=None, approved=False,
@@ -601,7 +713,8 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     return {'schema': 1, 'state': 'Needs Review', 'read_only': True,
                             'site_id': site['id'], 'recovery_id': record['op'],
                             'runtime_verified': False, 'purge_supported': False}
-                return _cache_observation(site, record, vhost_root=vhost_root, probe=probe)
+                return _cache_observation(site, record, vhost_root=vhost_root,
+                                          nginx_root=nginx_root, probe=probe)
 
             if approved is not True:
                 raise CacheManageError('authorization', 'Explicit current Cache approval required')
@@ -625,8 +738,9 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 initial = (probe or _probe)(site, marker=None)
                 sources = _site_sources(site, php, vhost_root=vhost_root, nginx_root=nginx_root)
                 record = {
-                    'schema': 1, 'site_id': site['id'], 'site_key': site['name'],
+                    'schema': 2, 'site_id': site['id'], 'site_key': site['name'],
                     'php_version': php, 'op': uuid4().hex, 'phase': 'prepared',
+                    'cache_identity': None,
                     'cache_generation': cache_generation,
                     'source_sha': readiness['source_sha256'],
                     'proposal_sha': reference['proposal_sha256'],
@@ -644,10 +758,11 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     _archive_restored_record(statefd, previous)
                 _record_save(statefd, record)
                 try:
-                    if previous is None:
+                    if previous is None or previous.get('cache_identity', 'legacy') is None:
                         _create_site_cache(site['id'])
-                    else:
-                        _path_owned(site['id'])
+                    identity = _path_owned(site['id'])
+                    record['cache_identity'] = list(identity)
+                    _record_save(statefd, record)
                     global_name, ext_name, _ = _names(site['id'])
                     gfd, efd, global_before, extension_before = _cache_files(
                         statefd, site, vhost_root=vhost_root)
@@ -662,7 +777,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                         os.close(efd)
                     _same_site_sources(site, record,
                                        vhost_root=vhost_root, nginx_root=nginx_root)
-                    _path_owned(site['id'])
+                    _same_cache_identity(site['id'], record)
                     observed = inspect_site_fastcgi_cache(
                         public, site['id'], site['name'], vhost_root=vhost_root,
                         nginx_root=nginx_root,
@@ -700,7 +815,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                         site, marker=site['id'], expected_status=initial, probe=probe)
                     _same_site_sources(site, record,
                                        vhost_root=vhost_root, nginx_root=nginx_root)
-                    _path_owned(site['id'])
+                    _same_cache_identity(site['id'], record)
                 except Exception as exc:
                     raise CacheManageError('uncertain',
                         'Cache reload/worker observation unconfirmed; Recheck and Restore',
@@ -724,6 +839,28 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     'Unknown, changed or already-restored Cache operation')
             _same_site_sources(site, record,
                                vhost_root=vhost_root, nginx_root=nginx_root)
+            if record['schema'] == 2 and record['cache_identity'] is None:
+                # A crash before the first durable directory-identity commit
+                # means no managed snippets have yet been published. Reconcile
+                # that precise pre-publication state without requiring a reload.
+                gfd, efd, g, e = _cache_files(statefd, site, vhost_root=vhost_root)
+                try:
+                    if (g is not None or e is not None or
+                            _path_owned(site['id'], allow_missing=True) is not None):
+                        raise CacheManageError('recovery',
+                            'Incomplete Cache physical setup requires manual review')
+                finally:
+                    os.close(gfd)
+                    os.close(efd)
+                _expected_files(record)
+                (probe or _probe)(site, marker=None)
+                record['phase'] = 'restored'
+                _record_save(statefd, record)
+                return {'schema': 1, 'state': 'Restored', 'changed': False,
+                        'site_id': site['id'], 'recovery_id': record['op'],
+                        'runtime_verified': False, 'purge_supported': False,
+                        'note': 'Prepared Cache had no managed files or cache directory; no reload.'}
+            _same_cache_identity(site['id'], record)
             global_bytes, ext_bytes = _expected_files(record)
             gfd, efd, _, _ = _cache_files(statefd, site, vhost_root=vhost_root)
             try:
