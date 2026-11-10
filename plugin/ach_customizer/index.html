@@ -1646,6 +1646,26 @@
         '\n' + r.note);
     });
   });
+  function validNginxHelperAudit(h) {
+    if (!h || h.schema !== 1 ||
+        h.active_verified !== false || h.purge_method_verified !== false ||
+        h.cache_path_verified !== false || h.purge_safe_verified !== false ||
+        !['Not Observed','Not Installed','Installed','Needs Review'].includes(h.state) ||
+        typeof h.note !== 'string' || h.note.length > 600 ||
+        typeof h.reason !== 'string' || h.reason.length > 200) return false;
+    return h.state === 'Installed'
+      ? typeof h.version === 'string' &&
+        /^[0-9]+\.[0-9]+(?:\.[0-9]+){0,2}$/.test(h.version) && h.reason === ''
+      : h.version === null &&
+        (h.state === 'Needs Review' ? h.reason.length > 0 : h.reason === '');
+  }
+  function nginxHelperAuditText(h) {
+    return '\nNginx Helper (root-level WordPress files only): ' + h.state +
+      (h.version === null ? '' : ' v' + h.version) +
+      '\nPlugin activation, purge method, effective purge directory and safe purge: NOT VERIFIED' +
+      (h.reason ? '\n' + h.reason : '') +
+      '\n' + h.note;
+  }
   function validCacheAudit(r, id) {
     var sha = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
     var same = hostsPageSites.get(id);
@@ -1653,7 +1673,7 @@
         r.site_id !== Number(id) || r.site_key !== same?.name ||
         r.read_only !== true || r.runtime_verified !== false ||
         r.cache_safe_verified !== false || r.fix_supported !== false ||
-        r.purge_supported !== false ||
+        r.purge_supported !== false || !validNginxHelperAudit(r.nginx_helper) ||
         !['Source Observed','Partial','Needs Review'].includes(r.state) ||
         !['Direct Zone','Direct Off','No Direct Directive','Needs Review'].includes(r.zone_state) ||
         !(r.cache_zone === null || typeof r.cache_zone === 'string' &&
@@ -1770,7 +1790,8 @@
       }
       if (r.state === 'Needs Review') {
         root.find('#ach-cache-result').text(
-          'FastCGI cache source: Needs Review — ' + r.reason + '\n' + r.note);
+          'FastCGI cache source: Needs Review — ' + r.reason + '\n' + r.note +
+          nginxHelperAuditText(r.nginx_helper));
         return;
       }
       root.find('#ach-cache-result').text(
@@ -1797,6 +1818,7 @@
         (r.reason ? '\n' + r.reason : '') +
         '\nSource snapshot SHA-256: ' + r.source_sha256 +
         '\n' + r.note +
+        nginxHelperAuditText(r.nginx_helper) +
         '\nDO NOT infer that private routes are safe or that site-scoped Purge All is isolated.');
     });
   });

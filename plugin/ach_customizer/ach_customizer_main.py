@@ -606,17 +606,21 @@ class ach_customizer_main:
             public, before, current_site = self._selected_native_website(args)
             site_id = before["id"]
             result = inspect_site_fastcgi_cache(public, site_id, before["name"])
+            from ach_customizer_cache_helper import inspect_nginx_helper_files
+            helper = inspect_nginx_helper_files(before["path"])
             if current_site() != before:
                 raise MonitorInputError(
                     "Native site or bound domains changed during cache inspection")
             response = {
                 "status": True, "request_id": request_id, **result,
+                "nginx_helper": helper,
             }
             return self._activity_result(
                 response, "websites", "inspect_fastcgi_cache",
                 target=str(site_id),
                 level="WARNING" if result["state"] != "Source Observed"
-                    or result["findings"] else "DEBUG",
+                    or result["findings"] or helper["state"] in ("Installed", "Needs Review")
+                    else "DEBUG",
             )
         except PermissionError as exc:
             return self._fail("cache_authorization", exc, request_id)

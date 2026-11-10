@@ -1486,6 +1486,11 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
   ui.statusSetValue('#ach-hosts-site-id',id,'input change');
 }
 
+const nginxHelperAudit = (overrides={}) => ({
+  schema:1,state:'Not Installed',version:null,active_verified:false,
+  purge_method_verified:false,cache_path_verified:false,purge_safe_verified:false,
+  reason:'',note:'No standard Nginx Helper plugin observed.',...overrides
+});
 const cacheInspection = (overrides={}) => ({
   status:true,schema:1,site_id:7,site_key:'site.test',
   read_only:true,runtime_verified:false,cache_safe_verified:false,
@@ -1506,6 +1511,7 @@ const cacheInspection = (overrides={}) => ({
   other_sites_same_zone:[{id:8,site_key:'other.test'}],
   unresolved_other_sites:0,inspected_sites:2,source_sha256:'b'.repeat(64),
   reason:'',note:'Source-only observation. No loaded cache or Nginx Helper safety claim.',
+  nginx_helper:nginxHelperAudit(),
   ...overrides
 });
 
@@ -2101,6 +2107,44 @@ test('FastCGI cache audit binds exact native website snapshot and never grants A
   assert.match(state,/8: other.test/);
   assert.match(state,/DO NOT infer/);
   assert.doesNotMatch(state,/safe to purge|private content protected/);
+});
+
+test('Installed Nginx Helper inspection exposes key and Purge All mismatch without authorizing actions', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const text='Installed PHP files; <img src=x onerror=alert(1)> unlink_files, get_request and recursive Purge All remain unverified.';
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    nginx_helper:nginxHelperAudit({state:'Installed',version:'2.4.1',note:text})
+  }));
+  const observed=ui.state().cacheResult;
+  assert.match(observed,/Nginx Helper.*Installed v2\.4\.1/);
+  assert.match(observed,/Plugin activation, purge method, effective purge directory and safe purge: NOT VERIFIED/);
+  assert.match(observed,/unlink_files, get_request/);
+  assert.match(observed,/\<img src=x onerror=alert\(1\)\>/);
+  assert.equal(ui.state().cacheInspectDisabled,false);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Nginx Helper incompatible source claims are never rendered as verified', () => {
+  const invalid=[
+    {active_verified:true},{purge_method_verified:true},
+    {cache_path_verified:true},{purge_safe_verified:true},
+    {state:'Installed',version:null},
+    {state:'Installed',version:'2.4.1 <script>'},
+    {state:'Not Installed',version:'2.4.1'},
+    {state:'Needs Review',reason:''},
+    {state:'Installed',reason:'conflict'},
+    {note:'x'.repeat(601)}
+  ];
+  for(const change of invalid){
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+      nginx_helper:nginxHelperAudit(change)
+    }));
+    assert.match(ui.state().cacheResult,/unavailable or incompatible/,
+      JSON.stringify(change));
+    assert.doesNotMatch(ui.state().cacheResult,/safe purge: NOT VERIFIED/);
+  }
 });
 
 test('Partial FastCGI cache source and Needs Review never claim verified isolation', () => {

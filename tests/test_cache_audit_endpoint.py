@@ -126,6 +126,20 @@ class NativeCacheAuditEndpointTests(unittest.TestCase):
         self.assertTrue(any(x["action"] == "inspect_fastcgi_cache" and
                             x["level"] == "WARNING" for x in rows), rows)
 
+    def test_helper_inspection_uses_native_document_root_not_caller_path(self):
+        from ach_customizer_cache_helper import inspect_nginx_helper_files
+        expected = inspect_nginx_helper_files("/missing/native/site")
+        with patch.dict(sys.modules, {
+                "public": self.native(), "flask": self.flask()
+        }), patch.object(audit, "inspect_site_fastcgi_cache",
+                         return_value=self.sample()), \
+            patch("ach_customizer_cache_helper.inspect_nginx_helper_files",
+                  return_value=expected) as scan:
+            response = self.plugin.inspect_fastcgi_cache(self.args())
+        self.assertTrue(response["status"], response)
+        self.assertEqual(response["nginx_helper"], expected)
+        scan.assert_called_once_with("/www/site.test")
+
     def test_nonprimary_get_or_temporary_identity_denied_before_read(self):
         for access in (self.flask(uid=2), self.flask(method="GET"),
                        self.flask(temporary=True)):
