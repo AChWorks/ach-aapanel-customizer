@@ -5863,8 +5863,11 @@ test('New-site defaults require global scope and a fresh source recheck', () => 
   current.respond(defaultReply('recheck'));
   assert.match(ui.state().defaultSourceResult,/Source Ready/);
   assert.equal(ui.state().defaultSourceApplyDisabled,true);
+  assert.match(ui.gate('ach-status-default-apply-why').text,/Tick to approve/);
   ui.statusSetChecked('#ach-status-default-apply-approve',true);
   assert.equal(ui.state().defaultSourceApplyDisabled,false);
+  assert.match(ui.gate('ach-status-default-apply-why').text,/Approval selected/);
+  assert.doesNotMatch(ui.gate('ach-status-default-apply-why').text,/Tick to approve/);
   const apply=ui.statusClick('#ach-status-default-apply');
   assert.match(apply.options.url,/s=status_defaults$/);
   assert.equal(apply.options.data.default_approval,'apply_new_site_default_404');

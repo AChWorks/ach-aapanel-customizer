@@ -2592,10 +2592,14 @@
     explainGate('ach-status-site-apply-why', siteApply && !busy ? 'ready' : 'blocked',
       pending || (!siteRunning ? 'Select a running website and supported status template; load branding before attempting Apply.' :
         !siteApply ? 'First Check selected site source (read-only). Then inspect the result; only fresh matching evidence permits Apply.' :
+        root.find('#ach-status-manage-apply-approve').prop('checked') ?
+        'Approval selected for the inspected website and delivery mode. Apply selected status page is enabled for this exact evidence.' :
         'Source preflight confirmed for this selection. Review the delivery method and impact, then tick to enable Apply.'));
     explainGate('ach-status-site-restore-why', siteRestore && !busy ? 'ready' : 'blocked',
       pending || (!siteRunning ? 'Restore requires the current verified running website and its saved recovery. Select the website and Recheck.' :
         !siteRestore ? 'Recheck selected site status. Restore is unavailable without a matching saved Applied / Recovery Required state.' :
+        root.find('#ach-status-manage-restore-approve').prop('checked') ?
+        'Restore approval selected for this saved site recovery. Review the operation impact before clicking Restore.' :
         'Matching recovery found. Review the saved recovery ID and reload/file consequences, then tick to enable Restore.'));
     var defaultApply = !!(defaultMatches && ['Source Ready','Restored'].includes(statusDefaultEvidence.state) &&
       statusDefaultEvidence.current !== statusDefaultEvidence.rendered);
@@ -2607,10 +2611,14 @@
         statusDefaultEvidence.current === statusDefaultEvidence.rendered ?
         'No change needed: the generated template already matches the current saved source. Apply remains disabled.' :
         !defaultApply ? 'Recheck found no safe source ready for Apply. Review the reported state instead of approving blindly.' :
+        root.find('#ach-status-default-apply-approve').prop('checked') ?
+        'Approval selected: Apply future-site default template is enabled. Only future newly created sites are affected.' :
         'Source ready. Tick to approve replacement for FUTURE sites only; existing websites are unchanged.'));
     explainGate('ach-status-default-restore-why', defaultRestore && !busy ? 'ready' : 'blocked',
       pending || (!defaultRestore ?
         'Restore is unavailable until Recheck confirms a saved Applied / Recovery Required default-template recovery.' :
+        root.find('#ach-status-default-restore-approve').prop('checked') ?
+        'Restore approval selected for the saved default-template recovery. Use Restore previous default source to proceed.' :
         'Saved recovery confirmed. Review the recovery ID; tick to restore the previous new-site source.'));
     var unboundApply = !!(unboundMatches &&
       ['Source Ready','Restored'].includes(statusUnboundEvidence.state));
@@ -2619,10 +2627,14 @@
     explainGate('ach-status-unbound-apply-why', unboundApply && !busy ? 'ready' : 'blocked',
       pending || (!unboundApply ?
         'Choose global / unbound, load branding and Recheck HTTP routing. Apply is unavailable without a compatible source.' :
+        root.find('#ach-status-unbound-apply-approve').prop('checked') ?
+        'Approval selected for global unmatched-host HTTP/80 and the shared Nginx reload. Apply unbound HTTP 404 is enabled.' :
         'Current HTTP/80 source ready. Review the impact on unmatched hosts and shared Nginx reload, then tick to enable Apply.'));
     explainGate('ach-status-unbound-restore-why', unboundRestore && !busy ? 'ready' : 'blocked',
       pending || (!unboundRestore ?
         'Restore requires a verified saved global HTTP/80 recovery from Recheck. It does not change HTTPS/443.' :
+        root.find('#ach-status-unbound-restore-approve').prop('checked') ?
+        'Restore approval selected for the verified HTTP/80 recovery. Restore previous HTTP default routing is enabled.' :
         'Saved HTTP/80 recovery confirmed. Review it, then tick to approve Restore and a shared Nginx reload.'));
     var stoppedApply = !!(stoppedMatches && String(selected.panel_status) === '1' &&
       ['Source Ready','Restored'].includes(statusStoppedEvidence.state));
@@ -2631,10 +2643,14 @@
     explainGate('ach-status-stopped-apply-why', stoppedApply && !busy ? 'ready' : 'blocked',
       pending || (!stoppedApply ?
         'Choose a running website and stopped template. Recheck its current source before arming a real HTTP 503 rule.' :
+        root.find('#ach-status-stopped-apply-approve').prop('checked') ?
+        'Approval selected: Arm HTTP 503 for SiteStop is enabled for the verified website; shared Nginx reload will be required.' :
         'Stopped-site source ready. Review the rule and shared Nginx reload, then tick to enable Arm.'));
     explainGate('ach-status-stopped-restore-why', stoppedRestore && !busy ? 'ready' : 'blocked',
       pending || (!stoppedRestore ?
         'Restore requires matching saved stopped-site recovery after Recheck (refresh site inventory after SiteStop/Start).' :
+        root.find('#ach-status-stopped-restore-approve').prop('checked') ?
+        'Restore approval selected for the saved stopped-site recovery. The exact guarded Restore action is enabled.' :
         'Saved stopped-site recovery identified. Review the recovery ID and current status, then tick to enable guarded Restore.'));
   }
   function statusClearPreview() {
