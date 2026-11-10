@@ -28,10 +28,10 @@ function loadUi() {
   const content = {scrollTop:0};
   let focusedTab = null, tabScrollCalls = 0;
   const elements = new Map();
-  const tabs = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('button', {
+  const tabs = ['overview', 'websites', 'routing', 'cache', 'php', 'status', 'activity'].map(name => fakeNode('button', {
     'data-tab': name, 'aria-selected': name === 'overview' ? 'true' : 'false'
   }));
-  const views = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('section', {
+  const views = ['overview', 'websites', 'routing', 'cache', 'php', 'status', 'activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
   root.querySelector = query => query === '#ach-content' ? content : null;
@@ -45,14 +45,17 @@ function loadUi() {
   for (const name of [
     '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
-    '#ach-site-changes-compare', '#ach-site-changes-approve',
-    '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-rows',
+    '#ach-site-changes-compare', '#ach-site-changes-approve', '#ach-site-changes-why',
+    '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-summary', '#ach-site-changes-rows',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
+    '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
+    '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-cache-plan-button', '#ach-cache-plan-result',
     '#ach-cache-activation-preview', '#ach-cache-activation-recheck',
     '#ach-cache-activation-result', '#ach-cache-activation-reviewed',
     '#ach-cache-activation-apply', '#ach-cache-restore-reviewed',
+    '#ach-cache-apply-why', '#ach-cache-restore-why',
     '#ach-cache-activation-restore',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
@@ -61,7 +64,7 @@ function loadUi() {
     '#ach-fpm-policy-recheck', '#ach-fpm-policy-recheck-status',
     '#ach-fpm-policy-diff-rows', '#ach-fpm-policy-impact', '#ach-fpm-policy-impact-rows',
     '#ach-fpm-policy-load', '#ach-fpm-policy-reviewed', '#ach-fpm-policy-save',
-    '#ach-fpm-policy-status',
+    '#ach-fpm-policy-status', '#ach-fpm-policy-why', '#ach-fpm-prepare-why',
     '#ach-max-children', '#ach-start-servers', '#ach-min-spare',
     '#ach-max-spare', '#ach-max-requests',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -82,6 +85,10 @@ function loadUi() {
     '#ach-status-manage-section', '#ach-status-default-section',
     '#ach-status-unbound-section', '#ach-status-stopped-section',
     '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
+    '#ach-status-reset-why', '#ach-status-site-apply-why', '#ach-status-site-restore-why',
+    '#ach-status-default-apply-why', '#ach-status-default-restore-why',
+    '#ach-status-unbound-apply-why', '#ach-status-unbound-restore-why',
+    '#ach-status-stopped-apply-why', '#ach-status-stopped-restore-why',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
     '#ach-status-probe-button', '#ach-status-probe-result', '#ach-status-adoption-result',
@@ -307,6 +314,14 @@ function loadUi() {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
       cacheResult: elements.get('#ach-cache-result').textContent,
+      cacheSummary: elements.get('#ach-cache-summary').textContent,
+      cacheSummaryTone: elements.get('#ach-cache-summary').attributes['data-tone'],
+      hostsSummary: elements.get('#ach-hosts-summary').textContent,
+      vhostSummary: elements.get('#ach-vhost-summary').textContent,
+      nginxSummary: elements.get('#ach-nginx-candidate-summary').textContent,
+      phpRuntimeSummary: elements.get('#ach-php-runtime-summary').textContent,
+      phpRuntimeSummaryTone: elements.get('#ach-php-runtime-summary').attributes['data-tone'],
+      websiteContextHidden: elements.get('#ach-website-context').props.hidden,
       cachePlanResult: elements.get('#ach-cache-plan-result').textContent,
       cachePlanDisabled: elements.get('#ach-cache-plan-button').props.disabled,
       cacheActivationResult: elements.get('#ach-cache-activation-result').textContent,
@@ -498,6 +513,12 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
+    openTab:name => {
+      const tab=tabs.find(item => item.attributes['data-tab'] === name);
+      assert.ok(tab, 'Unknown section');
+      trigger(tab, 'click');
+      return requests.at(-1);
+    },
     setViewportWidth:width => { browserWindow.innerWidth = width; },
     setMainScroll:value => { content.scrollTop = value; },
     mainScroll:() => content.scrollTop,
@@ -546,6 +567,11 @@ function loadUi() {
     approveFpmRollback: checked => fpmApproval('#ach-fpm-rollback-approval', checked),
     rollbackFpm: () => fpmTrigger('#ach-fpm-rollback'),
     changePhp,
+    gate:id => {
+      const node=elements.get('#' + id);
+      assert.ok(node,'Unknown contextual help: ' + id);
+      return {text:node.textContent,state:node.attributes['data-state']};
+    },
     respondControl, state, requests,
     clickNext: () => trigger(elements.get('#ach-next'), 'click'),
     clickPrevious: () => trigger(elements.get('#ach-prev'), 'click'),
@@ -1841,7 +1867,7 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
 });
 
 test('Cache Restore consent distinguishes conditional reload from no-op recovery', () => {
-  assert.match(html,/I approve restoring this site's saved Cache state\. Nginx may reload; verified unactivated recovery does not\./);
+  assert.match(html,/I reviewed the saved recovery identity and approve restoring this site's Cache state\. Nginx may reload; verified unactivated recovery does not\./);
   assert.match(html,/id="ach-cache-activation-restore"[^>]*>Restore saved Cache \/ recovery<\/button>/);
   assert.doesNotMatch(html,/Restore saved Cache \(reload Nginx\)/);
 });
@@ -3669,7 +3695,7 @@ test('A valid Persian diff still renders, then stale content disappears on inval
 
 
 test('Native sidebar sections are linked to panels and scrollable content', () => {
-  for (const name of ['overview','websites','php','status','activity']) {
+  for (const name of ['overview','websites','routing','cache','php','status','activity']) {
     assert.match(html, new RegExp('id="ach-tab-' + name + '"[^>]*aria-controls="ach-panel-' + name + '"'));
     assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*aria-labelledby="ach-tab-' + name + '"'));
   }
@@ -3684,7 +3710,7 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /\.ach-main \{[^}]*background:var\(--ach-surface\)/);
   assert.match(html, /\.ach-workspace \{[^}]*border-radius:0 0 10px 10px/);
   assert.match(html, /\.layui-layer:has\(#ach-customizer\) \{[^}]*border-radius:10px/);
-  assert.doesNotMatch(html, /class="ach-sidebar-label"/);
+  assert.match(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
   assert.match(html, /<h4 class="ach-sr-only">Overview<\/h4>/);
@@ -4478,12 +4504,55 @@ test('Read-only PHP 8.1 runtime inspection requires a discovered version and pre
   req.respond(phpRuntimeEvidence());
   assert.equal(ui.state().phpRuntimeDisabled,false);
   assert.match(ui.state().phpRuntime,/PHP 81 — Observed/);
+  assert.match(ui.state().phpRuntimeSummary,/PHP 81: Observed/);
+  assert.equal(ui.state().phpRuntimeSummaryTone,'observed');
   assert.match(ui.state().phpRuntime,/Master process: Matching Master/);
   assert.match(ui.state().phpRuntime,/Master PID: 432/);
   assert.match(ui.state().phpRuntime,/Socket listener: Bound Listener/);
   assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
   assert.equal(ui.state().fpmPrepareDisabled,true,
     'Runtime process evidence never enables a new PHP81 write adapter');
+});
+
+test('PHP runtime primary summary exposes incomplete listener reasons without enabling Apply', () => {
+  for (const [socketState, reason] of [
+    ['Missing', 'Matching PHP master exists but its Unix socket path is missing'],
+    ['Not Observed', 'PHP socket pathname exists but no matching kernel listener was observed'],
+    ['Not Observed', 'The matching PHP master did not own the observed Unix listener']
+  ]) {
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+      state:'Partial',socket_state:socketState,reason
+    }));
+    assert.equal(ui.state().phpRuntimeSummaryTone,'review',reason);
+    assert.match(ui.state().phpRuntimeSummary,/PHP 81: Partial\. Runtime incomplete:/);
+    assert.ok(ui.state().phpRuntimeSummary.includes(reason),
+      'Primary summary must show the actual incomplete-runtime reason');
+    assert.match(ui.state().phpRuntime,new RegExp('Reason: ' + reason));
+    assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
+    assert.equal(ui.state().fpmPrepareDisabled,true);
+    assert.equal(ui.state().fpmCommitDisabled,true);
+    ui.selectPhpVersion('85');
+    assert.equal(ui.state().phpRuntimeSummaryTone,'neutral',
+      'Version changes revoke the previous runtime presentation');
+    assert.doesNotMatch(ui.state().phpRuntimeSummary,new RegExp(reason));
+  }
+});
+
+test('PHP runtime Needs Review uses review tone and never represents a confirmed listener', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    state:'Needs Review',master_state:'Not Observed',master_pid:null,
+    socket_state:'Needs Review',reason:'No matching PHP-FPM master process observed'
+  }));
+  assert.equal(ui.state().phpRuntimeSummaryTone,'review');
+  assert.match(ui.state().phpRuntimeSummary,/PHP 81: Needs Review/);
+  assert.match(ui.state().phpRuntime,/No matching PHP-FPM master process observed/);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
 });
 
 test('PHP runtime observation discards stale selected-version and inventory-refresh callbacks', () => {
@@ -4725,8 +4794,10 @@ test('Native tab arrow keys follow actual desktop/mobile orientation', () => {
   assert.equal(ui.keyTab('websites','ArrowDown').prevented,false);
   const mobile=ui.keyTab('websites','ArrowRight');
   assert.equal(mobile.prevented,true);
-  assert.equal(mobile.focused,'php');
-  assert.equal(mobile.selected,'php');
+  assert.equal(mobile.focused,'routing');
+  assert.equal(mobile.selected,'routing');
+  assert.equal(ui.keyTab('routing','ArrowRight').selected,'cache');
+  assert.equal(ui.keyTab('cache','ArrowRight').selected,'php');
   assert.equal(ui.keyTab('php','Home').selected,'overview');
   assert.equal(ui.keyTab('overview','End').selected,'activity');
   assert.equal(ui.keyTab('activity','ArrowRight').selected,'overview',
@@ -5836,8 +5907,11 @@ test('New-site defaults require global scope and a fresh source recheck', () => 
   current.respond(defaultReply('recheck'));
   assert.match(ui.state().defaultSourceResult,/Source Ready/);
   assert.equal(ui.state().defaultSourceApplyDisabled,true);
+  assert.match(ui.gate('ach-status-default-apply-why').text,/Tick to approve/);
   ui.statusSetChecked('#ach-status-default-apply-approve',true);
   assert.equal(ui.state().defaultSourceApplyDisabled,false);
+  assert.match(ui.gate('ach-status-default-apply-why').text,/Approval selected/);
+  assert.doesNotMatch(ui.gate('ach-status-default-apply-why').text,/Tick to approve/);
   const apply=ui.statusClick('#ach-status-default-apply');
   assert.match(apply.options.url,/s=status_defaults$/);
   assert.equal(apply.options.data.default_approval,'apply_new_site_default_404');
@@ -6602,4 +6676,191 @@ test('Selected 50x shows source-only preflight and still gates fresh Apply indep
   ui.statusSetValue('#ach-status-delivery','file','change');
   assert.equal(ui.state().statusManageApplyDisabled,true);
   assert.equal(ui.state().statusProbeDisabled,true);
+});
+
+test('Navigation splits real site, routing and cache controls without duplicating the selected site', () => {
+  const start=name => html.indexOf('id="ach-panel-' + name + '"');
+  const panel=(name,next) => html.slice(start(name), start(next));
+  const sites=panel('websites','routing');
+  const routing=panel('routing','cache');
+  const cache=panel('cache','php');
+  assert.equal(html.split('id="ach-hosts-site-id"').length,2,'One shared site selector');
+  assert.ok(html.indexOf('id="ach-hosts-site-id"') < start('overview'),'Shared selector precedes views');
+  assert.match(sites,/id="ach-site-changes-compare"/);
+  assert.doesNotMatch(sites,/id="ach-cache-inspect-button"|id="ach-nginx-candidate-button"/);
+  assert.match(routing,/id="ach-hosts-inspect-button"/);
+  assert.match(routing,/id="ach-vhost-inspect-button"/);
+  assert.match(routing,/id="ach-nginx-candidate-button"/);
+  assert.doesNotMatch(routing,/id="ach-cache-activation-apply"/);
+  assert.match(cache,/id="ach-cache-inspect-button"/);
+  assert.match(cache,/id="ach-cache-plan-button"/);
+  assert.match(cache,/id="ach-cache-activation-apply"/);
+  assert.match(cache,/id="ach-cache-activation-restore"/);
+  for (const name of ['hosts','vhost','nginx-candidate','cache','php-runtime']) {
+    assert.equal(html.split('id="ach-' + name + '-summary"').length,2,'One human summary '+name);
+    assert.match(html,new RegExp('<details class="ach-technical-report">[\\s\\S]*?id="ach-'+name+'-result"'));
+  }
+});
+
+test('Routing and Cache open with the same selected website and no duplicate inventory reads', () => {
+  const ui=loadUi();
+  const req=ui.openTab('cache');
+  assert.match(req.options.url,/s=get_sites$/);
+  assert.equal(ui.state().websiteContextHidden,false);
+  req.respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection());
+  const count=ui.requests.length;
+  ui.openTab('routing');
+  assert.equal(ui.requests.length,count,'Shared verified list must not refetch on tab switch');
+  assert.equal(ui.state().websiteContextHidden,false);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection());
+  assert.match(ui.state().vhostSummary,/matches aaPanel site records/);
+  assert.match(ui.state().cacheSummary,/No Purge All is available/);
+  ui.openTab('overview');
+  assert.equal(ui.state().websiteContextHidden,true);
+  const loadedCount=ui.requests.length; // Overview may load its own state once.
+  ui.openTab('cache');
+  assert.equal(ui.requests.length,loadedCount,'Cache reentry must not refetch website inventory');
+  assert.equal(ui.state().cacheInspectDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.match(ui.state().cacheSummary,/Site selection changed/);
+  assert.doesNotMatch(ui.state().cacheSummary,/matches|No Purge All is available/);
+});
+
+test('Plain-language Cache findings distinguish risk from a verified safety claim', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const r=cacheInspection({nginx_helper:nginxHelperAudit({
+    state:'Installed',version:'2.4.1',
+    note:'Vendor header only; runtime settings unknown.'
+  })});
+  ui.statusClick('#ach-cache-inspect-button').respond(r);
+  assert.match(ui.state().cacheSummary,/cache directory is shared/);
+  assert.match(ui.state().cacheSummary,/response cache-control headers/);
+  assert.match(ui.state().cacheSummary,/plugin-header v2.4.1/);
+  assert.match(ui.state().cacheSummary,/private WordPress and WooCommerce routes/i);
+  assert.equal(ui.state().cacheSummaryTone,'review');
+  assert.match(ui.state().cacheSummary,/No Purge All is available/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.match(ui.state().cacheResult,/Shared Registered Directory/);
+  const invalid=cacheInspection({nginx_helper:nginxHelperAudit({purge_safe_verified:true})});
+  ui.statusClick('#ach-cache-inspect-button').respond(invalid);
+  assert.match(ui.state().cacheSummary,/could not be confirmed/);
+  assert.doesNotMatch(ui.state().cacheSummary,/plugin-header v2.4.1/);
+  assert.equal(ui.state().cacheSummaryTone,'review');
+});
+
+test('Read-only inspection result colors depend on evidence, not generic success', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection());
+  assert.match(ui.state().hostsSummary,/not public DNS|public DNS/i);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection());
+  assert.match(ui.state().vhostSummary,/matches aaPanel site records/);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+    state:'Needs Review',vhost_sha256:null,native_root:null,vhost_root:null,
+    native_names:[],vhost_names:[],listen_ports:[],findings:[],reason:'Unknown rewrite'
+  }));
+  assert.match(ui.state().vhostSummary,/could not be compared reliably/);
+});
+
+
+test('Every gated approval has nearby visible cause and action guidance, not title-only help', () => {
+  const pairs=[
+    ['ach-site-changes-approve','ach-site-changes-why'],
+    ['ach-cache-activation-reviewed','ach-cache-apply-why'],
+    ['ach-cache-restore-reviewed','ach-cache-restore-why'],
+    ['ach-fpm-policy-reviewed','ach-fpm-policy-why'],
+    ['ach-status-reset-approve','ach-status-reset-why'],
+    ['ach-status-manage-apply-approve','ach-status-site-apply-why'],
+    ['ach-status-manage-restore-approve','ach-status-site-restore-why'],
+    ['ach-status-default-apply-approve','ach-status-default-apply-why'],
+    ['ach-status-default-restore-approve','ach-status-default-restore-why'],
+    ['ach-status-unbound-apply-approve','ach-status-unbound-apply-why'],
+    ['ach-status-unbound-restore-approve','ach-status-unbound-restore-why'],
+    ['ach-status-stopped-apply-approve','ach-status-stopped-apply-why'],
+    ['ach-status-stopped-restore-approve','ach-status-stopped-restore-why']
+  ];
+  for(const [checkbox,hint] of pairs){
+    assert.match(html,new RegExp('<p id="'+hint+'" class="ach-availability"'));
+    assert.match(html,new RegExp('<input id="'+checkbox+'" type="checkbox" aria-describedby="'+hint+'"'));
+  }
+  assert.match(html,/id="ach-fpm-prepare"[^>]*aria-describedby="ach-fpm-prepare-why"/);
+  const version=html.indexOf('id="ach-php-version"');
+  const inspect=html.indexOf('id="ach-php-runtime-check"');
+  assert.ok(version>0 && inspect>0 && version<inspect,
+    'Choose PHP before offering an Inspect action');
+  assert.match(html,/id="ach-php-version" name="php_version" form="ach-php-form"/,
+    'Version selection must remain associated with the preview form');
+  assert.match(html,/id="ach-activity-result"/);
+  assert.match(html,/How to read these records/);
+});
+
+test('Website comparison explains its missing approval and updates guidance when evidence arrives', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  assert.equal(ui.state().siteChangesApproveDisabled,true);
+  assert.match(ui.gate('ach-site-changes-why').text,/Compare website records/);
+  const req=ui.siteChangesCompare();
+  assert.match(ui.gate('ach-site-changes-summary').text,/Comparing/);
+  req.respond(siteChangesPayload());
+  assert.equal(ui.state().siteChangesApproveDisabled,false);
+  assert.match(ui.gate('ach-site-changes-why').text,/Review.*site records/);
+  assert.equal(ui.gate('ach-site-changes-why').state,'ready');
+  assert.match(ui.gate('ach-site-changes-summary').text,/No saved comparison baseline/);
+  ui.siteChangesApprove(true);
+  assert.match(ui.gate('ach-site-changes-why').text,/plugin-owned comparison snapshot/);
+  ui.refreshSites().respond(page());
+  assert.equal(ui.state().siteChangesApproveDisabled,true);
+  assert.match(ui.gate('ach-site-changes-why').text,/Compare website records/);
+});
+
+test('Cache approval reasons follow the exact guarded preflight/recovery and site invalidation', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  assert.match(ui.gate('ach-cache-apply-why').text,/Check site-specific Cache Apply readiness/);
+  assert.match(ui.gate('ach-cache-restore-why').text,/Recheck Cache/);
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady());
+  assert.equal(ui.gate('ach-cache-apply-why').state,'ready');
+  assert.match(ui.gate('ach-cache-apply-why').text,/zone.*physical directory.*hashes/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true,
+    'Read-only evidence never independently authorizes Apply');
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.match(ui.gate('ach-cache-apply-why').text,/Approval selected/);
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false
+  });
+  assert.equal(ui.gate('ach-cache-restore-why').state,'ready');
+  assert.match(ui.gate('ach-cache-restore-why').text,/saved recovery/);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.gate('ach-cache-apply-why').state,'blocked');
+  assert.equal(ui.gate('ach-cache-restore-why').state,'blocked');
+  assert.match(ui.gate('ach-cache-apply-why').text,/Check site-specific Cache Apply readiness/);
+});
+
+test('PHP Monitor approval guidance changes only on valid preview and becomes stale on edits', () => {
+  const ui=loadUi();
+  const preview=ui.submitPhp();
+  assert.equal(ui.gate('ach-fpm-policy-why').state,'blocked');
+  preview.respond(fpmPolicyPreview());
+  assert.equal(ui.state().fpmPolicyReviewedDisabled,false);
+  assert.equal(ui.gate('ach-fpm-policy-why').state,'ready');
+  assert.match(ui.gate('ach-fpm-policy-why').text,/Monitor-only baseline/);
+  assert.equal(ui.gate('ach-fpm-prepare-why').state,'ready');
+  ui.selectPhpVersion('85');
+  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
+  assert.equal(ui.gate('ach-fpm-policy-why').state,'blocked');
+  assert.equal(ui.gate('ach-fpm-prepare-why').state,'blocked');
+});
+
+test('Status Pages identifies Apply and Restore prerequisites separately before recheck', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  assert.match(ui.gate('ach-status-default-apply-why').text,/Recheck/);
+  assert.match(ui.gate('ach-status-default-restore-why').text,/Recheck/);
+  assert.match(ui.gate('ach-status-site-apply-why').text,/running website/);
+  assert.match(ui.gate('ach-status-stopped-apply-why').text,/running website/);
+  assert.match(ui.gate('ach-status-unbound-restore-why').text,/saved global HTTP\/80 recovery/);
 });
