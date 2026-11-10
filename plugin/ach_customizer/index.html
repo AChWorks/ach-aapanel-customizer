@@ -4172,8 +4172,9 @@
       else clearPhpTopology('Native PHP file mapping missing or incompatible. No site-service attribution inferred.');
       inspectionSummary('php-runtime',
         'PHP ' + selected + ': ' + r.state +
+        (r.state === 'Partial' ? '. Runtime incomplete: ' + r.reason : '') +
         '. Check affected sites below before considering a shared pool change.',
-        r.state === 'Needs Review' ? 'review' : 'observed');
+        r.state === 'Observed' ? 'observed' : 'review');
     root.find('#ach-php-runtime-result').text(
       'PHP ' + selected + ' — ' + r.state +
         '\nMaster process: ' + r.master_state +

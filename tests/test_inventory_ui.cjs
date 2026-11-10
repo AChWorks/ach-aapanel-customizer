@@ -320,6 +320,7 @@ function loadUi() {
       vhostSummary: elements.get('#ach-vhost-summary').textContent,
       nginxSummary: elements.get('#ach-nginx-candidate-summary').textContent,
       phpRuntimeSummary: elements.get('#ach-php-runtime-summary').textContent,
+      phpRuntimeSummaryTone: elements.get('#ach-php-runtime-summary').attributes['data-tone'],
       websiteContextHidden: elements.get('#ach-website-context').props.hidden,
       cachePlanResult: elements.get('#ach-cache-plan-result').textContent,
       cachePlanDisabled: elements.get('#ach-cache-plan-button').props.disabled,
@@ -4503,12 +4504,55 @@ test('Read-only PHP 8.1 runtime inspection requires a discovered version and pre
   req.respond(phpRuntimeEvidence());
   assert.equal(ui.state().phpRuntimeDisabled,false);
   assert.match(ui.state().phpRuntime,/PHP 81 — Observed/);
+  assert.match(ui.state().phpRuntimeSummary,/PHP 81: Observed/);
+  assert.equal(ui.state().phpRuntimeSummaryTone,'observed');
   assert.match(ui.state().phpRuntime,/Master process: Matching Master/);
   assert.match(ui.state().phpRuntime,/Master PID: 432/);
   assert.match(ui.state().phpRuntime,/Socket listener: Bound Listener/);
   assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
   assert.equal(ui.state().fpmPrepareDisabled,true,
     'Runtime process evidence never enables a new PHP81 write adapter');
+});
+
+test('PHP runtime primary summary exposes incomplete listener reasons without enabling Apply', () => {
+  for (const [socketState, reason] of [
+    ['Missing', 'Matching PHP master exists but its Unix socket path is missing'],
+    ['Not Observed', 'PHP socket pathname exists but no matching kernel listener was observed'],
+    ['Not Observed', 'The matching PHP master did not own the observed Unix listener']
+  ]) {
+    const ui=loadUi();
+    ui.openPhp().respond(ui.phpVersions());
+    ui.selectPhpVersion('81');
+    ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+      state:'Partial',socket_state:socketState,reason
+    }));
+    assert.equal(ui.state().phpRuntimeSummaryTone,'review',reason);
+    assert.match(ui.state().phpRuntimeSummary,/PHP 81: Partial\. Runtime incomplete:/);
+    assert.ok(ui.state().phpRuntimeSummary.includes(reason),
+      'Primary summary must show the actual incomplete-runtime reason');
+    assert.match(ui.state().phpRuntime,new RegExp('Reason: ' + reason));
+    assert.match(ui.state().phpRuntime,/Apply eligibility: not inferred/);
+    assert.equal(ui.state().fpmPrepareDisabled,true);
+    assert.equal(ui.state().fpmCommitDisabled,true);
+    ui.selectPhpVersion('85');
+    assert.equal(ui.state().phpRuntimeSummaryTone,'neutral',
+      'Version changes revoke the previous runtime presentation');
+    assert.doesNotMatch(ui.state().phpRuntimeSummary,new RegExp(reason));
+  }
+});
+
+test('PHP runtime Needs Review uses review tone and never represents a confirmed listener', () => {
+  const ui=loadUi();
+  ui.openPhp().respond(ui.phpVersions());
+  ui.selectPhpVersion('81');
+  ui.inspectPhpRuntime().respond(phpRuntimeEvidence({
+    state:'Needs Review',master_state:'Not Observed',master_pid:null,
+    socket_state:'Needs Review',reason:'No matching PHP-FPM master process observed'
+  }));
+  assert.equal(ui.state().phpRuntimeSummaryTone,'review');
+  assert.match(ui.state().phpRuntimeSummary,/PHP 81: Needs Review/);
+  assert.match(ui.state().phpRuntime,/No matching PHP-FPM master process observed/);
+  assert.equal(ui.state().fpmPrepareDisabled,true);
 });
 
 test('PHP runtime observation discards stale selected-version and inventory-refresh callbacks', () => {
