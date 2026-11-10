@@ -69,7 +69,8 @@ def _record_read(state_fd, site_id):
         raise CacheManageError('recovery', 'Invalid persistent Cache recovery journal') from exc
     needed = {'schema', 'site_id', 'site_key', 'php_version', 'op', 'phase',
               'source_sha', 'proposal_sha', 'vhost_sha', 'main_sha', 'php_sha',
-              'global_sha', 'extension_sha', 'cache_directory', 'probe_status'}
+              'global_sha', 'extension_sha', 'cache_directory',
+              'cache_generation', 'probe_status'}
     if (not isinstance(record, dict) or set(record) != needed
             or record['schema'] != 1 or record['site_id'] != site_id
             or not isinstance(record['site_key'], str)
@@ -81,6 +82,8 @@ def _record_read(state_fd, site_id):
                    for x in ('source_sha','proposal_sha','vhost_sha','main_sha',
                              'php_sha','global_sha','extension_sha'))
             or record['cache_directory'] != CACHE_ROOT + '/site-' + str(site_id)
+            or not isinstance(record['cache_generation'], str)
+            or not TOKEN.fullmatch(record['cache_generation'])
             or type(record['probe_status']) is not int
             or not 100 <= record['probe_status'] <= 599):
         raise CacheManageError('recovery', 'Untrusted Cache journal; do not modify Nginx')
@@ -163,10 +166,10 @@ def _path_owned(site_id, *, cache_root=CACHE_ROOT, allow_missing=False):
         info = os.fstat(fd)
         os.close(fd)
         if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
-                or info.st_mode & 0o022 or os.path.ismount(chain)):
+                or info.st_mode & 0o022):
             if chain == Path('/'):
                 continue
-            raise CacheManageError('ownership','Untrusted or mounted cache ancestor')
+            raise CacheManageError('ownership','Untrusted cache ancestor')
         previous = info
     sitepath = root / ('site-'+str(site_id))
     # st_dev/inode alone do not detect same-device bind mounts. Mountinfo
@@ -323,7 +326,8 @@ def _await_php_route(site, *, marker, expected_status, probe=None):
         'Nginx route did not match its approved post-reload state') from last
 
 
-def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
+def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
+                   cache_generation=None):
     native=inspect_site_fastcgi_cache(
         public, site['id'], site['name'],vhost_root=vhost_root,nginx_root=nginx_root,
         rewrite_root=str(Path(vhost_root).parent/'rewrite'))
@@ -341,7 +345,8 @@ def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT
                                'Native VHost does not match the exact site/root/HTTP binding')
     sources=_site_sources(site,native['php_version'],
                           vhost_root=vhost_root,nginx_root=nginx_root)
-    reference=generate_reference(site['id'],native['php_version'])
+    reference=generate_reference(site['id'],native['php_version'],
+                                 cache_generation=cache_generation)
     return native,reference,sources
 
 
@@ -352,9 +357,13 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
     Never silently adopt a directory or archived fragment from a different
     site or a different policy. Prior journals are archived, not discarded.
     """
+    prior_reference = generate_reference(
+        site['id'], old['php_version'],
+        cache_generation=old['cache_generation'])
     if (old['phase'] != 'restored' or old['site_key'] != site['name'] or
             old['php_version'] != reference['php_version'] or
-            old['proposal_sha'] != reference['proposal_sha256']):
+            old['cache_generation'] == reference['cache_generation'] or
+            old['proposal_sha'] != prior_reference['proposal_sha256']):
         raise CacheManageError('recovery',
             'Existing Cache generation cannot be reused without policy-specific recovery')
     global_name, ext_name, _ = _names(site['id'])
@@ -388,15 +397,21 @@ def _archive_restored_record(statefd, record):
 
 
 def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
-                             nginx_root=NGINX_ROOT,data_dir=DATA_DIR):
+                             nginx_root=NGINX_ROOT,data_dir=DATA_DIR,
+                             cache_generation=None, probe=None):
     """Read-only approval preflight. This is NOT a runtime safety verdict."""
+    if cache_generation is None:
+        cache_generation = uuid4().hex
+    if type(cache_generation) is not str or not TOKEN.fullmatch(cache_generation):
+        raise CacheManageError('input','Invalid Cache approval generation')
     statefd=_open_state_dir(data_dir)
     try:
         old = _record_read(statefd,site['id'])
         if old is not None and old['phase'] != 'restored':
             raise CacheManageError('recovery','Existing Cache record requires Recheck/Restore')
         native,reference,sources=_compatibility(
-            site,public,vhost_root=vhost_root,nginx_root=nginx_root)
+            site,public,vhost_root=vhost_root,nginx_root=nginx_root,
+            cache_generation=cache_generation)
         if old is not None:
             _restored_generation_can_reapply(
                 site,old,reference,vhost_root=vhost_root)
@@ -409,11 +424,17 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
             os.close(globfd);os.close(extensionfd)
         if old is None and _path_owned(site['id'],allow_missing=True) is not None:
             raise CacheManageError('ownership','Existing Cache directory requires explicit recovery')
+        # A static/404 site may have the same Nginx include shape but no
+        # working PHP handler. Avoid presenting a plan that cannot pass the
+        # mandatory Apply health check after operator consent.
+        php_probe_status = (probe or _probe)(site, marker=None)
         return {'schema':1,'state':'Ready for Review','read_only':True,
+                'php_probe_status':php_probe_status,
                 'apply_supported':True,'runtime_verified':False,
                 'site_id':site['id'],'site_key':site['name'],
                 'source_sha256':native['source_sha256'],
                 'proposal_sha256':reference['proposal_sha256'],
+                'cache_generation':cache_generation,
                 'php_version':native['php_version'],
                 'cache_zone':reference['cache_zone'],
                 'cache_directory':reference['cache_directory'],
@@ -425,8 +446,9 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
         os.close(statefd)
 
 
-def _fragments(site_id, php_version):
-    reference=generate_reference(site_id,php_version)
+def _fragments(site_id, php_version, cache_generation):
+    reference=generate_reference(site_id,php_version,
+                                 cache_generation=cache_generation)
     global_bytes=reference['global_http_fragment'].encode()
     extension_bytes=reference['site_server_fragment'].encode()
     return reference,global_bytes,extension_bytes
@@ -444,7 +466,7 @@ def verified_cache_extension(directory,site_id,site_key,name,text,*,state_dir=No
     if (not record or record['site_key'] != site_key
             or record['phase'] not in ('prepared','applied')):
         raise CacheManageError('ownership','Cache extension lacks live recovery ownership')
-    ref,_,extension_bytes=_fragments(site_id,record['php_version'])
+    ref,_,extension_bytes=_fragments(site_id,record['php_version'],record['cache_generation'])
     if (record['proposal_sha'] != ref['proposal_sha256']
             or record['extension_sha'] != _hash(extension_bytes)
             or text.encode() != extension_bytes):
@@ -469,7 +491,7 @@ def verified_cache_global(vhost_root, site_id, name, *, state_dir=None):
         os.close(statefd)
     if not record or record['phase'] not in ('prepared','applied'):
         raise CacheManageError('ownership','Global Cache source lacks recovery ownership')
-    ref,global_bytes,_=_fragments(site_id,record['php_version'])
+    ref,global_bytes,_=_fragments(site_id,record['php_version'],record['cache_generation'])
     fd=_directory(vhost_root)
     try:
         _owned_dir(fd)
@@ -506,7 +528,7 @@ def _safe_retire(fd, name, expected, operation):
 
 
 def _expected_files(record):
-    _, global_bytes, extension_bytes = _fragments(record['site_id'], record['php_version'])
+    _, global_bytes, extension_bytes = _fragments(record['site_id'], record['php_version'], record['cache_generation'])
     if (_hash(global_bytes) != record['global_sha'] or
             _hash(extension_bytes) != record['extension_sha']):
         raise CacheManageError('recovery', 'Generated Cache source no longer matches saved journal')
@@ -552,7 +574,7 @@ def _cache_observation(site, record, *, vhost_root=VHOST_ROOT, probe=None):
 def manage_cache(action, site, public=None, *, expected_source=None,
                  expected_proposal=None, recovery_id=None, approved=False,
                  data_dir=DATA_DIR, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
-                 runner=None, probe=None):
+                 runner=None, probe=None, cache_generation=None):
     """Serialized guarded per-site cache Apply/Recheck/Restore.
 
     Neither successful Nginx -t nor reload signaling by itself proves the
@@ -589,20 +611,23 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 previous = record
                 if public is None:
                     raise CacheManageError('compatibility', 'Native site database is required')
+                if type(cache_generation) is not str or not TOKEN.fullmatch(cache_generation):
+                    raise CacheManageError('input','Fresh Cache approval generation is required')
                 readiness = preview_cache_activation(
                     site, public, vhost_root=vhost_root, nginx_root=nginx_root,
-                    data_dir=data_dir)
+                    data_dir=data_dir, cache_generation=cache_generation, probe=probe)
                 if (expected_source != readiness['source_sha256'] or
                         expected_proposal != readiness['proposal_sha256']):
                     raise CacheManageError('concurrency', 'Cache approval snapshot is stale')
                 php = readiness['php_version']
-                reference, global_bytes, ext_bytes = _fragments(site['id'], php)
+                reference, global_bytes, ext_bytes = _fragments(site['id'], php, cache_generation)
                 _nginx('-t', nginx=NGINX, conf=nginx_root+'/nginx.conf', runner=runner)
                 initial = (probe or _probe)(site, marker=None)
                 sources = _site_sources(site, php, vhost_root=vhost_root, nginx_root=nginx_root)
                 record = {
                     'schema': 1, 'site_id': site['id'], 'site_key': site['name'],
                     'php_version': php, 'op': uuid4().hex, 'phase': 'prepared',
+                    'cache_generation': cache_generation,
                     'source_sha': readiness['source_sha256'],
                     'proposal_sha': reference['proposal_sha256'],
                     'vhost_sha': sources['vhost_sha'], 'main_sha': sources['main_sha'],

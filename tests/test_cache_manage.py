@@ -43,7 +43,9 @@ class CacheManageTests(unittest.TestCase):
                      'unresolved_other_sites':0,'purge_directive_seen':False}
         self.commands=[]
         self.patchers=[
-            patch.object(cache,'_compatibility',return_value=(self.native,self.ref,self.sources)),
+            patch.object(cache,'_compatibility',side_effect=lambda site,public,**kw:
+                (self.native,cache.generate_reference(
+                    7,'85',cache_generation=kw.get('cache_generation')),self.sources)),
             patch.object(cache,'_path_owned',return_value=None),
             patch.object(cache,'_create_site_cache',return_value=None),
             patch.object(cache,'inspect_site_fastcgi_cache',return_value={
@@ -71,13 +73,15 @@ class CacheManageTests(unittest.TestCase):
     def preview(self):
         return cache.preview_cache_activation(
             self.site,object(),data_dir=str(self.state),
-            vhost_root=str(self.vhost),nginx_root=str(self.nginx))
+            vhost_root=str(self.vhost),nginx_root=str(self.nginx),
+            probe=self.probe)
 
     def apply(self,**kw):
         plan=self.preview()
         return cache.manage_cache('apply',self.site,public=object(),
             expected_source=kw.get('source',plan['source_sha256']),
             expected_proposal=kw.get('proposal',plan['proposal_sha256']),
+            cache_generation=kw.get('generation',plan['cache_generation']),
             approved=kw.get('approved',True),**self.kwargs())
 
     def test_read_only_preview_and_exact_approval(self):
@@ -92,8 +96,48 @@ class CacheManageTests(unittest.TestCase):
         with self.assertRaises(cache.CacheManageError):
             cache.manage_cache('apply',self.site,public=object(),
                 expected_source='b'*64,expected_proposal=result['proposal_sha256'],
+                cache_generation=result['cache_generation'],
                 approved=True,**self.kwargs())
         self.assertFalse((self.ext/'ach_customizer_cache_7.conf').exists())
+
+    def test_preflight_requires_healthy_php_route_before_operator_consent(self):
+        def php_404(site, *, marker=None):
+            raise cache.CacheManageError('probe','Registered PHP /index.php is not healthy')
+        with self.assertRaises(cache.CacheManageError) as raised:
+            cache.preview_cache_activation(
+                self.site,object(),data_dir=str(self.state),
+                vhost_root=str(self.vhost),nginx_root=str(self.nginx),
+                probe=php_404)
+        self.assertEqual(raised.exception.stage,'probe')
+        self.assertFalse((self.state/cache._names(7)[2]).exists())
+        self.assertFalse((self.ext/cache._names(7)[1]).exists())
+
+    def test_generation_is_part_of_fresh_operator_approval_and_journal(self):
+        a=self.preview()
+        b=self.preview()
+        self.assertRegex(a['cache_generation'],r'^[0-9a-f]{32}$')
+        self.assertNotEqual(a['cache_generation'],b['cache_generation'])
+        self.assertNotEqual(a['proposal_sha256'],b['proposal_sha256'])
+        with self.assertRaises(cache.CacheManageError):
+            cache.manage_cache('apply',self.site,public=object(),
+                expected_source=a['source_sha256'],
+                expected_proposal=a['proposal_sha256'],
+                cache_generation=b['cache_generation'],
+                approved=True,**self.kwargs())
+        self.assertFalse((self.state/cache._names(7)[2]).exists())
+        applied=cache.manage_cache('apply',self.site,public=object(),
+                expected_source=a['source_sha256'],
+                expected_proposal=a['proposal_sha256'],
+                cache_generation=a['cache_generation'],
+                approved=True,**self.kwargs())
+        self.assertEqual(applied['state'],'Applied')
+        fd=cache._open_state_dir(str(self.state))
+        try:
+            journal=cache._record_read(fd,7)
+        finally:
+            os.close(fd)
+        self.assertEqual(journal['cache_generation'],a['cache_generation'])
+        self.assertEqual(journal['proposal_sha'],a['proposal_sha256'])
 
     def test_apply_recheck_restore_journal_files_and_no_vendor_edit(self):
         old_vhost=(self.vhost/'qa.test.conf').read_bytes()
@@ -137,6 +181,9 @@ class CacheManageTests(unittest.TestCase):
 
     def test_reapply_after_restore_preserves_previous_recovery_journal(self):
         first=self.apply()
+        old_key=next(line for line in
+            (self.ext/cache._names(7)[1]).read_text().splitlines()
+            if 'fastcgi_cache_key ' in line)
         cache.manage_cache('restore',self.site,approved=True,
                            recovery_id=first['recovery_id'],**self.kwargs())
         # A previously created site-owned cache directory must be proven
@@ -145,6 +192,12 @@ class CacheManageTests(unittest.TestCase):
             second=self.apply()
             self.assertEqual(second['state'],'Applied')
             self.assertNotEqual(second['recovery_id'],first['recovery_id'])
+            new_key=next(line for line in
+                (self.ext/cache._names(7)[1]).read_text().splitlines()
+                if 'fastcgi_cache_key ' in line)
+            self.assertNotEqual(old_key,new_key)
+            self.assertRegex(old_key,r'\|[0-9a-f]{32}"')
+            self.assertRegex(new_key,r'\|[0-9a-f]{32}"')
             archived=self.state/(cache._names(7)[2]+'.'+first['recovery_id']+'.restored')
             self.assertTrue(archived.is_file())
             self.assertEqual(archived.stat().st_mode & 0o777,0o600)
@@ -178,10 +231,12 @@ class CacheManageTests(unittest.TestCase):
                     obj.count+=1
                 return SimpleNamespace(returncode=(1 if obj.count==2 else 0),stderr=b'QA')
         runner=FailAfterPublish()
+        plan=self.preview()
         with self.assertRaises(cache.CacheManageError) as caught:
             cache.manage_cache('apply',self.site,public=object(),
-                expected_source=self.native['source_sha256'],
-                expected_proposal=self.ref['proposal_sha256'],
+                expected_source=plan['source_sha256'],
+                expected_proposal=plan['proposal_sha256'],
+                cache_generation=plan['cache_generation'],
                 approved=True,runner=runner,**{
                     key:value for key,value in self.kwargs().items() if key!='runner'})
         self.assertEqual(caught.exception.stage,'recovered')

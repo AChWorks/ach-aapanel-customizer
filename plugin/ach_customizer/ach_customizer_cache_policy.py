@@ -29,7 +29,8 @@ NOTE = (
 )
 
 
-def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
+def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
+                       cache_generation=None):
     """Render reviewable http/server fragments with no side effects.
 
     Only a caller that has independently established a native website, PHP
@@ -46,6 +47,10 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
             cache_root.endswith(("/.", "/.."))):
         raise CachePolicyError("Cache reference root must be a canonical absolute path")
 
+    if cache_generation is not None and (
+            type(cache_generation) is not str or
+            not re.fullmatch(r"[0-9a-f]{32}", cache_generation)):
+        raise CachePolicyError("Invalid cache generation")
     zone = "ACHFC_%d" % site_id
     var = "achfc_%d" % site_id
     directory = "%s/site-%d" % (cache_root, site_id)
@@ -87,7 +92,11 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         + "    fastcgi_index index.php;\n"
         + "    include fastcgi.conf;\n"
         + "    fastcgi_cache %s;\n" % zone
-        + "    fastcgi_cache_key \"$scheme$request_method$host$request_uri\";\n"
+        # A fresh per-Apply cache key namespace prevents a later Reapply
+        # from serving stale objects left by a completed Restore. Keep the
+        # physical site-owned tree for forensic recovery and safe retention.
+        + '    fastcgi_cache_key "$scheme$request_method$host$request_uri%s";\n' %
+          (("|" + cache_generation) if cache_generation is not None else "")
         + "    fastcgi_cache_valid 200 10m;\n"
         # aaPanel 8.0.7 can inherit 'fastcgi_ignore_headers Cache-Control
         # Expires Set-Cookie'. At this location, override that list with only
@@ -110,7 +119,8 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT):
         "installed": False, "runtime_verified": False,
         "safe_verified": False, "apply_supported": False,
         "purge_supported": False, "cache_directory": directory,
-        "cache_zone": zone, "global_http_fragment": http_fragment,
+        "cache_zone": zone, "cache_generation": cache_generation,
+        "global_http_fragment": http_fragment,
         "site_server_fragment": server_fragment,
         "proposal_sha256": digest, "note": NOTE,
     }

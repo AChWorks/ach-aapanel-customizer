@@ -55,6 +55,29 @@ class CachePolicyRenderTests(unittest.TestCase):
         self.assertNotIn("site-8", a["global_http_fragment"])
         self.assertNotIn("$achfc_8", a["global_http_fragment"])
 
+    def test_operational_cache_generations_never_reuse_old_cache_keys(self):
+        initial = policy.generate_reference(7, "85", cache_generation="a"*32)
+        next_gen = policy.generate_reference(7, "85", cache_generation="b"*32)
+        preview = policy.generate_reference(7, "85")
+        for candidate, expected in ((initial, "a"*32), (next_gen, "b"*32)):
+            self.assertEqual(candidate["cache_generation"], expected)
+            self.assertIn(
+                'fastcgi_cache_key "$scheme$request_method$host$request_uri|'+expected+'";',
+                candidate["site_server_fragment"])
+        self.assertNotEqual(initial["proposal_sha256"], next_gen["proposal_sha256"])
+        self.assertEqual(initial["cache_zone"], next_gen["cache_zone"])
+        self.assertEqual(initial["cache_directory"], next_gen["cache_directory"])
+        self.assertEqual(initial["global_http_fragment"], next_gen["global_http_fragment"])
+        self.assertNotIn("|"+initial["cache_generation"], next_gen["site_server_fragment"])
+        self.assertIsNone(preview["cache_generation"])
+        self.assertIn('fastcgi_cache_key "$scheme$request_method$host$request_uri";',
+                      preview["site_server_fragment"])
+        for invalid in ('', 'A'*32, 'g'*32, 'a'*31, 'a'*33, 7, True, None.__class__,
+                        'c'*32 + '" include /etc/passwd'):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(policy.CachePolicyError):
+                    policy.generate_reference(7, "85", cache_generation=invalid)
+
     def test_original_uri_alias_escape_and_expires_override(self):
         fragment = policy.generate_reference(7, "85")["site_server_fragment"]
         guards = [

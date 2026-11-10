@@ -1760,7 +1760,8 @@ const cacheActivationReady = (overrides={}) => ({
   status:true, schema:1, state:'Ready for Review', read_only:true,
   apply_supported:true, runtime_verified:false, site_id:7,
   site_key:'site.test', source_sha256:'a'.repeat(64),
-  proposal_sha256:'b'.repeat(64), php_version:'85', cache_zone:'ACHFC_7',
+  proposal_sha256:'b'.repeat(64), cache_generation:'c'.repeat(32),
+  php_version:'85', php_probe_status:301, cache_zone:'ACHFC_7',
   cache_directory:'/www/server/ach-customizer-fastcgi/site-7',
   impact:'One selected HTTP/80 VHost and Nginx service reload',
   note:'Runtime WordPress and WooCommerce acceptance remains separate',
@@ -1803,6 +1804,8 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   assert.equal(apply.options.data.action,'apply');
   assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
   assert.equal(apply.options.data.expected_proposal_sha256,'b'.repeat(64));
+  assert.equal(apply.options.data.cache_generation,'c'.repeat(32));
+  assert.equal(apply.options.timeout,45000);
   assert.equal(apply.options.data.approved,'true');
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
   apply.respond(cacheOperationApplied());
@@ -1833,6 +1836,8 @@ test('Forged Cache readiness never permits Apply, HTML text stays inert', () => 
     {runtime_verified:true},{cache_zone:'WORDPRESS'},
     {cache_directory:'/var/cache/shared'},
     {source_sha256:'broken'},{proposal_sha256:'broken'},
+    {cache_generation:'bad'},{cache_generation:'d'.repeat(31)},
+    {php_probe_status:404},{php_probe_status:599},
     {state:'Needs Review'},{php_version:'86'}
   ]) {
     ui.statusClick('#ach-cache-activation-preview').respond(

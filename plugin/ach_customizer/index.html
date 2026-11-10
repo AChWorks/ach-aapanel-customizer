@@ -710,7 +710,7 @@
       method === 'status_manage' || method === 'status_defaults' ||
       method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
-      method === 'fpm_policy_save';
+      method === 'fpm_policy_save' || method === 'manage_cache_policy';
   }
   function validInventoryPage(r, expectedPage) {
     if (!r || typeof r !== 'object' || Array.isArray(r) ||
@@ -782,10 +782,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save))$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy)$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -1884,6 +1884,9 @@
       response.runtime_verified === false &&
       hash.test(response.source_sha256 || '') &&
       hash.test(response.proposal_sha256 || '') &&
+      /^[0-9a-f]{32}$/.test(response.cache_generation || '') &&
+      Number.isInteger(response.php_probe_status) &&
+      response.php_probe_status >= 200 && response.php_probe_status < 400 &&
       ['81','85'].includes(response.php_version) &&
       response.cache_zone === 'ACHFC_' + id &&
       response.cache_directory === '/www/server/ach-customizer-fastcgi/site-' + id &&
@@ -1915,14 +1918,17 @@
       }
       cacheActivationSnapshot = {
         site_id:id, source_sha256:r.source_sha256,
-        proposal_sha256:r.proposal_sha256
+        proposal_sha256:r.proposal_sha256,
+        cache_generation:r.cache_generation
       };
       cacheActivationNotice(
         'Manual Cache Apply preflight ready (NOT activated or runtime-safe-verified).' +
         '\nSelected site #'+id+' / PHP '+r.php_version+
+        '\nOrigin PHP route: HTTP '+r.php_probe_status+
         '\nZone: '+r.cache_zone+'; directory: '+r.cache_directory+
         '\nCurrent source SHA-256: '+r.source_sha256+
         '\nReference SHA-256: '+r.proposal_sha256+
+        '\nCache generation: '+r.cache_generation+
         '\nImpact: '+r.impact+'\n'+r.note);
       cacheActivationLock();
     });
@@ -1981,7 +1987,8 @@
     cacheActivationLock();
     request('manage_cache_policy', Object.assign(cacheNativeArgs(id),{
       action:'apply', expected_source_sha256:plan.source_sha256,
-      expected_proposal_sha256:plan.proposal_sha256, approved:'true'
+      expected_proposal_sha256:plan.proposal_sha256,
+      cache_generation:plan.cache_generation, approved:'true'
     }), function (r) {
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;

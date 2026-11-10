@@ -77,6 +77,7 @@ class CacheEndpointTests(unittest.TestCase):
                 **self.args(),'action':'apply',
                 'expected_source_sha256':'a'*64,
                 'expected_proposal_sha256':'b'*64,
+                'cache_generation':'c'*32,
                 'approved':'true',
                 'cache_root':'/tmp/untrusted',
                 'site_key':'different.test'})
@@ -89,6 +90,7 @@ class CacheEndpointTests(unittest.TestCase):
             self.assertEqual(kw['approved'],True)
             self.assertEqual(kw['expected_source'],'a'*64)
             self.assertEqual(kw['expected_proposal'],'b'*64)
+            self.assertEqual(kw['cache_generation'],'c'*32)
             self.assertNotIn('cache_root',kw)
             self.assertNotIn('site_key',kw)
 

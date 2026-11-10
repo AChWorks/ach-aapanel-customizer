@@ -721,6 +721,7 @@ class ach_customizer_main:
                 action, before, public,
                 expected_source=self._argument(args, "expected_source_sha256"),
                 expected_proposal=self._argument(args, "expected_proposal_sha256"),
+                cache_generation=self._argument(args, "cache_generation"),
                 recovery_id=self._argument(args, "recovery_id"),
                 approved=self._argument(args, "approved") == "true",
             )
