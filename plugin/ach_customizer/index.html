@@ -1949,11 +1949,18 @@
       Object.assign(cacheNativeArgs(id),{cache_action:'recheck'}), function (r) {
         if (ticket !== cacheActivationTicket) return;
         cacheActivationBusy = false;
+        var neverActivated = r && r.state === 'Restored' &&
+          r.journal_phase === 'restored' && r.recovery_scope === 'prepublication' &&
+          r.runtime_verified === false;
+        var coherentPhase = r && (['Unmanaged','Needs Review'].includes(r.state) ||
+          (r.state === 'Applied' && r.journal_phase === 'applied') ||
+          (r.state === 'Restored' && r.journal_phase === 'restored') ||
+          (r.state === 'Recovery Required' &&
+            ['prepared','applied'].includes(r.journal_phase)));
         var stable = id === hostsSiteId() && r && r.status === true &&
-          r.schema === 1 && r.site_id === Number(id) &&
-          ['Unmanaged','Applied','Restored','Recovery Required','Needs Review'].includes(r.state) &&
-          r.read_only === true && r.runtime_verified ===
-            ['Applied','Restored'].includes(r.state);
+          r.schema === 1 && r.site_id === Number(id) && coherentPhase &&
+          r.read_only === true && (r.runtime_verified ===
+            ['Applied','Restored'].includes(r.state) || neverActivated);
         if (!stable) {
           cacheActivationNotice('Cache recovery state not verified: ' +
             (r && typeof r.msg === 'string' ? r.msg : 'Recheck unavailable'));
@@ -2029,14 +2036,19 @@
     }), function (r) {
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
+      var neverActivated = r && r.recovery_scope === 'prepublication' &&
+        r.journal_phase === 'restored' &&
+        r.changed === false && r.runtime_verified === false;
       var success = id === hostsSiteId() && r && r.status === true &&
         r.schema === 1 && r.site_id === Number(id) &&
-        r.state === 'Restored' && r.changed === true && r.runtime_verified === true &&
-        r.recovery_id === recovery;
-      cacheActivationNotice(success ?
+        r.state === 'Restored' && r.recovery_id === recovery &&
+        ((r.changed === true && r.runtime_verified === true) || neverActivated);
+      cacheActivationNotice(success ? (neverActivated ?
+        'Prepared Cache recovery finalized; no Cache was activated or Nginx reloaded.'+
+        '\nRecovery ID: '+recovery+'\nRecheck to confirm the restored journal.' :
         'Cache Restore observed. Nginx handler removed; recovery files retained.'+
         '\nRecovery ID: '+recovery+
-        '\nNo shared WORDPRESS cache files were deleted.' :
+        '\nNo shared WORDPRESS cache files were deleted.') :
         'Cache Restore NOT CONFIRMED; Recheck recovery before another action. '+
         (r && typeof r.msg === 'string' ? r.msg : 'Inspect Activity and saved journal.'));
       cacheActivationLock();

@@ -344,41 +344,145 @@ class CacheManageTests(unittest.TestCase):
         self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
             recovery_id=third['recovery_id'],**self.kwargs())['state'],'Restored')
 
-    def test_prepublication_journal_can_be_safely_reconciled_without_reload(self):
+    def prepared_without_directory(self):
+        """Simulate Apply's durable prepared checkpoint after the writer lock."""
         plan=self.preview()
         reference,gb,eb=cache._fragments(7,'85',plan['cache_generation'])
-        identity=self.sources
         record={
             'schema':2,'site_id':7,'site_key':'qa.test','php_version':'85',
             'op':'e'*32,'phase':'prepared','cache_identity':None,
             'cache_generation':plan['cache_generation'],
             'source_sha':plan['source_sha256'],
             'proposal_sha':plan['proposal_sha256'],
-            'vhost_sha':identity['vhost_sha'],
-            'main_sha':identity['main_sha'],'php_sha':identity['php_sha'],
+            'vhost_sha':self.sources['vhost_sha'],
+            'main_sha':self.sources['main_sha'],'php_sha':self.sources['php_sha'],
             'global_sha':cache._hash(gb),'extension_sha':cache._hash(eb),
             'cache_directory':reference['cache_directory'],
             'probe_status':200,
         }
         fd=cache._open_state_dir(str(self.state))
         try:
-            cache._record_save(fd,record)
+            lock=cache._exclusive_lock(fd)
+            try:
+                cache._record_save(fd,record)
+            finally:
+                os.close(lock)
         finally:
             os.close(fd)
+        return record
+
+    def test_prepublication_journal_can_be_safely_reconciled_without_reload(self):
+        record=self.prepared_without_directory()
+        journal=self.state/cache._names(7)[2]
+        saved=journal.read_bytes()
         before=list(self.commands)
         result=cache.manage_cache('recheck',self.site,**self.kwargs())
-        self.assertEqual(result['state'],'Needs Review')
-        self.assertEqual(result['recovery_id'],'e'*32)
+        self.assertEqual(result['state'],'Recovery Required')
+        self.assertEqual(result['journal_phase'],'prepared')
+        self.assertEqual(result['recovery_scope'],'prepublication')
+        self.assertEqual(result['recovery_id'],record['op'])
+        self.assertFalse(result['runtime_verified'])
+        self.assertTrue(result['read_only'])
+        self.assertEqual(journal.read_bytes(),saved)
+        self.assertEqual(self.commands,before)
+        with self.assertRaisesRegex(cache.CacheManageError,'approval'):
+            cache.manage_cache('restore',self.site,approved=False,
+                recovery_id=record['op'],**self.kwargs())
+        self.assertEqual(journal.read_bytes(),saved)
         restored=cache.manage_cache('restore',self.site,approved=True,
-                recovery_id='e'*32,**self.kwargs())
+                recovery_id=record['op'],**self.kwargs())
         self.assertEqual(restored['state'],'Restored')
+        self.assertEqual(restored['recovery_scope'],'prepublication')
+        self.assertEqual(restored['journal_phase'],'restored')
         self.assertFalse(restored['changed'])
+        self.assertFalse(restored['runtime_verified'])
+        self.assertEqual(self.commands,before)
+        finalized=journal.read_bytes()
+        recheck=cache.manage_cache('recheck',self.site,**self.kwargs())
+        self.assertEqual(recheck['state'],'Restored')
+        self.assertEqual(recheck['journal_phase'],'restored')
+        self.assertEqual(recheck['recovery_scope'],'prepublication')
+        self.assertEqual(recheck['recovery_id'],record['op'])
+        self.assertFalse(recheck['runtime_verified'], 'Cache was never activated')
+        self.assertIn('already finalized',recheck['note'])
+        self.assertEqual(journal.read_bytes(),finalized)
         self.assertEqual(self.commands,before)
         applied=self.apply()
         self.assertEqual(applied['state'],'Applied')
         self.assertTrue(self.cache_created)
         self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
             recovery_id=applied['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_prepublication_partial_physical_setup_fails_closed(self):
+        record=self.prepared_without_directory()
+        reference,gb,eb=cache._fragments(7,'85',record['cache_generation'])
+        journal=self.state/cache._names(7)[2]
+        saved=journal.read_bytes()
+        before=list(self.commands)
+        global_name,ext_name,_=cache._names(7)
+        for label,path,bytes_,mode in (
+            ('global fragment',self.vhost/global_name,gb,0o600),
+            ('extension fragment',self.ext/ext_name,eb,0o600),
+            ('untrusted file permission',self.vhost/global_name,gb,0o644),
+            ('physical directory',None,None,None),
+        ):
+            with self.subTest(label=label):
+                if path is not None:
+                    path.write_bytes(bytes_)
+                    path.chmod(mode)
+                else:
+                    self.cache_created=True
+                observed=cache.manage_cache('recheck',self.site,**self.kwargs())
+                self.assertEqual(observed['state'],'Needs Review')
+                self.assertEqual(observed['recovery_id'],record['op'])
+                self.assertFalse(observed['runtime_verified'])
+                self.assertNotIn('recovery_scope',observed)
+                self.assertEqual(journal.read_bytes(),saved)
+                self.assertEqual(self.commands,before)
+                with self.assertRaises(cache.CacheManageError):
+                    cache.manage_cache('restore',self.site,approved=True,
+                        recovery_id=record['op'],**self.kwargs())
+                self.assertEqual(journal.read_bytes(),saved)
+                self.assertEqual(self.commands,before)
+                if path is not None:
+                    path.unlink()
+                else:
+                    self.cache_created=False
+        self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
+                         'Recovery Required')
+
+    def test_restored_fragments_reappearing_are_never_reported_applied(self):
+        applied=self.apply()
+        rid=applied['recovery_id']
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=rid,**self.kwargs())['state'],'Restored')
+        global_name,ext_name,journal_name=cache._names(7)
+        g=self.vhost/global_name
+        e=self.ext/ext_name
+        journal=self.state/journal_name
+        saved=journal.read_bytes()
+        before=list(self.commands)
+        for fragments in ((g,), (g,e)):
+            with self.subTest(active=len(fragments)):
+                for path in fragments:
+                    path.write_bytes(Path(str(path)+'.'+rid+'.retained').read_bytes())
+                def probe_must_not_run(*_a,**_kw):
+                    raise AssertionError('Restored journal cannot be classified as Applied')
+                options={**self.kwargs(),'probe':probe_must_not_run}
+                state=cache.manage_cache('recheck',self.site,**options)
+                self.assertEqual(state['state'],'Needs Review')
+                self.assertEqual(state['journal_phase'],'restored')
+                self.assertEqual(state['recovery_id'],rid)
+                self.assertFalse(state['runtime_verified'])
+                self.assertEqual(saved,journal.read_bytes())
+                self.assertEqual(before,self.commands)
+                with self.assertRaisesRegex(cache.CacheManageError,'already-restored'):
+                    cache.manage_cache('restore',self.site,approved=True,
+                        recovery_id=rid,**self.kwargs())
+                for path in fragments:
+                    path.unlink()
+                self.assertEqual(cache.manage_cache('recheck',self.site,**self.kwargs())['state'],
+                                 'Restored')
 
     def test_stock_php_and_header_preflight_guards(self):
         def inspect():

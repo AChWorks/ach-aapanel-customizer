@@ -1817,7 +1817,7 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   assert.equal(recheck.options.data.action,undefined);
   assert.equal(recheck.options.data.approved,undefined);
   recheck.respond({status:true,schema:1,state:'Applied',site_id:7,
-    site_key:'site.test',recovery_id:'f'.repeat(32),read_only:true,
+    site_key:'site.test',journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
     runtime_verified:true,purge_supported:false,note:'Site-managed PHP marker'});
   assert.match(ui.state().cacheActivationResult,/Cache state: Applied/);
   ui.statusSetChecked('#ach-cache-restore-reviewed',true);
@@ -1830,6 +1830,83 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   restore.respond(cacheOperationRestored());
   assert.match(ui.state().cacheActivationResult,/Cache Restore observed/);
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Prepublication Cache journal is recoverable from UI without false activation proof', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  const id='e'.repeat(32);
+  const original=ui.requests.length;
+  ui.statusClick('#ach-cache-activation-restore');
+  assert.equal(ui.requests.length,original,'no Restore without recovery Recheck');
+  const recheck=ui.statusClick('#ach-cache-activation-recheck');
+  recheck.respond({status:true,schema:1,state:'Recovery Required',site_id:7,
+    site_key:'site.test',journal_phase:'prepared',recovery_scope:'prepublication',
+    recovery_id:id,read_only:true,runtime_verified:false,purge_supported:false,
+    note:'Cache never activated; explicit Restore can finalize without reload.'});
+  assert.match(ui.state().cacheActivationResult,/Cache state: Recovery Required/);
+  assert.match(ui.state().cacheActivationResult,/Recovery ID: e{32}/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-cache-activation-restore');
+  assert.equal(restore.options.data.cache_action,'restore');
+  assert.equal(restore.options.data.recovery_id,id);
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond({status:true,schema:1,state:'Restored',site_id:7,
+    journal_phase:'restored',recovery_id:id,changed:false,runtime_verified:false,
+    recovery_scope:'prepublication',purge_supported:false});
+  assert.match(ui.state().cacheActivationResult,/recovery finalized/);
+  assert.match(ui.state().cacheActivationResult,/no Cache was activated or Nginx reloaded/);
+  assert.doesNotMatch(ui.state().cacheActivationResult,/NOT CONFIRMED/);
+  const finalized=ui.statusClick('#ach-cache-activation-recheck');
+  finalized.respond({status:true,schema:1,state:'Restored',site_id:7,
+    site_key:'site.test',journal_phase:'restored',recovery_scope:'prepublication',
+    recovery_id:id,read_only:true,runtime_verified:false,purge_supported:false});
+  assert.match(ui.state().cacheActivationResult,/Cache state: Restored/);
+  assert.doesNotMatch(ui.state().cacheActivationResult,/Cache recovery state not verified|Recheck unavailable/i);
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Restored Cache journal with resurrected files stays Needs Review and cannot authorize Restore', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  const id='e'.repeat(32);
+  const recheck=ui.statusClick('#ach-cache-activation-recheck');
+  recheck.respond({status:true,schema:1,state:'Needs Review',site_id:7,
+    journal_phase:'restored',recovery_id:id,read_only:true,runtime_verified:false,
+    note:'Restored Cache sources reappeared without an approved Apply'});
+  assert.match(ui.state().cacheActivationResult,/Needs Review/);
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  const before=ui.requests.length;
+  ui.statusClick('#ach-cache-activation-restore');
+  assert.equal(ui.requests.length,before);
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Restored',site_id:7,journal_phase:'restored',
+    recovery_id:id,read_only:true,runtime_verified:false,purge_supported:false});
+  assert.match(ui.state().cacheActivationResult,/not verified|unavailable/i,
+    'Restored with no runtime evidence must have exact prepublication proof');
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Applied',site_id:7,journal_phase:'restored',
+    recovery_id:id,read_only:true,runtime_verified:true,purge_supported:false});
+  assert.match(ui.state().cacheActivationResult,/not verified|unavailable/i,
+    'Restored journal cannot authorize a forged Applied state');
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Cache no-op Restore response without prepublication proof is not confirmed', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  const id='e'.repeat(32);
+  ui.statusClick('#ach-cache-activation-recheck').respond({status:true,schema:1,
+    state:'Recovery Required',site_id:7,journal_phase:'prepared',
+    recovery_id:id,read_only:true,runtime_verified:false,purge_supported:false});
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-cache-activation-restore');
+  restore.respond({status:true,schema:1,state:'Restored',site_id:7,
+    recovery_id:id,changed:false,runtime_verified:false,purge_supported:false});
+  assert.match(ui.state().cacheActivationResult,/NOT CONFIRMED/);
 });
 
 test('Forged Cache readiness never permits Apply, HTML text stays inert', () => {

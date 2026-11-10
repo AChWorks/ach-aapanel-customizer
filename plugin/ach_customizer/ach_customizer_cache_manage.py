@@ -636,51 +636,95 @@ def _expected_files(record):
     return global_bytes, extension_bytes
 
 
+def _empty_prepublication(site, record, *, vhost_root=VHOST_ROOT):
+    """Read-only proof that a prepared operation never published Cache state.
+
+    Only a schema-2 null identity can represent this crash window. Reuse the
+    same exact-file/physical checks in Recheck and explicit no-op Restore.
+    """
+    if (record['schema'] != 2 or record['cache_identity'] is not None or
+            record['phase'] not in ('prepared', 'restored')):
+        raise CacheManageError('recovery', 'Not an empty prepublication Cache recovery')
+    _expected_files(record)
+    try:
+        gfd, efd, g, e = _cache_files(None, site, vhost_root=vhost_root)
+    except StatusPageError as exc:
+        raise CacheManageError('ownership',
+            'Untrusted Cache source during prepublication recovery') from exc
+    try:
+        if (g is not None or e is not None or
+                _path_owned(site['id'], allow_missing=True) is not None):
+            raise CacheManageError('recovery',
+                'Incomplete Cache physical setup requires manual review')
+    finally:
+        os.close(gfd)
+        os.close(efd)
+
+
 def _cache_observation(site, record, *, vhost_root=VHOST_ROOT,
                        nginx_root=NGINX_ROOT, probe=None):
     """Read-only full recovery identity, file and PHP observation."""
     state = 'Needs Review'
     reason = None
+    recovery_scope = None
     gfd = efd = None
     try:
         _same_site_sources(site, record,
                            vhost_root=vhost_root, nginx_root=nginx_root)
-        _same_cache_identity(site['id'], record)
-        global_name, ext_name, _ = _names(site['id'])
-        gfd, efd, g, e = _cache_files(None, site, vhost_root=vhost_root)
-        gb, eb = _expected_files(record)
-        if (g is not None and g != gb) or (e is not None and e != eb):
-            raise CacheManageError('ownership',
-                'Managed Cache source differs from saved recovery')
-        if record['phase'] == 'restored' and g is None and e is None:
-            state = 'Restored'
-        elif g == gb and e == eb:
-            state = 'Recovery Required' if record['phase'] == 'prepared' else 'Applied'
+        if record['schema'] == 2 and record['cache_identity'] is None:
+            # Before directory creation, there is no inode to compare. Prove
+            # absence of BOTH managed files and the physical cache directory.
+            _empty_prepublication(site, record, vhost_root=vhost_root)
+            (probe or _probe)(site, marker=None)
+            state = 'Recovery Required' if record['phase'] == 'prepared' else 'Restored'
+            recovery_scope = 'prepublication'
         else:
-            state = 'Recovery Required'
-        if state in ('Applied', 'Restored'):
-            result = (probe or _probe)(site, marker=site['id'] if state == 'Applied' else None)
-            if record['phase'] == 'applied' and result != record['probe_status']:
-                raise CacheManageError('probe',
-                    'PHP response status differs from saved recovery')
-    except (CacheManageError, OSError, ValueError) as exc:
+            _same_cache_identity(site['id'], record)
+            gfd, efd, g, e = _cache_files(None, site, vhost_root=vhost_root)
+            gb, eb = _expected_files(record)
+            if (g is not None and g != gb) or (e is not None and e != eb):
+                raise CacheManageError('ownership',
+                    'Managed Cache source differs from saved recovery')
+            if record['phase'] == 'restored':
+                if g is not None or e is not None:
+                    raise CacheManageError('recovery',
+                        'Restored Cache sources reappeared without an approved Apply')
+                state = 'Restored'
+            elif g == gb and e == eb:
+                state = 'Recovery Required' if record['phase'] == 'prepared' else 'Applied'
+            else:
+                state = 'Recovery Required'
+            if state in ('Applied', 'Restored'):
+                result = (probe or _probe)(site, marker=site['id'] if state == 'Applied' else None)
+                if record['phase'] == 'applied' and result != record['probe_status']:
+                    raise CacheManageError('probe',
+                        'PHP response status differs from saved recovery')
+    except (StatusPageError, OSError, ValueError) as exc:
         state = 'Needs Review'
+        recovery_scope = None
         reason = ('Recovery ownership/source verification: ' + str(exc))[:250]
     finally:
         if gfd is not None:
             os.close(gfd)
         if efd is not None:
             os.close(efd)
-    return {'schema': 1, 'state': state, 'read_only': True,
+    response = {'schema': 1, 'state': state, 'read_only': True,
             'site_id': site['id'], 'site_key': site['name'],
             'recovery_id': record['op'], 'journal_phase': record['phase'],
-            'runtime_verified': state in ('Applied', 'Restored'),
+            'runtime_verified': state in ('Applied', 'Restored') and recovery_scope is None,
             'purge_supported': False,
             'cache_directory': record['cache_directory'],
             'cache_zone': 'ACHFC_' + str(site['id']),
-            'note': reason or
-            'File, physical directory and loopback PHP evidence only; '
-            'real WP/Woo and Nginx Helper compatibility remains unverified.'}
+            'note': reason or (
+                ('Cache never activated; explicit Restore can finalize the journal without reload.'
+                 if record['phase'] == 'prepared' else
+                 'Cache never activated; recovery journal already finalized without reload.')
+                if recovery_scope == 'prepublication' else
+                'File, physical directory and loopback PHP evidence only; '
+                'real WP/Woo and Nginx Helper compatibility remains unverified.')}
+    if recovery_scope is not None:
+        response['recovery_scope'] = recovery_scope
+    return response
 
 
 def manage_cache(action, site, public=None, *, expected_source=None,
@@ -855,26 +899,18 @@ def manage_cache(action, site, public=None, *, expected_source=None,
             _same_site_sources(site, record,
                                vhost_root=vhost_root, nginx_root=nginx_root)
             if record['schema'] == 2 and record['cache_identity'] is None:
-                # A crash before the first durable directory-identity commit
-                # means no managed snippets have yet been published. Reconcile
-                # that precise pre-publication state without requiring a reload.
-                gfd, efd, g, e = _cache_files(statefd, site, vhost_root=vhost_root)
-                try:
-                    if (g is not None or e is not None or
-                            _path_owned(site['id'], allow_missing=True) is not None):
-                        raise CacheManageError('recovery',
-                            'Incomplete Cache physical setup requires manual review')
-                finally:
-                    os.close(gfd)
-                    os.close(efd)
-                _expected_files(record)
+                # The same read-only physical proof used by Recheck permits
+                # journal-only recovery; no Cache source or reload is touched.
+                _empty_prepublication(site, record, vhost_root=vhost_root)
                 (probe or _probe)(site, marker=None)
                 record['phase'] = 'restored'
                 _record_save(statefd, record)
                 return {'schema': 1, 'state': 'Restored', 'changed': False,
                         'site_id': site['id'], 'recovery_id': record['op'],
+                        'journal_phase': 'restored',
                         'runtime_verified': False, 'purge_supported': False,
-                        'note': 'Prepared Cache had no managed files or cache directory; no reload.'}
+                        'recovery_scope': 'prepublication',
+                        'note': 'Prepared Cache never activated; journal finalized without Nginx reload.'}
             _same_cache_identity(site['id'], record)
             global_bytes, ext_bytes = _expected_files(record)
             gfd, efd, _, _ = _cache_files(statefd, site, vhost_root=vhost_root)
