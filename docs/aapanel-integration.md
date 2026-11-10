@@ -11,6 +11,42 @@ The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the
 4. Public aaPanel source [panelPlugin.py](https://github.com/aaPanel/aaPanel/blob/38bf35903b37b50d9654f47c4ad904ca3369715f/class/panelPlugin.py) recognizes `plugin/<name>/info.json` and constructs local-plugin inventory. The inspected implementation invokes uninstall scripts and removes plugin code. This is source evidence for that Git revision, **not** a cross-version contract.
 5. The same official PDF documents read-only `public.M('sites')` selectors for site IDs, names, paths and status. Actual panel schemas and revision-specific API behavior still require tests.
 
+## Native management navigation and inspection evidence (0.1.32 candidate)
+
+The native aaPanel dialog uses an operator-task hierarchy: Overview,
+Website list, Routing & Nginx, FastCGI Cache, PHP-FPM, Status Pages and
+Activity & Logs. The selected native website is shared between the three
+website-related panels; on entry without a loaded native inventory, the
+existing `get_sites` endpoint supplies the selector, and a Browse
+websites action returns to the paginated inventory. The selector is still
+bound to the existing strict backend site ID/key/root/status/bound-domain
+snapshot rather than a user-supplied filesystem path. Switching panels
+does not authorize, re-run or discard guarded operations; changing the site
+still invalidates affected source, Cache Apply and recovery approvals.
+
+The interface distinguishes plain-language inspection outcomes from the
+complete, expandable **Technical evidence** view: local hosts file clues,
+generated VHost comparison, prospective `nginx -T`, source-only FastCGI
+cache/Helper, and observed PHP process/socket. Color is an accessible
+secondary signal, with descriptive text and no false private-session,
+runtime-worker or Purge All safety claim. Long SHA/config IDs remain
+available in the technical report, and write/recovery results remain
+visible in their own existing operation panel. This changes frontend
+navigation/copy/layout only, not plugin routes, authorization, approvals,
+Cache policies, Nginx reload behavior or persistent recovery state.
+
+Source/UI regression tests plus a Chromium **static rendering check**
+were exercised for all seven destinations at viewport widths 1280, 720,
+and 390 px, inside a 980px-equivalent native dialog content wrapper:
+main content reflow had no horizontal overflow, and narrow navigation
+was horizontally scrollable. The static render used representative
+content and deliberately did not invoke real aaPanel actions. It still
+requires exact-package native aaPanel primary-admin Browser verification
+against the existing Nginx dialog reference under Issue #17, including
+keyboard navigation, form drafts, inspection responses and recovery,
+before describing it as fully accepted native UX. See Issue #21 for acceptance and Issue #2 for
+separate real WooCommerce/Purge All runtime scope.
+
 ## Important security boundary
 
 The aaPanel PDF explicitly warns: **dynamic plugin routes do not inherit aaPanel session authorization** and require an appropriate `_check` implementation. Its sample declares `_check` returning `True`, allowing unauthenticated requests. **Never copy this sample access pattern.**

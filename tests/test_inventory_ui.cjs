@@ -28,10 +28,10 @@ function loadUi() {
   const content = {scrollTop:0};
   let focusedTab = null, tabScrollCalls = 0;
   const elements = new Map();
-  const tabs = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('button', {
+  const tabs = ['overview', 'websites', 'routing', 'cache', 'php', 'status', 'activity'].map(name => fakeNode('button', {
     'data-tab': name, 'aria-selected': name === 'overview' ? 'true' : 'false'
   }));
-  const views = ['overview', 'websites', 'php', 'status', 'activity'].map(name => fakeNode('section', {
+  const views = ['overview', 'websites', 'routing', 'cache', 'php', 'status', 'activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
   root.querySelector = query => query === '#ach-content' ? content : null;
@@ -48,6 +48,8 @@ function loadUi() {
     '#ach-site-changes-compare', '#ach-site-changes-approve',
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-rows',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
+    '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
+    '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-cache-plan-button', '#ach-cache-plan-result',
     '#ach-cache-activation-preview', '#ach-cache-activation-recheck',
@@ -307,6 +309,13 @@ function loadUi() {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
       cacheResult: elements.get('#ach-cache-result').textContent,
+      cacheSummary: elements.get('#ach-cache-summary').textContent,
+      cacheSummaryTone: elements.get('#ach-cache-summary').attributes['data-tone'],
+      hostsSummary: elements.get('#ach-hosts-summary').textContent,
+      vhostSummary: elements.get('#ach-vhost-summary').textContent,
+      nginxSummary: elements.get('#ach-nginx-candidate-summary').textContent,
+      phpRuntimeSummary: elements.get('#ach-php-runtime-summary').textContent,
+      websiteContextHidden: elements.get('#ach-website-context').props.hidden,
       cachePlanResult: elements.get('#ach-cache-plan-result').textContent,
       cachePlanDisabled: elements.get('#ach-cache-plan-button').props.disabled,
       cacheActivationResult: elements.get('#ach-cache-activation-result').textContent,
@@ -498,6 +507,12 @@ function loadUi() {
     trigger(elements.get(selector), 'change');
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
+    openTab:name => {
+      const tab=tabs.find(item => item.attributes['data-tab'] === name);
+      assert.ok(tab, 'Unknown section');
+      trigger(tab, 'click');
+      return requests.at(-1);
+    },
     setViewportWidth:width => { browserWindow.innerWidth = width; },
     setMainScroll:value => { content.scrollTop = value; },
     mainScroll:() => content.scrollTop,
@@ -3669,7 +3684,7 @@ test('A valid Persian diff still renders, then stale content disappears on inval
 
 
 test('Native sidebar sections are linked to panels and scrollable content', () => {
-  for (const name of ['overview','websites','php','status','activity']) {
+  for (const name of ['overview','websites','routing','cache','php','status','activity']) {
     assert.match(html, new RegExp('id="ach-tab-' + name + '"[^>]*aria-controls="ach-panel-' + name + '"'));
     assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*aria-labelledby="ach-tab-' + name + '"'));
   }
@@ -3684,7 +3699,7 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /\.ach-main \{[^}]*background:var\(--ach-surface\)/);
   assert.match(html, /\.ach-workspace \{[^}]*border-radius:0 0 10px 10px/);
   assert.match(html, /\.layui-layer:has\(#ach-customizer\) \{[^}]*border-radius:10px/);
-  assert.doesNotMatch(html, /class="ach-sidebar-label"/);
+  assert.match(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
   assert.match(html, /<h4 class="ach-sr-only">Overview<\/h4>/);
@@ -4725,8 +4740,10 @@ test('Native tab arrow keys follow actual desktop/mobile orientation', () => {
   assert.equal(ui.keyTab('websites','ArrowDown').prevented,false);
   const mobile=ui.keyTab('websites','ArrowRight');
   assert.equal(mobile.prevented,true);
-  assert.equal(mobile.focused,'php');
-  assert.equal(mobile.selected,'php');
+  assert.equal(mobile.focused,'routing');
+  assert.equal(mobile.selected,'routing');
+  assert.equal(ui.keyTab('routing','ArrowRight').selected,'cache');
+  assert.equal(ui.keyTab('cache','ArrowRight').selected,'php');
   assert.equal(ui.keyTab('php','Home').selected,'overview');
   assert.equal(ui.keyTab('overview','End').selected,'activity');
   assert.equal(ui.keyTab('activity','ArrowRight').selected,'overview',
@@ -6602,4 +6619,89 @@ test('Selected 50x shows source-only preflight and still gates fresh Apply indep
   ui.statusSetValue('#ach-status-delivery','file','change');
   assert.equal(ui.state().statusManageApplyDisabled,true);
   assert.equal(ui.state().statusProbeDisabled,true);
+});
+
+test('Navigation splits real site, routing and cache controls without duplicating the selected site', () => {
+  const start=name => html.indexOf('id="ach-panel-' + name + '"');
+  const panel=(name,next) => html.slice(start(name), start(next));
+  const sites=panel('websites','routing');
+  const routing=panel('routing','cache');
+  const cache=panel('cache','php');
+  assert.equal(html.split('id="ach-hosts-site-id"').length,2,'One shared site selector');
+  assert.ok(html.indexOf('id="ach-hosts-site-id"') < start('overview'),'Shared selector precedes views');
+  assert.match(sites,/id="ach-site-changes-compare"/);
+  assert.doesNotMatch(sites,/id="ach-cache-inspect-button"|id="ach-nginx-candidate-button"/);
+  assert.match(routing,/id="ach-hosts-inspect-button"/);
+  assert.match(routing,/id="ach-vhost-inspect-button"/);
+  assert.match(routing,/id="ach-nginx-candidate-button"/);
+  assert.doesNotMatch(routing,/id="ach-cache-activation-apply"/);
+  assert.match(cache,/id="ach-cache-inspect-button"/);
+  assert.match(cache,/id="ach-cache-plan-button"/);
+  assert.match(cache,/id="ach-cache-activation-apply"/);
+  assert.match(cache,/id="ach-cache-activation-restore"/);
+  for (const name of ['hosts','vhost','nginx-candidate','cache','php-runtime']) {
+    assert.equal(html.split('id="ach-' + name + '-summary"').length,2,'One human summary '+name);
+    assert.match(html,new RegExp('<details class="ach-technical-report">[\\s\\S]*?id="ach-'+name+'-result"'));
+  }
+});
+
+test('Routing and Cache open with the same selected website and no duplicate inventory reads', () => {
+  const ui=loadUi();
+  const req=ui.openTab('cache');
+  assert.match(req.options.url,/s=get_sites$/);
+  assert.equal(ui.state().websiteContextHidden,false);
+  req.respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection());
+  const count=ui.requests.length;
+  ui.openTab('routing');
+  assert.equal(ui.requests.length,count,'Shared verified list must not refetch on tab switch');
+  assert.equal(ui.state().websiteContextHidden,false);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection());
+  assert.match(ui.state().vhostSummary,/matches aaPanel site records/);
+  assert.match(ui.state().cacheSummary,/No Purge All is available/);
+  ui.openTab('overview');
+  assert.equal(ui.state().websiteContextHidden,true);
+  const loadedCount=ui.requests.length; // Overview may load its own state once.
+  ui.openTab('cache');
+  assert.equal(ui.requests.length,loadedCount,'Cache reentry must not refetch website inventory');
+  assert.equal(ui.state().cacheInspectDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.match(ui.state().cacheSummary,/Site selection changed/);
+  assert.doesNotMatch(ui.state().cacheSummary,/matches|No Purge All is available/);
+});
+
+test('Plain-language Cache findings distinguish risk from a verified safety claim', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const r=cacheInspection({nginx_helper:nginxHelperAudit({
+    state:'Installed',version:'2.4.1',
+    note:'Vendor header only; runtime settings unknown.'
+  })});
+  ui.statusClick('#ach-cache-inspect-button').respond(r);
+  assert.match(ui.state().cacheSummary,/cache directory is shared/);
+  assert.match(ui.state().cacheSummary,/response cache-control headers/);
+  assert.match(ui.state().cacheSummary,/plugin-header v2.4.1/);
+  assert.match(ui.state().cacheSummary,/private WordPress and WooCommerce routes/i);
+  assert.equal(ui.state().cacheSummaryTone,'review');
+  assert.match(ui.state().cacheSummary,/No Purge All is available/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.match(ui.state().cacheResult,/Shared Registered Directory/);
+  const invalid=cacheInspection({nginx_helper:nginxHelperAudit({purge_safe_verified:true})});
+  ui.statusClick('#ach-cache-inspect-button').respond(invalid);
+  assert.match(ui.state().cacheSummary,/could not be confirmed/);
+  assert.doesNotMatch(ui.state().cacheSummary,/plugin-header v2.4.1/);
+  assert.equal(ui.state().cacheSummaryTone,'review');
+});
+
+test('Read-only inspection result colors depend on evidence, not generic success', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection());
+  assert.match(ui.state().hostsSummary,/not public DNS|public DNS/i);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection());
+  assert.match(ui.state().vhostSummary,/matches aaPanel site records/);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+    state:'Needs Review',vhost_sha256:null,native_root:null,vhost_root:null,
+    native_names:[],vhost_names:[],listen_ports:[],findings:[],reason:'Unknown rewrite'
+  }));
+  assert.match(ui.state().vhostSummary,/could not be compared reliably/);
 });

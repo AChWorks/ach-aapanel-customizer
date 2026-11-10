@@ -138,6 +138,18 @@ Policy application should be convergent/idempotent when meaningful. Unsupported 
 
 Prefer supported extension points over patches to aaPanel core or generated vendor files. If a narrow compatibility override is ever required, it must be separately justified, strictly version-gated, tested, and recoverable; it must not become the assumed default.
 
+**Native operator UX (Issues #17/#21):** Group administration by real
+operator tasks rather than backend-module names; allow distinct website
+inventory, Routing/Nginx and FastCGI Cache destinations with one validated
+selected-site context. Make each check's purpose, limits and usage clear.
+Show a human-readable result and recommended next step by default, with
+expandable exact diagnostic details (including hashes, operation/recovery
+IDs and real failure stages). Use semantic colors plus words, keep shared
+service and dangerous Apply/Restore consequences clear, preserve navigation
+scroll, drafts, keyboard/focus, mobile reflow and stale-evidence invalidation.
+No UI status may imply effective runtime, private-data safety or site-scoped
+Purge All without actual acceptance evidence.
+
 **FastCGI cache operational acceptance (Issue #2):** Keep HTTP-scope cache zones and per-site filesystem trees independently owned; a host-partitioned key does **not** make a shared physical directory safe to Purge All. Activation requires a version-appropriate native Nginx include surface, owned and fingerprinted config fragments, exact native site ID/root/bindings, a verified PHP handler, conservative private request/write exclusion, syntax preflight, narrowly authorized reload, runtime route observation, and an explicit saved recovery path. A single loopback marker establishes one effective PHP handler only; **real WordPress/WooCommerce session and cart/checkout/admin/webhook behavior**, multiple registered sites, cross-site isolation, and Nginx Helper `get_request` / `unlink_files` must be verified before advertising operational cache safety or exposing **Purge All**. A source-only preview and isolated Nginx fixture never substitute for authenticated native aaPanel installed-package acceptance, nor do they authorize production changes.
 
 **Production boundary:** building or maintaining this repository does not authorize installing the plugin, changing aaPanel, reloading production services, modifying production databases, or enabling production auto-enforcement. Such effects require explicit environment-specific authorization.

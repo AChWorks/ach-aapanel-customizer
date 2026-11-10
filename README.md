@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Status: 0.1.31 UNRELEASED development candidate (Issue #2).** [PR #49](https://github.com/AChWorks/ach-aapanel-customizer/pull/49) integrated the separately approved 0.1.30 guarded native FastCGI Cache Apply/Recheck/Restore into `main@0cc39be4038da057244ba9cc4d083a0fc21c912a`; [post-merge CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/42861197887) succeeded. The new 0.1.31 candidate adds only a site-bound, **read-only** Nginx Helper installed-file compatibility diagnosis in the native Cache audit. It does not execute WordPress, infer active settings, enable Helper integration, offer physical Purge All, certify WooCommerce/private sessions, auto-enforce policies, publish a Release or change Production. Open acceptance stays in [#2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+**Status: 0.1.32 UNRELEASED development candidate (Issues #2, #17 and #21).** [PR #50](https://github.com/AChWorks/ach-aapanel-customizer/pull/50) merged the independently approved v0.1.31 read-only Nginx Helper file/header audit into `main@553cb2d87f868fcafcdb9742831eaee29ea0941e`; [post-merge CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/42871209097) succeeded. The new 0.1.32 candidate reorganizes native operator navigation and human-readable read-only inspection reports without changing the backend Cache/PHP/Status Apply/Restore contracts, permission checks or recovery records. It **does not** implement Nginx Helper runtime integration, physical site Purge All, WooCommerce private-session acceptance, automatic enforcement, public Release or Production deployment. The current UX candidate requires independent review and authenticated native installed-package acceptance before Merge; the broader Cache/runtime work remains open.
 
 **0.1.22 guarded native stopped-site HTTP503 candidate (unreleased):** On aaPanel 8.0.7 Nginx only, select a native running website, the `stopped` EN/FA template, then explicitly Recheck and approve a site-scoped Nginx Apply. A plugin-owned inline server rewrite survives aaPanel's native SiteStop/Start include-commenting and root substitutions; it serves **actual HTTP 503 with HTML MIME** only while the site is stopped, without editing aaPanel core or the shared `/www/server/stop/index.html`. The saved root-owned original VHost and recovery journal stay outside plugin source. An explicitly approved Restore removes only the validated managed block and reloads shared Nginx; unknown or edited ownership fails to recovery review rather than overwriting an operator's changes. The rule checks the raw request Host (including verified native aliases) together with the native stopped root, so an unknown or absent Host does not accidentally inherit a selected default VHost's 503. After Nginx reload, the selected VHost's current bytes and Nginx -T source are rechecked before journal success; uncertain results retain recovery, and the UI separates prepared, observed HTTP503 and restored-route evidence. This is neither automatic enforcement nor a claim of generic 50x/HTTPS unknown-host coverage. The earlier R1 ZIP passed isolated native HTTP/HTTPS, Stop/Start and Restore testing; the final R2 proof-contract correction passed source tests and independent review, but its exact ZIP was not replayed in native aaPanel. The change was merged in PR #38; Release/Production and real authenticated Browser Phase B remain separate gates.
 
@@ -23,6 +23,46 @@ This candidate is a development-only evidence step toward Issue #2, **not comple
 The **PHP-FPM** tab provides **Recheck saved policy (read-only)**, **Load saved desired values** and **Save desired policy (Monitor)** for an installed PHP 8.1+ native shared `[www]` service. The operator selects a PHP version, enters the five desired `pm.*` settings, runs **Preview drift (read-only)**, explicitly acknowledges the shared-service impact, then saves against a fresh fingerprint of the actual native pool and main configuration, current Monitor revision and current policy revision. Saved policies are **version-specific plugin-owned intent**, kept in `/www/server/panel/data/ach_customizer.fpm-policy.json` outside the replaceable plugin directory. Recheck reads the **saved policy on the server**, never browser-supplied desired values; it shows current file/default Match/Drift/Needs Review and native impacted-site file mappings independently of the operator's draft form. To recover drift, Load fills the form, then the operator must **Preview → Prepare → approve → Apply** through the independently guarded PHP81/85 workflow, followed by site/service checks; other discovered versions remain Monitor only. Loading never approves a write. Backend rejects stale, conflicting, unsupported and nonprimary/temporary-admin requests; Activity contains a per-request correlation ID.
 
 The preview compares desired settings to the **file/default state**. This does not prove the running PHP master has adopted the file values, attribute a site-creation change to aaPanel, poll automatically, schedule a reconciliation job, or authorize host writes. It does **not** change any PHP file, restart/reload PHP-FPM, alter Manual Apply/Restore gates, or implicitly enable auto-enforcement. The existing guarded PHP 8.1/8.5 shared-pool Apply remains an independent explicit workflow with its original approval and recovery contract. A direct invocation of the native WordPress optimizer's actual shared-PHP reset path, followed by saved-policy Recheck and guarded Manual Apply/Restore, has now been tested on the exact R2 installed ZIP with three healthy named QA websites. A **full WordPress provisioning request**, timed/automatic drift observation, loaded PHP master/worker configuration and broad affected-traffic proof remain separate acceptance under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2). The following 0.1.28 details describe a historical candidate; PRs #45 and #46 have since merged into `main`. The exact current 51-member 0.1.28 ZIP (SHA256 `9fd52355730818b9c64105ed066dab7836db0287d16a440595095b647177300d`) passed bounded native PHP 8.1/8.5 **source/backend** QA for versioned saving, drift, site-file mapping, revision rejection and unchanged host files using isolated temporary state; this is **not** an authenticated App Store install, current-package UI acceptance or current-package guarded Apply/Restore replay. The historical exact 0.1.25 **R2 ZIP** passed native primary-admin aaPanel installed-ZIP testing, including the actual aaPanel WordPress optimizer reset, File Drift detection, guarded Manual Apply and byte-identical Restore. PR #46 was independently approved and merged into main at `209064a598a5063dff17e93d28fdc363af4f669f`; the separate Release/Production gate and exact-current ZIP native install/Browser acceptance remain open; see [PR #46 exact candidate and QA evidence](https://github.com/AChWorks/ach-aapanel-customizer/pull/46) and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6744217319).
+
+## Unreleased 0.1.32: task-based native management UX (Issues #17 / #2)
+
+The aaPanel modal now has clear destinations: **Overview**, **Website list**,
+**Routing & Nginx**, **FastCGI Cache**, **PHP-FPM**, **Status Pages** and
+**Activity & Logs**. A shared **Website being inspected** selector stays visible
+while moving between Website list, Routing and Cache, preserving a fresh native
+site snapshot; its list comes from the current page of aaPanel records. From
+a direct visit to Routing or Cache, inventory loads once, and a **Browse
+websites** action returns to pagination for more entries. Selection changes
+revoke previously rendered source evidence and Cache operation approvals.
+This is a frontend organization of **existing endpoints**, not an added
+write, policy or cache purge method.
+
+The read-only local hosts, VHost, Nginx next-load candidate, FastCGI cache,
+and PHP runtime reports now put a **plain-language outcome** first, followed
+by expandable **Technical evidence** containing the existing exact source
+details, SHA-256 identities and diagnostics. The operator can still expand
+raw evidence before/after an incident; it is not dropped or redacted.
+Status is conveyed by **words and semantic color** (observed source,
+review required, failed), never color alone. Green does not mean production
+or WooCommerce safety. The Cache summary prioritizes shared-directory purge
+risk, ignored response headers, private-route runtime acceptance, and Nginx
+Helper **plugin-header version**, not verified vendor-byte identity or active
+settings. Workflow guidance explains what each page checks, how to proceed
+and when Apply/Restore affects shared services. A concise PHP-FPM parameter
+guide explains the effect of each `pm.*` field. Read-only preview buttons
+retain neutral styling; dangerous/explicit Apply and Restore controls remain
+independently gated.
+
+Preserve existing enabled/disabled state, backend validation, native CSRF,
+per-tab scroll, unsaved Status Page drafts, saved recovery IDs and full
+primary-admin authority. No destructive action, disabled safety guard,
+new backend API or live Nginx reload is performed by these UX changes.
+Source/UI tests and a static Chromium render at 1280, 720 and 390 px showed
+no horizontal content overflow in the redesigned sections; this is **not**
+a substitute for exact-candidate authenticated installed-ZIP visual and
+interaction acceptance inside native aaPanel (#21).
+Actual WooCommerce session/cart/checkout/payment/webhook and safe, site-owned
+physical purge with active Nginx Helper remain separately unproven (#2).
 
 ## Unreleased 0.1.31: read-only Nginx Helper compatibility evidence (Issue #2)
 
