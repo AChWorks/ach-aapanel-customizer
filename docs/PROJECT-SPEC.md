@@ -144,7 +144,11 @@ inventory, Routing/Nginx and FastCGI Cache destinations with one validated
 selected-site context. Make each check's purpose, limits and usage clear.
 Show a human-readable result and recommended next step by default, with
 expandable exact diagnostic details (including hashes, operation/recovery
-IDs and real failure stages). Use semantic colors plus words, keep shared
+IDs and real failure stages). Wherever an Apply/Restore/Save confirmation
+or action is currently disabled, expose its actual evidence prerequisite
+and next supported step beside the control, independent of hover. A checked
+consent box must never be confused with successful preflight or backend
+authorization; keep readiness and saved-recovery requirements distinct. Use semantic colors plus words, keep shared
 service and dangerous Apply/Restore consequences clear, preserve navigation
 scroll, drafts, keyboard/focus, mobile reflow and stale-evidence invalidation.
 No UI status may imply effective runtime, private-data safety or site-scoped

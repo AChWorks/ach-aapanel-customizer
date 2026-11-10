@@ -43,7 +43,19 @@ by expandable **Technical evidence** containing the existing exact source
 details, SHA-256 identities and diagnostics. The operator can still expand
 raw evidence before/after an incident; it is not dropped or redacted.
 Status is conveyed by **words and semantic color** (observed source,
-review required, failed), never color alone. Green does not mean production
+review required, failed), never color alone. Disabled confirmations now show
+**inline, state-aware prerequisites** immediately beside the control: what
+the approval means, which read-only Compare/Preview/Recheck must be run,
+whether saved site recovery exists, and what changes are or are not
+authorized. The source result remains visible even when the checkbox is
+locked. Status Pages uses separate guidance for Apply versus Restore;
+checkboxes alone do not bypass its existing evidence checks. The PHP
+version selector appears **before** the runtime inspection and remains
+associated with the existing settings form; the operator can choose
+PHP, Inspect runtime, Preview values and then review a guarded action in
+natural order. Activity explains severity, stage, operation and recovery IDs.
+The website baseline now displays an ordinary-language summary before
+its expandable source digest, with the site comparison table retained. Green does not mean production
 or WooCommerce safety. The Cache summary prioritizes shared-directory purge
 risk, ignored response headers, private-route runtime acceptance, and Nginx
 Helper **plugin-header version**, not verified vendor-byte identity or active

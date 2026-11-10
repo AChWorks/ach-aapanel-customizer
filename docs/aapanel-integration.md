@@ -27,7 +27,23 @@ still invalidates affected source, Cache Apply and recovery approvals.
 The interface distinguishes plain-language inspection outcomes from the
 complete, expandable **Technical evidence** view: local hosts file clues,
 generated VHost comparison, prospective `nginx -T`, source-only FastCGI
-cache/Helper, and observed PHP process/socket. Color is an accessible
+cache/Helper, and observed PHP process/socket.
+
+The UX refinement on the same unreleased candidate also provides local
+state-aware eligibility messages and `aria-describedby` references for
+read-only comparison baselines, Cache Apply/Restore consent, saved PHP-FPM
+Monitor policy, manual PHP preparation, and each Status Pages
+Apply/Restore option. These messages are **derived from existing approved
+backend-observation state**; they neither introduce a new write permission
+nor remove the existing source/recovery/CSRF guards. A disabled checkbox
+explicitly indicates which Compare, Preview or Recheck to run and when
+no compatible state exists. In Status Pages, a selectable consent box
+without current evidence now explains why its action remains disabled.
+Move the existing PHP version selector before runtime inspection while
+keeping its HTML form ownership. The Website baseline uses a short result
+summary with exact hash/details in an expandable pane, and Activity logs
+include a field glossary. All user-supplied/error-bearing source data
+continues to render as text, not HTML. Color is an accessible
 secondary signal, with descriptive text and no false private-session,
 runtime-worker or Purge All safety claim. Long SHA/config IDs remain
 available in the technical report, and write/recovery results remain
