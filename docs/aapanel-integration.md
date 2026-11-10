@@ -206,6 +206,41 @@ The source audit is limited to the **aaPanel 8.0.7 + Nginx** conventional file l
 
 **Hard boundaries:** The helper returns read_only=true, runtime_verified=false, cache_safe_verified=false, fix_supported=false, purge_supported=false on every successful API result. It never runs nginx, sends HTTP requests, reads cache objects, follows paths supplied by the browser, writes site files, clears/reloads caches or enables Auto-enforce. Nginx fastcgi_cache_path may appear in other included files, location inheritance and map variables can change effective behavior, and unrelated apps/WordPress Nginx Helper may purge the shared cache directory outside these directives. Therefore this is not a complete cache-zone ownership graph, a route-by-route safety audit or proof that Purge All is site-scoped. Those P0 requirements remain under Issue #2: prove real authenticated/public HIT/MISS/BYPASS, WooCommerce/cart/session/webhook bypass and header semantics, cross-site cache isolation and safe per-site purge in an isolated aaPanel native setup; integrate only with an independently reviewed version-compatible adapter after authorization. Native browser roles/CSRF, source update drift, site creation and real responses remain pending consolidated Issue #21 QA. No Production or Release.
 
+### Nginx Helper installed-source compatibility inspection (0.1.31, Issue #2)
+
+The primary-admin, native-website-bound `inspect_fastcgi_cache` endpoint
+now includes an independent `nginx_helper` object, never a purge action. The
+backend uses the revalidated aaPanel site ID/root rather than a caller-supplied
+path. A descriptor-anchored, no-symlink, two-pass scan checks only conventional
+root-level WordPress and `wp-content/plugins/nginx-helper/nginx-helper.php`
+installed-file evidence. It reads no WordPress database, `wp-config.php`,
+WP options or secret, executes no PHP or plugin code, and never uses an
+unverified filesystem path to authorize an Apply/Restore/Purge. Unrecognized,
+redirected, changed or incomplete sources return `Needs Review`.
+
+Fields `active_verified`, `purge_method_verified`,
+`cache_path_verified` and `purge_safe_verified` remain **false** in
+all outcomes. Even a complete `Installed`/version observation cannot tell
+whether Nginx Helper is active or which purge method and path the runtime
+actually uses. The UI validates this negative-evidence contract and renders
+all output as text, including when the Nginx source audit itself is
+`Needs Review`. Non-WordPress/subdirectory/MU-plugin/custom layouts remain
+uncertain, not asserted absent.
+
+In the pinned upstream Nginx Helper 2.4.1 implementation,
+`FastCGI_Purger::delete_cache_file_for()` constructs its `unlink_files`
+lookup from MD5 of `scheme + GET + host + path`; Customizer's activated
+key also includes a fresh `|<generation>` suffix, so the default file
+lookup is incompatible. `get_request` performs an HTTP purge against an
+Nginx route not installed by Customizer; `FastCGI_Purger::purge_all()`
+for ordinary `get_request` and `unlink_files` uses
+`unlink_recursive(RT_WP_NGINX_HELPER_CACHE_PATH, false)`, independently
+of site-bound Nginx zone keys. The effective path can be configured at
+WordPress runtime. This is a **known source incompatibility**, not a
+successful real-plugin integration test or permission for automatic purge.
+See [Nginx Helper upstream 2.4.1 source](https://github.com/rtCamp/nginx-helper/tree/2.4.1)
+and [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2).
+
 ### Guarded site-owned native FastCGI Cache lifecycle candidate (0.1.30, Issue #2)
 
 The 0.1.29 `preview_cache_safety` route remains **reference-only**. The separate 0.1.30 `preview_cache_activation` route uses a primary-admin aaPanel POST with the native website ID, key, root, status and bound-domain snapshot. It requires aaPanel 8.0.7, Nginx, a verified site-matching generated VHost, a single stock `enable-php-81.conf` or `enable-php-85.conf` include, safe precedence of the native per-site extension glob **before** PHP, a direct known HTTP-scope VHost include glob, no site cache source already in force, and complete two-pass peer source attribution. The result contains a reviewable site-specific zone/path and source/proposal SHA256 and a fresh 128-bit **cache generation** included in the Nginx Cache Key. Each new approval binds that generation to exact source bytes; the backend rejects reuse across the active journal and every intact archived restored journal, so reactivating after a Restore cannot HIT stale objects left by an older generation. The original per-site physical Cache directory device/inode is persisted alongside the recovery identity; read-only Recheck requires current VHost/rewrite, main Nginx and stock PHP/parameter source hashes, physical ownership and identity, managed snippets, and the loopback PHP marker before returning Applied. Drift returns Needs Review with the original recovery ID and a diagnostic, without touching files or reloading Nginx. This is **not** a loaded-worker/visitor-session safety finding.
