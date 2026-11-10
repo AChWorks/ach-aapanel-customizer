@@ -246,20 +246,43 @@ class OwnedStatusInteropTests(unittest.TestCase):
 
     def test_healthy_selected_and_peer_cache_audit_with_owned_status(self):
         initial = self.audit()
-        self.assertEqual(initial["state"], "Partial", initial)
-        self.assertEqual(initial["unresolved_other_sites"], 1)  # static site
+        self.assertEqual(initial["state"], "Source Observed", initial)
+        self.assertEqual(initial["unresolved_other_sites"], 0)  # inert static peer
         self.owned(3, "404")
         self.owned(6, "502")
         healthy = self.audit()
-        self.assertEqual(healthy["state"], "Partial", healthy)  # static is unsupported
-        self.assertEqual(healthy["unresolved_other_sites"], 1)
+        self.assertEqual(healthy["state"], "Source Observed", healthy)
+        self.assertEqual(healthy["unresolved_other_sites"], 0)
         self.assertNotEqual(healthy["source_sha256"], initial["source_sha256"])
         self.assertEqual(healthy["zone_state"], initial["zone_state"])
         path = self.vhosts / "extension" / "wp-b.test" / "ach_customizer_6_502.conf"
         path.write_bytes(path.read_bytes() + b"proxy_pass http://elsewhere;\n")
         damaged = self.audit()
         self.assertEqual(damaged["state"], "Partial")
-        self.assertEqual(damaged["unresolved_other_sites"], 2)
+        self.assertEqual(damaged["unresolved_other_sites"], 1)
+
+    def test_static_peer_is_only_resolved_while_native_sources_are_inert(self):
+        snippet = self.nginx / "enable-php-00.conf"
+        original_snippet = snippet.read_text()
+        self.assertEqual(self.audit()["unresolved_other_sites"], 0)
+        for source in (
+            r"location ~ \.php$ { return 200; }" + "\n",
+            r"location ~ \.php$ { fastcgi_pass unix:/tmp/php-cgi-85.sock; }" + "\n",
+        ):
+            with self.subTest(source=source):
+                snippet.write_text(source)
+                self.assertEqual(self.audit()["unresolved_other_sites"], 1)
+        snippet.write_text("")
+        self.assertEqual(self.audit()["state"], "Source Observed")
+        snippet.write_text(original_snippet)
+
+        vhost = self.vhosts / "static.test.conf"
+        original_vhost = vhost.read_text()
+        vhost.write_text(original_vhost.replace(
+            "server {", "server {\n fastcgi_cache WORDPRESS;", 1))
+        self.assertEqual(self.audit()["unresolved_other_sites"], 1)
+        vhost.write_text(original_vhost)
+        self.assertEqual(self.audit()["state"], "Source Observed")
 
     def test_apply_then_owned_status_then_fresh_explicit_fpm_rollback(self):
         import ach_customizer_fpm_apply as core

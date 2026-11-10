@@ -119,11 +119,37 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
         vhost, native_rewrite=str(rewrite),
         native_extension=str(extension / "*.conf"),
     )
-    # Pure static / no-PHP sites are returned as unverified cache consumers;
-    # inherited HTTP/server cache directives are not modelled here.
-    if version == "00":
-        raise CacheAuditError("No supported native FastCGI PHP site include")
     snippet_source, snippet_sig = _text_and_signature(Path(nginx_root) / snippet)
+    if version == "00":
+        # Inert native Static sites must not block an unrelated PHP site's
+        # cache audit, but only classify them after reading their real files.
+        static_handler = snippet_source.strip()
+        if static_handler and not re.fullmatch(
+            r"location\s+~\s+\\\.php\$\s*\{\s*return\s+404;\s*\}",
+            static_handler,
+        ):
+            raise CacheAuditError("Static PHP include has unverified routing")
+        if any(_statements(vhost).values()):
+            raise CacheAuditError("Static VHost has FastCGI-cache controls")
+        fingerprints = [
+            ("vhost", site_key, vhost_sig),
+            ("static-snippet", snippet, snippet_sig),
+        ]
+        if has_rewrite:
+            text, sig = _text_and_signature(rewrite)
+            if text.strip():
+                raise CacheAuditError("Static site rewrite has unverified routing")
+            fingerprints.append(("rewrite", site_key, sig))
+        if has_extension:
+            sig = _native_extension_fingerprint(
+                extension, site_id=site_id, site_key=site_key)
+            # A site switched from PHP to Static after Cache Apply may still
+            # have an active site-owned PHP handler in its extension.
+            owned_cache = extension / ("ach_customizer_cache_%d.conf" % site_id)
+            if owned_cache.exists() or owned_cache.is_symlink():
+                raise CacheAuditError("Static site retains a managed cache handler")
+            fingerprints.append(("extension", site_key, sig))
+        return _merge_directives(vhost, snippet_source), fingerprints, "00"
     sources = [vhost, snippet_source]
     fingerprints = [("vhost", site_key, vhost_sig),
                     ("php-snippet", snippet, snippet_sig)]
