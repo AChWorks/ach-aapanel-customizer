@@ -56,7 +56,9 @@ class CacheEndpointTests(unittest.TestCase):
                      patch.object(manager,'preview_cache_activation') as readiness:
                     for endpoint, payload in (
                          ('preview_cache_activation',self.args()),
-                         ('manage_cache_policy',{**self.args(),'cache_action':'apply','approved':'true'})):
+                         ('manage_cache_policy',{**self.args(),'cache_action':'apply','approved':'true'}),
+                         ('manage_cache_policy',{**self.args(),'cache_action':'clear_files',
+                                                 'approved':'true','recovery_id':'f'*32})):
                         result=getattr(self.plugin,endpoint)(payload)
                         self.assertFalse(result['status'],result)
                         self.assertEqual(result['stage'],'cache_authorization')
@@ -93,6 +95,31 @@ class CacheEndpointTests(unittest.TestCase):
             self.assertEqual(kw['cache_generation'],'c'*32)
             self.assertNotIn('cache_root',kw)
             self.assertNotIn('site_key',kw)
+
+    def test_site_cache_clear_uses_primary_admin_site_snapshot_and_no_paths(self):
+        sample={'schema':1,'state':'Applied','changed':True,'site_id':7,
+                'site_key':'qa.test','journal_phase':'applied',
+                'recovery_id':'f'*32,'runtime_verified':True,
+                'purge_supported':False,'cache_files_removed':2}
+        with patch.dict(sys.modules,{'flask':self.flask()}), \
+             patch.object(self.plugin,'_require_enabled'), \
+             patch.object(self.plugin,'_selected_native_website',
+                          side_effect=self.selected), \
+             patch.object(manager,'manage_cache',return_value=sample) as operation:
+            result=self.plugin.manage_cache_policy({
+                **self.args(), 'cache_action':'clear_files',
+                'recovery_id':'f'*32,'approved':'true',
+                'cache_directory':'/etc','cache_root':'/tmp','purge_all':'true'})
+            self.assertTrue(result['status'],result)
+            self.assertEqual(result['cache_files_removed'],2)
+            self.assertEqual(operation.call_args.args[:2],('clear_files',self.site))
+            kwargs=operation.call_args.kwargs
+            self.assertEqual(kwargs['recovery_id'],'f'*32)
+            self.assertEqual(kwargs['approved'],True)
+            self.assertNotIn('cache_root',kwargs)
+            self.assertNotIn('cache_directory',kwargs)
+            self.assertNotIn('purge_all',kwargs)
+            self.assertEqual(self.checks,2)
 
     def test_native_route_action_is_not_reused_as_cache_operation(self):
         sample={'schema':1,'state':'Unmanaged','site_id':7,

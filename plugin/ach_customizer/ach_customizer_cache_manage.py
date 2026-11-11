@@ -382,6 +382,87 @@ def _path_owned(site_id, *, cache_root=CACHE_ROOT, allow_missing=False):
         os.close(sitefd)
 
 
+
+def _scan_site_cache_files(site_id, expected_identity, *, remove=False):
+    """Validate Nginx levels=1:2 objects inside ONE already-owned cache tree.
+
+    No arbitrary recursive delete: foreign entries, links, mounts, hard links,
+    changed inodes or unexpected layouts are not adopted as managed cache.
+    Leave the Nginx-owned directories present so workers can continue writing.
+    """
+    identity = _path_owned(site_id)
+    if identity != tuple(expected_identity):
+        raise CacheManageError('ownership', 'Selected Cache directory identity changed')
+    root_fd = os.open(CACHE_ROOT + '/site-' + str(site_id),
+                      os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    www = pwd.getpwnam('www')
+    count = 0
+
+    def child_dir(parent_fd, name, expected_dev):
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (not stat.S_ISDIR(before.st_mode) or before.st_dev != expected_dev
+                or before.st_uid != www.pw_uid or before.st_gid != www.pw_gid
+                or stat.S_IMODE(before.st_mode) != 0o700):
+            raise CacheManageError('ownership', 'Unexpected object inside site Cache tree')
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
+                     os.O_CLOEXEC, dir_fd=parent_fd)
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+            os.close(fd)
+            raise CacheManageError('concurrency', 'Site Cache directory changed during scan')
+        return fd
+
+    try:
+        top = os.fstat(root_fd)
+        if (top.st_dev, top.st_ino) != identity:
+            raise CacheManageError('concurrency', 'Selected Cache directory changed during scan')
+        for first in sorted(os.listdir(root_fd)):
+            if not re.fullmatch(r'[0-9a-f]', first):
+                raise CacheManageError('ownership', 'Unexpected top-level site Cache object')
+            first_fd = child_dir(root_fd, first, top.st_dev)
+            try:
+                for second in sorted(os.listdir(first_fd)):
+                    if not re.fullmatch(r'[0-9a-f]{2}', second):
+                        raise CacheManageError('ownership', 'Unexpected nested site Cache object')
+                    second_fd = child_dir(first_fd, second, top.st_dev)
+                    try:
+                        for name in sorted(os.listdir(second_fd)):
+                            if (not TOKEN.fullmatch(name) or name[-1] != first
+                                    or name[-3:-1] != second):
+                                raise CacheManageError('ownership', 'Unexpected site Cache filename')
+                            before = os.stat(name, dir_fd=second_fd, follow_symlinks=False)
+                            if (not stat.S_ISREG(before.st_mode) or before.st_dev != top.st_dev
+                                    or before.st_uid != www.pw_uid or before.st_gid != www.pw_gid
+                                    or stat.S_IMODE(before.st_mode) != 0o600
+                                    or before.st_nlink != 1):
+                                raise CacheManageError('ownership', 'Untrusted site Cache file')
+                            if remove:
+                                fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW |
+                                             os.O_CLOEXEC, dir_fd=second_fd)
+                                try:
+                                    actual = os.fstat(fd)
+                                    if (actual.st_dev, actual.st_ino) != (before.st_dev, before.st_ino):
+                                        raise CacheManageError('concurrency', 'Site Cache file changed during clear')
+                                    current = os.stat(name, dir_fd=second_fd, follow_symlinks=False)
+                                    if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                                        raise CacheManageError('concurrency', 'Site Cache filename changed during clear')
+                                    os.unlink(name, dir_fd=second_fd)
+                                finally:
+                                    os.close(fd)
+                            count += 1
+                        if remove:
+                            os.fsync(second_fd)
+                    finally:
+                        os.close(second_fd)
+            finally:
+                os.close(first_fd)
+        if _path_owned(site_id) != identity:
+            raise CacheManageError('concurrency', 'Site Cache ownership changed during clear')
+        return count
+    finally:
+        os.close(root_fd)
+
+
 def _create_site_cache(site_id):
     parent = Path(CACHE_ROOT).parent
     parent_fd = _directory(str(parent))
@@ -860,13 +941,13 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                  expected_proposal=None, recovery_id=None, approved=False,
                  data_dir=DATA_DIR, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
                  runner=None, probe=None, cache_generation=None):
-    """Serialized guarded per-site cache Apply/Recheck/Restore.
+    """Serialized guarded per-site cache Apply/Recheck/Restore/clear_files.
 
     Neither successful Nginx -t nor reload signaling by itself proves the
     target worker. A lost/ambiguous reload retains the journal and both source
     fragments for explicit reconciliation, never an automatic blind retry.
     """
-    if action not in ('apply', 'restore', 'recheck'):
+    if action not in ('apply', 'restore', 'recheck', 'clear_files'):
         raise CacheManageError('input', 'Unsupported Cache management operation')
     if (type(site.get('id')) is not int or
             not isinstance(site.get('name'), str) or
@@ -907,6 +988,68 @@ def manage_cache(action, site, public=None, *, expected_source=None,
 
             if approved is not True:
                 raise CacheManageError('authorization', 'Explicit current Cache approval required')
+            if action == 'clear_files':
+                if (record is None or record['site_key'] != site['name']
+                        or record['schema'] != 2 or record['phase'] != 'applied' or
+                        recovery_id != record['op']):
+                    raise CacheManageError('recovery',
+                        'Fresh Applied Cache Recheck and matching recovery ID required')
+                observed = _cache_observation(
+                    site, record, public, vhost_root=vhost_root,
+                    nginx_root=nginx_root, data_dir=data_dir, probe=probe)
+                if observed['state'] != 'Applied' or not observed['runtime_verified']:
+                    raise CacheManageError('recovery',
+                        'Site Cache is not verified Applied; reconcile and Recheck')
+                # The directory inode alone does not prove no other native
+                # website now targets this tree. Check the complete registered
+                # source inventory again, not only the saved Apply snapshot.
+                if public is None:
+                    raise CacheManageError('compatibility',
+                        'Native website inventory required for site Cache file clear')
+                native = inspect_site_fastcgi_cache(
+                    public, site['id'], site['name'], vhost_root=vhost_root,
+                    nginx_root=nginx_root,
+                    rewrite_root=str(Path(vhost_root).parent / 'rewrite'))
+                if (native.get('state') != 'Source Observed' or
+                        native.get('zone_state') != 'Direct Zone' or
+                        native.get('cache_zone') != 'ACHFC_' + str(site['id']) or
+                        native.get('cache_directory') != record['cache_directory'] or
+                        native.get('unresolved_other_sites') != 0 or
+                        native.get('other_sites_same_directory') or
+                        native.get('other_sites_same_zone')):
+                    raise CacheManageError('compatibility',
+                        'Registered Cache source isolation requires fresh review')
+                # First pass rejects foreign entries before unlinking any file.
+                # Nginx workers can write concurrently, so a changed tree or
+                # uncertain removal must never be reported as completed.
+                try:
+                    _scan_site_cache_files(site['id'], record['cache_identity'])
+                except OSError as exc:
+                    raise CacheManageError('ownership',
+                        'Selected Cache files are not safely enumerable') from exc
+                try:
+                    removed = _scan_site_cache_files(
+                        site['id'], record['cache_identity'], remove=True)
+                    if _cache_observation(
+                            site, record, public, vhost_root=vhost_root,
+                            nginx_root=nginx_root, data_dir=data_dir,
+                            probe=probe)['state'] != 'Applied':
+                        raise CacheManageError('concurrency',
+                            'Site Cache route changed during file clear')
+                except (OSError, CacheManageError) as exc:
+                    raise CacheManageError('uncertain',
+                        'Site Cache file removal not fully confirmed; Recheck before any retry',
+                        recovery_id=record['op']) from exc
+                return {'schema': 1, 'state': 'Applied', 'changed': removed > 0,
+                        'site_id': site['id'], 'site_key': site['name'],
+                        'recovery_id': record['op'], 'journal_phase': 'applied',
+                        'runtime_verified': True, 'purge_supported': False,
+                        'cache_files_removed': removed,
+                        'note': 'Only verified site-owned Cache files were unlinked. '
+                                'No Nginx reload, shared WORDPRESS purge or Nginx Helper '
+                                'operation. Concurrent traffic may repopulate the Cache; '
+                                'recheck application behavior independently.'}
+
             if action == 'apply':
                 if record is not None and record['phase'] != 'restored':
                     raise CacheManageError('recovery', 'Existing Cache journal must be reconciled')

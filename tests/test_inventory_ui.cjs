@@ -56,7 +56,8 @@ function loadUi() {
     '#ach-cache-activation-result', '#ach-cache-activation-reviewed',
     '#ach-cache-activation-apply', '#ach-cache-restore-reviewed',
     '#ach-cache-apply-why', '#ach-cache-restore-why',
-    '#ach-cache-activation-restore',
+    '#ach-cache-activation-restore', '#ach-cache-clear-why',
+    '#ach-cache-clear-reviewed', '#ach-cache-clear-files',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
@@ -330,6 +331,8 @@ function loadUi() {
       cacheActivationApplyDisabled: elements.get('#ach-cache-activation-apply').props.disabled,
       cacheActivationRestoreDisabled: elements.get('#ach-cache-activation-restore').props.disabled,
       cacheRestoreConsentDisabled: elements.get('#ach-cache-restore-reviewed').props.disabled,
+      cacheClearDisabled: elements.get('#ach-cache-clear-files').props.disabled,
+      cacheClearConsentDisabled: elements.get('#ach-cache-clear-reviewed').props.disabled,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       nginxCandidateDisabled: elements.get('#ach-nginx-candidate-button').props.disabled,
@@ -1979,6 +1982,95 @@ test('After Apply, Recovery Required Recheck and site/inventory invalidation ret
     assert.equal(ui.state().cacheRestoreConsentDisabled,true);
     assert.equal(ui.state().cacheActivationRestoreDisabled,true);
   }
+});
+
+test('Manual site Cache file clear requires fresh Applied Recheck and separate approval', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  assert.equal(ui.state().cacheClearDisabled,true);
+  assert.equal(ui.state().cacheClearConsentDisabled,true);
+  const before=ui.requests.length;
+  ui.statusSetChecked('#ach-cache-clear-reviewed',true);
+  ui.statusClick('#ach-cache-clear-files');
+  assert.equal(ui.requests.length,before,'no clear from unchecked or unverified state');
+
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),
+    read_only:true,runtime_verified:true,purge_supported:false});
+  assert.equal(ui.state().cacheClearConsentDisabled,false);
+  assert.equal(ui.state().cacheClearDisabled,true);
+  ui.statusSetChecked('#ach-cache-clear-reviewed',true);
+  assert.equal(ui.state().cacheClearDisabled,false);
+  const clear=ui.statusClick('#ach-cache-clear-files');
+  assert.match(clear.options.url,/s=manage_cache_policy$/);
+  assert.equal(clear.options.data.cache_action,'clear_files');
+  assert.equal(clear.options.data.recovery_id,'f'.repeat(32));
+  assert.equal(clear.options.data.approved,'true');
+  assert.deepEqual(Object.keys(clear.options.data).sort(),[
+    'approved','cache_action','expected_site_key','expected_site_snapshot',
+    'recovery_id','site_id']);
+  assert.equal(ui.state().cacheClearDisabled,true);
+  const during=ui.requests.length;
+  ui.statusClick('#ach-cache-clear-files');
+  assert.equal(ui.requests.length,during,'no concurrent or automatic retry');
+  clear.respond({status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),
+    runtime_verified:true,purge_supported:false,cache_files_removed:3,changed:true});
+  assert.match(ui.state().cacheActivationResult,/Verified files removed: 3/);
+  assert.match(ui.state().cacheActivationResult,/shared cache or Nginx Helper purge/);
+  assert.equal(ui.state().cacheClearDisabled,true);
+  assert.equal(ui.state().cacheClearConsentDisabled,true);
+});
+
+test('Cache clear is blocked by non-Applied states and invalidated by selection', () => {
+  for (const state of ['Unmanaged','Needs Review','Recovery Required','Restored']) {
+    const ui=loadUi();selectHostsSite(ui);
+    const r={status:true,schema:1,state,site_id:7,site_key:'site.test',
+      journal_phase:state === 'Restored' ? 'restored' : 'prepared',
+      recovery_id:'f'.repeat(32),read_only:true,
+      runtime_verified:state === 'Restored',purge_supported:false};
+    if (state === 'Unmanaged') {r.recovery_id=null;delete r.journal_phase;}
+    ui.statusClick('#ach-cache-activation-recheck').respond(r);
+    ui.statusSetChecked('#ach-cache-clear-reviewed',true);
+    assert.equal(ui.state().cacheClearDisabled,true,state);
+    assert.equal(ui.state().cacheClearConsentDisabled,true,state);
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),
+    read_only:true,runtime_verified:true,purge_supported:false});
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  ui.statusSetChecked('#ach-cache-clear-reviewed',true);
+  assert.equal(ui.state().cacheClearDisabled,true);
+  const n=ui.requests.length;
+  ui.statusClick('#ach-cache-clear-files');
+  assert.equal(ui.requests.length,n);
+});
+
+test('Cache clear uncertain and stale results never authorize a second clear', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const applied={status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),
+    read_only:true,runtime_verified:true,purge_supported:false};
+  ui.statusClick('#ach-cache-activation-recheck').respond(applied);
+  ui.statusSetChecked('#ach-cache-clear-reviewed',true);
+  ui.statusClick('#ach-cache-clear-files').respond({
+    status:false,stage:'cache_manage',
+    msg:'Site Cache file removal not fully confirmed',
+    operation_id:'b'.repeat(32),recovery_id:'f'.repeat(32)});
+  assert.match(ui.state().cacheActivationResult,/NOT CONFIRMED/);
+  assert.match(ui.state().cacheActivationResult,/Possible recovery ID: f{32}/);
+  assert.equal(ui.state().cacheClearDisabled,true);
+  ui.statusClick('#ach-cache-activation-recheck').respond(applied);
+  ui.statusSetChecked('#ach-cache-clear-reviewed',true);
+  const pending=ui.statusClick('#ach-cache-clear-files');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond({status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),
+    runtime_verified:true,purge_supported:false,cache_files_removed:1,changed:true});
+  assert.doesNotMatch(ui.state().cacheActivationResult,/Verified files removed/);
+  assert.equal(ui.state().cacheClearDisabled,true);
 });
 
 test('Site Cache Apply and Restore require exact approval and recovery identity', () => {

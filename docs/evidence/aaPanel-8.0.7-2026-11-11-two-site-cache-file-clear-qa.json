@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-11",
+  "environment": {
+    "incus_project": "ach-aapanel-qa",
+    "guest": "aac-native-qa",
+    "guest_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "aapanel": "8.0.7",
+    "nginx": "1.28.3",
+    "php": "8.5",
+    "scope": "temporary independent loopback Nginx process; original nine websites unmodified"
+  },
+  "physical_isolation_test": {
+    "separate_zones": true,
+    "separate_directories": true,
+    "per_site_generation_keys": true,
+    "site_a_listen": "127.0.0.1:19087",
+    "site_b_listen": "127.0.0.1:19088",
+    "site_a_first": {"http_status": 200, "cache": "MISS"},
+    "site_a_second": {"http_status": 200, "cache": "HIT"},
+    "site_b_first": {"http_status": 200, "cache": "MISS"},
+    "site_b_second": {"http_status": 200, "cache": "HIT"},
+    "before_clear_files": {"site_a": 1, "site_b": 1},
+    "after_a_only_clear_files": {"site_a": 0, "site_b": 1},
+    "site_a_after_clear": {"http_status": 200, "cache": "MISS"},
+    "site_b_after_clear": {"http_status": 200, "cache": "HIT"},
+    "nginx_config_test": "PASS",
+    "temporary_instance_closed": true,
+    "temporary_files_removed": true
+  },
+  "not_verified_by_this_test": [
+    "exact new plugin ZIP installed and exercised through authenticated aaPanel UI",
+    "all loaded native Nginx worker generations",
+    "native site VHost template regeneration and HTTPS routing",
+    "logged-in cross-customer WordPress/WooCommerce cache isolation",
+    "Nginx Helper 2.4.1 generation-aware invalidation or Purge All",
+    "production, release or automatic enforcement"
+  ],
+  "protected_qa_assets_touched": false
+}

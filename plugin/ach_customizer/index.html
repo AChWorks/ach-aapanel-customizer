@@ -495,6 +495,10 @@
         <p id="ach-cache-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore is unavailable until Recheck Cache / recovery confirms a saved, site-owned recovery. No verified recovery means no Restore.</p>
         <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" disabled /> I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
+        <p class="ach-note"><strong>Selected-site Cache file clear (manual):</strong> only verified Nginx Cache files inside the selected site's own physical directory. Requires a fresh <em>Applied</em> Recheck and separate approval; does not touch shared WORDPRESS cache, call Nginx Helper, reload Nginx, or enable Purge All. New requests may immediately repopulate the cache.</p>
+        <p id="ach-cache-clear-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm the selected site's Cache is Applied before file clear.</p>
+        <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" disabled /> I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</label>
+        <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" disabled>Clear selected-site Cache files</button></div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
@@ -1493,7 +1497,7 @@
   var cacheBusy = false, cacheTicket = 0;
   var cachePlanBusy = false, cachePlanTicket = 0;
   var cacheActivationBusy = false, cacheActivationTicket = 0;
-  var cacheActivationSnapshot = null, cacheRecoveryIdentity = null;
+  var cacheActivationSnapshot = null, cacheRecoveryIdentity = null, cacheClearIdentity = null;
   function cacheActivationLock() {
     var id = hostsSiteId(), unready = hostsBusy || siteBusy ||
       websitePolicyState !== 'stable' || !id;
@@ -1510,6 +1514,11 @@
     root.find('#ach-cache-activation-restore')
       .prop('disabled', cacheActivationBusy || unready || !cacheRecoveryIdentity ||
         root.find('#ach-cache-restore-reviewed').prop('checked') !== true);
+    root.find('#ach-cache-clear-reviewed')
+      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity);
+    root.find('#ach-cache-clear-files')
+      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity ||
+        root.find('#ach-cache-clear-reviewed').prop('checked') !== true);
     var common = websitePolicyState !== 'stable' ?
       'Monitor state is unverified. Open Overview and Refresh state first.' :
       !id ? 'Select a website above before checking Cache readiness.' :
@@ -1528,6 +1537,14 @@
         root.find('#ach-cache-restore-reviewed').prop('checked') === true ?
         'Recovery approval selected. Restore will use the verified saved identity and may reload shared Nginx.' :
         'Verified saved recovery found. Review the recovery identity and affected site, then tick to enable Restore.'));
+    explainGate('ach-cache-clear-why',
+      !unready && !cacheActivationBusy && cacheClearIdentity ? 'ready' : 'blocked',
+      common || (cacheActivationBusy ? 'A Cache operation is in progress.' :
+        !cacheClearIdentity ?
+        'Locked: run a fresh Recheck Cache / recovery and verify Applied. '+
+        'Needs Review, Recovery Required, Restored and Unmanaged cannot clear files.' :
+        'Applied confirmed for this website and recovery ID. Explicitly approve removal '+
+        'of only this site-owned Cache files; shared WORDPRESS cache is untouched.'));
   }
   var vhostBusy = false, vhostTicket = 0;
   var nginxCandidateBusy = false, nginxCandidateTicket = 0;
@@ -1558,7 +1575,8 @@
     cacheActivationBusy = false;
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+    cacheClearIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
       .prop('checked', false);
     root.find('#ach-cache-activation-result').text(
       'Native website selection changed; recheck Cache readiness and recovery.');
@@ -2228,7 +2246,7 @@
       response.cache_directory === '/www/server/ach-customizer-fastcgi/site-' + id &&
       typeof response.impact === 'string' && response.impact.length < 500);
   }
-  root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+  root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
     .on('change', cacheActivationLock);
   root.find('#ach-cache-activation-preview').on('click', function () {
     var id = hostsSiteId();
@@ -2238,7 +2256,8 @@
     cacheActivationBusy = true;
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+    cacheClearIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Inspecting current native sources for manual Cache approval...');
     cacheActivationLock();
@@ -2317,7 +2336,8 @@
     cacheActivationBusy = true;
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+    cacheClearIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Rechecking site-specific Cache journal and worker marker...');
     cacheActivationLock();
@@ -2338,6 +2358,9 @@
           if (hasRecoveryId && ['Applied','Recovery Required'].includes(r.state)) {
             cacheRecoveryIdentity = op;
           }
+          if (hasRecoveryId && r.state === 'Applied') {
+            cacheClearIdentity = op;
+          }
           var blockedRecovery = r.state === 'Needs Review' && hasRecoveryId ?
             '\nSaved recovery ID (read-only; Restore locked): '+op : '';
           var blockedPhase = r.state === 'Needs Review' && r.journal_phase ?
@@ -2357,6 +2380,46 @@
         cacheActivationLock();
       });
   });
+  function validCacheClearReply(r, id, recovery) {
+    var site = hostsPageSites.get(id);
+    return !!(r && site && r.status === true && r.schema === 1 &&
+      r.state === 'Applied' && r.site_id === Number(id) &&
+      r.site_key === site.name && r.recovery_id === recovery &&
+      r.journal_phase === 'applied' && r.runtime_verified === true &&
+      r.purge_supported === false && Number.isSafeInteger(r.cache_files_removed) &&
+      r.cache_files_removed >= 0 && r.changed === (r.cache_files_removed > 0));
+  }
+  root.find('#ach-cache-clear-files').on('click', function () {
+    var id = hostsSiteId(), recovery = cacheClearIdentity;
+    if (!id || cacheActivationBusy || !recovery ||
+        root.find('#ach-cache-clear-reviewed').prop('checked') !== true ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++cacheActivationTicket;
+    cacheActivationBusy = true;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    cacheClearIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
+      .prop('checked', false);
+    cacheActivationNotice('Clearing only verified selected-site Cache files; do not retry blindly...');
+    cacheActivationLock();
+    request('manage_cache_policy', Object.assign(cacheNativeArgs(id), {
+      cache_action:'clear_files', recovery_id:recovery, approved:'true'
+    }), function (r, failure) {
+      if (ticket !== cacheActivationTicket) return;
+      cacheActivationBusy = false;
+      var ok = id === hostsSiteId() && validCacheClearReply(r,id,recovery);
+      cacheActivationNotice(ok ?
+        'Selected-site Cache file clear completed.'+
+        '\nVerified files removed: '+r.cache_files_removed+
+        '\nRecovery ID: '+recovery+' (still Applied; Recheck required for another action).'+
+        '\nNo Nginx reload, shared cache or Nginx Helper purge; traffic may refill this site.' :
+        'Site Cache file clear NOT CONFIRMED. Do not repeat before fresh Recheck. '+
+        (cacheBackendFailure(failure,'cache_manage') ||
+          'Inspect Activity and saved Cache recovery.'));
+      cacheActivationLock();
+    });
+  });
   root.find('#ach-cache-activation-apply').on('click', function () {
     var id = hostsSiteId(), plan = cacheActivationSnapshot;
     if (!id || cacheActivationBusy || !plan || plan.site_id !== id ||
@@ -2366,7 +2429,8 @@
     cacheActivationBusy = true;
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+    cacheClearIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Applying approved site cache and verifying Nginx reload; do not retry uncertain operations...');
     cacheActivationLock();
@@ -2409,7 +2473,8 @@
     cacheActivationBusy = true;
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed')
+    cacheClearIdentity = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Restoring saved Cache generation; do not retry until Recheck...');
     cacheActivationLock();

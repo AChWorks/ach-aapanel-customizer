@@ -61,7 +61,8 @@ class CacheManageTests(unittest.TestCase):
             patch.object(cache,'inspect_site_fastcgi_cache',return_value={
                 'state':'Source Observed','zone_state':'Direct Zone',
                 'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
-                'unresolved_other_sites':0,'source_sha256':'a'*64}),
+                'unresolved_other_sites':0,'other_sites_same_directory':[],
+                'other_sites_same_zone':[],'source_sha256':'a'*64}),
         ]
         for p in self.patchers:
             p.start();self.addCleanup(p.stop)
@@ -986,6 +987,130 @@ class CacheManageTests(unittest.TestCase):
             cache.manage_cache('restore',self.site,approved=True,
                 recovery_id=applied['recovery_id'],**self.kwargs())
         self.assertTrue((self.ext/cache._names(7)[1]).exists())
+
+
+    def test_site_cache_file_clear_requires_fresh_applied_identity_and_consent(self):
+        with patch.object(cache, '_scan_site_cache_files') as physical:
+            with self.assertRaises(cache.CacheManageError):
+                cache.manage_cache('clear_files', self.site,
+                    approved=True, recovery_id='a'*32, **self.kwargs())
+            physical.assert_not_called()
+            applied = self.apply()
+            unchanged = list(self.commands)
+            for approved, recovery in ((False, applied['recovery_id']),
+                                       (True, 'f'*32), (True, None)):
+                with self.subTest(approved=approved, recovery=recovery):
+                    with self.assertRaises(cache.CacheManageError):
+                        cache.manage_cache('clear_files', self.site,
+                            public=object(), approved=approved,
+                            recovery_id=recovery, **self.kwargs())
+            physical.assert_not_called()
+            physical.side_effect = [2, 2]
+            cleared = cache.manage_cache('clear_files', self.site,
+                public=object(), approved=True,
+                recovery_id=applied['recovery_id'], **self.kwargs())
+            self.assertEqual(cleared['state'], 'Applied')
+            self.assertTrue(cleared['changed'])
+            self.assertEqual(cleared['cache_files_removed'], 2)
+            self.assertFalse(cleared['purge_supported'])
+            self.assertEqual(cleared['recovery_id'], applied['recovery_id'])
+            self.assertEqual(physical.call_count, 2)
+            self.assertEqual(physical.call_args.kwargs, {'remove':True})
+            self.assertEqual(self.commands, unchanged, 'File clear must not reload Nginx')
+            self.assertEqual(cache.manage_cache('recheck',self.site,
+                 public=object(), **self.kwargs())['state'], 'Applied')
+            fd = cache._open_state_dir(str(self.state))
+            try:
+                self.assertEqual(cache._record_read(fd, 7)['phase'], 'applied')
+            finally:
+                os.close(fd)
+
+    def test_cache_file_clear_blocks_new_physical_peer_alias_before_unlink(self):
+        applied = self.apply()
+        with patch.object(cache, '_scan_site_cache_files') as physical:
+            with patch.object(cache, 'inspect_site_fastcgi_cache', return_value={
+                    'state':'Source Observed','zone_state':'Direct Zone',
+                    'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
+                    'unresolved_other_sites':0,
+                    'other_sites_same_directory':[{'id':8,'site_key':'peer.test'}],
+                    'other_sites_same_zone':[] }):
+                with self.assertRaisesRegex(cache.CacheManageError, 'isolation'):
+                    cache.manage_cache('clear_files', self.site,
+                        public=object(), approved=True,
+                        recovery_id=applied['recovery_id'], **self.kwargs())
+            physical.assert_not_called()
+
+    def test_cache_file_clear_refuses_restored_and_changed_source(self):
+        applied = self.apply()
+        with patch.object(cache, '_scan_site_cache_files') as physical:
+            native = self.vhost/'qa.test.conf'
+            original = native.read_bytes()
+            native.write_bytes(original + bytes([10]) + b'# drift' + bytes([10]))
+            with self.assertRaisesRegex(cache.CacheManageError, 'not verified Applied'):
+                cache.manage_cache('clear_files', self.site, public=object(),
+                    approved=True, recovery_id=applied['recovery_id'], **self.kwargs())
+            native.write_bytes(original)
+            physical.assert_not_called()
+            cache.manage_cache('restore', self.site, public=object(), approved=True,
+                recovery_id=applied['recovery_id'], **self.kwargs())
+            with self.assertRaises(cache.CacheManageError):
+                cache.manage_cache('clear_files', self.site, public=object(),
+                    approved=True, recovery_id=applied['recovery_id'], **self.kwargs())
+            physical.assert_not_called()
+
+    def test_partial_cache_file_clear_is_uncertain_with_recovery_identity(self):
+        applied = self.apply()
+        with patch.object(cache, '_scan_site_cache_files',
+                          side_effect=[4, OSError('simulated mid-unlink error')]):
+            with self.assertRaises(cache.CacheManageError) as caught:
+                cache.manage_cache('clear_files', self.site,
+                    public=object(), approved=True,
+                    recovery_id=applied['recovery_id'], **self.kwargs())
+        self.assertEqual(caught.exception.stage, 'uncertain')
+        self.assertEqual(caught.exception.recovery_id, applied['recovery_id'])
+        self.assertEqual(cache.manage_cache('recheck', self.site,
+              public=object(), **self.kwargs())['state'], 'Applied')
+
+    def test_physical_cache_clear_rejects_foreign_nodes_and_preserves_peer(self):
+        root = self.root / 'cache-root'
+        root.mkdir()
+        a = root / 'site-7'
+        b = root / 'site-8'
+        for site_dir, prefix, suffix in ((a, 'c', '4a'), (b, 'd', '5b')):
+            leaf = site_dir / prefix / suffix
+            leaf.mkdir(parents=True)
+            site_dir.chmod(0o750)
+            (site_dir / prefix).chmod(0o700)
+            leaf.chmod(0o700)
+            obj = leaf / ('0'*29+suffix+prefix)
+            obj.write_bytes(b'generated-cache-data')
+            obj.chmod(0o600)
+        owner = SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid())
+        cache_identity = (a.stat().st_dev, a.stat().st_ino)
+        with patch.object(cache,'CACHE_ROOT',str(root)), \
+             patch.object(cache, '_path_owned', return_value=cache_identity), \
+             patch.object(cache.pwd, 'getpwnam', return_value=owner):
+            foreign = a/'unexpected.txt'
+            foreign.write_bytes(b'untouched')
+            with self.assertRaises(cache.CacheManageError):
+                cache._scan_site_cache_files(7, cache_identity)
+            self.assertEqual(len(list(a.rglob('0'*29+'4ac'))), 1)
+            foreign.unlink()
+            # A symlink hidden among otherwise legitimate files is rejected.
+            linked = a/'c'/'4a'/('0'*29+'4ad')
+            linked.symlink_to('/etc/hosts')
+            with self.assertRaises(cache.CacheManageError):
+                cache._scan_site_cache_files(7, cache_identity)
+            self.assertEqual(len(list(a.rglob('0'*29+'4ac'))), 1)
+            linked.unlink()
+            self.assertEqual(cache._scan_site_cache_files(7, cache_identity), 1)
+            self.assertEqual(cache._scan_site_cache_files(7, cache_identity,
+                             remove=True), 1)
+            self.assertEqual(len(list(a.rglob('0'*29+'4ac'))), 0)
+            self.assertTrue((b/'d'/'5b'/('0'*29+'5bd')).is_file())
+            self.assertTrue((a/'c'/'4a').is_dir())
+            self.assertEqual(cache._scan_site_cache_files(7, cache_identity), 0)
+
 
 
 if __name__=='__main__':

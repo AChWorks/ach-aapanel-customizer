@@ -11,6 +11,44 @@ The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the
 4. Public aaPanel source [panelPlugin.py](https://github.com/aaPanel/aaPanel/blob/38bf35903b37b50d9654f47c4ad904ca3369715f/class/panelPlugin.py) recognizes `plugin/<name>/info.json` and constructs local-plugin inventory. The inspected implementation invokes uninstall scripts and removes plugin code. This is source evidence for that Git revision, **not** a cross-version contract.
 5. The same official PDF documents read-only `public.M('sites')` selectors for site IDs, names, paths and status. Actual panel schemas and revision-specific API behavior still require tests.
 
+## Manual site-owned Cache file clear: physical ownership and limits (unmerged candidate)
+
+This is a **new separately approved site-maintenance operation**, not the
+older Nginx Helper `Purge All`, a URL-specific invalidator or a promise that
+WooCommerce cache is safe for private users. The existing native primary
+administrator uses the site's stable validated selection, runs a fresh
+`cache_action=recheck`, receives `state=Applied` and its matching recovery
+ID, then separately approves `cache_action=clear_files`. The backend
+independently revalidates the persisted schema-2 identity, native source and
+origin-local PHP marker, complete registered-site Cache zone/directory
+collision audit, physical owner/device/inode and Nginx `levels=1:2` layout.
+It reuses the existing serialized cache operation lock; no caller-supplied
+filesystem path, zone, domain or arbitrary purge scope is accepted.
+
+Before deletion, a full file-only validation rejects any untrusted entry;
+only regular `0600 www:www` 32-hex cache objects in verified `0700
+www:www` hex-prefix directories may be removed, using fd-relative,
+nofollow operations. The site's cache directory itself remains intact,
+as do archived generations and the persistent recovery journal. A
+changed or unexpected source, symlink/hardlink/alias, missing PHP route or
+other registered site referencing the physical tree **does not qualify**.
+File count is diagnostic only; live Nginx may repopulate the directory
+immediately, and worker in-memory behavior requires separate verification.
+Mid-operation failure is **uncertain**, not proof of a complete purge: the
+operator gets the saved recovery ID and must Recheck before retrying. There
+is no Nginx reload and no shared-zone or Nginx Helper mutation.
+
+On 2026-11-11 the isolated `ach-aapanel-qa/aac-native-qa` guest's
+Nginx 1.28.3/PHP85 ran two temporary loopback VHosts and independent Cache
+zones/filesystems. Both returned `MISS` then `HIT`, followed by an
+A-only file removal and subsequent `A=MISS`, `B=HIT`.
+The temporary Nginx process, listeners and test-owned files were closed
+and cleaned. This is **direct host-runtime evidence**, but not a native
+installed-plugin Clear action, private-session test, loaded worker proof
+across native sites or accepted Nginx Helper integration. See
+[exact observation record](evidence/aaPanel-8.0.7-2026-11-11-two-site-cache-file-clear-qa.json)
+and the open Issues #2/#21.
+
 ## New-site native Nginx Extension compatibility (0.1.35 development; Issues #2 / #21)
 
 The **authenticated native aaPanel 8.0.7 Website → Add site** operation produced a fresh PHP8.5 Nginx VHost with the expected `include enable-php-85.conf;` but **without** its per-site `include /www/server/panel/vhost/nginx/extension/<site>/*.conf;`. The installed vendor's `class_v2/panel_site_v2.py::nginxAdd()` and older `class/panelSite.py::nginxAdd()` omit this extension, while `nginx_update_config()` reconstruction templates include it. Vendor regeneration can replace much more of the operator VHost, so the Customizer **must not invoke regeneration to cure one missing include** and must not edit aaPanel core. [Exact first real test and cleanup](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6792970143).
