@@ -158,6 +158,58 @@ def _read_source(path):
     return source.encode('utf8'), signature
 
 
+def _missing_extension_inventory(site, vhost_root):
+    """Read the prospective wildcard target before suggesting its activation.
+
+    Native aaPanel may create the Extension tree after site creation. An
+    absent, verified site directory is compatible with refresh-first guidance;
+    an existing directory is accepted only with bounded, anchored inspection
+    of the native inert site_total.conf. No foreign routing is endorsed.
+    """
+    parent = Path(vhost_root) / 'extension'
+    try:
+        root_fd = _directory(vhost_root)
+        try:
+            _owned_dir(root_fd)
+            try:
+                source = os.stat('extension', dir_fd=root_fd,
+                                 follow_symlinks=False)
+            except FileNotFoundError:
+                return  # No Extension parent yet on this native installation.
+            if not stat.S_ISDIR(source.st_mode):
+                raise ValueError('Native Extension parent is not a directory')
+        finally:
+            os.close(root_fd)
+
+        parent_fd = _directory(str(parent))
+        try:
+            _owned_dir(parent_fd)
+            if not os.fstat(parent_fd).st_mode & stat.S_IRUSR:
+                raise ValueError('Native Extension parent is inaccessible')
+            try:
+                site_dir = os.stat(site['name'], dir_fd=parent_fd,
+                                   follow_symlinks=False)
+            except FileNotFoundError:
+                return  # Native statistics has not created this site directory.
+            if (not stat.S_ISDIR(site_dir.st_mode) or
+                    not site_dir.st_mode & stat.S_IRUSR):
+                raise ValueError('Native Extension directory is inaccessible')
+        finally:
+            os.close(parent_fd)
+
+        _native_extension_fingerprint(
+            parent / site['name'],
+            site_id=site['id'], site_key=site['name'],
+            allowed_conf_names=frozenset(('site_total.conf',)))
+    except (OSError, ValueError, StatusPageError) as exc:
+        raise CacheManageError(
+            'compatibility',
+            'Native site VHost is missing its Extension include, but the on-disk '
+            'Extension directory is unverified. Inspect its ownership and '
+            '*.conf contents before adding a wildcard include. '
+            'No VHost or Cache change was made.') from exc
+
+
 def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     if (site.get('status') not in ('1',1) or not SITE_KEY.fullmatch(site['name'])
             or not any(binding.get('name') == site['name'] and binding.get('port') == 80
@@ -220,6 +272,7 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
             and not re.search(r'\binclude\s+[^;\n]*/extension/[^;\n]*;', active)
             and not re.search(r'\bfastcgi_cache(?:_purge)?\b', active)
             and not re.search(r'\blocation\s+~', active[:active.index(php_line)])):
+        _missing_extension_inventory(site, vhost_root)
         raise CacheManageError(
             'compatibility',
             'Native aaPanel site VHost is missing the per-site extension include. '

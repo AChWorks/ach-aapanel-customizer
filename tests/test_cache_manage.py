@@ -612,6 +612,123 @@ class CacheManageTests(unittest.TestCase):
         finally:
             vhost.write_text(initial)
 
+    def test_missing_extension_allows_absent_or_verified_inert_native_sources(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        missing = original.replace(
+            ' include ' + str(self.ext) + '/*.conf;\n', '')
+        self.assertNotEqual(original, missing)
+
+        def assert_guided():
+            with self.assertRaises(cache.CacheManageError) as observed:
+                cache._site_sources(self.site, '85',
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+            self.assertEqual(observed.exception.stage, 'compatibility')
+            self.assertEqual(observed.exception.reason_code,
+                             'native_extension_include_missing')
+            self.assertEqual(vhost.read_text(), missing)
+            self.assertFalse(list(self.state.iterdir()))
+            self.assertFalse(self.commands)
+
+        try:
+            vhost.write_text(missing)
+            assert_guided()  # Existing, empty site Extension directory.
+            self.ext.rmdir()
+            assert_guided()  # Site directory not yet created by site_total.
+            self.ext.parent.rmdir()
+            assert_guided()  # Entire native Extension parent still absent.
+            self.ext.mkdir(parents=True)
+            (self.ext / 'site_total.conf').write_text(
+                'access_log syslog:server=unix:/tmp/site_total.sock,'
+                'nohostname,tag=7__access site_total;\n')
+            assert_guided()  # On-disk aaPanel analytics, independently inspected.
+        finally:
+            vhost.write_text(original)
+
+    def test_missing_extension_unverified_files_never_recommend_wildcard(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        missing = original.replace(
+            ' include ' + str(self.ext) + '/*.conf;\n', '')
+        self.assertNotEqual(original, missing)
+
+        def assert_rejected():
+            with self.assertRaises(cache.CacheManageError) as observed:
+                cache._site_sources(self.site, '85',
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+            self.assertEqual(observed.exception.stage, 'compatibility')
+            self.assertIsNone(observed.exception.reason_code)
+            self.assertIn('Extension directory is unverified',
+                          str(observed.exception))
+            self.assertIn('before adding a wildcard include',
+                          str(observed.exception))
+            self.assertEqual(vhost.read_text(), missing)
+            self.assertFalse(list(self.state.iterdir()))
+            self.assertFalse(self.commands)
+
+        try:
+            vhost.write_text(missing)
+            for name, body in (
+                ('foreign.conf', 'location /private { return 200; }\n'),
+                ('foreign.conf', 'access_log off;\n'),
+                ('site_total.conf', 'proxy_pass http://foreign;\n'),
+                ('site_total.conf',
+                 'access_log off; fastcgi_pass unix:/tmp/php.sock;\n'),
+            ):
+                with self.subTest(name=name, body=body):
+                    path = self.ext / name
+                    path.write_text(body)
+                    try:
+                        assert_rejected()
+                    finally:
+                        path.unlink()
+            linked = self.ext / 'site_total.conf'
+            linked.symlink_to(self.nginx / 'fastcgi.conf')
+            try:
+                assert_rejected()
+            finally:
+                linked.unlink()
+            # Also inspect unsafe directory identity/permissions, even when
+            # no foreign .conf currently exists. Do not rely on root bypass.
+            original_mode = self.ext.stat().st_mode & 0o777
+            for mode in (0o000, 0o777):
+                with self.subTest(mode=oct(mode)):
+                    self.ext.chmod(mode)
+                    try:
+                        assert_rejected()
+                    finally:
+                        self.ext.chmod(original_mode)
+            # An unreadable Extension parent must not be accepted merely
+            # because root can traverse it with elevated privileges.
+            parent = self.ext.parent
+            parent_mode = parent.stat().st_mode & 0o777
+            parent.chmod(0o000)
+            try:
+                assert_rejected()
+            finally:
+                parent.chmod(parent_mode)
+            moved = self.ext.with_name('qa-held')
+            self.ext.rename(moved)
+            try:
+                self.ext.symlink_to(moved, target_is_directory=True)
+                assert_rejected()
+            finally:
+                self.ext.unlink()
+                moved.rename(self.ext)
+            # The parent cannot be an alias either, even when the site
+            # directory inside the alias would otherwise be empty.
+            parent = self.ext.parent
+            moved = parent.with_name('extension-held')
+            parent.rename(moved)
+            try:
+                parent.symlink_to(moved, target_is_directory=True)
+                assert_rejected()
+            finally:
+                parent.unlink()
+                moved.rename(parent)
+        finally:
+            vhost.write_text(original)
+
     def test_edited_or_ambiguous_extension_source_does_not_offer_stock_hint(self):
         vhost = self.vhost / 'qa.test.conf'
         initial = vhost.read_text()
