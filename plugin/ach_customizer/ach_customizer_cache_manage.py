@@ -223,9 +223,9 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
         raise CacheManageError(
             'compatibility',
             'Native aaPanel site VHost is missing the per-site extension include. '
-            'Use the selected website Config editor in aaPanel to add that server-level '
-            'include before the PHP handler, Save, then rerun Cache readiness. '
-            'No Cache or VHost change was made.',
+            'Native site statistics may add it later; refresh the site Config and '
+            'rerun Cache readiness before any manual edit. If still missing, use '
+            'the latest native Config editor and recheck. No VHost/Cache change was made.',
             reason_code='native_extension_include_missing')
     if (active.count(ext) != 1 or len(php_includes) != 1
             or php_includes[0] != php_line

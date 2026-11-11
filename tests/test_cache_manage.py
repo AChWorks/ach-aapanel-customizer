@@ -599,7 +599,7 @@ class CacheManageTests(unittest.TestCase):
             self.assertEqual(observed.exception.stage, 'compatibility')
             self.assertEqual(observed.exception.reason_code,
                              'native_extension_include_missing')
-            self.assertIn('Save, then rerun Cache readiness', str(observed.exception))
+            self.assertIn('site statistics may add it later', str(observed.exception))
             self.assertEqual(vhost.read_bytes(), before)
             self.assertFalse(list(self.state.iterdir()))
             self.assertFalse(self.commands)

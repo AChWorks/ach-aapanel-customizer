@@ -1850,6 +1850,8 @@ test('Fresh aaPanel site extension diagnosis gives exact native Config step but 
     /include \/www\/server\/panel\/vhost\/nginx\/extension\/site\.test\/\*\.conf;/);
   assert.match(ui.state().cacheActivationResult, /Website > site\.test > Config/);
   assert.match(ui.state().cacheActivationResult, /BEFORE #PHP-INFO-START/);
+  assert.match(ui.state().cacheActivationResult, /site statistics are enabled/);
+  assert.match(ui.state().cacheActivationResult, /NEVER save an editor opened before aaPanel changed/);
   assert.match(ui.state().cacheActivationResult, /fresh Cache readiness check/);
   ui.statusSetChecked('#ach-cache-activation-reviewed',true);
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
@@ -1860,6 +1862,11 @@ test('Fresh aaPanel site extension diagnosis gives exact native Config step but 
     msg:'Conflicting site include',reason_code:'unknown',
     operation_id:'b'.repeat(32)});
   assert.doesNotMatch(ui.state().cacheActivationResult,/include \/www\/server\/panel\/vhost/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  // Once native reconciliation fixes the include, a fresh bounded preflight
+  // replaces the old warning. No positive approval is inherited.
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady());
+  assert.doesNotMatch(ui.state().cacheActivationResult,/NEVER save an editor/);
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
 
   const pending=ui.statusClick('#ach-cache-activation-preview');
