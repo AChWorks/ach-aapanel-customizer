@@ -108,6 +108,32 @@ Clear evidence remains identified with its original exact ZIP.
 Independent delta re-review must evaluate this remaining validation
 boundary; no Merge/Release/Production action is authorized.
 
+**Second reviewer finding: nested bind aliases (PR #56 R2).** The prior
+root-inode-chain guard could miss a mount of `site-6/8` into a peer
+`fastcgi_cache/8` whose root inode remained independent. The bounded
+physical Clear now correlates Linux `mountinfo` entries inside, at and
+exclusively above registered peer Cache roots with the selected site's
+ancestor chain and streamed physical inodes of the supported Nginx
+`levels=1:2` Cache tree, including regular cache objects. Shared nested
+directory and individual-file mount identities are refused before
+unlinking, while unrelated mounted filesystems remain eligible.
+Mount IDs and inode signatures are checked again before unlink and
+afterward. Unexpected/unknown mount identity is non-authorizing.
+External concurrent mount changes cannot be made atomic with unlink.
+
+[Focused actual Linux bind-mount QA](evidence/aaPanel-8.0.7-2026-11-11-pr56-nested-peer-bind-r2-qa.json)
+in the isolated aaPanel 8.0.7 guest denied a selected-site root
+alias, a first-level subtree bind into an independent peer root, and
+a bound individual cache file. Proof-file bytes were preserved;
+independent roots and a separate unrelated bind mount stayed accepted.
+Native site #6's two registered peers #9/#10 remained physically
+distinct despite source-only `purge_scope=Unknown`. Nine websites
+returned HTTP200 and `nginx -t` passed. The exact R2 module was
+imported from its ZIP in fresh guest Python processes, but the corrected
+ZIP was **not installed into running aaPanel** and the protected Browser
+Clear flow was not replayed. Final exact-HEAD CI and independent delta
+re-review remain prerequisites, as does separate Owner Merge approval.
+
 ## New-site native Nginx Extension compatibility (0.1.35 development; Issues #2 / #21)
 
 The **authenticated native aaPanel 8.0.7 Website → Add site** operation produced a fresh PHP8.5 Nginx VHost with the expected `include enable-php-85.conf;` but **without** its per-site `include /www/server/panel/vhost/nginx/extension/<site>/*.conf;`. The installed vendor's `class_v2/panel_site_v2.py::nginxAdd()` and older `class/panelSite.py::nginxAdd()` omit this extension, while `nginx_update_config()` reconstruction templates include it. Vendor regeneration can replace much more of the operator VHost, so the Customizer **must not invoke regeneration to cure one missing include** and must not edit aaPanel core. [Exact first real test and cleanup](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6792970143).

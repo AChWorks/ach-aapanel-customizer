@@ -412,6 +412,112 @@ def _cache_directory_identity_chain(path):
         os.close(fd)
 
 
+def _cache_mount_target_identity(path):
+    """No-follow identity of a mount target (directory OR regular Cache file)."""
+    parent, name = path.rsplit('/', 1)
+    if not parent or not name or name in ('.', '..'):
+        raise CacheManageError('compatibility', 'Unverified peer Cache mount target')
+    # Anchor the parent descriptor one component at a time: an intermediate
+    # symlink cannot redirect this inspection outside the registered tree.
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open('/', flags)
+    try:
+        for part in parent.split('/')[1:]:
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        target = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if not (stat.S_ISDIR(target.st_mode) or stat.S_ISREG(target.st_mode)):
+            raise CacheManageError('compatibility', 'Unverified peer Cache mount object')
+        return (target.st_dev, target.st_ino)
+    finally:
+        os.close(fd)
+
+
+def _cache_peer_mounts(selected_path, peer_directories):
+    """Inspect Linux mountpoints within, at, or exclusively above peer roots.
+
+    A bind mount can expose one selected-site Cache subtree through a peer
+    root, descendant or exclusive ancestor. Do not reject unrelated mounts:
+    compare their actual source object identities to selected Cache objects.
+    Keep mount IDs to detect observed topology drift between passes.
+    """
+    nested = []
+    try:
+        with open('/proc/self/mountinfo', encoding='utf-8') as source:
+            for line in source:
+                fields = line.split()
+                if len(fields) < 10 or '-' not in fields[6:]:
+                    raise CacheManageError('compatibility',
+                                           'Registered peer Cache mount table is malformed')
+                path = re.sub(r'\\([0-7]{3})',
+                              lambda m: chr(int(m.group(1), 8)), fields[4])
+                for directory in peer_directories:
+                    if (path == directory or path.startswith(directory + '/') or
+                            (directory.startswith(path.rstrip('/') + '/') and
+                             not selected_path.startswith(path.rstrip('/') + '/'))):
+                        nested.append((directory, path, fields[0],
+                                       _cache_mount_target_identity(path)))
+    except (OSError, UnicodeError) as exc:
+        raise CacheManageError('compatibility',
+                               'Registered peer Cache mount table is unavailable') from exc
+    return tuple(sorted(nested))
+
+
+def _selected_cache_contains_mount_identity(selected_path, expected_identity,
+                                            mount_identities):
+    """Check actual selected Nginx objects only when a peer has nested mounts.
+
+    Depth is the selected owned Nginx levels=1:2 layout; stream directory
+    entries, keeping only the small set of suspicious mount-target identities.
+    This also detects a bind mount of an individual selected cache file.
+    """
+    possible = set(mount_identities)
+    if not possible:
+        return False
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    root_fd = os.open(selected_path, flags)
+    try:
+        info = os.fstat(root_fd)
+        if (info.st_dev, info.st_ino) != tuple(expected_identity):
+            raise CacheManageError('concurrency',
+                                   'Selected Cache root changed during peer inspection')
+        if (info.st_dev, info.st_ino) in possible:
+            return True
+        # Actual Nginx levels=1:2 directories, no arbitrary recursion.
+        # Foreign entries are validated by the normal two-pass file scanner.
+        with os.scandir(root_fd) as first_entries:
+            for first in first_entries:
+                if not first.is_dir(follow_symlinks=False):
+                    continue
+                first_fd = os.open(first.name, flags, dir_fd=root_fd)
+                try:
+                    f = os.fstat(first_fd)
+                    if (f.st_dev, f.st_ino) in possible:
+                        return True
+                    with os.scandir(first_fd) as second_entries:
+                        for second in second_entries:
+                            if not second.is_dir(follow_symlinks=False):
+                                continue
+                            second_fd = os.open(second.name, flags, dir_fd=first_fd)
+                            try:
+                                q = os.fstat(second_fd)
+                                if (q.st_dev, q.st_ino) in possible:
+                                    return True
+                                with os.scandir(second_fd) as objects:
+                                    for obj in objects:
+                                        sig = obj.stat(follow_symlinks=False)
+                                        if (sig.st_dev, sig.st_ino) in possible:
+                                            return True
+                            finally:
+                                os.close(second_fd)
+                finally:
+                    os.close(first_fd)
+        return False
+    finally:
+        os.close(root_fd)
+
+
 def _verify_cache_peer_isolation(selected_path, expected_identity, peer_paths):
     """Prove relevant native peer cache trees are physically separate.
 
@@ -432,6 +538,7 @@ def _verify_cache_peer_isolation(selected_path, expected_identity, peer_paths):
                                    'Selected Cache directory physical identity changed')
         verified = []
         seen = set()
+        peer_directories = set()
         for peer in peer_paths:
             if (not isinstance(peer, dict) or set(peer) != {'id', 'directory'}
                     or type(peer['id']) is not int or peer['id'] < 1
@@ -447,7 +554,20 @@ def _verify_cache_peer_isolation(selected_path, expected_identity, peer_paths):
                 raise CacheManageError('compatibility',
                                        'Registered Cache directories physically overlap')
             verified.append((peer['id'], directory, peer_chain))
-        return tuple(verified)
+            peer_directories.add(directory)
+
+        # Root identity alone misses an external bind of site/8 into
+        # peer/8. Inspect actual mount destinations anywhere under the
+        # registered peer roots, without rejecting unrelated mounted trees.
+        nested = _cache_peer_mounts(selected_path, peer_directories)
+        candidates = {identity for _, _, _, identity in nested
+                      if identity[0] == selected_chain[-1][0]}
+        if (candidates.intersection(selected_chain) or
+                _selected_cache_contains_mount_identity(
+                    selected_path, expected_identity, candidates)):
+            raise CacheManageError(
+                'compatibility', 'Registered Cache subtrees physically overlap')
+        return (tuple(verified), nested)
     except (OSError, UnicodeError) as exc:
         raise CacheManageError('compatibility',
                                'Registered peer Cache physical separation is unverified') from exc

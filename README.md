@@ -89,6 +89,27 @@ The earlier native Browser Clear acceptance belongs to the pre-delta
 candidate; no new installed-R1 Browser replay is claimed. Independent
 delta re-review and Owner authorization remain required.
 
+**PR #56 second physical-isolation delta (nested bind mounts):** A second
+independent review found that distinct Cache roots could still share
+the selected site's `levels=1:2` object subtree through an external
+bind mount, such as `site-6/8` exposed through `fastcgi_cache/8`.
+The guarded Clear now inspects Linux `mountinfo` targets within, at,
+or exclusively above registered peer Cache roots and cross-checks their
+anchored inode identities against the selected root ancestor chain and
+its streamed actual Nginx Cache subdirectories **and files**.
+Shared nested subtrees or individual objects block unlink, while
+independently mounted objects remain supported when physically
+distinct. Mount IDs join the repeated physical-isolation signature.
+Actual native guest bind-mount QA verified refusal of root, nested
+directory and single-file aliases; preservation of Cache proof bytes;
+acceptance of unrelated mounted trees; and unchanged nine-site
+HTTP/Nginx health. See
+[nested-bind native evidence](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-nested-peer-bind-r2-qa.json).
+This exact R2 ZIP was executed directly in a fresh native guest Python
+process but was **not installed into the running aaPanel plugin**;
+current-HEAD Browser Clear/Restore is not claimed. Exact completed CI,
+independent delta re-review and Owner integration approval remain gates.
+
 This does **not** establish all-worker HTTPS, logged-in WooCommerce
 cross-customer privacy, Nginx Helper URL invalidation or a safe Purge All.
 Issues #2 and #21 remain open; PR #56 still requires independent
