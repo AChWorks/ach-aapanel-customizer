@@ -2195,6 +2195,20 @@
     }
     return message;
   }
+  function nativeVhostExtensionHint(failure, id) {
+    if (!failure || failure.status !== false ||
+        failure.stage !== 'cache_activation_preview' ||
+        failure.reason_code !== 'native_extension_include_missing' ||
+        id !== hostsSiteId()) return '';
+    var site = hostsPageSites.get(id);
+    if (!site || typeof site.name !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(site.name)) return '';
+    return '\nIn aaPanel > Website > ' + site.name +
+      ' > Config (Nginx), insert this server-level line immediately BEFORE #PHP-INFO-START:\n' +
+      'include /www/server/panel/vhost/nginx/extension/' + site.name + '/*.conf;' +
+      '\nSave in aaPanel and confirm Nginx syntax, then run a fresh Cache readiness check.' +
+      '\nThis manual VHost edit is not made by Customizer and does not authorize Cache Apply.';
+  }
   function validCacheActivationReady(response, id) {
     var site = hostsPageSites.get(id), hash = /^[0-9a-f]{64}$/;
     return !!(response && site && response.status === true &&
@@ -2230,9 +2244,11 @@
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
       if (id !== hostsSiteId() || !validCacheActivationReady(r,id)) {
+        var failureText = cacheBackendFailure(failure, 'cache_activation_preview');
         cacheActivationNotice('Cache Apply is not ready: ' +
-          (cacheBackendFailure(failure, 'cache_activation_preview') ||
-            'The site, source or response could not be verified. Recheck native setup.'));
+          (failureText ||
+            'The site, source or response could not be verified. Recheck native setup.') +
+          (failureText ? nativeVhostExtensionHint(failure, id) : ''));
         cacheActivationLock();
         return;
       }

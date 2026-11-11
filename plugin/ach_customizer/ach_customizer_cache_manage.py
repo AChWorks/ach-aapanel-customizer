@@ -43,10 +43,12 @@ JOURNAL_PREFIX = 'ach_customizer.cache.'
 
 
 class CacheManageError(StatusPageError):
-    def __init__(self, stage, message, *, recovery_id=None):
+    def __init__(self, stage, message, *, recovery_id=None, reason_code=None):
         super().__init__(message)
         self.stage = stage
         self.recovery_id = recovery_id if isinstance(recovery_id, str) and TOKEN.fullmatch(recovery_id) else None
+        self.reason_code = (reason_code if reason_code == 'native_extension_include_missing'
+                            else None)
 
 
 def _hash(data):
@@ -209,6 +211,22 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
                 '(observed PHP %s.%s); reconcile PHP in aaPanel and Recheck '
                 'before Restore' %
                 (php[0], php[1], observed[0], observed[1]))
+    # Stock aaPanel 8.0.7 nginxAdd() creates new VHosts without the
+    # per-site extension glob. Diagnose only that exact missing-include
+    # condition, not a commented, competing, edited or mixed include. This
+    # is operator guidance: never bootstrap a vendor-generated VHost here.
+    if (active.count(ext) == 0 and ext not in vhost.decode()
+            and len(php_includes) == 1 and php_includes[0] == php_line
+            and not re.search(r'\binclude\s+[^;\n]*/extension/[^;\n]*;', active)
+            and not re.search(r'\bfastcgi_cache(?:_purge)?\b', active)
+            and not re.search(r'\blocation\s+~', active[:active.index(php_line)])):
+        raise CacheManageError(
+            'compatibility',
+            'Native aaPanel site VHost is missing the per-site extension include. '
+            'Use the selected website Config editor in aaPanel to add that server-level '
+            'include before the PHP handler, Save, then rerun Cache readiness. '
+            'No Cache or VHost change was made.',
+            reason_code='native_extension_include_missing')
     if (active.count(ext) != 1 or len(php_includes) != 1
             or php_includes[0] != php_line
             or active.index(ext) > active.index(php_line)

@@ -1840,6 +1840,36 @@ test('Native Cache preflight and Recheck show controlled failure stage and ID in
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
 });
 
+test('Fresh aaPanel site extension diagnosis gives exact native Config step but no Apply', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-preview').respond({
+    status:false,stage:'cache_activation_preview',
+    msg:'Native aaPanel site VHost is missing the per-site extension include.',
+    reason_code:'native_extension_include_missing',operation_id:'a'.repeat(32)});
+  assert.match(ui.state().cacheActivationResult,
+    /include \/www\/server\/panel\/vhost\/nginx\/extension\/site\.test\/\*\.conf;/);
+  assert.match(ui.state().cacheActivationResult, /Website > site\.test > Config/);
+  assert.match(ui.state().cacheActivationResult, /BEFORE #PHP-INFO-START/);
+  assert.match(ui.state().cacheActivationResult, /fresh Cache readiness check/);
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+
+  ui.statusClick('#ach-cache-activation-preview').respond({
+    status:false,stage:'cache_activation_preview',
+    msg:'Conflicting site include',reason_code:'unknown',
+    operation_id:'b'.repeat(32)});
+  assert.doesNotMatch(ui.state().cacheActivationResult,/include \/www\/server\/panel\/vhost/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+
+  const pending=ui.statusClick('#ach-cache-activation-preview');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond({status:false,stage:'cache_activation_preview',
+    msg:'Old site missing include',reason_code:'native_extension_include_missing'});
+  assert.doesNotMatch(ui.state().cacheActivationResult,/extension\/site\.test/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+});
+
 test('Native Cache failed Apply and Restore retain recovery clues without retry permission', () => {
   const ui=loadUi(); selectHostsSite(ui);
   ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady());

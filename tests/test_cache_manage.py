@@ -585,6 +585,54 @@ class CacheManageTests(unittest.TestCase):
         self.assertEqual(cache.manage_cache('recheck', self.site,
                                             **self.kwargs())['state'], 'Restored')
 
+    def test_native_new_site_missing_extension_include_is_guided_without_write(self):
+        vhost = self.vhost / 'qa.test.conf'
+        initial = vhost.read_text()
+        missing = initial.replace(' include ' + str(self.ext) + '/*.conf;\n', '')
+        self.assertNotEqual(missing, initial)
+        try:
+            vhost.write_text(missing)
+            before = vhost.read_bytes()
+            with self.assertRaises(cache.CacheManageError) as observed:
+                cache._site_sources(self.site, '85',
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+            self.assertEqual(observed.exception.stage, 'compatibility')
+            self.assertEqual(observed.exception.reason_code,
+                             'native_extension_include_missing')
+            self.assertIn('Save, then rerun Cache readiness', str(observed.exception))
+            self.assertEqual(vhost.read_bytes(), before)
+            self.assertFalse(list(self.state.iterdir()))
+            self.assertFalse(self.commands)
+            # The operator can use the native aaPanel VHost editor. A fresh
+            # inspection after that independent action is still mandatory.
+            vhost.write_text(initial)
+            self.assertIn('vhost_sha', cache._site_sources(
+                self.site, '85', vhost_root=str(self.vhost),
+                nginx_root=str(self.nginx)))
+        finally:
+            vhost.write_text(initial)
+
+    def test_edited_or_ambiguous_extension_source_does_not_offer_stock_hint(self):
+        vhost = self.vhost / 'qa.test.conf'
+        initial = vhost.read_text()
+        extension = ' include ' + str(self.ext) + '/*.conf;'
+        for replacement in (
+            '#'+extension,
+            ' include /other/extension/other.test/*.conf;',
+            extension + '\n' + extension,
+            ' include enable-php-81.conf;',
+            ' fastcgi_cache WORDPRESS;'
+        ):
+            with self.subTest(replacement=replacement):
+                try:
+                    vhost.write_text(initial.replace(extension, replacement))
+                    with self.assertRaises(cache.CacheManageError) as observed:
+                        cache._site_sources(self.site, '85',
+                            vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+                    self.assertIsNone(observed.exception.reason_code)
+                finally:
+                    vhost.write_text(initial)
+
     def test_multiple_or_unrecognized_native_php_includes_fail_closed(self):
         vhost = self.vhost / 'qa.test.conf'
         original = vhost.read_text()
