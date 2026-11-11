@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Status: 0.1.35 UNRELEASED development (Issues #2, #17 and #21).** The latest merged source is `main@7227c32d70ab61384d701dfe9040a151b3d17269` (`0.1.34`), independently approved in [PR #54](https://github.com/AChWorks/ach-aapanel-customizer/pull/54). Its exact ZIP was installed, byte-verified and exercised in [authenticated native aaPanel 8.0.7 Browser QA](https://github.com/AChWorks/ach-aapanel-customizer/pull/54#issuecomment-6793193551). Separately, [real Nginx Helper 2.4.1 tests](https://github.com/AChWorks/ach-aapanel-customizer/issues/2#issuecomment-6792199811) found incompatible `get_request` (HTTP404) and legacy-key `unlink_files` (cannot target generation-suffixed objects), **not** successful Cache purge. The new **0.1.35 development candidate** explains aaPanel's fresh-site missing Extension include, with an explicit native-editor remedy and **no automatic VHost or Cache mutation**; its own candidate validation/review remains separate. Logged-in WooCommerce cross-customer isolation, safe physical site-scoped Purge All, full vendor VHost regeneration, automatic invalidation, Release and Production remain unverified. New integration requires exact candidate CI, independent review and separate Owner approval.
+**Status: 0.1.35 UNRELEASED development (Issues #2, #17 and #21).** The latest integrated source is `main@78a2df0b3a69cbf340d5008af2ab1d4fdc0cedb3` (`0.1.35`), independently reviewed and merged as [PR #55](https://github.com/AChWorks/ach-aapanel-customizer/pull/55). Its exact ZIP passed native aaPanel 8.0.7 package verification and preserved the original nine QA sites; the follow-up new-site Extension include diagnosis is read-only and does not auto-edit VHosts. [Real Nginx Helper 2.4.1 tests](https://github.com/AChWorks/ach-aapanel-customizer/issues/2#issuecomment-6792199811) still show incompatible `get_request` (HTTP 404) and legacy-key `unlink_files` (generation-aware invalidation unverified). A separate **unmerged development package** adds an explicitly approved, single-site physical cache-file clear with fresh Applied/ownership/peer checks; its precise QA and limitations are described below. Automatic invalidation, Nginx Helper Purge All, logged-in WooCommerce cross-customer isolation, full vendor VHost regeneration, all-worker/HTTPS acceptance, Release and Production remain unverified. New integration requires candidate CI, independent read-only review and separate Owner Merge approval.
 
 **0.1.22 guarded native stopped-site HTTP503 candidate (unreleased):** On aaPanel 8.0.7 Nginx only, select a native running website, the `stopped` EN/FA template, then explicitly Recheck and approve a site-scoped Nginx Apply. A plugin-owned inline server rewrite survives aaPanel's native SiteStop/Start include-commenting and root substitutions; it serves **actual HTTP 503 with HTML MIME** only while the site is stopped, without editing aaPanel core or the shared `/www/server/stop/index.html`. The saved root-owned original VHost and recovery journal stay outside plugin source. An explicitly approved Restore removes only the validated managed block and reloads shared Nginx; unknown or edited ownership fails to recovery review rather than overwriting an operator's changes. The rule checks the raw request Host (including verified native aliases) together with the native stopped root, so an unknown or absent Host does not accidentally inherit a selected default VHost's 503. After Nginx reload, the selected VHost's current bytes and Nginx -T source are rechecked before journal success; uncertain results retain recovery, and the UI separates prepared, observed HTTP503 and restored-route evidence. This is neither automatic enforcement nor a claim of generic 50x/HTTPS unknown-host coverage. The earlier R1 ZIP passed isolated native HTTP/HTTPS, Stop/Start and Restore testing; the final R2 proof-contract correction passed source tests and independent review, but its exact ZIP was not replayed in native aaPanel. The change was merged in PR #38; Release/Production and real authenticated Browser Phase B remain separate gates.
 
@@ -23,6 +23,116 @@ This candidate is a development-only evidence step toward Issue #2, **not comple
 The **PHP-FPM** tab provides **Recheck saved policy (read-only)**, **Load saved desired values** and **Save desired policy (Monitor)** for an installed PHP 8.1+ native shared `[www]` service. The operator selects a PHP version, enters the five desired `pm.*` settings, runs **Preview drift (read-only)**, explicitly acknowledges the shared-service impact, then saves against a fresh fingerprint of the actual native pool and main configuration, current Monitor revision and current policy revision. Saved policies are **version-specific plugin-owned intent**, kept in `/www/server/panel/data/ach_customizer.fpm-policy.json` outside the replaceable plugin directory. Recheck reads the **saved policy on the server**, never browser-supplied desired values; it shows current file/default Match/Drift/Needs Review and native impacted-site file mappings independently of the operator's draft form. To recover drift, Load fills the form, then the operator must **Preview → Prepare → approve → Apply** through the independently guarded PHP81/85 workflow, followed by site/service checks; other discovered versions remain Monitor only. Loading never approves a write. Backend rejects stale, conflicting, unsupported and nonprimary/temporary-admin requests; Activity contains a per-request correlation ID.
 
 The preview compares desired settings to the **file/default state**. This does not prove the running PHP master has adopted the file values, attribute a site-creation change to aaPanel, poll automatically, schedule a reconciliation job, or authorize host writes. It does **not** change any PHP file, restart/reload PHP-FPM, alter Manual Apply/Restore gates, or implicitly enable auto-enforcement. The existing guarded PHP 8.1/8.5 shared-pool Apply remains an independent explicit workflow with its original approval and recovery contract. A direct invocation of the native WordPress optimizer's actual shared-PHP reset path, followed by saved-policy Recheck and guarded Manual Apply/Restore, has now been tested on the exact R2 installed ZIP with three healthy named QA websites. A **full WordPress provisioning request**, timed/automatic drift observation, loaded PHP master/worker configuration and broad affected-traffic proof remain separate acceptance under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2). The following 0.1.28 details describe a historical candidate; PRs #45 and #46 have since merged into `main`. The exact current 51-member 0.1.28 ZIP (SHA256 `9fd52355730818b9c64105ed066dab7836db0287d16a440595095b647177300d`) passed bounded native PHP 8.1/8.5 **source/backend** QA for versioned saving, drift, site-file mapping, revision rejection and unchanged host files using isolated temporary state; this is **not** an authenticated App Store install, current-package UI acceptance or current-package guarded Apply/Restore replay. The historical exact 0.1.25 **R2 ZIP** passed native primary-admin aaPanel installed-ZIP testing, including the actual aaPanel WordPress optimizer reset, File Drift detection, guarded Manual Apply and byte-identical Restore. PR #46 was independently approved and merged into main at `209064a598a5063dff17e93d28fdc363af4f669f`; the separate Release/Production gate and exact-current ZIP native install/Browser acceptance remain open; see [PR #46 exact candidate and QA evidence](https://github.com/AChWorks/ach-aapanel-customizer/pull/46) and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6744217319).
+
+## Unmerged development: manual selected-site Cache file clear (Issues #2 / #21)
+
+A newly proposed **Clear selected-site Cache files** control is separate from
+Nginx Helper's shared-directory **Purge All**, which remains **OFF**. It can
+only be enabled after a fresh, site-bound `Applied` Cache Recheck and a
+separate confirmation. The existing primary-admin/CSRF native POST and
+stable site-ID/root/domain snapshot are revalidated. The backend takes the
+existing Cache mutation lock, requires the exact saved recovery ID and
+schema-2 physical cache identity, repeats native source/worker verification,
+then checks that no other registered website uses the selected directory or
+zone. It inspects the selected site-owned physical tree, refusing unexpected
+filenames, symlinks, mount aliases, hardlinks, foreign ownership, changed
+inodes and non-Nginx `levels=1:2` objects **before** unlinking any verified
+files. It leaves the physical directory and recovery journals intact. A
+partial/uncertain clear returns a recovery ID and requires another Recheck;
+there is no blind retry, Nginx reload, vendor-file edit, cache bypass, or
+shared `WORDPRESS` directory mutation.
+
+A first isolated aaPanel QA Nginx test used two scratch loopback listeners and
+independent zones/directories. Both produced MISS then HIT, and removing only
+the first site's object produced A=MISS and B=HIT. This scratch experiment
+is separately documented in
+[the original two-site record](docs/evidence/aaPanel-8.0.7-2026-11-11-two-site-cache-file-clear-qa.json).
+
+The exact PR #56 **54-member** ZIP (SHA-256
+`e1cb9d151e8ebfa54d334a9721f4c7ec8c687f525e11b8ab23264d68f9d20600`)
+was subsequently imported through the actual aaPanel 8.0.7
+`panelPlugin.update_zip/input_zip` path, with 54/54 installed-byte matches,
+a controlled BT-Panel reload, and an authenticated primary-admin Browser test.
+Native sites #6 (PHP 8.1) and #7 (PHP 8.5) each passed consented
+Apply / fresh Recheck Applied and real HTTP 200 MISS -> HIT -> HIT.
+A deliberately unexpected site #6 cache filename caused the new Clear to
+refuse without deleting the valid generation object. On a separate fresh
+Applied Recheck, an approved site #6 Clear removed three cache files
+(then zero present); site #6 returned MISS while site #7 stayed HIT and
+its generation-object SHA-256 remained byte-identical. Both sites then passed
+separately approved Restore and Recheck Restored. All nine original native
+websites remained HTTP 200; original source VHost/main/shared Nginx config
+hashes were retained and `nginx -t` passed. Recovery ZIPs/snapshots were
+preserved. See
+[installed-package native evidence](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-native-cache-clear-qa.json).
+
+**PR #56 physical-peer delta after independent review:** The original
+review found that different canonical peer-cache paths could still be
+the same physical directory through an external bind mount. The amended
+Clear now obtains all registered peer zone-to-directory mappings from the
+existing twice-verified source audit and checks actual device/inode
+identities through component-wise no-follow directory descriptors. Direct
+aliases, parent/descendant overlaps, symlinks and unresolved peer roots
+cannot authorize deletion; changed peer topology is rechecked before
+the first unlink and afterward. A source-only `purge_scope=Unknown` is not
+an automatic rejection when physically distinct directories can be
+verified. The correction passed local focused/full source regressions
+and a **real external bind-mount** identity test on the isolated aaPanel
+8.0.7 guest; an ordinary native site with two other cache-using peers
+also passed this physical preflight despite source-only
+`purge_scope=Unknown`. See the
+[review-remediation QA record](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-physical-peer-delta-qa.json).
+**Validation boundary:** The amended ZIP was imported as a Python
+module for the focused native filesystem test, but was **not installed
+into the running aaPanel plugin** due to execution-tool restrictions.
+The earlier native Browser Clear acceptance belongs to the pre-delta
+candidate; no new installed-R1 Browser replay is claimed. Independent
+delta re-review and Owner authorization remain required.
+
+**PR #56 second physical-isolation delta (nested bind mounts):** A second
+independent review found that distinct Cache roots could still share
+the selected site's `levels=1:2` object subtree through an external
+bind mount, such as `site-6/8` exposed through `fastcgi_cache/8`.
+The guarded Clear now inspects Linux `mountinfo` targets within, at,
+or exclusively above registered peer Cache roots and cross-checks their
+anchored inode identities against the selected root ancestor chain and
+its streamed actual Nginx Cache subdirectories **and files**.
+Shared nested subtrees or individual objects block unlink, while
+independently mounted objects remain supported when physically
+distinct. Mount IDs join the repeated physical-isolation signature.
+Actual native guest bind-mount QA verified refusal of root, nested
+directory and single-file aliases; preservation of Cache proof bytes;
+acceptance of unrelated mounted trees; and unchanged nine-site
+HTTP/Nginx health. See
+[nested-bind native evidence](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-nested-peer-bind-r2-qa.json).
+This exact R2 ZIP was executed directly in a fresh native guest Python
+process but was **not installed into the running aaPanel plugin**;
+current-HEAD Browser Clear/Restore is not claimed. Exact completed CI,
+independent delta re-review and Owner integration approval remain gates.
+
+**PR #56 R3 physical-isolation delta (peer Cache symlinks):** A
+subsequent independent review identified ordinary symlinks below
+registered peer Cache roots as another potential physical alias.
+The guarded Clear now reads relevant peer `levels=1:2` entries
+through pinned directory descriptors, checks symlink target
+device/inode against selected-site Cache ancestor, subtree and
+file identities, and refuses dangerous or unresolved aliases
+before unlinking. An independent peer symlink remains eligible.
+The symlink identity signature joins existing repeated preflight
+and recovery uncertainty checks. The exact corrected ZIP passed
+native first-/second-level, Cache-file, multi-hop, independent
+and dangling-symlink experiments without changing the proof
+file hash; see [R3 peer symlink evidence](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-peer-symlink-r3-qa.json).
+The ZIP was executed in fresh native QA guest Python but was
+**not installed into running aaPanel**; this is not a new
+authenticated Browser Clear/Restore acceptance. Completed
+current-HEAD CI, independent delta review and Owner Merge approval
+remain required.
+
+This does **not** establish all-worker HTTPS, logged-in WooCommerce
+cross-customer privacy, Nginx Helper URL invalidation or a safe Purge All.
+Issues #2 and #21 remain open; PR #56 still requires independent
+review and separate Owner Merge authorization.
 
 ## Unreleased 0.1.35: fresh aaPanel site Extension compatibility diagnosis (Issues #2 / #21)
 

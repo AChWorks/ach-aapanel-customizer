@@ -11,6 +11,153 @@ The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the
 4. Public aaPanel source [panelPlugin.py](https://github.com/aaPanel/aaPanel/blob/38bf35903b37b50d9654f47c4ad904ca3369715f/class/panelPlugin.py) recognizes `plugin/<name>/info.json` and constructs local-plugin inventory. The inspected implementation invokes uninstall scripts and removes plugin code. This is source evidence for that Git revision, **not** a cross-version contract.
 5. The same official PDF documents read-only `public.M('sites')` selectors for site IDs, names, paths and status. Actual panel schemas and revision-specific API behavior still require tests.
 
+## Manual site-owned Cache file clear: physical ownership and limits (unmerged candidate)
+
+This is a **new separately approved site-maintenance operation**, not the
+older Nginx Helper `Purge All`, a URL-specific invalidator or a promise that
+WooCommerce cache is safe for private users. The existing native primary
+administrator uses the site's stable validated selection, runs a fresh
+`cache_action=recheck`, receives `state=Applied` and its matching recovery
+ID, then separately approves `cache_action=clear_files`. The backend
+independently revalidates the persisted schema-2 identity, native source and
+origin-local PHP marker, complete registered-site Cache zone/directory
+collision audit, physical owner/device/inode and Nginx `levels=1:2` layout.
+It reuses the existing serialized cache operation lock; no caller-supplied
+filesystem path, zone, domain or arbitrary purge scope is accepted.
+
+Before deletion, a full file-only validation rejects any untrusted entry;
+only regular `0600 www:www` 32-hex cache objects in verified `0700
+www:www` hex-prefix directories may be removed, using fd-relative,
+nofollow operations. The site's cache directory itself remains intact,
+as do archived generations and the persistent recovery journal. A
+changed or unexpected source, symlink/hardlink/alias, missing PHP route or
+other registered site referencing the physical tree **does not qualify**.
+File count is diagnostic only; live Nginx may repopulate the directory
+immediately, and worker in-memory behavior requires separate verification.
+Mid-operation failure is **uncertain**, not proof of a complete purge: the
+operator gets the saved recovery ID and must Recheck before retrying. There
+is no Nginx reload and no shared-zone or Nginx Helper mutation.
+
+On 2026-11-11 the isolated `ach-aapanel-qa/aac-native-qa` guest's
+Nginx 1.28.3/PHP85 ran two temporary loopback VHosts and independent Cache
+zones/filesystems. Both returned `MISS` then `HIT`, followed by an
+A-only file removal and subsequent `A=MISS`, `B=HIT`.
+The temporary Nginx process, listeners and test-owned files were closed
+and cleaned. This is **direct host-runtime evidence**, but not a native
+installed-plugin Clear action, private-session test, loaded worker proof
+across native sites or accepted Nginx Helper integration. See
+[exact observation record](evidence/aaPanel-8.0.7-2026-11-11-two-site-cache-file-clear-qa.json)
+and the open Issues #2/#21.
+
+**Separate real installed-package native acceptance (PR #56, 2026-11-11):**
+The exact 54-member `0.1.35 UNRELEASED` ZIP (SHA-256
+`e1cb9d151e8ebfa54d334a9721f4c7ec8c687f525e11b8ab23264d68f9d20600`)
+was installed through actual aaPanel 8.0.7
+`panelPlugin.update_zip/input_zip`; 54/54 installed files matched.
+The QA-only BT-Panel reload made the new Python handler resident.
+An authenticated primary-admin Browser then tested selected site #6/PHP81
+and site #7/PHP85: explicit Apply / fresh Recheck Applied; independent
+HTTP200 MISS -> HIT -> HIT and generation-specific disk objects.
+A foreign top-level site #6 cache entry caused a genuine, non-deleting
+Clear refusal and diagnostic operation ID. A subsequent fresh Recheck
+and consented Clear removed exactly three site #6 objects, leaving zero
+before a new request; site #6 returned MISS and site #7 retained HIT
+with its cache generation file hash unchanged. Both sites completed native
+approved Restore / Recheck Restored. All nine original sites returned
+HTTP200, Nginx syntax passed, original VHost/main/shared config hashes
+remained unchanged, and the protected recovery ZIPs/snapshots were retained.
+[Native exact-ZIP acceptance record](evidence/aaPanel-8.0.7-2026-11-11-pr56-native-cache-clear-qa.json)
+includes the precise site/recovery identities and limitations.
+This replaces the prior *unverified installed Clear action* gap for
+this one candidate and environment, but not all-worker/HTTPS,
+WooCommerce logged-in A/B, vendor full regeneration or Nginx Helper
+Purge All/invalidation acceptance. Keep Issues #2/#21 open; no Merge,
+Release or Production permission is inferred.
+
+**Physical alias review remediation (PR #56):** The earlier two-site
+installed-package Clear proof did not exercise an external bind mount.
+The reviewed candidate's public source audit correctly labeled other
+canonical peer directory paths as `purge_scope=Unknown`, but Clear only
+checked textual peer equality. The amended implementation obtains the
+complete twice-verified registered cache-using site inventory as an
+internal-only path list; any non-resolvable zone path denies the Clear.
+An anchored root-to-leaf `O_NOFOLLOW` open compares actual directory
+`st_dev/st_ino` chains and rejects physical aliases, even when the peer
+path lies outside the managed Cache root; nested/ancestor overlaps are
+also refused. The physical identity set is checked again before the
+first unlink and after removal. An observed post-unlink drift is
+reported as uncertain, not successful, with the original recovery ID.
+Ordinary verified separate Cache directories remain supported even
+where source-only `purge_scope` remains `Unknown`.
+
+Focused native QA tested a **real external Linux bind mount** inside
+the isolated aaPanel 8.0.7 guest: a separately named peer resolving
+to the same inode was denied; a genuinely distinct directory was
+accepted; contents were unchanged; the temporary mount was unmounted
+and test fixtures removed. The twice-read native site inventory also
+identified two other registered sites using the existing WORDPRESS
+physical directory; positive identity comparison confirmed they
+differ from the selected managed directory. Local tests cover peer
+symlink, missing/unreadable paths, inode drift and pre-unlink denial.
+[Exact delta source/native file-identity observations](evidence/aaPanel-8.0.7-2026-11-11-pr56-physical-peer-delta-qa.json).
+The corrected ZIP was **not re-imported into the running aaPanel
+plugin** and no new authenticated Browser Clear/Restore acceptance is
+claimed: the native installer and protected Browser-login tool calls
+were blocked by execution safety checks. The pre-delta native Browser
+Clear evidence remains identified with its original exact ZIP.
+Independent delta re-review must evaluate this remaining validation
+boundary; no Merge/Release/Production action is authorized.
+
+**Second reviewer finding: nested bind aliases (PR #56 R2).** The prior
+root-inode-chain guard could miss a mount of `site-6/8` into a peer
+`fastcgi_cache/8` whose root inode remained independent. The bounded
+physical Clear now correlates Linux `mountinfo` entries inside, at and
+exclusively above registered peer Cache roots with the selected site's
+ancestor chain and streamed physical inodes of the supported Nginx
+`levels=1:2` Cache tree, including regular cache objects. Shared nested
+directory and individual-file mount identities are refused before
+unlinking, while unrelated mounted filesystems remain eligible.
+Mount IDs and inode signatures are checked again before unlink and
+afterward. Unexpected/unknown mount identity is non-authorizing.
+External concurrent mount changes cannot be made atomic with unlink.
+
+[Focused actual Linux bind-mount QA](evidence/aaPanel-8.0.7-2026-11-11-pr56-nested-peer-bind-r2-qa.json)
+in the isolated aaPanel 8.0.7 guest denied a selected-site root
+alias, a first-level subtree bind into an independent peer root, and
+a bound individual cache file. Proof-file bytes were preserved;
+independent roots and a separate unrelated bind mount stayed accepted.
+Native site #6's two registered peers #9/#10 remained physically
+distinct despite source-only `purge_scope=Unknown`. Nine websites
+returned HTTP200 and `nginx -t` passed. The exact R2 module was
+imported from its ZIP in fresh guest Python processes, but the corrected
+ZIP was **not installed into running aaPanel** and the protected Browser
+Clear flow was not replayed. Final exact-HEAD CI and independent delta
+re-review remain prerequisites, as does separate Owner Merge approval.
+
+**Third reviewer finding: peer symlink-only aliases (PR #56 R3).**
+A symlink nested in a registered native peer Cache directory does
+not appear in Linux mountinfo. The guarded Clear now scans the
+peer's supported `levels=1:2` tree with read-only, pinned
+directory descriptors and compares resolved symlink device/inode
+identities against selected Cache ancestors, directories and
+regular files. Dangling/unverifiable or physically shared
+objects deny Clear before unlink. Independently verified peer
+symlinks remain eligible; no arbitrary low file-count limit or
+new persistent journal is introduced. Link identity and mtime
+are included in repeated pre-/post-unlink checks so observed
+drift remains uncertain with the original recovery identity.
+
+[Exact R3 peer-symlink QA](evidence/aaPanel-8.0.7-2026-11-11-pr56-peer-symlink-r3-qa.json)
+used the SHA256-verified module directly from its ZIP in the
+isolated aaPanel 8.0.7 guest: first-level, second-level,
+single-file and multi-hop aliases were refused; an independent
+link was accepted; proof bytes remained unchanged. Native site
+#6 and peer Cache consumers #9/#10 passed the physical preflight.
+Nine sites returned HTTP200 and `nginx -t` passed. This does
+**not** establish installed plugin activation or an R3
+authenticated Browser Clear/Restore replay; current CI and
+independent delta review remain gates before Owner-approved Merge.
+
 ## New-site native Nginx Extension compatibility (0.1.35 development; Issues #2 / #21)
 
 The **authenticated native aaPanel 8.0.7 Website → Add site** operation produced a fresh PHP8.5 Nginx VHost with the expected `include enable-php-85.conf;` but **without** its per-site `include /www/server/panel/vhost/nginx/extension/<site>/*.conf;`. The installed vendor's `class_v2/panel_site_v2.py::nginxAdd()` and older `class/panelSite.py::nginxAdd()` omit this extension, while `nginx_update_config()` reconstruction templates include it. Vendor regeneration can replace much more of the operator VHost, so the Customizer **must not invoke regeneration to cure one missing include** and must not edit aaPanel core. [Exact first real test and cleanup](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6792970143).

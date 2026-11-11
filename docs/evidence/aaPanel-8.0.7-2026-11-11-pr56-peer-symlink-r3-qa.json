@@ -1,0 +1,117 @@
+{
+  "change": {
+    "behavior": "Stream native registered peer levels=1:2 Cache entries with pinned root-to-leaf O_NOFOLLOW descriptors; read-only resolve symlink targets, compare dev/inode against the selected site physical Cache ancestor/directory/file object identities",
+    "file": "plugin/ach_customizer/ach_customizer_cache_manage.py",
+    "performance": "Stream peer directory entries and avoid stat on ordinary non-linked Cache leaf objects; do not add arbitrary directory-entry limits",
+    "repeatability": "Symlink inode, link modification timestamp and physical target identities join existing pre/post unlink topology signature; any observed mid-operation drift requires recovery reconciliation",
+    "safety": "Refuse aliased Cache objects before first unlink; unresolved or changing link targets are non-authorizing; unrelated physically independent links remain eligible",
+    "scope": "guarded clear_files peer physical isolation only; no public API, UI, Apply/Restore, recovery journal or general Purge All change"
+  },
+  "limits": [
+    "Current R3 ZIP NOT installed into the running aaPanel plugin; authenticated installed-package Browser Clear/Restore NOT rerun",
+    "Prior exact installed Browser acceptance belongs to earlier candidate and does not prove installed R3 code",
+    "External concurrent mount and symlink changes cannot be made atomic with unlink; observed drift returns uncertainty retaining recovery ID",
+    "Nginx Helper Purge All remains disabled, WooCommerce logged-in privacy and HTTPS/all-worker safety are separate acceptance",
+    "New exact-HEAD CI, independent delta review and separate Owner integration permission must be verified before merge"
+  ],
+  "pr": 56,
+  "recorded_utc": "2026-11-11T22:03:29Z",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "review": {
+    "completion": "COMPLETE",
+    "finding": "BLOCKER-02: symlink aliases within registered native peer Cache subtrees",
+    "integration_target": "main@78a2df0b3a69cbf340d5008af2ab1d4fdc0cedb3",
+    "previous_ci": {
+      "conclusion": "success",
+      "javascript_pass": 299,
+      "python_pass": 647,
+      "run": 43102061338
+    },
+    "previous_head": "b1b43881f11ddc50691e0772ec708d08cd68c589",
+    "previous_tree": "6a2e18961ef4ca1a86ae6cf641db0ed4fec99ae3",
+    "verdict": "CHANGES_REQUIRED"
+  },
+  "schema": 1,
+  "validation": {
+    "git_diff_check": "PASS",
+    "javascript_pass": 299,
+    "native_guest": {
+      "aaPanel": "8.0.7",
+      "cases": [
+        {
+          "case": "Selected and peer roots physically separate",
+          "result": "ACCEPT"
+        },
+        {
+          "case": "Peer /8 symlink to selected /8",
+          "result": "DENY"
+        },
+        {
+          "case": "Peer /8/aa symlink to selected /8/aa",
+          "result": "DENY"
+        },
+        {
+          "case": "Peer symlink at Cache file level",
+          "result": "DENY"
+        },
+        {
+          "case": "Peer multi-hop symlink to selected second-level folder",
+          "result": "DENY"
+        },
+        {
+          "case": "Peer symlink to independently stored Cache subtree",
+          "result": "ACCEPT"
+        },
+        {
+          "case": "Dangling peer symlink",
+          "result": "DENY as physical separation unverified"
+        }
+      ],
+      "incus_project": "ach-aapanel-qa",
+      "instance": "aac-native-qa",
+      "native_site": {
+        "distinct_cache_peers": [
+          9,
+          10
+        ],
+        "id": 6,
+        "name": "qa-fixture-php81.test",
+        "nested_mounts": 0,
+        "physical_check": "ACCEPT",
+        "source_only_purge_scope": "Unknown",
+        "source_state": "Source Observed",
+        "symlinks": 0,
+        "unresolved_sites": 0
+      },
+      "native_sites": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "native_sites_http_200": 9,
+      "nginx": "1.28.3",
+      "nginx_syntax": "PASS",
+      "rollback_snapshots_preserved": true,
+      "selected_proof_sha256_unchanged": "792b96346071bfb185e6d3e64f07df4e9dc8931c390341151dd0bcb5c9aeb7af",
+      "source": "exact SHA256-verified ZIP module imported in a new guest panel-Python process; NOT installed into running aaPanel plugin",
+      "task_fixture_removed": true,
+      "uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040"
+    },
+    "python_compilation": "PASS",
+    "python_focused_pass": 91,
+    "python_full_pass": 655,
+    "shell_syntax": "PASS",
+    "zip": {
+      "guest_path": "/root/achqa/pr56-r3-peer-symlink.zip",
+      "sha256": "9111f7e273e9bab7dc0061b4a5d7aa9c01feb520678ef11a24770bb92317439b",
+      "two_builds_identical": true,
+      "version": "0.1.35 UNRELEASED"
+    }
+  }
+}

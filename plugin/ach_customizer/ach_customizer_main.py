@@ -725,7 +725,7 @@ class ach_customizer_main:
             # A body 'action' would override query action=a before this handler.
             action = self._argument(args, "cache_action")
             from ach_customizer_cache_manage import manage_cache
-            if action not in ("apply", "recheck", "restore"):
+            if action not in ("apply", "recheck", "restore", "clear_files"):
                 raise MonitorInputError("Unsupported Cache operation")
             public, before, current_site = self._selected_native_website(args)
             result = manage_cache(

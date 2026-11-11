@@ -471,8 +471,14 @@ def _analyze_selected(directives, zone_state, zone, globals_, peers, directory_p
 def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                                vhost_root="/www/server/panel/vhost/nginx",
                                nginx_root="/www/server/nginx/conf",
-                               rewrite_root="/www/server/panel/vhost/rewrite"):
-    """Read registered native site text twice, reporting bounded clues only."""
+                               rewrite_root="/www/server/panel/vhost/rewrite",
+                               include_physical_peers=False):
+    """Read registered native site text twice, reporting bounded clues only.
+
+    The optional peer-directory inventory is internal to guarded Cache Clear:
+    it exposes the native zone-to-path mapping for filesystem verification,
+    without making source-only purge_scope a destructive authorization.
+    """
     result = {
         "schema": 1, "state": "Needs Review", "site_id": site_id,
         "site_key": site_key, "read_only": True,
@@ -510,6 +516,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             peers = []
             directory_peers = []
             different_directory_peer = False
+            physical_peer_paths = []
             unresolved = 0
             selected_directory = (
                 globals_["paths"].get(zone, (None, None))[0]
@@ -531,6 +538,10 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                     peers.append({"id": ident, "site_key": key})
                 peer_directory = (globals_["paths"].get(peer_zone, (None, None))[0]
                                   if peer_zone is not None else None)
+                if peer_zone is not None:
+                    # A referenced but undeclared zone also needs resolution
+                    # before a filesystem-deleting operation can be approved.
+                    physical_peer_paths.append((ident, peer_directory))
                 if selected_directory is not None and peer_directory is not None:
                     if peer_directory == selected_directory:
                         directory_peers.append({"id": ident, "site_key": key})
@@ -541,7 +552,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                         different_directory_peer = True
             return (sites, globals_, selected_directives, version, zone_state,
                     zone, peers, directory_peers, different_directory_peer,
-                    unresolved, fingerprints)
+                    physical_peer_paths, unresolved, fingerprints)
 
         first = scan()
         if first != scan():
@@ -550,7 +561,8 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                 str(panel_public.get_panel_version()).strip() != "8.0.7"):
             raise CacheAuditError("Native web engine or panel version changed during audit")
         (sites, globals_, directives, php_version, zone_state, zone, peers,
-         directory_peers, different_directory_peer, unresolved, fingerprints) = first
+         directory_peers, different_directory_peer, physical_peer_paths,
+         unresolved, fingerprints) = first
         findings, ignored = _analyze_selected(
             directives, zone_state, zone, globals_, peers, directory_peers)
         observed_key = (directives["fastcgi_cache_key"][0]
@@ -562,6 +574,13 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         source_sha = hashlib.sha256(json.dumps(
             {"sites": sites, "source": fingerprints}, sort_keys=True,
             separators=(",", ":")).encode("utf-8")).hexdigest()
+        if include_physical_peers is True:
+            # Not part of the regular public source-audit response. All peer
+            # paths come from the same twice-verified native inventory.
+            result["physical_peer_cache_paths"] = [
+                {"id": ident, "directory": path}
+                for ident, path in physical_peer_paths
+            ]
         result.update(
             state="Partial" if unresolved else "Source Observed",
             zone_state=zone_state, cache_zone=zone, php_version=php_version,

@@ -1,0 +1,106 @@
+{
+  "branch": "feat/issue2-site-cache-clear-20261111",
+  "correction": {
+    "alias_detection": "Compare mount target device/inode to selected root ancestor chain and streaming Nginx levels=1:2 selected Cache directory and file inodes; reject physical overlap before unlink",
+    "concurrency": "Full physical peer/mount signatures compared before prescan, before first unlink and after removal; observed post-removal drift produces uncertainty with retained recovery ID",
+    "limitations": "An external concurrent mount topology change cannot be made atomic with a file unlink",
+    "mount_data": "Linux /proc/self/mountinfo peer-root/descendant/exclusive-ancestor mountpoints with mount IDs and no-follow anchored target dev/inode",
+    "ordinary_sites": "Independently verified directories and physically unrelated mounts still permitted despite source-only purge_scope=Unknown",
+    "scope": "Guarded clear_files physical peer isolation only; no Apply/Restore, endpoint/UI or recovery schema change",
+    "source": "plugin/ach_customizer/ach_customizer_cache_manage.py"
+  },
+  "pr": 56,
+  "recorded_utc_date": "2026-11-11",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "review": {
+    "finding": "Distinct native registered peer Cache roots may share nested Cache object subtrees through external bind mounts",
+    "prior_exact_CI": {
+      "conclusion": null,
+      "run_id": 43097509779,
+      "status": "queued"
+    },
+    "prior_head": "c544c8fbee1451243b5b56a1f89417c09f4db3f1",
+    "prior_tree": "9759cbc94584be87fd5af8983380399753dd96f3",
+    "target": "main@78a2df0b3a69cbf340d5008af2ab1d4fdc0cedb3",
+    "verdict": "INCOMPLETE / NO_VERDICT"
+  },
+  "schema": 1,
+  "unverified": [
+    "The corrected ZIP was not installed into the running aaPanel plugin and its Browser Clear/Restore path was not replayed",
+    "The previous installed Browser acceptance belongs to older source and is not direct proof of R2",
+    "Exact new HEAD CI and independent delta re-review must complete before Merge eligibility",
+    "WooCommerce private-session behavior, generation-aware Nginx Helper invalidation, Purge All and HTTPS/all-worker equivalence remain separate"
+  ],
+  "validation": {
+    "current_head_Browser_Clear_replay": false,
+    "diff_check": "PASS",
+    "focused_unit_tests": "Root and nested mount identity; ancestor, first-level and individual selected cache file overlap; unrelated mount acceptance; symlinked/unresolved paths; explicit pre-unlink refusal; previous tested guards remain",
+    "installed_in_native_panel": false,
+    "javascript_pass": 299,
+    "native_guest": {
+      "aapanel": "8.0.7",
+      "actual_bind_tests": [
+        {
+          "case": "Independent Cache roots",
+          "result": "ACCEPT"
+        },
+        {
+          "case": "Selected Cache root externally bound onto peer root",
+          "result": "DENIED / physically overlap"
+        },
+        {
+          "case": "Selected Cache site/8 externally bound onto peer /8",
+          "original_object_sha_unchanged": true,
+          "result": "DENIED / subtrees physically overlap"
+        },
+        {
+          "case": "Unrelated subtree bind-mounted into peer /8",
+          "result": "ACCEPT"
+        },
+        {
+          "both_paths_original_sha256": "c7d1453d9dd5318794295632b60d01b6ddf34b7b53d3c1e6dfe060388600224b",
+          "case": "Single selected site Cache object bind-mounted into peer /8/aa/<32-hex-name>",
+          "result": "DENIED / subtrees physically overlap"
+        }
+      ],
+      "cleanup": "Verified temporary bind mounts absent from /proc/self/mountinfo and task-only fixture directories removed",
+      "fixture_failure_note": "First combined run stopped when the test omitted creating a file-level bind destination. This was a QA fixture failure; a separate rerun with that destination file created passed.",
+      "guest_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+      "incus_project": "ach-aapanel-qa",
+      "instance": "aac-native-qa",
+      "live_panel_plugin": "Unmodified, previous candidate",
+      "module_executed_directly_from_zip": true,
+      "native_website_200_count": 9,
+      "native_website_ids": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "nginx": "1.28.3",
+      "nginx_syntax": "PASS",
+      "recovery_assets": "Retained",
+      "registered_site_6": {
+        "nested_mounts": 0,
+        "purge_scope": "Unknown",
+        "result": "ACCEPT",
+        "source_state": "Source Observed",
+        "unresolved_other_sites": 0,
+        "verified_independent_peer_ids": [
+          9,
+          10
+        ]
+      }
+    },
+    "python_pass": 647,
+    "zip_guest": "/root/achqa/pr56-nested-bind-r2.zip",
+    "zip_reproducible": true,
+    "zip_sha256": "c999b36f14454fc31bc25588372a5676e26fd03371fe636c5fb208bd5f4a16a0",
+    "zip_version": "0.1.35 UNRELEASED"
+  }
+}

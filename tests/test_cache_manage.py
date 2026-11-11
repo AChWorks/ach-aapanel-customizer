@@ -12,6 +12,257 @@ sys.path.insert(0,str(ROOT/'plugin'/'ach_customizer'))
 import ach_customizer_cache_manage as cache
 
 
+class CachePeerDirectoryIdentityTests(unittest.TestCase):
+    def setUp(self):
+        td=tempfile.TemporaryDirectory(prefix='ach-cache-peer-')
+        self.addCleanup(td.cleanup)
+        self.base=Path(td.name)
+        self.selected=self.base/'selected'
+        self.selected.mkdir()
+        self.distinct=self.base/'separate'
+        self.distinct.mkdir()
+        s=os.stat(self.selected)
+        self.identity=(s.st_dev,s.st_ino)
+
+    def check(self, peer_path):
+        return cache._verify_cache_peer_isolation(
+            str(self.selected),self.identity,
+            [{'id':8,'directory':str(peer_path)}])
+
+    def test_distinct_verified_peer_directory_is_supported(self):
+        report=self.check(self.distinct)
+        self.assertEqual(len(report[0]),1)
+        self.assertEqual(report[0][0][0],8)
+        self.assertEqual(report[0][0][1],str(self.distinct))
+        self.assertNotEqual(report[0][0][2][-1],self.identity)
+        self.assertEqual(report[1],())
+
+    def test_same_directory_canonical_path_is_rejected(self):
+        with self.assertRaisesRegex(cache.CacheManageError,'physically overlap'):
+            self.check(self.selected)
+
+    def test_external_bind_mount_identity_alias_is_rejected(self):
+        # A Linux bind mount reports the source directory's dev/inode at
+        # its otherwise different canonical destination. Model that exact
+        # kernel identity relation without requiring mount privileges.
+        actual=cache._cache_directory_identity_chain
+        def bound(path):
+            chain=actual(path)
+            return chain[:-1]+(self.identity,) if path==str(self.distinct) else chain
+        with patch.object(cache,'_cache_directory_identity_chain',
+                          side_effect=bound):
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                        'physically overlap'):
+                self.check(self.distinct)
+
+    def _selected_cache_object(self):
+        first = self.selected/'8'
+        second = first/'aa'
+        second.mkdir(parents=True,exist_ok=True)
+        leaf = second/('b'*29+'aa8')
+        leaf.write_bytes(b'selected-cache-object-unmodified')
+        return first, second, leaf
+
+    def test_nested_peer_bind_directory_is_rejected_without_changing_cache(self):
+        first, second, leaf = self._selected_cache_object()
+        from hashlib import sha256
+        before = sha256(leaf.read_bytes()).hexdigest()
+        fs=os.stat(first)
+        # Actual bind mount of selected/8 to peer/8 is exercised in
+        # isolated native QA; the local unit focuses on the same dev/inode.
+        nested=((str(self.distinct),str(self.distinct/'8'),'814',
+                (fs.st_dev,fs.st_ino)),)
+        with patch.object(cache,'_cache_peer_mounts',return_value=nested):
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                        'subtrees physically overlap'):
+                self.check(self.distinct)
+        self.assertEqual(sha256(leaf.read_bytes()).hexdigest(),before)
+
+    def test_nested_peer_bind_cache_file_is_rejected(self):
+        first, second, leaf = self._selected_cache_object()
+        fs=os.stat(leaf)
+        nested=((str(self.distinct),str(self.distinct/'8'/'aa'/leaf.name),'816',
+                (fs.st_dev,fs.st_ino)),)
+        with patch.object(cache,'_cache_peer_mounts',return_value=nested):
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                        'subtrees physically overlap'):
+                self.check(self.distinct)
+        self.assertEqual(leaf.read_bytes(),b'selected-cache-object-unmodified')
+
+    def test_first_level_symlink_to_selected_cache_is_denied_unchanged(self):
+        first, _, leaf = self._selected_cache_object()
+        import hashlib
+        before = hashlib.sha256(leaf.read_bytes()).hexdigest()
+        (self.distinct/'8').symlink_to(first, target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(hashlib.sha256(leaf.read_bytes()).hexdigest(), before)
+
+    def test_second_level_symlink_to_selected_cache_is_denied_unchanged(self):
+        _, second, leaf = self._selected_cache_object()
+        before = leaf.read_bytes()
+        (self.distinct/'8').mkdir()
+        (self.distinct/'8'/'aa').symlink_to(second, target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(leaf.read_bytes(), before)
+
+    def test_individual_cache_file_symlink_is_denied_unchanged(self):
+        _, _, leaf = self._selected_cache_object()
+        before = leaf.read_bytes()
+        peer_file = self.distinct/'8'/'aa'/leaf.name
+        peer_file.parent.mkdir(parents=True)
+        peer_file.symlink_to(leaf)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(leaf.read_bytes(), before)
+
+    def test_multi_hop_symlink_under_independent_parent_is_denied(self):
+        _, second, leaf = self._selected_cache_object()
+        outer = self.base/'external-cache-directory'
+        outer.mkdir()
+        (outer/'aa').symlink_to(second, target_is_directory=True)
+        (self.distinct/'8').symlink_to(outer, target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(leaf.read_bytes(), b'selected-cache-object-unmodified')
+
+    def test_independent_peer_symlink_target_remains_supported(self):
+        _, _, leaf = self._selected_cache_object()
+        independent = self.base/'independent-cache-content'
+        (independent/'aa').mkdir(parents=True)
+        (independent/'aa'/leaf.name).write_bytes(b'peer-only-cache-content')
+        (self.distinct/'8').symlink_to(independent, target_is_directory=True)
+        result = self.check(self.distinct)
+        self.assertEqual(result[1], ())  # No bind mounts.
+        self.assertEqual(len(result[2]), 1)
+        self.assertEqual(result[2][0][1], '8')
+        self.assertEqual(leaf.read_bytes(), b'selected-cache-object-unmodified')
+
+    def test_unresolved_symlink_peer_target_is_non_authorizing(self):
+        (self.distinct/'8').symlink_to(self.base/'absent-physical-cache',
+                                      target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'physical separation is unverified'):
+            self.check(self.distinct)
+
+    def test_symlink_swap_changes_preflight_identity_without_deletion(self):
+        _, _, leaf = self._selected_cache_object()
+        one = self.base/'independent-one'
+        two = self.base/'independent-two'
+        one.mkdir(); two.mkdir()
+        link = self.distinct/'8'
+        link.symlink_to(one, target_is_directory=True)
+        old = self.check(self.distinct)
+        link.unlink()
+        link.symlink_to(two, target_is_directory=True)
+        new = self.check(self.distinct)
+        self.assertNotEqual(old, new)
+        self.assertEqual(leaf.read_bytes(), b'selected-cache-object-unmodified')
+
+    def test_unrelated_nested_mount_on_same_device_remains_authorized(self):
+        first, second, leaf = self._selected_cache_object()
+        other = self.base/'other-physical-subtree'
+        other.mkdir()
+        st = os.stat(other)
+        nested=((str(self.distinct),str(self.distinct/'8'),'815',
+                 (st.st_dev,st.st_ino)),)
+        with patch.object(cache,'_cache_peer_mounts',return_value=nested):
+            observed=self.check(self.distinct)
+        self.assertEqual(observed[1],nested)
+
+    def test_bind_of_selected_ancestor_is_rejected_as_overlap(self):
+        parent=os.stat(self.base)
+        nested=((str(self.distinct),str(self.distinct/'8'),'817',
+                 (parent.st_dev,parent.st_ino)),)
+        with patch.object(cache,'_cache_peer_mounts',return_value=nested):
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                        'subtrees physically overlap'):
+                self.check(self.distinct)
+
+    def test_nested_peer_mount_path_inspection_is_anchored(self):
+        from io import StringIO
+        first, second, leaf=self._selected_cache_object()
+        peer_first=self.distinct/'8'
+        peer_first.mkdir()
+        row=('11 10 0:1 / '+str(peer_first)+' rw,relatime - ext4 /dev/vda1 rw\n')
+        with patch('builtins.open',side_effect=lambda *a,**kw: StringIO(row)):
+            found=cache._cache_peer_mounts(str(self.selected),{str(self.distinct)})
+        self.assertEqual(len(found),1)
+        self.assertEqual(found[0][0],str(self.distinct))
+        self.assertEqual(found[0][1],str(peer_first))
+        st=os.stat(peer_first)
+        self.assertEqual(found[0][3],(st.st_dev,st.st_ino))
+
+    def test_nested_symlink_mount_target_is_non_authorizing(self):
+        first, second, leaf=self._selected_cache_object()
+        linked=self.distinct/'8'
+        linked.symlink_to(first,target_is_directory=True)
+        with self.assertRaises(OSError):
+            cache._cache_mount_target_identity(str(linked/'aa'))
+        with self.assertRaises(cache.CacheManageError):
+            cache._cache_mount_target_identity(str(linked))
+
+    def test_nested_or_ancestor_cache_path_is_rejected(self):
+        child=self.selected/'child'
+        child.mkdir()
+        for peer in (self.base,child):
+            with self.subTest(peer=str(peer)):
+                with self.assertRaisesRegex(cache.CacheManageError,
+                                            'physically overlap'):
+                    self.check(peer)
+
+    def test_symlinked_peer_and_symlinked_ancestor_fail_closed(self):
+        linked=self.base/'linked'
+        linked.symlink_to(self.selected,target_is_directory=True)
+        child=self.selected/'child'
+        child.mkdir()
+        for peer in (linked,linked/'child'):
+            with self.subTest(peer=str(peer)):
+                with self.assertRaisesRegex(cache.CacheManageError,
+                                            'physical separation is unverified'):
+                    self.check(peer)
+
+    def test_missing_or_non_directory_peer_is_non_authorizing(self):
+        file=self.base/'not-directory'
+        file.write_text('not a cache')
+        for peer in (self.base/'missing',file):
+            with self.subTest(peer=str(peer)):
+                with self.assertRaisesRegex(cache.CacheManageError,
+                                            'physical separation is unverified'):
+                    self.check(peer)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'Unverified registered Cache directory path'):
+            cache._verify_cache_peer_isolation(
+                str(self.selected),self.identity,[{'id':8,'directory':None}])
+
+    def test_unreadable_peer_is_non_authorizing(self):
+        blocked=self.base/'unreadable'
+        blocked.mkdir()
+        blocked.chmod(0)
+        try:
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                        'physical separation is unverified'):
+                self.check(blocked)
+        finally:
+            blocked.chmod(0o700)
+
+    def test_selected_identity_drift_blocks_clear(self):
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'physical identity changed'):
+            cache._verify_cache_peer_isolation(
+                str(self.selected),(self.identity[0],self.identity[1]+1),
+                [{'id':8,'directory':str(self.distinct)}])
+
+    def test_missing_peer_inventory_blocks_even_when_no_peers_are_reported(self):
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'inventory unavailable'):
+            cache._verify_cache_peer_isolation(str(self.selected),self.identity,None)
+
 class CacheManageTests(unittest.TestCase):
     def setUp(self):
         td=tempfile.TemporaryDirectory(prefix='ach-cache-manage-')
@@ -61,7 +312,9 @@ class CacheManageTests(unittest.TestCase):
             patch.object(cache,'inspect_site_fastcgi_cache',return_value={
                 'state':'Source Observed','zone_state':'Direct Zone',
                 'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
-                'unresolved_other_sites':0,'source_sha256':'a'*64}),
+                'unresolved_other_sites':0,'other_sites_same_directory':[],
+                'other_sites_same_zone':[],'source_sha256':'a'*64,
+                'physical_peer_cache_paths':[]}),
         ]
         for p in self.patchers:
             p.start();self.addCleanup(p.stop)
@@ -986,6 +1239,284 @@ class CacheManageTests(unittest.TestCase):
             cache.manage_cache('restore',self.site,approved=True,
                 recovery_id=applied['recovery_id'],**self.kwargs())
         self.assertTrue((self.ext/cache._names(7)[1]).exists())
+
+
+    def test_site_cache_file_clear_requires_fresh_applied_identity_and_consent(self):
+        with patch.object(cache, '_scan_site_cache_files') as physical:
+            with self.assertRaises(cache.CacheManageError):
+                cache.manage_cache('clear_files', self.site,
+                    approved=True, recovery_id='a'*32, **self.kwargs())
+            physical.assert_not_called()
+            applied = self.apply()
+            unchanged = list(self.commands)
+            for approved, recovery in ((False, applied['recovery_id']),
+                                       (True, 'f'*32), (True, None)):
+                with self.subTest(approved=approved, recovery=recovery):
+                    with self.assertRaises(cache.CacheManageError):
+                        cache.manage_cache('clear_files', self.site,
+                            public=object(), approved=approved,
+                            recovery_id=recovery, **self.kwargs())
+            physical.assert_not_called()
+            physical.side_effect = [2, 2]
+            cleared = cache.manage_cache('clear_files', self.site,
+                public=object(), approved=True,
+                recovery_id=applied['recovery_id'], **self.kwargs())
+            self.assertEqual(cleared['state'], 'Applied')
+            self.assertTrue(cleared['changed'])
+            self.assertEqual(cleared['cache_files_removed'], 2)
+            self.assertFalse(cleared['purge_supported'])
+            self.assertEqual(cleared['recovery_id'], applied['recovery_id'])
+            self.assertEqual(physical.call_count, 2)
+            self.assertEqual(physical.call_args.kwargs, {'remove':True})
+            self.assertEqual(self.commands, unchanged, 'File clear must not reload Nginx')
+            self.assertEqual(cache.manage_cache('recheck',self.site,
+                 public=object(), **self.kwargs())['state'], 'Applied')
+            fd = cache._open_state_dir(str(self.state))
+            try:
+                self.assertEqual(cache._record_read(fd, 7)['phase'], 'applied')
+            finally:
+                os.close(fd)
+
+    def test_cache_file_clear_blocks_new_physical_peer_alias_before_unlink(self):
+        applied = self.apply()
+        with patch.object(cache, '_scan_site_cache_files') as physical:
+            with patch.object(cache, 'inspect_site_fastcgi_cache', return_value={
+                    'state':'Source Observed','zone_state':'Direct Zone',
+                    'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
+                    'unresolved_other_sites':0,
+                    'other_sites_same_directory':[{'id':8,'site_key':'peer.test'}],
+                    'other_sites_same_zone':[] }):
+                with self.assertRaisesRegex(cache.CacheManageError, 'isolation'):
+                    cache.manage_cache('clear_files', self.site,
+                        public=object(), approved=True,
+                        recovery_id=applied['recovery_id'], **self.kwargs())
+            physical.assert_not_called()
+
+    def test_cache_clear_rejects_unresolved_peer_identity_before_unlink(self):
+        applied = self.apply()
+        source = {
+            'state':'Source Observed','zone_state':'Direct Zone',
+            'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
+            'unresolved_other_sites':0,'other_sites_same_directory':[],
+            'other_sites_same_zone':[],
+            'physical_peer_cache_paths':[{'id':8,'directory':None}],
+        }
+        with patch.object(cache,'inspect_site_fastcgi_cache',return_value=source):
+            with patch.object(cache, '_scan_site_cache_files') as scanner:
+                with self.assertRaisesRegex(cache.CacheManageError,
+                                            'physical separation is unverified'):
+                    cache.manage_cache('clear_files',self.site,public=object(),
+                        approved=True,recovery_id=applied['recovery_id'],
+                        **self.kwargs())
+                scanner.assert_not_called()
+
+    def test_cache_clear_refuses_discovered_peer_alias_before_unlink(self):
+        applied=self.apply()
+        source = {
+            'state':'Source Observed','zone_state':'Direct Zone',
+            'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
+            'unresolved_other_sites':0,'other_sites_same_directory':[],
+            'other_sites_same_zone':[], 'purge_scope':'Unknown',
+            'physical_peer_cache_paths':[
+                {'id':8,'directory':'/some/other/canonical/cache'}
+            ],
+        }
+        with patch.object(cache,'inspect_site_fastcgi_cache',return_value=source):
+            with patch.object(cache,'_verify_cache_peer_isolation',
+                              side_effect=cache.CacheManageError(
+                                  'compatibility','Registered Cache directories physically overlap'
+                              )) as verifier:
+                with patch.object(cache,'_scan_site_cache_files') as scanner:
+                    with self.assertRaisesRegex(cache.CacheManageError,
+                                                'physically overlap'):
+                        cache.manage_cache('clear_files',self.site,public=object(),
+                            approved=True,recovery_id=applied['recovery_id'],
+                            **self.kwargs())
+                    scanner.assert_not_called()
+                    verifier.assert_called_once()
+
+    def test_cache_clear_allows_verified_distinct_peer_even_if_purge_scope_unknown(self):
+        applied = self.apply()
+        source = {
+            'state':'Source Observed','zone_state':'Direct Zone',
+            'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
+            'unresolved_other_sites':0,'other_sites_same_directory':[],
+            'other_sites_same_zone':[], 'purge_scope':'Unknown',
+            'physical_peer_cache_paths':[
+                {'id':8,'directory':'/a/separate/peer/cache'}
+            ],
+        }
+        with patch.object(cache,'inspect_site_fastcgi_cache',return_value=source):
+            with patch.object(cache,'_verify_cache_peer_isolation',
+                              return_value=((8,'/a/separate/peer/cache',((1,2),(3,4))),)) as physical:
+                with patch.object(cache,'_scan_site_cache_files',
+                                  side_effect=[3,3]) as scanner:
+                    result=cache.manage_cache('clear_files',self.site,public=object(),
+                        approved=True,recovery_id=applied['recovery_id'],
+                        **self.kwargs())
+        self.assertEqual(result['cache_files_removed'],3)
+        self.assertEqual(physical.call_count,3)
+        self.assertEqual(scanner.call_count,2)
+
+    def test_cache_clear_topology_changes_before_unlink(self):
+        applied = self.apply()
+        with patch.object(cache,'_verify_cache_peer_isolation',
+                          side_effect=[('initial',),('changed',)]) as verify:
+            with patch.object(cache,'_scan_site_cache_files',
+                              return_value=1) as scanner:
+                with self.assertRaisesRegex(cache.CacheManageError,
+                                            'not fully confirmed'):
+                    cache.manage_cache('clear_files',self.site,public=object(),
+                        approved=True,recovery_id=applied['recovery_id'],
+                        **self.kwargs())
+                self.assertEqual(verify.call_count,2)
+                scanner.assert_called_once_with(7,[19,23])
+
+
+    def test_nested_bind_alias_denies_manual_clear_before_first_unlink(self):
+        applied = self.apply()
+        source = {
+            'state':'Source Observed', 'zone_state':'Direct Zone',
+            'cache_zone':'ACHFC_7', 'cache_directory':self.ref['cache_directory'],
+            'unresolved_other_sites':0, 'other_sites_same_directory':[],
+            'other_sites_same_zone':[], 'purge_scope':'Unknown',
+            'physical_peer_cache_paths':[
+                {'id':8, 'directory':'/www/server/fastcgi_cache'}
+            ],
+        }
+        # Both Cache roots appear independent; one peer child is an external
+        # bind destination pointing to a selected-site child inode.
+        selected=((1,1),(19,22),(19,23))
+        peer=((1,1),(19,22),(19,48),(19,49))
+        def inode_chain(path):
+            if path == self.ref['cache_directory']:
+                return selected
+            if path == '/www/server/fastcgi_cache':
+                return peer
+            raise AssertionError('unexpected filesystem identity request')
+        mount=((source['physical_peer_cache_paths'][0]['directory'],
+                '/www/server/fastcgi_cache/8','814',(19,77)),)
+        with patch.object(cache,'inspect_site_fastcgi_cache',return_value=source):
+            with patch.object(cache,'_cache_directory_identity_chain',
+                              side_effect=inode_chain):
+                with patch.object(cache,'_cache_peer_mounts',return_value=mount):
+                    with patch.object(cache,'_cache_peer_symlink_targets',
+                                      return_value=((),set())):
+                        with patch.object(cache,'_selected_cache_contains_mount_identity',
+                                          return_value=True):
+                            with patch.object(cache,'_scan_site_cache_files') as scanner:
+                                with self.assertRaisesRegex(cache.CacheManageError,
+                                                            'subtrees physically overlap'):
+                                    cache.manage_cache('clear_files',self.site,
+                                        public=object(), approved=True,
+                                        recovery_id=applied['recovery_id'],**self.kwargs())
+                                scanner.assert_not_called()
+
+    def test_cache_clear_physical_peer_symlink_refused_before_any_file_walk(self):
+        applied = self.apply()
+        selected = self.root/'selected-cache-fixture'
+        peer = self.root/'independent-peer-fixture'
+        (selected/'8'/'aa').mkdir(parents=True)
+        peer.mkdir()
+        token = 'b'*29+'aa8'
+        proof = selected/'8'/'aa'/token
+        proof.write_bytes(b'keep-selected-cache-object')
+        (peer/'8').symlink_to(selected/'8', target_is_directory=True)
+        actual_guard = cache._verify_cache_peer_isolation
+        st = os.stat(selected)
+        source = {
+            'state':'Source Observed','zone_state':'Direct Zone',
+            'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
+            'unresolved_other_sites':0,'other_sites_same_directory':[],
+            'other_sites_same_zone':[], 'purge_scope':'Unknown',
+            'physical_peer_cache_paths':[{'id':8,'directory':str(peer)}],
+        }
+        def physical(*_):
+            return actual_guard(str(selected),(st.st_dev,st.st_ino),
+                                source['physical_peer_cache_paths'])
+        with patch.object(cache,'inspect_site_fastcgi_cache',return_value=source):
+            with patch.object(cache,'_verify_cache_peer_isolation',
+                              side_effect=physical):
+                with patch.object(cache,'_scan_site_cache_files') as scanner:
+                    with self.assertRaisesRegex(cache.CacheManageError,
+                                                'subtrees physically overlap'):
+                        cache.manage_cache('clear_files',self.site,
+                            public=object(),approved=True,
+                            recovery_id=applied['recovery_id'],**self.kwargs())
+                    scanner.assert_not_called()
+        self.assertEqual(proof.read_bytes(), b'keep-selected-cache-object')
+
+    def test_cache_file_clear_refuses_restored_and_changed_source(self):
+        applied = self.apply()
+        with patch.object(cache, '_scan_site_cache_files') as physical:
+            native = self.vhost/'qa.test.conf'
+            original = native.read_bytes()
+            native.write_bytes(original + bytes([10]) + b'# drift' + bytes([10]))
+            with self.assertRaisesRegex(cache.CacheManageError, 'not verified Applied'):
+                cache.manage_cache('clear_files', self.site, public=object(),
+                    approved=True, recovery_id=applied['recovery_id'], **self.kwargs())
+            native.write_bytes(original)
+            physical.assert_not_called()
+            cache.manage_cache('restore', self.site, public=object(), approved=True,
+                recovery_id=applied['recovery_id'], **self.kwargs())
+            with self.assertRaises(cache.CacheManageError):
+                cache.manage_cache('clear_files', self.site, public=object(),
+                    approved=True, recovery_id=applied['recovery_id'], **self.kwargs())
+            physical.assert_not_called()
+
+    def test_partial_cache_file_clear_is_uncertain_with_recovery_identity(self):
+        applied = self.apply()
+        with patch.object(cache, '_scan_site_cache_files',
+                          side_effect=[4, OSError('simulated mid-unlink error')]):
+            with self.assertRaises(cache.CacheManageError) as caught:
+                cache.manage_cache('clear_files', self.site,
+                    public=object(), approved=True,
+                    recovery_id=applied['recovery_id'], **self.kwargs())
+        self.assertEqual(caught.exception.stage, 'uncertain')
+        self.assertEqual(caught.exception.recovery_id, applied['recovery_id'])
+        self.assertEqual(cache.manage_cache('recheck', self.site,
+              public=object(), **self.kwargs())['state'], 'Applied')
+
+    def test_physical_cache_clear_rejects_foreign_nodes_and_preserves_peer(self):
+        root = self.root / 'cache-root'
+        root.mkdir()
+        a = root / 'site-7'
+        b = root / 'site-8'
+        for site_dir, prefix, suffix in ((a, 'c', '4a'), (b, 'd', '5b')):
+            leaf = site_dir / prefix / suffix
+            leaf.mkdir(parents=True)
+            site_dir.chmod(0o750)
+            (site_dir / prefix).chmod(0o700)
+            leaf.chmod(0o700)
+            obj = leaf / ('0'*29+suffix+prefix)
+            obj.write_bytes(b'generated-cache-data')
+            obj.chmod(0o600)
+        owner = SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid())
+        cache_identity = (a.stat().st_dev, a.stat().st_ino)
+        with patch.object(cache,'CACHE_ROOT',str(root)), \
+             patch.object(cache, '_path_owned', return_value=cache_identity), \
+             patch.object(cache.pwd, 'getpwnam', return_value=owner):
+            foreign = a/'unexpected.txt'
+            foreign.write_bytes(b'untouched')
+            with self.assertRaises(cache.CacheManageError):
+                cache._scan_site_cache_files(7, cache_identity)
+            self.assertEqual(len(list(a.rglob('0'*29+'4ac'))), 1)
+            foreign.unlink()
+            # A symlink hidden among otherwise legitimate files is rejected.
+            linked = a/'c'/'4a'/('0'*29+'4ad')
+            linked.symlink_to('/etc/hosts')
+            with self.assertRaises(cache.CacheManageError):
+                cache._scan_site_cache_files(7, cache_identity)
+            self.assertEqual(len(list(a.rglob('0'*29+'4ac'))), 1)
+            linked.unlink()
+            self.assertEqual(cache._scan_site_cache_files(7, cache_identity), 1)
+            self.assertEqual(cache._scan_site_cache_files(7, cache_identity,
+                             remove=True), 1)
+            self.assertEqual(len(list(a.rglob('0'*29+'4ac'))), 0)
+            self.assertTrue((b/'d'/'5b'/('0'*29+'5bd')).is_file())
+            self.assertTrue((a/'c'/'4a').is_dir())
+            self.assertEqual(cache._scan_site_cache_files(7, cache_identity), 0)
+
 
 
 if __name__=='__main__':

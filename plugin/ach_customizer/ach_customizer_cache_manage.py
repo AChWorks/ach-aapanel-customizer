@@ -382,6 +382,351 @@ def _path_owned(site_id, *, cache_root=CACHE_ROOT, allow_missing=False):
         os.close(sitefd)
 
 
+
+def _cache_directory_identity_chain(path):
+    """Pin every component of one native cache path without following symlinks.
+
+    Identity chains detect both external bind mounts pointing at the selected
+    directory and peer cache roots containing/contained in that directory.
+    No peer path supplied by the browser is ever accepted here.
+    """
+    if (not isinstance(path, str) or not path.startswith('/') or
+            path.startswith('//') or
+            any(part in ('', '.', '..') for part in path.split('/')[1:])):
+        raise CacheManageError('compatibility',
+                               'Unverified registered Cache directory path')
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open('/', flags)
+    identities = []
+    try:
+        parent = os.fstat(fd)
+        identities.append((parent.st_dev, parent.st_ino))
+        for name in path.split('/')[1:]:
+            next_fd = os.open(name, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+            info = os.fstat(fd)
+            identities.append((info.st_dev, info.st_ino))
+        return tuple(identities)
+    finally:
+        os.close(fd)
+
+
+def _cache_mount_target_identity(path):
+    """No-follow identity of a mount target (directory OR regular Cache file)."""
+    parent, name = path.rsplit('/', 1)
+    if not parent or not name or name in ('.', '..'):
+        raise CacheManageError('compatibility', 'Unverified peer Cache mount target')
+    # Anchor the parent descriptor one component at a time: an intermediate
+    # symlink cannot redirect this inspection outside the registered tree.
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open('/', flags)
+    try:
+        for part in parent.split('/')[1:]:
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        target = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if not (stat.S_ISDIR(target.st_mode) or stat.S_ISREG(target.st_mode)):
+            raise CacheManageError('compatibility', 'Unverified peer Cache mount object')
+        return (target.st_dev, target.st_ino)
+    finally:
+        os.close(fd)
+
+
+def _cache_peer_mounts(selected_path, peer_directories):
+    """Inspect Linux mountpoints within, at, or exclusively above peer roots.
+
+    A bind mount can expose one selected-site Cache subtree through a peer
+    root, descendant or exclusive ancestor. Do not reject unrelated mounts:
+    compare their actual source object identities to selected Cache objects.
+    Keep mount IDs to detect observed topology drift between passes.
+    """
+    nested = []
+    try:
+        with open('/proc/self/mountinfo', encoding='utf-8') as source:
+            for line in source:
+                fields = line.split()
+                if len(fields) < 10 or '-' not in fields[6:]:
+                    raise CacheManageError('compatibility',
+                                           'Registered peer Cache mount table is malformed')
+                path = re.sub(r'\\([0-7]{3})',
+                              lambda m: chr(int(m.group(1), 8)), fields[4])
+                for directory in peer_directories:
+                    if (path == directory or path.startswith(directory + '/') or
+                            (directory.startswith(path.rstrip('/') + '/') and
+                             not selected_path.startswith(path.rstrip('/') + '/'))):
+                        nested.append((directory, path, fields[0],
+                                       _cache_mount_target_identity(path)))
+    except (OSError, UnicodeError) as exc:
+        raise CacheManageError('compatibility',
+                               'Registered peer Cache mount table is unavailable') from exc
+    return tuple(sorted(nested))
+
+
+def _selected_cache_contains_mount_identity(selected_path, expected_identity,
+                                            mount_identities):
+    """Check actual selected Nginx objects only when a peer has nested mounts.
+
+    Depth is the selected owned Nginx levels=1:2 layout; stream directory
+    entries, keeping only the small set of suspicious mount-target identities.
+    This also detects a bind mount of an individual selected cache file.
+    """
+    possible = set(mount_identities)
+    if not possible:
+        return False
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    root_fd = os.open(selected_path, flags)
+    try:
+        info = os.fstat(root_fd)
+        if (info.st_dev, info.st_ino) != tuple(expected_identity):
+            raise CacheManageError('concurrency',
+                                   'Selected Cache root changed during peer inspection')
+        if (info.st_dev, info.st_ino) in possible:
+            return True
+        # Actual Nginx levels=1:2 directories, no arbitrary recursion.
+        # Foreign entries are validated by the normal two-pass file scanner.
+        with os.scandir(root_fd) as first_entries:
+            for first in first_entries:
+                if not first.is_dir(follow_symlinks=False):
+                    continue
+                first_fd = os.open(first.name, flags, dir_fd=root_fd)
+                try:
+                    f = os.fstat(first_fd)
+                    if (f.st_dev, f.st_ino) in possible:
+                        return True
+                    with os.scandir(first_fd) as second_entries:
+                        for second in second_entries:
+                            if not second.is_dir(follow_symlinks=False):
+                                continue
+                            second_fd = os.open(second.name, flags, dir_fd=first_fd)
+                            try:
+                                q = os.fstat(second_fd)
+                                if (q.st_dev, q.st_ino) in possible:
+                                    return True
+                                with os.scandir(second_fd) as objects:
+                                    for obj in objects:
+                                        sig = obj.stat(follow_symlinks=False)
+                                        if (sig.st_dev, sig.st_ino) in possible:
+                                            return True
+                            finally:
+                                os.close(second_fd)
+                finally:
+                    os.close(first_fd)
+        return False
+    finally:
+        os.close(root_fd)
+
+
+def _cache_peer_symlink_targets(peer_directories, selected_device):
+    """Read peer Nginx levels=1:2 symlinks without following unverified writes.
+
+    Stream ordinary peer entries. Only a symlink (or objects reached below
+    one) contributes physical identities: normal peer files are independent
+    unless already covered by the mount table or a checked symlink.
+    Following a peer symlink is read-only, relative to a pinned parent fd;
+    the opened directory must have the previously observed target identity.
+    No peer path is ever used for unlink.
+    """
+    links = []
+    identities = set()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+
+    def walk(parent_fd, peer, prefix, depth, linked_parent):
+        with os.scandir(parent_fd) as entries:
+            for entry in entries:
+                # The ordinary peer Cache may contain many regular files.
+                # Directory-entry type avoids a stat() for each non-link
+                # leaf unless the parent was itself reached via a symlink.
+                if depth == 2 and not linked_parent and not entry.is_symlink():
+                    continue
+                rel = prefix + entry.name
+                raw = entry.stat(follow_symlinks=False)
+                linked = stat.S_ISLNK(raw.st_mode)
+                if linked:
+                    resolved = entry.stat(follow_symlinks=True)
+                    if (depth < 2 and not stat.S_ISDIR(resolved.st_mode) or
+                            depth == 2 and not stat.S_ISREG(resolved.st_mode)):
+                        raise CacheManageError(
+                            'compatibility', 'Registered peer Cache symlink has unverified target')
+                    links.append((peer, rel, raw.st_dev, raw.st_ino,
+                                  raw.st_mtime_ns, resolved.st_dev, resolved.st_ino))
+                elif depth < 2:
+                    if not stat.S_ISDIR(raw.st_mode):
+                        continue
+                    resolved = raw
+                else:
+                    if not linked_parent:
+                        continue  # Ordinary Cache files have no symlink exposure.
+                    resolved = raw
+                if (linked or linked_parent) and resolved.st_dev == selected_device:
+                    identities.add((resolved.st_dev, resolved.st_ino))
+                if depth == 2:
+                    continue
+                child = os.open(entry.name, flags | (0 if linked else os.O_NOFOLLOW),
+                                dir_fd=parent_fd)
+                try:
+                    actual = os.fstat(child)
+                    if (actual.st_dev, actual.st_ino) != (resolved.st_dev, resolved.st_ino):
+                        raise CacheManageError(
+                            'concurrency', 'Registered peer Cache object changed during scan')
+                    walk(child, peer, rel + '/', depth + 1, linked_parent or linked)
+                finally:
+                    os.close(child)
+
+    for peer in sorted(peer_directories):
+        # Re-open each registered root by no-follow, directory-relative
+        # components, rather than trusting a path with a replaced ancestor.
+        fd = os.open('/', flags | os.O_NOFOLLOW)
+        try:
+            for name in peer.split('/')[1:]:
+                child = os.open(name, flags | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            walk(fd, peer, '', 0, False)
+        finally:
+            os.close(fd)
+    return tuple(sorted(links)), identities
+
+
+def _verify_cache_peer_isolation(selected_path, expected_identity, peer_paths):
+    """Prove relevant native peer cache trees are physically separate.
+
+    A distinct canonical pathname is not enough: an external bind mount may
+    name the selected inode, and a peer root may overlap its subtree.
+    Rechecks around deletion detect observed topology changes; they cannot
+    make arbitrary external mount changes atomic with Nginx traffic.
+    """
+    if not isinstance(peer_paths, list):
+        raise CacheManageError('compatibility',
+                               'Registered peer Cache directory inventory unavailable')
+    if not peer_paths:
+        return ()
+    try:
+        selected_chain = _cache_directory_identity_chain(selected_path)
+        if selected_chain[-1] != tuple(expected_identity):
+            raise CacheManageError('concurrency',
+                                   'Selected Cache directory physical identity changed')
+        verified = []
+        seen = set()
+        peer_directories = set()
+        for peer in peer_paths:
+            if (not isinstance(peer, dict) or set(peer) != {'id', 'directory'}
+                    or type(peer['id']) is not int or peer['id'] < 1
+                    or peer['id'] in seen):
+                raise CacheManageError('compatibility',
+                                       'Registered peer Cache identity is ambiguous')
+            seen.add(peer['id'])
+            # Missing global keys_zone paths are not proof of isolation.
+            directory = peer['directory']
+            peer_chain = _cache_directory_identity_chain(directory)
+            if (selected_chain[-1] in peer_chain or
+                    peer_chain[-1] in selected_chain):
+                raise CacheManageError('compatibility',
+                                       'Registered Cache directories physically overlap')
+            verified.append((peer['id'], directory, peer_chain))
+            peer_directories.add(directory)
+
+        # Root identity alone misses an external bind of site/8 into
+        # peer/8. Inspect actual mount destinations anywhere under the
+        # registered peer roots, without rejecting unrelated mounted trees.
+        nested = _cache_peer_mounts(selected_path, peer_directories)
+        links, linked_objects = _cache_peer_symlink_targets(
+            peer_directories, selected_chain[-1][0])
+        candidates = ({identity for _, _, _, identity in nested
+                       if identity[0] == selected_chain[-1][0]} | linked_objects)
+        if (candidates.intersection(selected_chain) or
+                _selected_cache_contains_mount_identity(
+                    selected_path, expected_identity, candidates)):
+            raise CacheManageError(
+                'compatibility', 'Registered Cache subtrees physically overlap')
+        return (tuple(verified), nested, links)
+    except (OSError, UnicodeError) as exc:
+        raise CacheManageError('compatibility',
+                               'Registered peer Cache physical separation is unverified') from exc
+
+
+
+def _scan_site_cache_files(site_id, expected_identity, *, remove=False):
+    """Validate Nginx levels=1:2 objects inside ONE already-owned cache tree.
+
+    No arbitrary recursive delete: foreign entries, links, mounts, hard links,
+    changed inodes or unexpected layouts are not adopted as managed cache.
+    Leave the Nginx-owned directories present so workers can continue writing.
+    """
+    identity = _path_owned(site_id)
+    if identity != tuple(expected_identity):
+        raise CacheManageError('ownership', 'Selected Cache directory identity changed')
+    root_fd = os.open(CACHE_ROOT + '/site-' + str(site_id),
+                      os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    www = pwd.getpwnam('www')
+    count = 0
+
+    def child_dir(parent_fd, name, expected_dev):
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (not stat.S_ISDIR(before.st_mode) or before.st_dev != expected_dev
+                or before.st_uid != www.pw_uid or before.st_gid != www.pw_gid
+                or stat.S_IMODE(before.st_mode) != 0o700):
+            raise CacheManageError('ownership', 'Unexpected object inside site Cache tree')
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
+                     os.O_CLOEXEC, dir_fd=parent_fd)
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+            os.close(fd)
+            raise CacheManageError('concurrency', 'Site Cache directory changed during scan')
+        return fd
+
+    try:
+        top = os.fstat(root_fd)
+        if (top.st_dev, top.st_ino) != identity:
+            raise CacheManageError('concurrency', 'Selected Cache directory changed during scan')
+        for first in sorted(os.listdir(root_fd)):
+            if not re.fullmatch(r'[0-9a-f]', first):
+                raise CacheManageError('ownership', 'Unexpected top-level site Cache object')
+            first_fd = child_dir(root_fd, first, top.st_dev)
+            try:
+                for second in sorted(os.listdir(first_fd)):
+                    if not re.fullmatch(r'[0-9a-f]{2}', second):
+                        raise CacheManageError('ownership', 'Unexpected nested site Cache object')
+                    second_fd = child_dir(first_fd, second, top.st_dev)
+                    try:
+                        for name in sorted(os.listdir(second_fd)):
+                            if (not TOKEN.fullmatch(name) or name[-1] != first
+                                    or name[-3:-1] != second):
+                                raise CacheManageError('ownership', 'Unexpected site Cache filename')
+                            before = os.stat(name, dir_fd=second_fd, follow_symlinks=False)
+                            if (not stat.S_ISREG(before.st_mode) or before.st_dev != top.st_dev
+                                    or before.st_uid != www.pw_uid or before.st_gid != www.pw_gid
+                                    or stat.S_IMODE(before.st_mode) != 0o600
+                                    or before.st_nlink != 1):
+                                raise CacheManageError('ownership', 'Untrusted site Cache file')
+                            if remove:
+                                fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW |
+                                             os.O_CLOEXEC, dir_fd=second_fd)
+                                try:
+                                    actual = os.fstat(fd)
+                                    if (actual.st_dev, actual.st_ino) != (before.st_dev, before.st_ino):
+                                        raise CacheManageError('concurrency', 'Site Cache file changed during clear')
+                                    current = os.stat(name, dir_fd=second_fd, follow_symlinks=False)
+                                    if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                                        raise CacheManageError('concurrency', 'Site Cache filename changed during clear')
+                                    os.unlink(name, dir_fd=second_fd)
+                                finally:
+                                    os.close(fd)
+                            count += 1
+                        if remove:
+                            os.fsync(second_fd)
+                    finally:
+                        os.close(second_fd)
+            finally:
+                os.close(first_fd)
+        if _path_owned(site_id) != identity:
+            raise CacheManageError('concurrency', 'Site Cache ownership changed during clear')
+        return count
+    finally:
+        os.close(root_fd)
+
+
 def _create_site_cache(site_id):
     parent = Path(CACHE_ROOT).parent
     parent_fd = _directory(str(parent))
@@ -860,13 +1205,13 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                  expected_proposal=None, recovery_id=None, approved=False,
                  data_dir=DATA_DIR, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
                  runner=None, probe=None, cache_generation=None):
-    """Serialized guarded per-site cache Apply/Recheck/Restore.
+    """Serialized guarded per-site cache Apply/Recheck/Restore/clear_files.
 
     Neither successful Nginx -t nor reload signaling by itself proves the
     target worker. A lost/ambiguous reload retains the journal and both source
     fragments for explicit reconciliation, never an automatic blind retry.
     """
-    if action not in ('apply', 'restore', 'recheck'):
+    if action not in ('apply', 'restore', 'recheck', 'clear_files'):
         raise CacheManageError('input', 'Unsupported Cache management operation')
     if (type(site.get('id')) is not int or
             not isinstance(site.get('name'), str) or
@@ -907,6 +1252,86 @@ def manage_cache(action, site, public=None, *, expected_source=None,
 
             if approved is not True:
                 raise CacheManageError('authorization', 'Explicit current Cache approval required')
+            if action == 'clear_files':
+                if (record is None or record['site_key'] != site['name']
+                        or record['schema'] != 2 or record['phase'] != 'applied' or
+                        recovery_id != record['op']):
+                    raise CacheManageError('recovery',
+                        'Fresh Applied Cache Recheck and matching recovery ID required')
+                observed = _cache_observation(
+                    site, record, public, vhost_root=vhost_root,
+                    nginx_root=nginx_root, data_dir=data_dir, probe=probe)
+                if observed['state'] != 'Applied' or not observed['runtime_verified']:
+                    raise CacheManageError('recovery',
+                        'Site Cache is not verified Applied; reconcile and Recheck')
+                # The directory inode alone does not prove no other native
+                # website now targets this tree. Check the complete registered
+                # source inventory again, not only the saved Apply snapshot.
+                if public is None:
+                    raise CacheManageError('compatibility',
+                        'Native website inventory required for site Cache file clear')
+                native = inspect_site_fastcgi_cache(
+                    public, site['id'], site['name'], vhost_root=vhost_root,
+                    nginx_root=nginx_root,
+                    rewrite_root=str(Path(vhost_root).parent / 'rewrite'),
+                    include_physical_peers=True)
+                if (native.get('state') != 'Source Observed' or
+                        native.get('zone_state') != 'Direct Zone' or
+                        native.get('cache_zone') != 'ACHFC_' + str(site['id']) or
+                        native.get('cache_directory') != record['cache_directory'] or
+                        native.get('unresolved_other_sites') != 0 or
+                        native.get('other_sites_same_directory') or
+                        native.get('other_sites_same_zone')):
+                    raise CacheManageError('compatibility',
+                        'Registered Cache source isolation requires fresh review')
+                # Source-text path inequality does not exclude an external
+                # bind-mount/symlink alias to this site's physical directory.
+                # Verify all registered cache-using peers' pinned dev/inode
+                # chains, then recheck before the first unlink.
+                peer_paths = native.get('physical_peer_cache_paths')
+                identities = _verify_cache_peer_isolation(
+                    record['cache_directory'], record['cache_identity'], peer_paths)
+                # First pass rejects foreign entries before unlinking any file.
+                # Nginx workers can write concurrently, so a changed tree or
+                # uncertain removal must never be reported as completed.
+                try:
+                    _scan_site_cache_files(site['id'], record['cache_identity'])
+                except OSError as exc:
+                    raise CacheManageError('ownership',
+                        'Selected Cache files are not safely enumerable') from exc
+                try:
+                    if _verify_cache_peer_isolation(
+                            record['cache_directory'], record['cache_identity'],
+                            peer_paths) != identities:
+                        raise CacheManageError(
+                            'concurrency', 'Registered Cache directory topology changed')
+                    removed = _scan_site_cache_files(
+                        site['id'], record['cache_identity'], remove=True)
+                    if _verify_cache_peer_isolation(
+                            record['cache_directory'], record['cache_identity'],
+                            peer_paths) != identities:
+                        raise CacheManageError(
+                            'concurrency', 'Registered Cache directory topology changed')
+                    if _cache_observation(
+                            site, record, public, vhost_root=vhost_root,
+                            nginx_root=nginx_root, data_dir=data_dir,
+                            probe=probe)['state'] != 'Applied':
+                        raise CacheManageError('concurrency',
+                            'Site Cache route changed during file clear')
+                except (OSError, CacheManageError) as exc:
+                    raise CacheManageError('uncertain',
+                        'Site Cache file removal not fully confirmed; Recheck before any retry',
+                        recovery_id=record['op']) from exc
+                return {'schema': 1, 'state': 'Applied', 'changed': removed > 0,
+                        'site_id': site['id'], 'site_key': site['name'],
+                        'recovery_id': record['op'], 'journal_phase': 'applied',
+                        'runtime_verified': True, 'purge_supported': False,
+                        'cache_files_removed': removed,
+                        'note': 'Only verified site-owned Cache files were unlinked. '
+                                'No Nginx reload, shared WORDPRESS purge or Nginx Helper '
+                                'operation. Concurrent traffic may repopulate the Cache; '
+                                'recheck application behavior independently.'}
+
             if action == 'apply':
                 if record is not None and record['phase'] != 'restored':
                     raise CacheManageError('recovery', 'Existing Cache journal must be reconciled')
