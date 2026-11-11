@@ -134,6 +134,30 @@ ZIP was **not installed into running aaPanel** and the protected Browser
 Clear flow was not replayed. Final exact-HEAD CI and independent delta
 re-review remain prerequisites, as does separate Owner Merge approval.
 
+**Third reviewer finding: peer symlink-only aliases (PR #56 R3).**
+A symlink nested in a registered native peer Cache directory does
+not appear in Linux mountinfo. The guarded Clear now scans the
+peer's supported `levels=1:2` tree with read-only, pinned
+directory descriptors and compares resolved symlink device/inode
+identities against selected Cache ancestors, directories and
+regular files. Dangling/unverifiable or physically shared
+objects deny Clear before unlink. Independently verified peer
+symlinks remain eligible; no arbitrary low file-count limit or
+new persistent journal is introduced. Link identity and mtime
+are included in repeated pre-/post-unlink checks so observed
+drift remains uncertain with the original recovery identity.
+
+[Exact R3 peer-symlink QA](evidence/aaPanel-8.0.7-2026-11-11-pr56-peer-symlink-r3-qa.json)
+used the SHA256-verified module directly from its ZIP in the
+isolated aaPanel 8.0.7 guest: first-level, second-level,
+single-file and multi-hop aliases were refused; an independent
+link was accepted; proof bytes remained unchanged. Native site
+#6 and peer Cache consumers #9/#10 passed the physical preflight.
+Nine sites returned HTTP200 and `nginx -t` passed. This does
+**not** establish installed plugin activation or an R3
+authenticated Browser Clear/Restore replay; current CI and
+independent delta review remain gates before Owner-approved Merge.
+
 ## New-site native Nginx Extension compatibility (0.1.35 development; Issues #2 / #21)
 
 The **authenticated native aaPanel 8.0.7 Website → Add site** operation produced a fresh PHP8.5 Nginx VHost with the expected `include enable-php-85.conf;` but **without** its per-site `include /www/server/panel/vhost/nginx/extension/<site>/*.conf;`. The installed vendor's `class_v2/panel_site_v2.py::nginxAdd()` and older `class/panelSite.py::nginxAdd()` omit this extension, while `nginx_update_config()` reconstruction templates include it. Vendor regeneration can replace much more of the operator VHost, so the Customizer **must not invoke regeneration to cure one missing include** and must not edit aaPanel core. [Exact first real test and cleanup](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6792970143).

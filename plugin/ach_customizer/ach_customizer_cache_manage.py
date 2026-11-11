@@ -518,6 +518,77 @@ def _selected_cache_contains_mount_identity(selected_path, expected_identity,
         os.close(root_fd)
 
 
+def _cache_peer_symlink_targets(peer_directories, selected_device):
+    """Read peer Nginx levels=1:2 symlinks without following unverified writes.
+
+    Stream ordinary peer entries. Only a symlink (or objects reached below
+    one) contributes physical identities: normal peer files are independent
+    unless already covered by the mount table or a checked symlink.
+    Following a peer symlink is read-only, relative to a pinned parent fd;
+    the opened directory must have the previously observed target identity.
+    No peer path is ever used for unlink.
+    """
+    links = []
+    identities = set()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+
+    def walk(parent_fd, peer, prefix, depth, linked_parent):
+        with os.scandir(parent_fd) as entries:
+            for entry in entries:
+                # The ordinary peer Cache may contain many regular files.
+                # Directory-entry type avoids a stat() for each non-link
+                # leaf unless the parent was itself reached via a symlink.
+                if depth == 2 and not linked_parent and not entry.is_symlink():
+                    continue
+                rel = prefix + entry.name
+                raw = entry.stat(follow_symlinks=False)
+                linked = stat.S_ISLNK(raw.st_mode)
+                if linked:
+                    resolved = entry.stat(follow_symlinks=True)
+                    if (depth < 2 and not stat.S_ISDIR(resolved.st_mode) or
+                            depth == 2 and not stat.S_ISREG(resolved.st_mode)):
+                        raise CacheManageError(
+                            'compatibility', 'Registered peer Cache symlink has unverified target')
+                    links.append((peer, rel, raw.st_dev, raw.st_ino,
+                                  raw.st_mtime_ns, resolved.st_dev, resolved.st_ino))
+                elif depth < 2:
+                    if not stat.S_ISDIR(raw.st_mode):
+                        continue
+                    resolved = raw
+                else:
+                    if not linked_parent:
+                        continue  # Ordinary Cache files have no symlink exposure.
+                    resolved = raw
+                if (linked or linked_parent) and resolved.st_dev == selected_device:
+                    identities.add((resolved.st_dev, resolved.st_ino))
+                if depth == 2:
+                    continue
+                child = os.open(entry.name, flags | (0 if linked else os.O_NOFOLLOW),
+                                dir_fd=parent_fd)
+                try:
+                    actual = os.fstat(child)
+                    if (actual.st_dev, actual.st_ino) != (resolved.st_dev, resolved.st_ino):
+                        raise CacheManageError(
+                            'concurrency', 'Registered peer Cache object changed during scan')
+                    walk(child, peer, rel + '/', depth + 1, linked_parent or linked)
+                finally:
+                    os.close(child)
+
+    for peer in sorted(peer_directories):
+        # Re-open each registered root by no-follow, directory-relative
+        # components, rather than trusting a path with a replaced ancestor.
+        fd = os.open('/', flags | os.O_NOFOLLOW)
+        try:
+            for name in peer.split('/')[1:]:
+                child = os.open(name, flags | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            walk(fd, peer, '', 0, False)
+        finally:
+            os.close(fd)
+    return tuple(sorted(links)), identities
+
+
 def _verify_cache_peer_isolation(selected_path, expected_identity, peer_paths):
     """Prove relevant native peer cache trees are physically separate.
 
@@ -560,14 +631,16 @@ def _verify_cache_peer_isolation(selected_path, expected_identity, peer_paths):
         # peer/8. Inspect actual mount destinations anywhere under the
         # registered peer roots, without rejecting unrelated mounted trees.
         nested = _cache_peer_mounts(selected_path, peer_directories)
-        candidates = {identity for _, _, _, identity in nested
-                      if identity[0] == selected_chain[-1][0]}
+        links, linked_objects = _cache_peer_symlink_targets(
+            peer_directories, selected_chain[-1][0])
+        candidates = ({identity for _, _, _, identity in nested
+                       if identity[0] == selected_chain[-1][0]} | linked_objects)
         if (candidates.intersection(selected_chain) or
                 _selected_cache_contains_mount_identity(
                     selected_path, expected_identity, candidates)):
             raise CacheManageError(
                 'compatibility', 'Registered Cache subtrees physically overlap')
-        return (tuple(verified), nested)
+        return (tuple(verified), nested, links)
     except (OSError, UnicodeError) as exc:
         raise CacheManageError('compatibility',
                                'Registered peer Cache physical separation is unverified') from exc

@@ -89,6 +89,81 @@ class CachePeerDirectoryIdentityTests(unittest.TestCase):
                 self.check(self.distinct)
         self.assertEqual(leaf.read_bytes(),b'selected-cache-object-unmodified')
 
+    def test_first_level_symlink_to_selected_cache_is_denied_unchanged(self):
+        first, _, leaf = self._selected_cache_object()
+        import hashlib
+        before = hashlib.sha256(leaf.read_bytes()).hexdigest()
+        (self.distinct/'8').symlink_to(first, target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(hashlib.sha256(leaf.read_bytes()).hexdigest(), before)
+
+    def test_second_level_symlink_to_selected_cache_is_denied_unchanged(self):
+        _, second, leaf = self._selected_cache_object()
+        before = leaf.read_bytes()
+        (self.distinct/'8').mkdir()
+        (self.distinct/'8'/'aa').symlink_to(second, target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(leaf.read_bytes(), before)
+
+    def test_individual_cache_file_symlink_is_denied_unchanged(self):
+        _, _, leaf = self._selected_cache_object()
+        before = leaf.read_bytes()
+        peer_file = self.distinct/'8'/'aa'/leaf.name
+        peer_file.parent.mkdir(parents=True)
+        peer_file.symlink_to(leaf)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(leaf.read_bytes(), before)
+
+    def test_multi_hop_symlink_under_independent_parent_is_denied(self):
+        _, second, leaf = self._selected_cache_object()
+        outer = self.base/'external-cache-directory'
+        outer.mkdir()
+        (outer/'aa').symlink_to(second, target_is_directory=True)
+        (self.distinct/'8').symlink_to(outer, target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'subtrees physically overlap'):
+            self.check(self.distinct)
+        self.assertEqual(leaf.read_bytes(), b'selected-cache-object-unmodified')
+
+    def test_independent_peer_symlink_target_remains_supported(self):
+        _, _, leaf = self._selected_cache_object()
+        independent = self.base/'independent-cache-content'
+        (independent/'aa').mkdir(parents=True)
+        (independent/'aa'/leaf.name).write_bytes(b'peer-only-cache-content')
+        (self.distinct/'8').symlink_to(independent, target_is_directory=True)
+        result = self.check(self.distinct)
+        self.assertEqual(result[1], ())  # No bind mounts.
+        self.assertEqual(len(result[2]), 1)
+        self.assertEqual(result[2][0][1], '8')
+        self.assertEqual(leaf.read_bytes(), b'selected-cache-object-unmodified')
+
+    def test_unresolved_symlink_peer_target_is_non_authorizing(self):
+        (self.distinct/'8').symlink_to(self.base/'absent-physical-cache',
+                                      target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError,
+                                    'physical separation is unverified'):
+            self.check(self.distinct)
+
+    def test_symlink_swap_changes_preflight_identity_without_deletion(self):
+        _, _, leaf = self._selected_cache_object()
+        one = self.base/'independent-one'
+        two = self.base/'independent-two'
+        one.mkdir(); two.mkdir()
+        link = self.distinct/'8'
+        link.symlink_to(one, target_is_directory=True)
+        old = self.check(self.distinct)
+        link.unlink()
+        link.symlink_to(two, target_is_directory=True)
+        new = self.check(self.distinct)
+        self.assertNotEqual(old, new)
+        self.assertEqual(leaf.read_bytes(), b'selected-cache-object-unmodified')
+
     def test_unrelated_nested_mount_on_same_device_remains_authorized(self):
         first, second, leaf = self._selected_cache_object()
         other = self.base/'other-physical-subtree'
@@ -1325,15 +1400,51 @@ class CacheManageTests(unittest.TestCase):
             with patch.object(cache,'_cache_directory_identity_chain',
                               side_effect=inode_chain):
                 with patch.object(cache,'_cache_peer_mounts',return_value=mount):
-                    with patch.object(cache,'_selected_cache_contains_mount_identity',
-                                      return_value=True):
-                        with patch.object(cache,'_scan_site_cache_files') as scanner:
-                            with self.assertRaisesRegex(cache.CacheManageError,
-                                                        'subtrees physically overlap'):
-                                cache.manage_cache('clear_files',self.site,
-                                    public=object(), approved=True,
-                                    recovery_id=applied['recovery_id'],**self.kwargs())
-                            scanner.assert_not_called()
+                    with patch.object(cache,'_cache_peer_symlink_targets',
+                                      return_value=((),set())):
+                        with patch.object(cache,'_selected_cache_contains_mount_identity',
+                                          return_value=True):
+                            with patch.object(cache,'_scan_site_cache_files') as scanner:
+                                with self.assertRaisesRegex(cache.CacheManageError,
+                                                            'subtrees physically overlap'):
+                                    cache.manage_cache('clear_files',self.site,
+                                        public=object(), approved=True,
+                                        recovery_id=applied['recovery_id'],**self.kwargs())
+                                scanner.assert_not_called()
+
+    def test_cache_clear_physical_peer_symlink_refused_before_any_file_walk(self):
+        applied = self.apply()
+        selected = self.root/'selected-cache-fixture'
+        peer = self.root/'independent-peer-fixture'
+        (selected/'8'/'aa').mkdir(parents=True)
+        peer.mkdir()
+        token = 'b'*29+'aa8'
+        proof = selected/'8'/'aa'/token
+        proof.write_bytes(b'keep-selected-cache-object')
+        (peer/'8').symlink_to(selected/'8', target_is_directory=True)
+        actual_guard = cache._verify_cache_peer_isolation
+        st = os.stat(selected)
+        source = {
+            'state':'Source Observed','zone_state':'Direct Zone',
+            'cache_zone':'ACHFC_7','cache_directory':self.ref['cache_directory'],
+            'unresolved_other_sites':0,'other_sites_same_directory':[],
+            'other_sites_same_zone':[], 'purge_scope':'Unknown',
+            'physical_peer_cache_paths':[{'id':8,'directory':str(peer)}],
+        }
+        def physical(*_):
+            return actual_guard(str(selected),(st.st_dev,st.st_ino),
+                                source['physical_peer_cache_paths'])
+        with patch.object(cache,'inspect_site_fastcgi_cache',return_value=source):
+            with patch.object(cache,'_verify_cache_peer_isolation',
+                              side_effect=physical):
+                with patch.object(cache,'_scan_site_cache_files') as scanner:
+                    with self.assertRaisesRegex(cache.CacheManageError,
+                                                'subtrees physically overlap'):
+                        cache.manage_cache('clear_files',self.site,
+                            public=object(),approved=True,
+                            recovery_id=applied['recovery_id'],**self.kwargs())
+                    scanner.assert_not_called()
+        self.assertEqual(proof.read_bytes(), b'keep-selected-cache-object')
 
     def test_cache_file_clear_refuses_restored_and_changed_source(self):
         applied = self.apply()

@@ -110,6 +110,25 @@ process but was **not installed into the running aaPanel plugin**;
 current-HEAD Browser Clear/Restore is not claimed. Exact completed CI,
 independent delta re-review and Owner integration approval remain gates.
 
+**PR #56 R3 physical-isolation delta (peer Cache symlinks):** A
+subsequent independent review identified ordinary symlinks below
+registered peer Cache roots as another potential physical alias.
+The guarded Clear now reads relevant peer `levels=1:2` entries
+through pinned directory descriptors, checks symlink target
+device/inode against selected-site Cache ancestor, subtree and
+file identities, and refuses dangerous or unresolved aliases
+before unlinking. An independent peer symlink remains eligible.
+The symlink identity signature joins existing repeated preflight
+and recovery uncertainty checks. The exact corrected ZIP passed
+native first-/second-level, Cache-file, multi-hop, independent
+and dangling-symlink experiments without changing the proof
+file hash; see [R3 peer symlink evidence](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-peer-symlink-r3-qa.json).
+The ZIP was executed in fresh native QA guest Python but was
+**not installed into running aaPanel**; this is not a new
+authenticated Browser Clear/Restore acceptance. Completed
+current-HEAD CI, independent delta review and Owner Merge approval
+remain required.
+
 This does **not** establish all-worker HTTPS, logged-in WooCommerce
 cross-customer privacy, Nginx Helper URL invalidation or a safe Purge All.
 Issues #2 and #21 remain open; PR #56 still requires independent
