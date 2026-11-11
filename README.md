@@ -31,9 +31,12 @@ saved recovery ID explicitly as **read-only evidence**, plus the saved journal
 phase when available. It offers an actionable next step: inspect the changed
 native source/ownership, reconcile only the intended change through aaPanel or
 supervised recovery, and Recheck. The UI **never** authorizes Restore solely
-because an ID exists; the normal `Applied`/`Recovery Required` and separate
-approval gates remain unchanged. Malformed/stale replies remain rejected; the
-read-only result is rendered as text, not trusted markup. There is **no**
+because an ID exists: **even a successful Apply acknowledgement is diagnostic
+only**. A separately initiated, current `Applied`/`Recovery Required` Recheck
+must validate the selected site's saved journal before Restore consent becomes
+available; a fresh explicit operator approval is still required.
+Malformed/stale replies remain rejected; the read-only result is rendered
+as text, not trusted markup. There is **no**
 Nginx/PHP/WordPress write, Purge All, new API or changed backend adapter.
 
 The real [aaPanel 8.0.7, installed 0.1.32 site #7 QA](https://github.com/AChWorks/ach-aapanel-customizer/issues/2#issuecomment-6787853322)

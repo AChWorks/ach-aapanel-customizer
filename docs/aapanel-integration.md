@@ -20,8 +20,11 @@ remain visible to the operator for controlled investigation **without** being
 used as a Restore credential. The UI now labels that ID `read-only; Restore
 locked`, shows the journal phase, and recommends inspecting/reconciling the
 actual native source or cache ownership before a *fresh* Recheck. Only the
-previously validated `Applied`/`Recovery Required` states may set the
-actionable recovery identity, followed by the separate explicit consent.
+previously validated `Applied`/`Recovery Required` states returned from a
+**separately initiated, current Recheck** may set the actionable recovery
+identity, followed by the separate explicit consent. A successful `Apply`
+response may display its recovery ID only as diagnostic evidence, and cannot
+enable Restore approval directly.
 
 This corrects a specific [real aaPanel 8.0.7 QA finding](https://github.com/AChWorks/ach-aapanel-customizer/issues/2#issuecomment-6787853322):
 adding a test-only alias to an already-cached PHP85 site changed one generated

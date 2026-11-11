@@ -329,6 +329,7 @@ function loadUi() {
       cacheActivationRecheckDisabled: elements.get('#ach-cache-activation-recheck').props.disabled,
       cacheActivationApplyDisabled: elements.get('#ach-cache-activation-apply').props.disabled,
       cacheActivationRestoreDisabled: elements.get('#ach-cache-activation-restore').props.disabled,
+      cacheRestoreConsentDisabled: elements.get('#ach-cache-restore-reviewed').props.disabled,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       nginxCandidateDisabled: elements.get('#ach-nginx-candidate-button').props.disabled,
@@ -1869,6 +1870,78 @@ test('Native Cache failed Apply and Restore retain recovery clues without retry 
   assert.match(ui.state().cacheActivationResult,/Operation ID: 3{32}/);
   assert.match(ui.state().cacheActivationResult,/Possible recovery ID: 2{32}/);
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Successful Cache Apply alone cannot authorize Restore until fresh Recheck', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady());
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  const applied=ui.statusClick('#ach-cache-activation-apply');
+  applied.respond(cacheOperationApplied());
+  assert.match(ui.state().cacheActivationResult,/Cache Apply observed/);
+  assert.match(ui.state().cacheActivationResult,/Recovery ID: f{32}/);
+  assert.equal(ui.state().cacheRestoreConsentDisabled,true,
+    'Apply acknowledgement is diagnostic evidence, not Restore approval');
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.match(ui.gate('ach-cache-restore-why').text,/Recheck Cache/);
+
+  // Even if a disabled checkbox is changed out of band, action guard holds.
+  const before=ui.requests.length;
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  ui.statusClick('#ach-cache-activation-restore');
+  assert.equal(ui.requests.length,before,'Apply-only recovery cannot dispatch Restore');
+
+  const recheck=ui.statusClick('#ach-cache-activation-recheck');
+  assert.equal(recheck.options.data.cache_action,'recheck');
+  recheck.respond({status:true,schema:1,state:'Applied',site_id:7,
+    site_key:'site.test',journal_phase:'applied',recovery_id:'f'.repeat(32),
+    read_only:true,runtime_verified:true,purge_supported:false});
+  assert.equal(ui.state().cacheRestoreConsentDisabled,false);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true,
+    'fresh positive Recheck alone still requires explicit Restore consent');
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-cache-activation-restore');
+  assert.equal(restore.options.data.cache_action,'restore');
+  assert.equal(restore.options.data.recovery_id,'f'.repeat(32));
+  assert.equal(restore.options.data.approved,'true');
+});
+
+test('After Apply, Recovery Required Recheck and site/inventory invalidation retain safety gates', () => {
+  for(const journal_phase of ['applied','prepared']){
+    const ui=loadUi(); selectHostsSite(ui);
+    ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady());
+    ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+    ui.statusClick('#ach-cache-activation-apply').respond(cacheOperationApplied());
+    assert.equal(ui.state().cacheRestoreConsentDisabled,true);
+    const check=ui.statusClick('#ach-cache-activation-recheck');
+    check.respond({status:true,schema:1,state:'Recovery Required',site_id:7,
+      site_key:'site.test',journal_phase,
+      recovery_scope:journal_phase==='prepared' ? 'prepublication' : null,
+      recovery_id:'f'.repeat(32),read_only:true,runtime_verified:false,
+      purge_supported:false});
+    assert.equal(ui.state().cacheRestoreConsentDisabled,false,journal_phase);
+    ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+    assert.equal(ui.state().cacheActivationRestoreDisabled,false,journal_phase);
+
+    ui.statusSetValue('#ach-hosts-site-id','8','input change');
+    assert.equal(ui.state().cacheRestoreConsentDisabled,true);
+    assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+    const n=ui.requests.length;
+    ui.statusClick('#ach-cache-activation-restore');
+    assert.equal(ui.requests.length,n,'site change cannot reuse previous recovery');
+
+    ui.statusSetValue('#ach-hosts-site-id','7','input change');
+    const stale=ui.statusClick('#ach-cache-activation-recheck');
+    const refresh=ui.refreshSites();
+    refresh.respond(hostsInventory());
+    stale.respond({status:true,schema:1,state:'Applied',site_id:7,
+      site_key:'site.test',journal_phase:'applied',recovery_id:'f'.repeat(32),
+      read_only:true,runtime_verified:true,purge_supported:false});
+    assert.equal(ui.state().cacheRestoreConsentDisabled,true);
+    assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  }
 });
 
 test('Site Cache Apply and Restore require exact approval and recovery identity', () => {

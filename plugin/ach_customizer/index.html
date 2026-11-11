@@ -2367,9 +2367,11 @@
         r.runtime_verified === true &&
         r.purge_supported === false && /^[0-9a-f]{32}$/.test(r.recovery_id || '');
       if (success) {
-        cacheRecoveryIdentity = r.recovery_id;
+        // Apply acknowledges the change but is NOT a recovery Recheck.
+        // Preserve its ID as read-only diagnostic text; only a separately
+        // validated Recheck may grant the actionable Restore identity.
         cacheActivationNotice('Cache Apply observed on origin PHP handler.'+
-          '\nRecovery ID: '+r.recovery_id+
+          '\nRecovery ID: '+r.recovery_id+' (read-only until fresh Recheck)'+
           '\nThis does not certify actual WordPress/WooCommerce private routes.'+
           '\nRecheck the saved generation before any Restore.');
       } else {
