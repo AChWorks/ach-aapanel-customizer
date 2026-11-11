@@ -2195,6 +2195,22 @@
     }
     return message;
   }
+  function nativeVhostExtensionHint(failure, id) {
+    if (!failure || failure.status !== false ||
+        failure.stage !== 'cache_activation_preview' ||
+        failure.reason_code !== 'native_extension_include_missing' ||
+        id !== hostsSiteId()) return '';
+    var site = hostsPageSites.get(id);
+    if (!site || typeof site.name !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(site.name)) return '';
+    return '\nFirst refresh native Config and rerun Cache readiness. If site statistics are enabled, aaPanel may add the Extension include after creating a site.' +
+      '\nNEVER save an editor opened before aaPanel changed the VHost; reload the latest complete Config first.' +
+      '\nOnly if the fresh Config STILL lacks the line, use aaPanel > Website > ' + site.name +
+      ' > Config (Nginx) to add this server-level line immediately BEFORE #PHP-INFO-START:\n' +
+      'include /www/server/panel/vhost/nginx/extension/' + site.name + '/*.conf;' +
+      '\nReview the full current VHost, Save with Nginx syntax verification, then run a fresh Cache readiness check.' +
+      '\nCustomizer never edits the VHost here or authorizes Cache Apply from this diagnostic.';
+  }
   function validCacheActivationReady(response, id) {
     var site = hostsPageSites.get(id), hash = /^[0-9a-f]{64}$/;
     return !!(response && site && response.status === true &&
@@ -2230,9 +2246,11 @@
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
       if (id !== hostsSiteId() || !validCacheActivationReady(r,id)) {
+        var failureText = cacheBackendFailure(failure, 'cache_activation_preview');
         cacheActivationNotice('Cache Apply is not ready: ' +
-          (cacheBackendFailure(failure, 'cache_activation_preview') ||
-            'The site, source or response could not be verified. Recheck native setup.'));
+          (failureText ||
+            'The site, source or response could not be verified. Recheck native setup.') +
+          (failureText ? nativeVhostExtensionHint(failure, id) : ''));
         cacheActivationLock();
         return;
       }

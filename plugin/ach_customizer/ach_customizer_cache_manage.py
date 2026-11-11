@@ -43,10 +43,12 @@ JOURNAL_PREFIX = 'ach_customizer.cache.'
 
 
 class CacheManageError(StatusPageError):
-    def __init__(self, stage, message, *, recovery_id=None):
+    def __init__(self, stage, message, *, recovery_id=None, reason_code=None):
         super().__init__(message)
         self.stage = stage
         self.recovery_id = recovery_id if isinstance(recovery_id, str) and TOKEN.fullmatch(recovery_id) else None
+        self.reason_code = (reason_code if reason_code == 'native_extension_include_missing'
+                            else None)
 
 
 def _hash(data):
@@ -156,6 +158,58 @@ def _read_source(path):
     return source.encode('utf8'), signature
 
 
+def _missing_extension_inventory(site, vhost_root):
+    """Read the prospective wildcard target before suggesting its activation.
+
+    Native aaPanel may create the Extension tree after site creation. An
+    absent, verified site directory is compatible with refresh-first guidance;
+    an existing directory is accepted only with bounded, anchored inspection
+    of the native inert site_total.conf. No foreign routing is endorsed.
+    """
+    parent = Path(vhost_root) / 'extension'
+    try:
+        root_fd = _directory(vhost_root)
+        try:
+            _owned_dir(root_fd)
+            try:
+                source = os.stat('extension', dir_fd=root_fd,
+                                 follow_symlinks=False)
+            except FileNotFoundError:
+                return  # No Extension parent yet on this native installation.
+            if not stat.S_ISDIR(source.st_mode):
+                raise ValueError('Native Extension parent is not a directory')
+        finally:
+            os.close(root_fd)
+
+        parent_fd = _directory(str(parent))
+        try:
+            _owned_dir(parent_fd)
+            if not os.fstat(parent_fd).st_mode & stat.S_IRUSR:
+                raise ValueError('Native Extension parent is inaccessible')
+            try:
+                site_dir = os.stat(site['name'], dir_fd=parent_fd,
+                                   follow_symlinks=False)
+            except FileNotFoundError:
+                return  # Native statistics has not created this site directory.
+            if (not stat.S_ISDIR(site_dir.st_mode) or
+                    not site_dir.st_mode & stat.S_IRUSR):
+                raise ValueError('Native Extension directory is inaccessible')
+        finally:
+            os.close(parent_fd)
+
+        _native_extension_fingerprint(
+            parent / site['name'],
+            site_id=site['id'], site_key=site['name'],
+            allowed_conf_names=frozenset(('site_total.conf',)))
+    except (OSError, ValueError, StatusPageError) as exc:
+        raise CacheManageError(
+            'compatibility',
+            'Native site VHost is missing its Extension include, but the on-disk '
+            'Extension directory is unverified. Inspect its ownership and '
+            '*.conf contents before adding a wildcard include. '
+            'No VHost or Cache change was made.') from exc
+
+
 def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     if (site.get('status') not in ('1',1) or not SITE_KEY.fullmatch(site['name'])
             or not any(binding.get('name') == site['name'] and binding.get('port') == 80
@@ -209,6 +263,23 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
                 '(observed PHP %s.%s); reconcile PHP in aaPanel and Recheck '
                 'before Restore' %
                 (php[0], php[1], observed[0], observed[1]))
+    # Stock aaPanel 8.0.7 nginxAdd() creates new VHosts without the
+    # per-site extension glob. Diagnose only that exact missing-include
+    # condition, not a commented, competing, edited or mixed include. This
+    # is operator guidance: never bootstrap a vendor-generated VHost here.
+    if (active.count(ext) == 0 and ext not in vhost.decode()
+            and len(php_includes) == 1 and php_includes[0] == php_line
+            and not re.search(r'\binclude\s+[^;\n]*/extension/[^;\n]*;', active)
+            and not re.search(r'\bfastcgi_cache(?:_purge)?\b', active)
+            and not re.search(r'\blocation\s+~', active[:active.index(php_line)])):
+        _missing_extension_inventory(site, vhost_root)
+        raise CacheManageError(
+            'compatibility',
+            'Native aaPanel site VHost is missing the per-site extension include. '
+            'Native site statistics may add it later; refresh the site Config and '
+            'rerun Cache readiness before any manual edit. If still missing, use '
+            'the latest native Config editor and recheck. No VHost/Cache change was made.',
+            reason_code='native_extension_include_missing')
     if (active.count(ext) != 1 or len(php_includes) != 1
             or php_includes[0] != php_line
             or active.index(ext) > active.index(php_line)

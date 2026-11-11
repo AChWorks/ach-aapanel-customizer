@@ -113,6 +113,11 @@ class ach_customizer_main:
             message = "Unexpected plugin error; inspect Activity using Operation ID"
         response = {"status": False, "stage": stage,
                     "msg": message, "operation_id": operation_id}
+        # A narrow read-only diagnosis for aaPanel's fresh-site VHost shape.
+        # No Cache mutation/recovery endpoint accepts this as authorization.
+        if (stage == "cache_activation_preview" and
+                getattr(error, "reason_code", None) == "native_extension_include_missing"):
+            response["reason_code"] = "native_extension_include_missing"
         actual_recovery = getattr(error, "recovery_id", None)
         if (isinstance(actual_recovery, str) and
                 re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):

@@ -154,6 +154,25 @@ class CacheEndpointTests(unittest.TestCase):
             self.assertEqual(result['state'],'Ready for Review')
             self.assertEqual(preview.call_count,1)
 
+    def test_native_missing_extension_hint_is_read_only_preview_only(self):
+        cause=manager.CacheManageError('compatibility',
+            'Native aaPanel site VHost is missing the per-site extension include.',
+            reason_code='native_extension_include_missing')
+        with patch.dict(sys.modules,{'flask':self.flask()}),\
+             patch.object(self.plugin,'_require_enabled'),\
+             patch.object(self.plugin,'_selected_native_website',
+                          side_effect=self.selected),\
+             patch.object(manager,'preview_cache_activation',side_effect=cause):
+            failed=self.plugin.preview_cache_activation(self.args())
+        self.assertFalse(failed['status'])
+        self.assertEqual(failed['stage'],'cache_activation_preview')
+        self.assertEqual(failed['reason_code'],'native_extension_include_missing')
+        self.assertNotIn('recovery_id',failed)
+        self.assertNotIn('apply_supported',failed)
+        # It is diagnostic metadata, never passed to the mutating route.
+        other=self.plugin._fail('cache_manage',cause,'a'*32)
+        self.assertNotIn('reason_code',other)
+
 
 if __name__=='__main__':
     unittest.main()
