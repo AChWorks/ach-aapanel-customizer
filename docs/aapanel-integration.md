@@ -49,6 +49,31 @@ across native sites or accepted Nginx Helper integration. See
 [exact observation record](evidence/aaPanel-8.0.7-2026-11-11-two-site-cache-file-clear-qa.json)
 and the open Issues #2/#21.
 
+**Separate real installed-package native acceptance (PR #56, 2026-11-11):**
+The exact 54-member `0.1.35 UNRELEASED` ZIP (SHA-256
+`e1cb9d151e8ebfa54d334a9721f4c7ec8c687f525e11b8ab23264d68f9d20600`)
+was installed through actual aaPanel 8.0.7
+`panelPlugin.update_zip/input_zip`; 54/54 installed files matched.
+The QA-only BT-Panel reload made the new Python handler resident.
+An authenticated primary-admin Browser then tested selected site #6/PHP81
+and site #7/PHP85: explicit Apply / fresh Recheck Applied; independent
+HTTP200 MISS -> HIT -> HIT and generation-specific disk objects.
+A foreign top-level site #6 cache entry caused a genuine, non-deleting
+Clear refusal and diagnostic operation ID. A subsequent fresh Recheck
+and consented Clear removed exactly three site #6 objects, leaving zero
+before a new request; site #6 returned MISS and site #7 retained HIT
+with its cache generation file hash unchanged. Both sites completed native
+approved Restore / Recheck Restored. All nine original sites returned
+HTTP200, Nginx syntax passed, original VHost/main/shared config hashes
+remained unchanged, and the protected recovery ZIPs/snapshots were retained.
+[Native exact-ZIP acceptance record](evidence/aaPanel-8.0.7-2026-11-11-pr56-native-cache-clear-qa.json)
+includes the precise site/recovery identities and limitations.
+This replaces the prior *unverified installed Clear action* gap for
+this one candidate and environment, but not all-worker/HTTPS,
+WooCommerce logged-in A/B, vendor full regeneration or Nginx Helper
+Purge All/invalidation acceptance. Keep Issues #2/#21 open; no Merge,
+Release or Production permission is inferred.
+
 ## New-site native Nginx Extension compatibility (0.1.35 development; Issues #2 / #21)
 
 The **authenticated native aaPanel 8.0.7 Website → Add site** operation produced a fresh PHP8.5 Nginx VHost with the expected `include enable-php-85.conf;` but **without** its per-site `include /www/server/panel/vhost/nginx/extension/<site>/*.conf;`. The installed vendor's `class_v2/panel_site_v2.py::nginxAdd()` and older `class/panelSite.py::nginxAdd()` omit this extension, while `nginx_update_config()` reconstruction templates include it. Vendor regeneration can replace much more of the operator VHost, so the Customizer **must not invoke regeneration to cure one missing include** and must not edit aaPanel core. [Exact first real test and cleanup](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6792970143).

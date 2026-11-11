@@ -1,0 +1,133 @@
+{
+  "date_utc": "2026-11-11",
+  "environment": {
+    "aapanel": "8.0.7",
+    "browser": "real authenticated native primary-admin session",
+    "guest": "aac-native-qa",
+    "incus_project": "ach-aapanel-qa",
+    "nginx": "1.28.3",
+    "qa_only": true,
+    "uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040"
+  },
+  "foreign_entry_refusal": {
+    "fixture": "qa-pr56-foreign-sentinel (unexpected top-level site-6 file)",
+    "legitimate_site6_generation_sha256_after_denial": "840ff110825ad05c2407fea88563d2274d59f3dfce1b4833cdda9a5c022215cf",
+    "note": "The temporary test marker was absent at the later reconciliation; its removal actor was not established. No valid generation-object deletion was observed in the denied attempt.",
+    "operation": "browser-authorized clear_files",
+    "operation_id": "526ba4237496498eb9faf5c8373a01a4",
+    "outcome": "DENIED",
+    "reason": "Unexpected top-level site Cache object"
+  },
+  "installed_package": {
+    "guest_zip": "/root/achqa/pr56-0.1.35-ba4c169-exact.zip",
+    "installed_file_hash_matches": 54,
+    "members": 54,
+    "method": "real aaPanel panelPlugin.update_zip + input_zip; BT-Panel reload",
+    "result": "Installation succeeded; exact bytes and live Browser control verified",
+    "sha256": "e1cb9d151e8ebfa54d334a9721f4c7ec8c687f525e11b8ab23264d68f9d20600",
+    "version": "0.1.35 UNRELEASED"
+  },
+  "integration_base": "78a2df0b3a69cbf340d5008af2ab1d4fdc0cedb3",
+  "pr": 56,
+  "recovery_and_postconditions": {
+    "active_customizer_cache_fragments": 0,
+    "all_nine_http_200": true,
+    "new_candidate_zip_retained": true,
+    "nginx_syntax": "PASS",
+    "original_config_sha256": {
+      "nginx_main": "dd87d0dad8fd394fb7e5f0fbe6420bc2fc02a50196d144600b732b87771c65ef",
+      "shared_fastcgi": "1db1d19ab113df6707d98f551e1d5e8daade8c4ff2825c39fed7879ee0613035",
+      "vhost6": "c63f4a5b455da0f31f72a47b5096abdbc3fa85299bf13082cdd12e533622b5e8",
+      "vhost7": "bba8b84c832b2e0f9c787b1cee60263b870c8cc2e7c46a8f48bc0901828c9460"
+    },
+    "panel_control_plane_running": true,
+    "protected_snapshots_retained": [
+      "qa21-pre-exactzip-20261109",
+      "qa21-cold-restore-20261109"
+    ],
+    "registered_site_ids": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "rollback_zips_retained": [
+      "pr55-0.1.35-785d08f-delta.zip",
+      "pr54-0.1.34-3de4c53.zip",
+      "qa33-main04ab50d-exact.zip"
+    ],
+    "site6": "native approved Restore -> fresh Recheck Restored, runtime_verified=true",
+    "site7": "native approved Restore -> fresh Recheck Restored, runtime_verified=true"
+  },
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "schema": 1,
+  "sites": {
+    "6": {
+      "applied_recheck": "Applied, runtime_verified=true",
+      "cache_directory": "/www/server/ach-customizer-fastcgi/site-6",
+      "generation": "dcdbdfb860ef4be6903436019f918d47",
+      "get_index_php_cache_sequence": [
+        "MISS",
+        "HIT",
+        "HIT"
+      ],
+      "host": "qa-fixture-php81.test",
+      "php": "8.1",
+      "recovery_id": "2916eeaf231d4489a5f5a4bb54a8ad01",
+      "zone": "ACHFC_6"
+    },
+    "7": {
+      "applied_recheck": "Applied, runtime_verified=true",
+      "cache_directory": "/www/server/ach-customizer-fastcgi/site-7",
+      "generation": "032ae064d6f547faac54847395b8493c",
+      "get_index_php_cache_sequence": [
+        "MISS",
+        "HIT",
+        "HIT"
+      ],
+      "host": "qa-fixture-wp85.test",
+      "php": "8.5",
+      "recovery_id": "67d1b3e443b04405a1e139cb65d83212",
+      "zone": "ACHFC_7"
+    }
+  },
+  "source_candidate": "ba4c1695c04715143d9b0c2cc2b05b2f4351ccca",
+  "source_tests": {
+    "conclusion": "SUCCESS",
+    "github_ci_run": 43078046336,
+    "javascript_pass": 299,
+    "python_pass": 626
+  },
+  "still_unverified": [
+    "real logged-in WooCommerce customer A/B private-response safety",
+    "Nginx Helper 2.4.1 generation-aware URL invalidation and Purge All",
+    "all Nginx worker generations / HTTPS route equivalence",
+    "full aaPanel native VHost regeneration and cross-version behavior",
+    "Production readiness, release and independent PR approval"
+  ],
+  "successful_clear": {
+    "flow": "fresh native Recheck Applied -> distinct consent -> clear_files",
+    "nginx_helper_invoked": false,
+    "note": "Observed origin responses and on-disk bytes; no claim about all loaded workers or third-party cookies.",
+    "shared_wordpress_purge_invoked": false,
+    "site6_files_after": 0,
+    "site6_files_after_new_request": 1,
+    "site6_files_before": 3,
+    "site6_next_get": {
+      "cache": "MISS",
+      "status": 200
+    },
+    "site7_generation_sha256_before_and_after": "3088a937b697755a78e7532c5a67bc24085847a740cd7e31624d54fc1d756edd",
+    "site7_next_get": {
+      "cache": "HIT",
+      "status": 200
+    },
+    "target_site_id": 6,
+    "verified_files_removed": 3
+  }
+}

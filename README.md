@@ -42,15 +42,33 @@ partial/uncertain clear returns a recovery ID and requires another Recheck;
 there is no blind retry, Nginx reload, vendor-file edit, cache bypass, or
 shared `WORDPRESS` directory mutation.
 
-Actual **aaPanel QA guest Nginx 1.28.3/PHP85** testing with two independent
-loopback Nginx ports, two physical directories and two unique keys zones
-observed `MISS→HIT` for both hosts; removing **only site A** cached file
-produced `A=MISS` and `B=HIT` on subsequent requests. This proves the
-basic Nginx physical isolation behavior of that scratch setup, **not** a
-new installed native-plugin Browser acceptance, all loaded worker safety,
-WooCommerce user privacy or Nginx Helper URL/Purge All compatibility. The
-broader acceptance work in Issues #2/#21 remains open. See
-[isolated test observations](docs/evidence/aaPanel-8.0.7-2026-11-11-two-site-cache-file-clear-qa.json).
+A first isolated aaPanel QA Nginx test used two scratch loopback listeners and
+independent zones/directories. Both produced MISS then HIT, and removing only
+the first site's object produced A=MISS and B=HIT. This scratch experiment
+is separately documented in
+[the original two-site record](docs/evidence/aaPanel-8.0.7-2026-11-11-two-site-cache-file-clear-qa.json).
+
+The exact PR #56 **54-member** ZIP (SHA-256
+`e1cb9d151e8ebfa54d334a9721f4c7ec8c687f525e11b8ab23264d68f9d20600`)
+was subsequently imported through the actual aaPanel 8.0.7
+`panelPlugin.update_zip/input_zip` path, with 54/54 installed-byte matches,
+a controlled BT-Panel reload, and an authenticated primary-admin Browser test.
+Native sites #6 (PHP 8.1) and #7 (PHP 8.5) each passed consented
+Apply / fresh Recheck Applied and real HTTP 200 MISS -> HIT -> HIT.
+A deliberately unexpected site #6 cache filename caused the new Clear to
+refuse without deleting the valid generation object. On a separate fresh
+Applied Recheck, an approved site #6 Clear removed three cache files
+(then zero present); site #6 returned MISS while site #7 stayed HIT and
+its generation-object SHA-256 remained byte-identical. Both sites then passed
+separately approved Restore and Recheck Restored. All nine original native
+websites remained HTTP 200; original source VHost/main/shared Nginx config
+hashes were retained and `nginx -t` passed. Recovery ZIPs/snapshots were
+preserved. See
+[installed-package native evidence](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-native-cache-clear-qa.json).
+This does **not** establish all-worker HTTPS, logged-in WooCommerce
+cross-customer privacy, Nginx Helper URL invalidation or a safe Purge All.
+Issues #2 and #21 remain open; PR #56 still requires independent
+review and separate Owner Merge authorization.
 
 ## Unreleased 0.1.35: fresh aaPanel site Extension compatibility diagnosis (Issues #2 / #21)
 
