@@ -11,6 +11,29 @@ The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the
 4. Public aaPanel source [panelPlugin.py](https://github.com/aaPanel/aaPanel/blob/38bf35903b37b50d9654f47c4ad904ca3369715f/class/panelPlugin.py) recognizes `plugin/<name>/info.json` and constructs local-plugin inventory. The inspected implementation invokes uninstall scripts and removes plugin code. This is source evidence for that Git revision, **not** a cross-version contract.
 5. The same official PDF documents read-only `public.M('sites')` selectors for site IDs, names, paths and status. Actual panel schemas and revision-specific API behavior still require tests.
 
+## Native Cache recovery guidance on source drift (0.1.33 unreleased)
+
+The existing native `manage_cache_policy(cache_action=recheck)` response may
+contain a valid saved `recovery_id` when `state=Needs Review` and its
+`journal_phase` is `prepared`, `applied`, or `restored`. Such evidence must
+remain visible to the operator for controlled investigation **without** being
+used as a Restore credential. The UI now labels that ID `read-only; Restore
+locked`, shows the journal phase, and recommends inspecting/reconciling the
+actual native source or cache ownership before a *fresh* Recheck. Only the
+previously validated `Applied`/`Recovery Required` states returned from a
+**separately initiated, current Recheck** may set the actionable recovery
+identity, followed by the separate explicit consent. A successful `Apply`
+response may display its recovery ID only as diagnostic evidence, and cannot
+enable Restore approval directly.
+
+This corrects a specific [real aaPanel 8.0.7 QA finding](https://github.com/AChWorks/ach-aapanel-customizer/issues/2#issuecomment-6787853322):
+adding a test-only alias to an already-cached PHP85 site changed one generated
+VHost line; Recheck refused with `Needs Review`, but the saved recovery ID was
+hidden in the inline report. After reverting the native change, a fresh Recheck
+accepted the same recovery and an explicitly approved Restore succeeded. This
+UI refinement does not weaken backend source identity, site snapshot, CSRF,
+Nginx reload, Purge All prohibition or independent native acceptance gates.
+
 ## Native management navigation and inspection evidence (0.1.32 candidate)
 
 The native aaPanel dialog uses an operator-task hierarchy: Overview,
