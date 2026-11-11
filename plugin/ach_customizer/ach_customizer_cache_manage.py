@@ -383,6 +383,77 @@ def _path_owned(site_id, *, cache_root=CACHE_ROOT, allow_missing=False):
 
 
 
+def _cache_directory_identity_chain(path):
+    """Pin every component of one native cache path without following symlinks.
+
+    Identity chains detect both external bind mounts pointing at the selected
+    directory and peer cache roots containing/contained in that directory.
+    No peer path supplied by the browser is ever accepted here.
+    """
+    if (not isinstance(path, str) or not path.startswith('/') or
+            path.startswith('//') or
+            any(part in ('', '.', '..') for part in path.split('/')[1:])):
+        raise CacheManageError('compatibility',
+                               'Unverified registered Cache directory path')
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open('/', flags)
+    identities = []
+    try:
+        parent = os.fstat(fd)
+        identities.append((parent.st_dev, parent.st_ino))
+        for name in path.split('/')[1:]:
+            next_fd = os.open(name, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+            info = os.fstat(fd)
+            identities.append((info.st_dev, info.st_ino))
+        return tuple(identities)
+    finally:
+        os.close(fd)
+
+
+def _verify_cache_peer_isolation(selected_path, expected_identity, peer_paths):
+    """Prove relevant native peer cache trees are physically separate.
+
+    A distinct canonical pathname is not enough: an external bind mount may
+    name the selected inode, and a peer root may overlap its subtree.
+    Rechecks around deletion detect observed topology changes; they cannot
+    make arbitrary external mount changes atomic with Nginx traffic.
+    """
+    if not isinstance(peer_paths, list):
+        raise CacheManageError('compatibility',
+                               'Registered peer Cache directory inventory unavailable')
+    if not peer_paths:
+        return ()
+    try:
+        selected_chain = _cache_directory_identity_chain(selected_path)
+        if selected_chain[-1] != tuple(expected_identity):
+            raise CacheManageError('concurrency',
+                                   'Selected Cache directory physical identity changed')
+        verified = []
+        seen = set()
+        for peer in peer_paths:
+            if (not isinstance(peer, dict) or set(peer) != {'id', 'directory'}
+                    or type(peer['id']) is not int or peer['id'] < 1
+                    or peer['id'] in seen):
+                raise CacheManageError('compatibility',
+                                       'Registered peer Cache identity is ambiguous')
+            seen.add(peer['id'])
+            # Missing global keys_zone paths are not proof of isolation.
+            directory = peer['directory']
+            peer_chain = _cache_directory_identity_chain(directory)
+            if (selected_chain[-1] in peer_chain or
+                    peer_chain[-1] in selected_chain):
+                raise CacheManageError('compatibility',
+                                       'Registered Cache directories physically overlap')
+            verified.append((peer['id'], directory, peer_chain))
+        return tuple(verified)
+    except (OSError, UnicodeError) as exc:
+        raise CacheManageError('compatibility',
+                               'Registered peer Cache physical separation is unverified') from exc
+
+
+
 def _scan_site_cache_files(site_id, expected_identity, *, remove=False):
     """Validate Nginx levels=1:2 objects inside ONE already-owned cache tree.
 
@@ -1009,7 +1080,8 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 native = inspect_site_fastcgi_cache(
                     public, site['id'], site['name'], vhost_root=vhost_root,
                     nginx_root=nginx_root,
-                    rewrite_root=str(Path(vhost_root).parent / 'rewrite'))
+                    rewrite_root=str(Path(vhost_root).parent / 'rewrite'),
+                    include_physical_peers=True)
                 if (native.get('state') != 'Source Observed' or
                         native.get('zone_state') != 'Direct Zone' or
                         native.get('cache_zone') != 'ACHFC_' + str(site['id']) or
@@ -1019,6 +1091,13 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                         native.get('other_sites_same_zone')):
                     raise CacheManageError('compatibility',
                         'Registered Cache source isolation requires fresh review')
+                # Source-text path inequality does not exclude an external
+                # bind-mount/symlink alias to this site's physical directory.
+                # Verify all registered cache-using peers' pinned dev/inode
+                # chains, then recheck before the first unlink.
+                peer_paths = native.get('physical_peer_cache_paths')
+                identities = _verify_cache_peer_isolation(
+                    record['cache_directory'], record['cache_identity'], peer_paths)
                 # First pass rejects foreign entries before unlinking any file.
                 # Nginx workers can write concurrently, so a changed tree or
                 # uncertain removal must never be reported as completed.
@@ -1028,8 +1107,18 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     raise CacheManageError('ownership',
                         'Selected Cache files are not safely enumerable') from exc
                 try:
+                    if _verify_cache_peer_isolation(
+                            record['cache_directory'], record['cache_identity'],
+                            peer_paths) != identities:
+                        raise CacheManageError(
+                            'concurrency', 'Registered Cache directory topology changed')
                     removed = _scan_site_cache_files(
                         site['id'], record['cache_identity'], remove=True)
+                    if _verify_cache_peer_isolation(
+                            record['cache_directory'], record['cache_identity'],
+                            peer_paths) != identities:
+                        raise CacheManageError(
+                            'concurrency', 'Registered Cache directory topology changed')
                     if _cache_observation(
                             site, record, public, vhost_root=vhost_root,
                             nginx_root=nginx_root, data_dir=data_dir,

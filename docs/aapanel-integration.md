@@ -74,6 +74,40 @@ WooCommerce logged-in A/B, vendor full regeneration or Nginx Helper
 Purge All/invalidation acceptance. Keep Issues #2/#21 open; no Merge,
 Release or Production permission is inferred.
 
+**Physical alias review remediation (PR #56):** The earlier two-site
+installed-package Clear proof did not exercise an external bind mount.
+The reviewed candidate's public source audit correctly labeled other
+canonical peer directory paths as `purge_scope=Unknown`, but Clear only
+checked textual peer equality. The amended implementation obtains the
+complete twice-verified registered cache-using site inventory as an
+internal-only path list; any non-resolvable zone path denies the Clear.
+An anchored root-to-leaf `O_NOFOLLOW` open compares actual directory
+`st_dev/st_ino` chains and rejects physical aliases, even when the peer
+path lies outside the managed Cache root; nested/ancestor overlaps are
+also refused. The physical identity set is checked again before the
+first unlink and after removal. An observed post-unlink drift is
+reported as uncertain, not successful, with the original recovery ID.
+Ordinary verified separate Cache directories remain supported even
+where source-only `purge_scope` remains `Unknown`.
+
+Focused native QA tested a **real external Linux bind mount** inside
+the isolated aaPanel 8.0.7 guest: a separately named peer resolving
+to the same inode was denied; a genuinely distinct directory was
+accepted; contents were unchanged; the temporary mount was unmounted
+and test fixtures removed. The twice-read native site inventory also
+identified two other registered sites using the existing WORDPRESS
+physical directory; positive identity comparison confirmed they
+differ from the selected managed directory. Local tests cover peer
+symlink, missing/unreadable paths, inode drift and pre-unlink denial.
+[Exact delta source/native file-identity observations](evidence/aaPanel-8.0.7-2026-11-11-pr56-physical-peer-delta-qa.json).
+The corrected ZIP was **not re-imported into the running aaPanel
+plugin** and no new authenticated Browser Clear/Restore acceptance is
+claimed: the native installer and protected Browser-login tool calls
+were blocked by execution safety checks. The pre-delta native Browser
+Clear evidence remains identified with its original exact ZIP.
+Independent delta re-review must evaluate this remaining validation
+boundary; no Merge/Release/Production action is authorized.
+
 ## New-site native Nginx Extension compatibility (0.1.35 development; Issues #2 / #21)
 
 The **authenticated native aaPanel 8.0.7 Website → Add site** operation produced a fresh PHP8.5 Nginx VHost with the expected `include enable-php-85.conf;` but **without** its per-site `include /www/server/panel/vhost/nginx/extension/<site>/*.conf;`. The installed vendor's `class_v2/panel_site_v2.py::nginxAdd()` and older `class/panelSite.py::nginxAdd()` omit this extension, while `nginx_update_config()` reconstruction templates include it. Vendor regeneration can replace much more of the operator VHost, so the Customizer **must not invoke regeneration to cure one missing include** and must not edit aaPanel core. [Exact first real test and cleanup](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6792970143).

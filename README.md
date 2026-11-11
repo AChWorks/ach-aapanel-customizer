@@ -65,6 +65,30 @@ websites remained HTTP 200; original source VHost/main/shared Nginx config
 hashes were retained and `nginx -t` passed. Recovery ZIPs/snapshots were
 preserved. See
 [installed-package native evidence](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-native-cache-clear-qa.json).
+
+**PR #56 physical-peer delta after independent review:** The original
+review found that different canonical peer-cache paths could still be
+the same physical directory through an external bind mount. The amended
+Clear now obtains all registered peer zone-to-directory mappings from the
+existing twice-verified source audit and checks actual device/inode
+identities through component-wise no-follow directory descriptors. Direct
+aliases, parent/descendant overlaps, symlinks and unresolved peer roots
+cannot authorize deletion; changed peer topology is rechecked before
+the first unlink and afterward. A source-only `purge_scope=Unknown` is not
+an automatic rejection when physically distinct directories can be
+verified. The correction passed local focused/full source regressions
+and a **real external bind-mount** identity test on the isolated aaPanel
+8.0.7 guest; an ordinary native site with two other cache-using peers
+also passed this physical preflight despite source-only
+`purge_scope=Unknown`. See the
+[review-remediation QA record](docs/evidence/aaPanel-8.0.7-2026-11-11-pr56-physical-peer-delta-qa.json).
+**Validation boundary:** The amended ZIP was imported as a Python
+module for the focused native filesystem test, but was **not installed
+into the running aaPanel plugin** due to execution-tool restrictions.
+The earlier native Browser Clear acceptance belongs to the pre-delta
+candidate; no new installed-R1 Browser replay is claimed. Independent
+delta re-review and Owner authorization remain required.
+
 This does **not** establish all-worker HTTPS, logged-in WooCommerce
 cross-customer privacy, Nginx Helper URL invalidation or a safe Purge All.
 Issues #2 and #21 remain open; PR #56 still requires independent

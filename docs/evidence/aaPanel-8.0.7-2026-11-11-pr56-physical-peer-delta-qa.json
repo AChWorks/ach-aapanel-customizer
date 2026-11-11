@@ -1,0 +1,99 @@
+{
+  "correction": {
+    "lifecycle": "guard checks source inventory, physical peer identities before cache walk and immediately before first unlink, and verifies unchanged identities afterward; newly observed topology drift after removal is uncertain with original recovery ID",
+    "physical_guard": "anchored component-wise O_DIRECTORY|O_NOFOLLOW path open, compare dev/inode identity chains and parent/descendant overlap of target and each peer",
+    "source_audit": "include_physical_peers=True returns all twice-source-verified registered cache-using peers, including undeclared-zone paths as null; public source-only result unchanged",
+    "source_scope": "No generic Purge All and no change to existing Apply/Recheck/Restore or global WordPress cache",
+    "unknown_scope": "purge_scope=Unknown does not alone reject confirmed physically distinct peers",
+    "unresolved_path": "missing, linked, unreadable and undeclared zone paths remain nonauthorizing before removal"
+  },
+  "exact_source_zip": {
+    "guest_path": "/root/achqa/pr56-0.1.35-peer-isolation-r1.zip",
+    "installed_remediation": false,
+    "new_zip_native_browser_clear_replay": false,
+    "reason": "Native installer action and protected Browser credential-login action were rejected by execution-tool safety checks; neither was retried via a privilege bypass",
+    "sha256": "fff51958779ae544fdc7eca18ac44ff290553687b5e23ca2982f39f897d09a69",
+    "source_usage": "The corrected helper was imported directly from this ZIP in a fresh QA guest Python process; this was NOT installed into aaPanel's running plugin directory",
+    "version": "0.1.35 UNRELEASED"
+  },
+  "local_source_validation": {
+    "javascript_pass": 299,
+    "physical_regressions": "Tests cover independent paths, same inode, external bind mount inode model, symlinked peer/ancestor, missing/non-directory peer, unreadable peer, parent/subtree overlap, selected inode drift, missing inventory, source scan path inclusion, pre-unlink rejection and topology drift",
+    "python_pass": 640,
+    "unit_tests_linux_unprivileged": "External bind mount identity modeled by delivering selected dev/inode for a different lexical peer; actual Linux bind-mount test separately executed in QA guest"
+  },
+  "native_qa": {
+    "guest_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "instance": "aac-native-qa",
+    "nginx": "1.28.3",
+    "panel": "8.0.7",
+    "postconditions": {
+      "candidate_ZIP_preserved_in_qa_guest": true,
+      "managed_cache_extension_fragments": 0,
+      "native_sites_http_200_count": 9,
+      "native_sites_unchanged_ids": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "nginx_config_test": "PASS",
+      "protected_snapshot_and_rollback_assets": "Retained from prior QA; no restore/snapshot deletion performed",
+      "resident_plugin_version": "Previous PR56 candidate (not the R1 correction)"
+    },
+    "project": "ach-aapanel-qa",
+    "real_bind_mount": {
+      "different_path_same_dev_inode": true,
+      "distinct_control": "/root/achqa/pr56-r1-bind-distinct",
+      "distinct_root_verified": "ACCEPT",
+      "external_alias": "/root/achqa/pr56-r1-bind-peer",
+      "external_bind_alias_verified": "DENIED / compatibility / Registered Cache directories physically overlap",
+      "origin": "/root/achqa/pr56-r1-bind-source",
+      "source_and_alias_file_sha256_unchanged": "6f74786b51c8ae1da926c0075af68e572db26ef5ef9f05d1f1710bf1f3877dc6",
+      "test_owned_directories_removed": true,
+      "test_owned_mount_unmounted": true
+    },
+    "real_native_site_peer_inventory": {
+      "current_cache_state": "Restored; source-only peer inventory read",
+      "native_audit_state": "Source Observed",
+      "note": "This is a real source plus physical-identity preflight; it is not an actual installed-candidate Clear operation",
+      "observed_physical_peer_directories": [
+        {
+          "directory": "/www/server/fastcgi_cache",
+          "id": 9
+        },
+        {
+          "directory": "/www/server/fastcgi_cache",
+          "id": 10
+        }
+      ],
+      "outcome": "ACCEPT",
+      "purge_scope": "Unknown",
+      "selected_site": 6,
+      "selected_site_key": "qa-fixture-php81.test",
+      "unresolved_other_sites": 0,
+      "verified_distinct_peers": 2
+    }
+  },
+  "pr": 56,
+  "recorded_at_utc": "2026-11-11",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "review": {
+    "finding": "BLOCKER-01",
+    "previous_head": "f3a44281eb18925f89d1dc558e61dea141e58462",
+    "previous_tree": "172e19e61497caca47bb18b66d837af036cde8fc",
+    "target": "main@78a2df0b3a69cbf340d5008af2ab1d4fdc0cedb3",
+    "verdict": "CHANGES_REQUIRED"
+  },
+  "schema": 1,
+  "unverified": [
+    "The corrected candidate was not re-imported as a native plugin in this QA pass",
+    "The amended native Browser Apply/Recheck/Clear/Restore flow was not rerun",
+    "Cross-customer WooCommerce safety, Nginx Helper generation-aware purge, full VHost regeneration and HTTPS remain independent product tasks"
+  ]
+}

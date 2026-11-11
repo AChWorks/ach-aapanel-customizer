@@ -304,6 +304,38 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         self.assertEqual(result["purge_scope"], "Unknown")
         self.assertFalse(result["purge_supported"])
 
+    def test_internal_native_peer_directory_list_reports_distinct_and_unresolved(self):
+        global_file=self.global_cache_fixture()
+        original=global_file.read_text()
+        php=self.nginx/'enable-php-81-wpfastcgi.conf'
+        php.write_text(self.native_snippet.replace(
+            'fastcgi_cache WORDPRESS;', 'fastcgi_cache ALTERNATE;'
+        ).replace('php-cgi-85.sock','php-cgi-81.sock'))
+        self.make_vhost('shop.test','enable-php-81-wpfastcgi.conf')
+
+        def inspect_internal():
+            return audit.inspect_site_fastcgi_cache(
+                self.panel,4,'wp.test',vhost_root=str(self.vhost),
+                nginx_root=str(self.nginx),
+                rewrite_root=str(self.rewrites),include_physical_peers=True)
+
+        global_file.write_text(original+
+            'fastcgi_cache_path /www/server/another-cache '
+            'keys_zone=ALTERNATE:50m;\n')
+        plain=self.inspect()
+        self.assertNotIn('physical_peer_cache_paths',plain)
+        separate=inspect_internal()
+        self.assertEqual(separate['state'],'Source Observed',separate)
+        self.assertEqual(separate['purge_scope'],'Unknown')
+        self.assertEqual(separate['physical_peer_cache_paths'],[
+            {'id':6,'directory':'/www/server/another-cache'}])
+
+        global_file.write_text(original)
+        unresolved=inspect_internal()
+        self.assertEqual(unresolved['state'],'Source Observed',unresolved)
+        self.assertEqual(unresolved['physical_peer_cache_paths'],[
+            {'id':6,'directory':None}])
+
     def test_double_leading_slash_selected_cache_directory_needs_review(self):
         global_file = self.global_cache_fixture()
         global_file.write_text(global_file.read_text().replace(
