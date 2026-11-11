@@ -33,7 +33,11 @@ The UX refinement on the same unreleased candidate also provides local
 state-aware eligibility messages and `aria-describedby` references for
 read-only comparison baselines, Cache Apply/Restore consent, saved PHP-FPM
 Monitor policy, manual PHP preparation, and each Status Pages
-Apply/Restore option. These messages are **derived from existing approved
+Apply/Restore option. A later Cache diagnostics follow-up preserves only
+controlled backend failure reasons and validated operation/recovery IDs
+inside the same Cache Preview/Recheck/Apply/Restore panel (not just the
+transient global message); unknown stages or invalid responses retain
+generic guidance and never authorize a write. These messages are **derived from existing approved
 backend-observation state**; they neither introduce a new write permission
 nor remove the existing source/recovery/CSRF guards. A disabled checkbox
 explicitly indicates which Compare, Preview or Recheck to run and when

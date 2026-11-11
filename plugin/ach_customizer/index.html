@@ -2179,6 +2179,22 @@
   function cacheActivationNotice(message) {
     root.find('#ach-cache-activation-result').text(message);
   }
+  function cacheBackendFailure(failure, stage) {
+    // request() passes controlled status:false responses as its second callback
+    // argument. Preserve the useful stage/correlation/recovery evidence in
+    // the owning inline panel, not only the transient global error toast.
+    if (!failure || failure.status !== false || failure.stage !== stage ||
+        typeof failure.msg !== 'string' || !failure.msg.length ||
+        failure.msg.length > 300) return null;
+    var message = failure.msg;
+    if (/^[0-9a-f]{32}$/.test(failure.operation_id || '')) {
+      message += '\nOperation ID: ' + failure.operation_id;
+    }
+    if (/^[0-9a-f]{32}$/.test(failure.recovery_id || '')) {
+      message += '\nPossible recovery ID: ' + failure.recovery_id;
+    }
+    return message;
+  }
   function validCacheActivationReady(response, id) {
     var site = hostsPageSites.get(id), hash = /^[0-9a-f]{64}$/;
     return !!(response && site && response.status === true &&
@@ -2210,12 +2226,12 @@
       .prop('checked', false);
     cacheActivationNotice('Inspecting current native sources for manual Cache approval...');
     cacheActivationLock();
-    request('preview_cache_activation', cacheNativeArgs(id), function (r) {
+    request('preview_cache_activation', cacheNativeArgs(id), function (r, failure) {
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
       if (id !== hostsSiteId() || !validCacheActivationReady(r,id)) {
         cacheActivationNotice('Cache Apply is not ready: ' +
-          (r && typeof r.msg === 'string' ? r.msg :
+          (cacheBackendFailure(failure, 'cache_activation_preview') ||
             'The site, source or response could not be verified. Recheck native setup.'));
         cacheActivationLock();
         return;
@@ -2288,13 +2304,13 @@
     cacheActivationNotice('Rechecking site-specific Cache journal and worker marker...');
     cacheActivationLock();
     request('manage_cache_policy',
-      Object.assign(cacheNativeArgs(id),{cache_action:'recheck'}), function (r) {
+      Object.assign(cacheNativeArgs(id),{cache_action:'recheck'}), function (r, failure) {
         if (ticket !== cacheActivationTicket) return;
         cacheActivationBusy = false;
         var stable = id === hostsSiteId() && validCacheRecoveryRecheck(r,id);
         if (!stable) {
           cacheActivationNotice('Cache recovery state not verified: ' +
-            (r && typeof r.msg === 'string' ? r.msg : 'Recheck unavailable'));
+            (cacheBackendFailure(failure, 'cache_manage') || 'Recheck unavailable'));
         } else {
           var op = r.recovery_id;
           if (typeof op === 'string' && /^[0-9a-f]{32}$/.test(op) &&
@@ -2327,7 +2343,7 @@
       cache_action:'apply', expected_source_sha256:plan.source_sha256,
       expected_proposal_sha256:plan.proposal_sha256,
       cache_generation:plan.cache_generation, approved:'true'
-    }), function (r) {
+    }), function (r, failure) {
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
       var success = id === hostsSiteId() && r && r.status === true &&
@@ -2345,9 +2361,8 @@
           '\nRecheck the saved generation before any Restore.');
       } else {
         cacheActivationNotice('Cache Apply NOT CONFIRMED; do not retry blindly. '+
-          (r && typeof r.msg === 'string' ? r.msg : 'Inspect Activity and Recheck recovery.')+
-          (r && /^[0-9a-f]{32}$/.test(r.recovery_id || '') ?
-            '\nPossible recovery ID: '+r.recovery_id : ''));
+          (cacheBackendFailure(failure, 'cache_manage') ||
+            'Inspect Activity and Recheck recovery.'));
       }
       cacheActivationLock();
     });
@@ -2367,7 +2382,7 @@
     cacheActivationLock();
     request('manage_cache_policy', Object.assign(cacheNativeArgs(id),{
       cache_action:'restore', recovery_id:recovery, approved:'true'
-    }), function (r) {
+    }), function (r, failure) {
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
       var neverActivated = r && r.recovery_scope === 'prepublication';
@@ -2380,7 +2395,8 @@
         '\nRecovery ID: '+recovery+
         '\nNo shared WORDPRESS cache files were deleted.') :
         'Cache Restore NOT CONFIRMED; Recheck recovery before another action. '+
-        (r && typeof r.msg === 'string' ? r.msg : 'Inspect Activity and saved journal.'));
+        (cacheBackendFailure(failure, 'cache_manage') ||
+          'Inspect Activity and saved journal.'));
       cacheActivationLock();
     });
   });
