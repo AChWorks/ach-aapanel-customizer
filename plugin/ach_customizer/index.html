@@ -2313,15 +2313,28 @@
             (cacheBackendFailure(failure, 'cache_manage') || 'Recheck unavailable'));
         } else {
           var op = r.recovery_id;
-          if (typeof op === 'string' && /^[0-9a-f]{32}$/.test(op) &&
-              ['Applied','Recovery Required'].includes(r.state)) {
+          var hasRecoveryId = typeof op === 'string' && /^[0-9a-f]{32}$/.test(op);
+          // A Needs Review journal has useful recovery evidence, but it must
+          // never become an actionable Restore identity until a fresh Recheck
+          // proves Applied or Recovery Required.
+          if (hasRecoveryId && ['Applied','Recovery Required'].includes(r.state)) {
             cacheRecoveryIdentity = op;
           }
+          var blockedRecovery = r.state === 'Needs Review' && hasRecoveryId ?
+            '\nSaved recovery ID (read-only; Restore locked): '+op : '';
+          var blockedPhase = r.state === 'Needs Review' && r.journal_phase ?
+            '\nSaved journal phase: '+r.journal_phase : '';
+          var blockedNextStep = r.state === 'Needs Review' ?
+            '\nNext: inspect the reported native source or recovery-ownership change. '+
+            'Reconcile only the intended change through aaPanel or supervised recovery, '+
+            'then run Recheck. Do not force Restore or discard its recovery record.' : '';
           cacheActivationNotice('Cache state: '+r.state+
             (cacheRecoveryIdentity ? '\nRecovery ID: '+cacheRecoveryIdentity : '')+
+            blockedRecovery+blockedPhase+
             '\nRuntime marker verified: '+r.runtime_verified+
             '\nSite-scoped Purge All: unavailable until native compatibility acceptance.'+
-            '\n'+(r.note || 'Source and worker observations do not certify WooCommerce safety.'));
+            '\n'+(r.note || 'Source and worker observations do not certify WooCommerce safety.')+
+            blockedNextStep);
         }
         cacheActivationLock();
       });

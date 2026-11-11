@@ -1968,6 +1968,54 @@ test('Prepublication Cache journal is recoverable from UI without false activati
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
 });
 
+test('Native Cache drift shows read-only recovery evidence and safe next steps without unlocking Restore', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  const id='e'.repeat(32);
+  const recheck=ui.statusClick('#ach-cache-activation-recheck');
+  recheck.respond({status:true,schema:1,state:'Needs Review',site_id:7,
+    site_key:'site.test',journal_phase:'applied',recovery_id:id,
+    read_only:true,runtime_verified:false,purge_supported:false,
+    note:'Native Cache source changed since approval: VHost/rewrite'});
+  const message=ui.state().cacheActivationResult;
+  assert.match(message,/Cache state: Needs Review/);
+  assert.match(message,/Saved recovery ID \(read-only; Restore locked\): e{32}/);
+  assert.match(message,/Saved journal phase: applied/);
+  assert.match(message,/VHost\/rewrite/);
+  assert.match(message,/Next: inspect the reported native source or recovery-ownership change/);
+  assert.match(message,/then run Recheck\. Do not force Restore/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  const requests=ui.requests.length;
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  ui.statusClick('#ach-cache-activation-restore');
+  assert.equal(ui.requests.length,requests,'a displayed recovery ID is not Restore authority');
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+
+  // Once the operator has independently corrected the native source,
+  // only a fresh positive Recheck may authorize an explicitly approved Restore.
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:id,read_only:true,
+    runtime_verified:true,purge_supported:false});
+  assert.match(ui.state().cacheActivationResult,/Recovery ID: e{32}/);
+  assert.doesNotMatch(ui.state().cacheActivationResult,/Saved recovery ID \(read-only/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,false);
+});
+
+test('Cache drift never renders malformed recovery IDs or grants Restore', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Needs Review',site_id:7,
+    site_key:'site.test',journal_phase:'applied',
+    recovery_id:'not-a-valid-recovery-id',read_only:true,
+    runtime_verified:false,purge_supported:false,
+    note:'Native Cache source changed since approval: VHost/rewrite'});
+  assert.match(ui.state().cacheActivationResult,/not verified|unavailable/i);
+  assert.doesNotMatch(ui.state().cacheActivationResult,/not-a-valid-recovery-id/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
 test('Restored Cache journal with resurrected files stays Needs Review and cannot authorize Restore', () => {
   const ui=loadUi(); selectHostsSite(ui);
   const id='e'.repeat(32);
