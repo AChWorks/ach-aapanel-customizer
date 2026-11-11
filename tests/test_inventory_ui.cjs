@@ -1812,6 +1812,65 @@ const cacheOperationRestored = (overrides={}) => ({
   purge_supported:false, ...overrides
 });
 
+test('Native Cache preflight and Recheck show controlled failure stage and ID inline', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  const preview=ui.statusClick('#ach-cache-activation-preview');
+  preview.respond({status:false, stage:'cache_activation_preview',
+    msg:'Existing cache, unsupported native PHP/include, or unresolved peer site requires review',
+    operation_id:'a'.repeat(32)});
+  assert.match(ui.state().cacheActivationResult,/Existing cache, unsupported native PHP\/include/);
+  assert.match(ui.state().cacheActivationResult,/Operation ID: a{32}/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+
+  const recheck=ui.statusClick('#ach-cache-activation-recheck');
+  recheck.respond({status:false,stage:'cache_manage',
+    msg:'Native Cache source changed since approval: VHost/rewrite',
+    operation_id:'b'.repeat(32)});
+  assert.match(ui.state().cacheActivationResult,/VHost\/rewrite/);
+  assert.match(ui.state().cacheActivationResult,/Operation ID: b{32}/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+
+  // Only the expected native failure stage may supply operator-facing text.
+  ui.statusClick('#ach-cache-activation-preview').respond({
+    status:false,stage:'other',msg:'Wrong endpoint reason'});
+  assert.doesNotMatch(ui.state().cacheActivationResult,/Wrong endpoint reason/);
+  assert.match(ui.state().cacheActivationResult,/source or response could not be verified/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+});
+
+test('Native Cache failed Apply and Restore retain recovery clues without retry permission', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady());
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  const apply=ui.statusClick('#ach-cache-activation-apply');
+  apply.respond({status:false,stage:'cache_manage',
+    msg:'Nginx route did not match its approved post-reload state',
+    operation_id:'1'.repeat(32),recovery_id:'2'.repeat(32)});
+  assert.match(ui.state().cacheActivationResult,/Apply NOT CONFIRMED/);
+  assert.match(ui.state().cacheActivationResult,/Nginx route did not match/);
+  assert.match(ui.state().cacheActivationResult,/Operation ID: 1{32}/);
+  assert.match(ui.state().cacheActivationResult,/Possible recovery ID: 2{32}/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Recovery Required',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'2'.repeat(32),
+    read_only:true,runtime_verified:false,purge_supported:false});
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-cache-activation-restore');
+  restore.respond({status:false,stage:'cache_manage',
+    msg:'Saved Cache source changed since confirmation',
+    operation_id:'3'.repeat(32),recovery_id:'2'.repeat(32)});
+  assert.match(ui.state().cacheActivationResult,/Restore NOT CONFIRMED/);
+  assert.match(ui.state().cacheActivationResult,/source changed since confirmation/);
+  assert.match(ui.state().cacheActivationResult,/Operation ID: 3{32}/);
+  assert.match(ui.state().cacheActivationResult,/Possible recovery ID: 2{32}/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
 test('Site Cache Apply and Restore require exact approval and recovery identity', () => {
   const ui=loadUi(); selectHostsSite(ui);
   assert.equal(ui.state().cacheActivationPreviewDisabled,false);
