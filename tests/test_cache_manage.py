@@ -545,6 +545,87 @@ class CacheManageTests(unittest.TestCase):
         self.assertEqual(cache.manage_cache('recheck',self.site,public=object(),
                                           **self.kwargs())['state'],'Recovery Required')
 
+    def test_native_php_switch_reports_versions_without_authorizing_restore(self):
+        applied = self.apply()
+        journal = self.state / cache._names(7)[2]
+        saved = journal.read_bytes()
+        old_commands = list(self.commands)
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        switched = original.replace('include enable-php-85.conf;',
+                                    'include enable-php-81.conf;')
+        self.assertNotEqual(switched, original)
+        try:
+            vhost.write_text(switched)
+            observed = cache.manage_cache('recheck', self.site, public=object(),
+                                          **self.kwargs())
+            self.assertEqual(observed['state'], 'Needs Review')
+            self.assertEqual(observed['journal_phase'], 'applied')
+            self.assertEqual(observed['recovery_id'], applied['recovery_id'])
+            self.assertFalse(observed['runtime_verified'])
+            self.assertIn('PHP 8.5', observed['note'])
+            self.assertIn('PHP 8.1', observed['note'])
+            self.assertIn('Recheck', observed['note'])
+            self.assertEqual(saved, journal.read_bytes())
+            self.assertEqual(old_commands, self.commands)
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                        'PHP 8\\.5.*PHP 8\\.1'):
+                cache.manage_cache('restore', self.site, approved=True,
+                                   recovery_id=applied['recovery_id'],
+                                   **self.kwargs())
+            self.assertEqual(saved, journal.read_bytes())
+            self.assertEqual(old_commands, self.commands)
+        finally:
+            vhost.write_text(original)
+        verified = cache.manage_cache('recheck', self.site, **self.kwargs())
+        self.assertEqual(verified['state'], 'Applied')
+        self.assertEqual(verified['recovery_id'], applied['recovery_id'])
+        cache.manage_cache('restore', self.site, approved=True,
+                           recovery_id=applied['recovery_id'], **self.kwargs())
+        self.assertEqual(cache.manage_cache('recheck', self.site,
+                                            **self.kwargs())['state'], 'Restored')
+
+    def test_multiple_or_unrecognized_native_php_includes_fail_closed(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        try:
+            for replacement in (
+                'include enable-php-81.conf;\n include enable-php-85.conf;',
+                'include enable-php-74.conf;\n include enable-php-85.conf;',
+                'include enable-php-74.conf;',
+            ):
+                with self.subTest(replacement=replacement):
+                    vhost.write_text(original.replace(
+                        'include enable-php-85.conf;', replacement))
+                    with self.assertRaisesRegex(
+                            cache.CacheManageError,
+                            'Unsupported selected native VHost include order'):
+                        cache._site_sources(self.site, '85',
+                                            vhost_root=str(self.vhost),
+                                            nginx_root=str(self.nginx))
+        finally:
+            vhost.write_text(original)
+
+    def test_reverse_php_version_switch_is_also_diagnostic_only(self):
+        (self.nginx / 'enable-php-81.conf').write_text(
+            (self.nginx / 'enable-php-85.conf').read_text().replace(
+                'php-cgi-85.sock', 'php-cgi-81.sock'))
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        try:
+            vhost.write_text(original.replace('enable-php-85.conf',
+                                              'enable-php-81.conf'))
+            compatible = cache._site_sources(self.site, '81',
+                vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+            self.assertIn('vhost_sha', compatible)
+            vhost.write_text(original)
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                         'PHP 8\\.1.*PHP 8\\.5.*Recheck'):
+                cache._site_sources(self.site, '81',
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+        finally:
+            vhost.write_text(original)
+
     def test_stock_php_and_header_preflight_guards(self):
         def inspect():
             return cache._site_sources(self.site,'85',vhost_root=str(self.vhost),
