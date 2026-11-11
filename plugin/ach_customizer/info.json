@@ -2,7 +2,7 @@
   "title": "ACh aaPanel Customizer",
   "name": "ach_customizer",
   "ps": "Native Monitor, site lifecycle, PHP 8.1+ runtime/socket discovery, PHP 8.1+ desired shared-pool Monitor policy and PHP 8.1/8.5 guarded Apply, read-only Nginx next-load config and local HTTP/80 observation, FastCGI aaPanel cache/purge-scope and read-only Nginx Helper header-version compatibility audit, task-based site/Routing/Cache menus and readable inspection summaries, site Status Pages 404/502 and Nginx-generated 50x extension Apply/Restore with explicit Nginx reload and native site-file Apply/Restore without reload, panel new-site source defaults Apply/Restore, guarded global IPv4/IPv6 HTTP/80 unbound 404 Apply/Restore, offline branding, Activity and diagnostics; unknown-host HTTPS/443 unsupported; opt-in guarded native stopped-site HTTP503 available with recovery; 50x is site-scoped Nginx-generated errors only; isolated FastCGI cache reference plus guarded site-owned manual Cache Apply/Recheck/Restore for the verified native PHP 8.1/8.5 Nginx shape (no Purge, auto-enforcement or WooCommerce safety claim)",
-  "versions": "0.1.33",
+  "versions": "0.1.34",
   "checks": "/www/server/panel/plugin/ach_customizer",
   "author": "AChWorks",
   "home": "https://github.com/AChWorks/ach-aapanel-customizer"

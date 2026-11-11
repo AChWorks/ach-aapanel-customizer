@@ -11,6 +11,12 @@ The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the
 4. Public aaPanel source [panelPlugin.py](https://github.com/aaPanel/aaPanel/blob/38bf35903b37b50d9654f47c4ad904ca3369715f/class/panelPlugin.py) recognizes `plugin/<name>/info.json` and constructs local-plugin inventory. The inspected implementation invokes uninstall scripts and removes plugin code. This is source evidence for that Git revision, **not** a cross-version contract.
 5. The same official PDF documents read-only `public.M('sites')` selectors for site IDs, names, paths and status. Actual panel schemas and revision-specific API behavior still require tests.
 
+## Native aaPanel PHP switching while Cache is active (0.1.34 candidate)
+
+An exact installed `0.1.33` primary-admin Browser cycle on QA site #7 confirmed aaPanel's native PHP-85 → PHP-81 control changed only the VHost's `include enable-php-85.conf;` line to `include enable-php-81.conf;`. With Cache Applied and pinned to PHP85, fresh Recheck returned `Needs Review`, preserved the saved read-only recovery ID and journal phase, and locked Restore. Immediate HTTP could still return a prior cached `HIT` before Recheck: **source-drift inspection is not automatic or an instantaneous traffic guard**. After reverting native PHP, a new Recheck returned `Applied` and separate approval restored the Cache operation. Nine site VHosts, PHP81/PHP85 pool files, Nginx main and shared cache source returned to exact baseline. [Exact evidence](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6792490364).
+
+The `0.1.34` backend reports the specific expected Cache PHP 8.5 / observed native PHP 8.1 (or reverse) discrepancy when the bounded native VHost has a single alternative stock include. This remains `Needs Review`; neither an alternative include nor a saved ID authorizes Restore. Native site PHP reconciliation and a fresh validated Recheck are mandatory before separate Restore consent. Two competing handler includes, duplicate versions and unrecognized PHP includes are incompatible even if the expected include is also present. This introduces no PHP edit, watch loop, reload, Purge All, permission change or auto-reconciliation. Native PHP switching here affected one VHost line; **complete vendor template regeneration and live-worker routing are still unverified**.
+
 ## Native Cache recovery guidance on source drift (0.1.33 unreleased)
 
 The existing native `manage_cache_policy(cache_action=recheck)` response may

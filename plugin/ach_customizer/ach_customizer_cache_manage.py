@@ -192,7 +192,25 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
             'Selected VHost response headers cannot be inherited by Cache handler')
     ext = 'include '+vhost_root+'/extension/'+site['name']+'/*.conf;'
     php_line = 'include enable-php-'+php+'.conf;'
-    if (active.count(ext) != 1 or active.count(php_line) != 1
+    # A native aaPanel PHP switch leaves the saved Cache extension pinned to
+    # its original PHP handler. Explain the two independently observed versions
+    # without treating the new include as approved or changing recovery gates.
+    php_includes = re.findall(r'\binclude\s+enable-php-[^\s;]+\s*;', active)
+    if (len(php_includes) == 1 and php in ('81', '85')
+            and active.count(ext) == 1 and
+            php_includes[0] != php_line):
+        alternate = re.fullmatch(r'include enable-php-(81|85)\.conf;',
+                                 php_includes[0])
+        if (alternate and alternate.group(1) != php):
+            observed = alternate.group(1)
+            raise CacheManageError(
+                'compatibility',
+                'Native site PHP include differs from saved Cache PHP %s.%s '
+                '(observed PHP %s.%s); reconcile PHP in aaPanel and Recheck '
+                'before Restore' %
+                (php[0], php[1], observed[0], observed[1]))
+    if (active.count(ext) != 1 or len(php_includes) != 1
+            or php_includes[0] != php_line
             or active.index(ext) > active.index(php_line)
             or re.search(r'\bfastcgi_cache(?:_purge)?\b', active)
             or re.search(r'\blocation\s+~', active[:active.find(ext)])):
