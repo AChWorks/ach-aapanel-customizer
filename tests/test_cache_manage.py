@@ -838,6 +838,60 @@ class CacheManageTests(unittest.TestCase):
         self.assertEqual(cache.manage_cache('recheck', self.site,
                                             **self.kwargs())['state'], 'Restored')
 
+    def test_native_807_unused_subdir_source_is_accepted(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        mask_dir = self.vhost / 'sub_dir' / self.site['name']
+        vhost.write_text(original.replace(
+            ' include ' + str(self.ext) + '/*.conf;',
+            ' include ' + str(mask_dir) + '/*.conf;\n'
+            ' include ' + str(self.ext) + '/*.conf;'))
+        try:
+            report = cache._site_sources(self.site, '85',
+                vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+            self.assertIn('vhost_sha', report)
+        finally:
+            vhost.write_text(original)
+
+    def test_native_807_subdir_route_cannot_bypass_cache_preflight(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        mask_dir = self.vhost / 'sub_dir' / self.site['name']
+        mask_dir.mkdir(parents=True)
+        vhost.write_text(original.replace(
+            ' include ' + str(self.ext) + '/*.conf;',
+            ' include ' + str(mask_dir) + '/*.conf;\n'
+            ' include ' + str(self.ext) + '/*.conf;'))
+        (mask_dir / 'foreign.conf').write_text(
+            'location /private { fastcgi_pass unix:/tmp/other.sock; }\n')
+        try:
+            with self.assertRaises(cache.CacheManageError) as observed:
+                cache._site_sources(self.site, '85',
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+            self.assertEqual(observed.exception.stage, 'compatibility')
+            self.assertFalse(list(self.state.iterdir()))
+            self.assertFalse(self.commands)
+        finally:
+            vhost.write_text(original)
+
+    def test_native_subdir_nested_in_location_rejects_cache_preflight(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        mask = self.vhost / 'sub_dir' / self.site['name'] / '*.conf'
+        vhost.write_text(original.replace(
+            ' include ' + str(self.ext) + '/*.conf;',
+            ' location = /custom { include ' + str(mask) + '; }\n'
+            ' include ' + str(self.ext) + '/*.conf;'))
+        try:
+            with self.assertRaises(cache.CacheManageError) as observed:
+                cache._site_sources(self.site, '85',
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+            self.assertEqual(observed.exception.stage, 'compatibility')
+            self.assertFalse(list(self.state.iterdir()))
+            self.assertFalse(self.commands)
+        finally:
+            vhost.write_text(original)
+
     def test_native_new_site_missing_extension_include_is_guided_without_write(self):
         vhost = self.vhost / 'qa.test.conf'
         initial = vhost.read_text()

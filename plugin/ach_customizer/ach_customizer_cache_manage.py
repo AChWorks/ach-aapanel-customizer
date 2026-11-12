@@ -21,7 +21,8 @@ from uuid import uuid4
 from ach_customizer_cache_policy import generate_reference, CACHE_ROOT
 from ach_customizer_cache_audit import inspect_site_fastcgi_cache
 from ach_customizer_monitor import (
-    _active_nginx_text, _bounded_file_text, _native_extension_fingerprint,
+    MonitorInputError, _active_nginx_text, _bounded_file_text,
+    _native_extension_fingerprint, _native_unused_subdir,
     MAX_NGINX_SITE_BYTES,
 )
 from ach_customizer_state import DATA_DIR, _open_state_dir, _exclusive_lock
@@ -280,6 +281,20 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
             'rerun Cache readiness before any manual edit. If still missing, use '
             'the latest native Config editor and recheck. No VHost/Cache change was made.',
             reason_code='native_extension_include_missing')
+    native_subdir = 'include '+vhost_root+'/sub_dir/'+site['name']+'/*.conf;'
+    subdir_refs = re.findall(r'\binclude\s+[^;\n]*/sub_dir/[^;\n]*;', active)
+    if subdir_refs:
+        if (subdir_refs != [native_subdir] or active.count(native_subdir) != 1
+                or active.find(native_subdir) > active.find(ext)
+                or active[:active.index(native_subdir)].count('{') -
+                active[:active.index(native_subdir)].count('}') != 1):
+            raise CacheManageError(
+                'compatibility', 'Unverified native per-site subdirectory include')
+        try:
+            _native_unused_subdir(vhost_root, site['name'])
+        except (OSError, MonitorInputError) as exc:
+            raise CacheManageError(
+                'compatibility', 'Native subdirectory routing needs review') from exc
     if (active.count(ext) != 1 or len(php_includes) != 1
             or php_includes[0] != php_line
             or active.index(ext) > active.index(php_line)

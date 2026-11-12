@@ -104,6 +104,50 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         )
         return cache
 
+    def test_regenerated_native_subdir_is_checked_for_selected_and_peer_sites(self):
+        self.global_cache_fixture()
+        selected = self.vhost / "wp.test.conf"
+        peer = self.vhost / "shop.test.conf"
+
+        def with_subdir(vhost, key):
+            original = vhost.read_text()
+            mask = self.vhost / "sub_dir" / key / "*.conf"
+            vhost.write_text(original.replace(
+                "include enable-php-85-wpfastcgi.conf;",
+                "include " + str(mask) + ";\n"
+                "include enable-php-85-wpfastcgi.conf;"))
+            return mask.parent
+
+        peer_dir = with_subdir(peer, "shop.test")
+        self.assertEqual(self.inspect()["state"], "Source Observed")
+        peer_dir.mkdir(parents=True)
+        self.assertEqual(self.inspect()["state"], "Source Observed")
+        (peer_dir / "foreign.conf").write_text(
+            "location /checkout { fastcgi_cache WORDPRESS; }\n")
+        unresolved = self.inspect()
+        self.assertEqual(unresolved["state"], "Partial", unresolved)
+        self.assertEqual(unresolved["unresolved_other_sites"], 1)
+        self.assertEqual(unresolved["purge_scope"], "Unknown")
+        self.assertFalse(unresolved["purge_supported"])
+        (peer_dir / "foreign.conf").unlink()
+
+        selected_dir = with_subdir(selected, "wp.test")
+        self.assertEqual(self.inspect()["state"], "Source Observed")
+        selected_dir.mkdir(parents=True)
+        (selected_dir / "foreign.conf").write_text(
+            "location /pay { fastcgi_no_cache off; }\n")
+        refused = self.inspect()
+        self.assertEqual(refused["state"], "Needs Review")
+        self.assertIsNone(refused["source_sha256"])
+        self.assertFalse(refused["purge_supported"])
+        (selected_dir / "foreign.conf").unlink()
+
+        selected_dir.rmdir()
+        selected_dir.symlink_to(peer_dir, target_is_directory=True)
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+        selected_dir.unlink()
+        self.assertEqual(self.inspect()["state"], "Source Observed")
+
     def test_global_aaPanel_cache_include_is_fingerprinted_and_flags_shared_physical_purge(self):
         cache = self.global_cache_fixture()
         result = self.inspect()

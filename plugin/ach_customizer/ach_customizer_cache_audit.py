@@ -16,6 +16,7 @@ from pathlib import Path
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
     _native_nginx_php_version, _native_extension_fingerprint,
+    _native_unused_subdir,
     _unsupported_nginx_upstream, MAX_NGINX_SITE_BYTES,
     PHP_IMPACT_SITE_LIMIT,
 )
@@ -115,10 +116,16 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
     vhost, vhost_sig = _text_and_signature(vhost_path)
     rewrite = Path(rewrite_root) / (site_key + ".conf")
     extension = Path(vhost_root) / "extension" / site_key
-    version, snippet, has_rewrite, has_extension = _native_nginx_php_version(
+    version, snippet, has_rewrite, has_extension, has_subdir = _native_nginx_php_version(
         vhost, native_rewrite=str(rewrite),
         native_extension=str(extension / "*.conf"),
+        native_subdir=str(Path(vhost_root) / "sub_dir" / site_key / "*.conf"),
     )
+    # Cache Clear's all-site source graph must include native subdirectory
+    # routing, even on a peer site, before asserting cache file isolation.
+    extra_files = ([("native-unused-subdir", site_key,
+                     _native_unused_subdir(vhost_root, site_key))]
+                   if has_subdir else [])
     snippet_source, snippet_sig = _text_and_signature(Path(nginx_root) / snippet)
     if version == "00":
         # Inert native Static sites must not block an unrelated PHP site's
@@ -134,7 +141,7 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
         fingerprints = [
             ("vhost", site_key, vhost_sig),
             ("static-snippet", snippet, snippet_sig),
-        ]
+        ] + extra_files
         if has_rewrite:
             text, sig = _text_and_signature(rewrite)
             if text.strip():
@@ -151,8 +158,8 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
             fingerprints.append(("extension", site_key, sig))
         return _merge_directives(vhost, snippet_source), fingerprints, "00"
     sources = [vhost, snippet_source]
-    fingerprints = [("vhost", site_key, vhost_sig),
-                    ("php-snippet", snippet, snippet_sig)]
+    fingerprints = ([("vhost", site_key, vhost_sig),
+                     ("php-snippet", snippet, snippet_sig)] + extra_files)
     nested = re.findall(
         r"(?m)^[ \t]*include[ \t]+([^;{}\r\n]+);[ \t]*(?=\r?$)",
         snippet_source,

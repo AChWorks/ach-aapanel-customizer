@@ -817,6 +817,46 @@ def _verified_owned_status_extension(directory, site_id, site_key, name, text):
     return record
 
 
+def _native_unused_subdir(vhost_root, site_key):
+    """Verify an optional native aaPanel sub_dir/<site>/*.conf is inactive.
+
+    aaPanel 8.0.7 regeneration adds this wildcard independently of the
+    existing per-site Extension include. An absent directory is valid for
+    a wildcard, but any *.conf inside it can introduce application routes
+    that these adapters have not proven safe. Never follow a directory alias;
+    a present tree is checked twice by the existing bounded source scanner.
+    """
+    import os
+
+    root = Path(vhost_root)
+    if (not isinstance(site_key, str) or
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}", site_key) or
+            not root.is_absolute() or ".." in root.parts or
+            str(root) != os.path.normpath(str(root))):
+        raise MonitorInputError("Unsupported native subdirectory source identity")
+    directory = root / "sub_dir" / site_key
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open("/", flags)
+    try:
+        for index, part in enumerate(directory.parts[1:]):
+            try:
+                child = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                if index < len(root.parts) - 1:
+                    raise MonitorInputError("Native Nginx source root is missing")
+                return None
+            os.close(fd)
+            fd = child
+    except OSError as exc:
+        raise MonitorInputError("Native subdirectory source is not a trusted directory") from exc
+    finally:
+        os.close(fd)
+
+    # No .conf is accepted here, even when it looks inert: this directory
+    # is a separate aaPanel routing extension point, not the site_total log.
+    return _native_extension_fingerprint(directory, allowed_conf_names=frozenset())
+
+
 def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
                                   allowed_conf_names=None, cache_state_dir=None):
     """Read a single native per-site '*.conf' glob without following links.
@@ -929,8 +969,8 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
 
 
 def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
-                              native_extension=None):
-    """Accept only an exact native PHP include, site rewrite and inert glob."""
+                              native_extension=None, native_subdir=None):
+    """Accept exact aaPanel PHP/rewrite/extension and optional unused sub_dir."""
     active = _active_nginx_text(vhost_text)
     includes = re.findall(
         r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$", active,
@@ -945,11 +985,18 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
     if len(php) != 1:
         raise MonitorInputError("No unique native Nginx PHP include")
     extras = [name for name in includes if name != php[0][1]]
-    if (len(extras) > 2 or any(
-            name not in (native_rewrite, native_extension) or name is None
-            for name in extras)):
+    if (len(extras) > 3 or any(
+            name not in (native_rewrite, native_extension, native_subdir)
+            or name is None for name in extras)):
         raise MonitorInputError("Additional or unverified Nginx include/routing needs review")
-    return php[0][0], php[0][1], native_rewrite in extras, native_extension in extras
+    if native_subdir in extras and native_subdir is not None:
+        marker = re.search(r"(?m)^[ \t]*include[ \t]+" +
+                           re.escape(native_subdir) + r"[ \t]*;[ \t]*$", active)
+        if (marker is None or active[:marker.start()].count("{") -
+                active[:marker.start()].count("}") != 1):
+            raise MonitorInputError("Native subdirectory include is not server-scoped")
+    return (php[0][0], php[0][1], native_rewrite in extras,
+            native_extension in extras, native_subdir in extras)
 
 
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
@@ -1032,10 +1079,16 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 )
                 rewrite = rewrite_dir / (name + ".conf")
                 extension = vhost_dir / "extension" / name
-                assigned, php_name, has_rewrite, has_extension = _native_nginx_php_version(
+                assigned, php_name, has_rewrite, has_extension, has_subdir = _native_nginx_php_version(
                     vhost, native_rewrite=str(rewrite),
                     native_extension=str(extension / "*.conf"),
+                    native_subdir=str(vhost_dir / "sub_dir" / name / "*.conf"),
                 )
+                if has_subdir:
+                    dependencies.append({
+                        "kind": "native_unused_subdir", "id": site_id,
+                        "signature": _native_unused_subdir(vhost_dir, name),
+                    })
                 if has_rewrite:
                     rewrite_text, rewrite_signature = _bounded_file_text(
                         rewrite, MAX_NGINX_SITE_BYTES, with_fingerprint=True

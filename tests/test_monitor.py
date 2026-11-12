@@ -1159,6 +1159,31 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         self.assertRegex(got['dependency_sha256'], '^[0-9a-f]{64}$')
         self.assertIn('not proof of effective routing', got['note'])
 
+    def test_regenerated_native_subdir_empty_is_compatible_but_routes_are_not(self):
+        self._native_qa_shapes()
+        selected = self.vhost("site-a.example.test")
+        native = self.vhosts / "sub_dir" / "site-a.example.test"
+        original = selected.read_text()
+        selected.write_text(original.replace(
+            "include enable-php-85.conf;",
+            "include " + str(native / "*.conf") + ";\n"
+            " include enable-php-85.conf;"))
+        first = self.inspect()
+        self.assertEqual(first["state"], "File Mapping", first)
+        self.assertTrue(first["manual_apply_eligible"])
+        native.mkdir(parents=True)
+        second = self.inspect()
+        self.assertEqual(second["state"], "File Mapping", second)
+        self.assertNotEqual(first["dependency_sha256"], second["dependency_sha256"])
+        (native / "foreign.conf").write_text("location /cart { return 200; }\n")
+        refused = self.inspect()
+        self.assertEqual(refused["state"], "Needs Review")
+        self.assertFalse(refused["manual_apply_eligible"])
+        self.assertEqual([x["id"] for x in refused["unresolved_sites"]], [3])
+        (native / "foreign.conf").unlink()
+        native.rmdir()
+        self.assertEqual(self.inspect()["state"], "File Mapping")
+
     def test_native_extension_changes_invalidate_approval_identity(self):
         self._native_qa_shapes()
         good = self.inspect()
