@@ -1,0 +1,94 @@
+{
+  "artifact_provenance": {
+    "installed_plugin_version": "0.1.35 UNRELEASED",
+    "native_source_match": true,
+    "policy_file": "plugin/ach_customizer/ach_customizer_cache_policy.py",
+    "policy_sha256": "571d05754b3b2b23cbb300184b898adb38ebca76a40076191eba96ae3ec86a56",
+    "test_file": "scripts/qa_woocommerce_cache_runtime.py",
+    "test_sha256": "ada1b13dd95c31a330bbdf4ebcb7e6cba75ee190fbb4eadc70dfbc2770cd1d7c",
+    "test_sha256_scope": "Historical successful nonproduction WooCommerce run; do not attribute its results to the later corrected script."
+  },
+  "environment": {
+    "aapanel": "8.0.7",
+    "host": "qa21-woocommerce-native.test",
+    "instance": "aac-native-qa",
+    "native_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "nginx": "1.28.3",
+    "owner": "Issue #21 nonproduction Incus QA",
+    "payment_gateways_available": 0,
+    "permalinks": "Plain",
+    "php": "8.5",
+    "project": "ach-aapanel-qa",
+    "site_id": 10,
+    "woocommerce": "11.2.2",
+    "wordpress": "7.1.4"
+  },
+  "execution": {
+    "cart": "each customer: real WooCommerce Store API /?rest_route=/wc/store/v1/cart returned HTTP200/BYPASS with own product ID and not peer's",
+    "cart_addition": "distinct existing WooCommerce simple products added through actual GET ?add-to-cart, never cached",
+    "cart_checkout_account_page": "HTTP200/BYPASS for both customers using actual Plain permalink query page IDs; Cart/Checkout are Block-based",
+    "logged_in_account_page": "HTTP200, BYPASS, each own username present and peer absent",
+    "logged_in_public_request": "BYPASS for each independent authenticated customer",
+    "mode": "private loopback Nginx process loading the exact merged cache_policy.py and real existing WooCommerce document root/PHP-FPM/DB",
+    "nginx_config_test": "PASS",
+    "other_api_requests": "Woo Store/order API, WC-AJAX, login and wc-api negative paths were BYPASS or uncacheable; no actual payment gateway webhook handler was exercised",
+    "production_touched": false,
+    "public_request_cache": [
+      "MISS",
+      "HIT"
+    ],
+    "real_wordpress_customer_auth": "temporary signed WordPress logged_in session via genuine WP Session Tokens; no real customer password",
+    "site_config_changed": false,
+    "source_script_exit_code": 0,
+    "test_accounts": "two disposable QA-only customer accounts, created/removed with WordPress APIs; no emails sent"
+  },
+  "integration_target": "main@c01d3b6b298ed1d138540976c3f011c4dd329c79",
+  "limits": [
+    "Separate isolated-Nginx policy runtime test, NOT native Customizer Apply/Restore on WooCommerce site #10; native aaPanel WP FastCGI handler remains unsupported without verified integration.",
+    "Signed WP customer cookies and real Store API/cart isolate A/B responses, but not a complete interactive password-login Browser test.",
+    "No configured payment gateway, so real checkout submission/payment processing/webhook callbacks were not exercised.",
+    "No Nginx Helper generation-aware invalidation or Purge All (still disabled), no full VHost regeneration or HTTPS/all-worker equivalence.",
+    "This does not certify other WooCommerce extensions, additional private routes, or Production deployment."
+  ],
+  "native_apply_gate": {
+    "action": "Check site-specific Cache Apply readiness",
+    "allowed_override": false,
+    "observed_native_php_include": "enable-php-85-wpfastcgi.conf",
+    "operation_id": "991b9d167fde4ecbb278f0a00bebbd88",
+    "reason": "Existing native WP FastCGI Cache and PHP include not equal to the verified independent standard PHP handler; no Native Apply was attempted",
+    "result": "Needs Review; Apply disabled"
+  },
+  "postconditions": {
+    "active_customizer_cache_fragments": 0,
+    "disposable_accounts_removed": 2,
+    "existing_protected_snapshots_retained": 2,
+    "native_config_sha256": {
+      "nginx_main": "dd87d0dad8fd394fb7e5f0fbe6420bc2fc02a50196d144600b732b87771c65ef",
+      "shared_fastcgi": "1db1d19ab113df6707d98f551e1d5e8daade8c4ff2825c39fed7879ee0613035",
+      "woo_vhost": "39e8c80177d73f6ed73225a2eb9e0cac6b5d50a0b38fe3785fe4d62cd69b0795"
+    },
+    "native_main_vhost_rewrite_shared_configs_unchanged": true,
+    "no_disposable_accounts_remain": true,
+    "original_registered_sites_http200": "9/9",
+    "original_wordpress_user_count": 3,
+    "real_nginx_syntax": "PASS",
+    "temporary_loopback_nginx_stopped": true,
+    "temporary_nginx_cache_removed": true
+  },
+  "recorded_utc": "2026-11-12",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "review_remediation": {
+    "corrected_script_guest_rerun": "NOT PERFORMED: guest transfer was rejected by a platform safety check; rejected action not bypassed; partial staging file verified removed without execution",
+    "corrected_script_sha256": "9c5180559a42cbd9d0d90d62cd4e354d8e9cbf498e3c9ae06f39aa34ec3a361d",
+    "focused_failure_injection_tests": "12 PASS in isolated local mocks; no guest accounts or services modified by failure injection",
+    "focused_test_file": "tests/test_qa_woocommerce_lifecycle.py",
+    "historical_test_unchanged": true,
+    "initial_review": "COMPLETE / CHANGES_REQUIRED (2026-11-12; 0 BLOCKER, 1 REQUIRED)",
+    "integration_status": "Candidate in PR #57; no Merge/Release authorization and independent delta review remains necessary",
+    "php_embedded_syntax": "PASS on PHP 8.4.24 CLI in AI Dev Server",
+    "production_actions": false,
+    "required_finding": "Recover precisely scoped WordPress customer identities after an unconfirmed prepare or cleanup subprocess."
+  },
+  "schema": 1,
+  "target_tree": "81f78e7bd899e6b17b18ce1b76b6ae39abd97497"
+}

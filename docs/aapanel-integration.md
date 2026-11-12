@@ -11,7 +11,88 @@ The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the
 4. Public aaPanel source [panelPlugin.py](https://github.com/aaPanel/aaPanel/blob/38bf35903b37b50d9654f47c4ad904ca3369715f/class/panelPlugin.py) recognizes `plugin/<name>/info.json` and constructs local-plugin inventory. The inspected implementation invokes uninstall scripts and removes plugin code. This is source evidence for that Git revision, **not** a cross-version contract.
 5. The same official PDF documents read-only `public.M('sites')` selectors for site IDs, names, paths and status. Actual panel schemas and revision-specific API behavior still require tests.
 
-## Manual site-owned Cache file clear: physical ownership and limits (unmerged candidate)
+## Real WooCommerce customer-session runtime QA — 2026-11-12 (bounded)
+
+After the exact merged `main@c01d3b6` native Cache Clear package was
+installed and accepted on site #6/#7, a separate live WooCommerce integration
+slice exercised the actual WordPress 7.1.4 / WooCommerce 11.2.2 application
+on the same isolated aaPanel 8.0.7 guest. Native site #10
+`qa21-woocommerce-native.test` uses `enable-php-85-wpfastcgi.conf` and
+an existing aaPanel WordPress Cache. The installed Customizer's primary-admin
+**Cache Apply readiness correctly returned Needs Review** (operation
+`991b9d167fde4ecbb278f0a00bebbd88`); no site #10 native Apply, PHP
+handler replacement, shared `WORDPRESS` cache mutation or implicit override
+was attempted. This unsupported native path must not be reported as accepted.
+
+To test the *exact installed per-site cache policy* against real WooCommerce
+without changing the existing aaPanel site, the reusable
+[`scripts/qa_woocommerce_cache_runtime.py`](../scripts/qa_woocommerce_cache_runtime.py)
+ran a separate two-worker Nginx process on loopback with a disposable physical
+cache directory, using the real native site #10 document root, PHP 8.5 FPM,
+WordPress/WooCommerce code and QA database. The generator imported from the
+installed `ach_customizer_cache_policy.py` matched current `main` SHA256
+`571d05754b3b2b23cbb300184b898adb38ebca76a40076191eba96ae3ec86a56`.
+The script creates two temporary real WordPress customer accounts with
+independent signed session cookies, suppresses outgoing welcome emails, uses
+real WooCommerce simple-product add-to-cart and Store API requests, then
+removes only those task-owned accounts/sessions and confirms native file
+hashes and isolated Nginx teardown. Never run this QA script on Production;
+its explicit nonproduction flag is a caller assertion, not Production
+permission or a replacement for environment authorization.
+
+Observed origin status: anonymous public homepage **MISS → HIT**;
+authenticated customer A/B public homepage **BYPASS**, each native account
+page HTTP200 with its own user identity; distinct actual A/B product carts
+from `/?rest_route=/wc/store/v1/cart`, both **HTTP200/BYPASS** with no other
+customer's product; cart and checkout query-page responses **HTTP200/BYPASS**.
+The actual Cart and Checkout use WooCommerce Blocks, whose item contents are
+loaded by the Store API; comparing initial HTML shells would be an invalid
+isolation test. The QA site's permalink structure is **Plain**: the actual
+cart/checkout/account routes are the corresponding `?page_id=` URLs, not
+`/cart/` or `/checkout/`. API/login/negative WC-API requests were
+BYPASS/uncacheable without initiating payments. The private listener was
+stopped, its files removed, two test accounts removed (preexisting total
+restored to three), native aaPanel config hashes unchanged, all nine original
+websites HTTP200, `nginx -t` PASS, original snapshots retained.
+
+[Exact sanitized evidence](evidence/aaPanel-8.0.7-2026-11-12-woocommerce-real-session-qa.json)
+links the native site/guest, source/script identities and postconditions.
+**Remaining limits:** this is genuine application/runtime evidence for the
+cache *policy* in a separate Nginx process, **not** the Customizer's native
+Apply/Recheck/Restore on an `enable-php-85-wpfastcgi.conf` WooCommerce site;
+interactive password login, active payment gateway processing/webhooks,
+Nginx Helper generation-aware invalidation/Purge All, full VHost
+regeneration, HTTPS/all loaded native workers, other private extensions and
+Production remain unverified. Keep Issues #2/#21 OPEN. No source policy
+behavior change, Release or Production action is implied.
+
+**Interrupted-run QA recovery (review-required lifecycle hardening):** This
+test harness now generates a cryptographically random per-run ID and first
+checks that its two exact usernames do not exist. Before creating either
+customer, it writes a mode-`0600` non-secret manifest
+`qa-account-recovery.json` inside the dedicated temporary QA directory.
+Even if PHP creates users but its preparation response times out or is
+malformed, `finally` removes **only those two exact run usernames** with
+their matching generated email addresses and independently re-queries
+WordPress to verify absence. It never deletes arbitrary users matching an
+`achqa_cache_*` prefix. Nginx control commands are bounded; an uncertain
+stop or unverified customer cleanup is **not** reported as success.
+
+When cleanup cannot be verified, the runner prints the retained temporary
+directory and exact account names without passwords or cookies. An
+authorized nonproduction operator should inspect the manifest, reconcile
+those exact WordPress accounts and associated WooCommerce sessions, then
+remove only the verified task-owned recovery directory; never perform
+prefix-wide user deletion. Historical successful A/B runtime results above
+belong to the original QA runner SHA256
+`ada1b13dd95c31a330bbdf4ebcb7e6cba75ee190fbb4eadc70dfbc2770cd1d7c`.
+Corrected recovery paths were validated with local failure-injection tests.
+The corrected runner was not rerun against the native QA guest after a
+protected transfer action was rejected; the partial staging file was
+removed without execution. No new native WooCommerce acceptance or
+Production certification is implied.
+
+## Manual site-owned Cache file clear: physical ownership and limits (PR #56 merged)
 
 This is a **new separately approved site-maintenance operation**, not the
 older Nginx Helper `Purge All`, a URL-specific invalidator or a promise that
