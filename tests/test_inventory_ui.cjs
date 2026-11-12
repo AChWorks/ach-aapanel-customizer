@@ -1680,6 +1680,61 @@ test('Generated VHost comparison binds native site snapshot, shows drift without
   assert.doesNotMatch(ui.state().vhostResult,/Apply change|Fix automatically|runtime verified/);
 });
 
+test('VHost UI recognizes only exact native trailing-root-slash equivalence', () => {
+  const matching = [
+    ['/www/site.test','/www/site.test'],
+    ['/www/site.test','/www/site.test/'],
+    ['/www/site.test/','/www/site.test'],
+    ['/www/site.test/','/www/site.test/']
+  ];
+  for (const [native_root,vhost_root] of matching) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+      native_root,vhost_root,state:'File Match',findings:[]
+    }));
+    assert.match(ui.state().vhostResult,/Generated VHost: File Match/,
+      native_root+' -> '+vhost_root);
+    assert.doesNotMatch(ui.state().vhostResult,/unavailable or incompatible/);
+  }
+  for (const [native_root,vhost_root] of [
+    ['/www/site.test','/www/other/'],
+    ['/www/site.test','/www/site.test/other'],
+    ['/www/site.test/','/www/site.test-other/']
+  ]) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+      native_root,vhost_root,state:'File Drift',findings:['DOCUMENT_ROOT_MISMATCH']
+    }));
+    assert.match(ui.state().vhostResult,/Generated VHost: File Drift/);
+  }
+  for (const [native_root,vhost_root] of [
+    ['/www/site.test','/www/site.test//'],
+    ['/www/site.test','/www/site.test/./'],
+    ['/www/site.test','/www/site.test/../site.test'],
+    ['/www/site.test//','/www/site.test//'],
+    ['/www/site.test/./','/www/site.test/./'],
+    ['/www/site.test','/www//site.test'],
+    ['/www/site.test','/www/site.test\\../'],
+    ['/www/site.test','/www/site.test?query'],
+    ['/www/site.test','/www/site.test\n'],
+    ['/www/site.test','/www/site.test\r'],
+  ]) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+      native_root,vhost_root,state:'File Match',findings:[]
+    }));
+    assert.match(ui.state().vhostResult,/unavailable or incompatible/,
+      native_root+' -> '+vhost_root);
+    assert.doesNotMatch(ui.state().vhostResult,/Generated VHost: File Match/);
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+    vhost_root:'/www/site.test/',state:'File Drift',
+    findings:['DOCUMENT_ROOT_MISMATCH']
+  }));
+  assert.match(ui.state().vhostResult,/unavailable or incompatible/);
+});
+
 test('VHost uncertain source and invalid replies never claim a matching file', () => {
   const invalid=[{site_id:8},{site_key:'other.test'},{runtime_verified:true},
     {fix_supported:true},{vhost_sha256:'forged'},
