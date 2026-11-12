@@ -12,6 +12,9 @@ sys.path.insert(0,str(ROOT/'plugin'/'ach_customizer'))
 import ach_customizer_cache_manage as cache
 
 
+REAL_COMPATIBILITY = cache._compatibility
+
+
 class CachePeerDirectoryIdentityTests(unittest.TestCase):
     def setUp(self):
         td=tempfile.TemporaryDirectory(prefix='ach-cache-peer-')
@@ -837,6 +840,139 @@ class CacheManageTests(unittest.TestCase):
                            recovery_id=applied['recovery_id'], **self.kwargs())
         self.assertEqual(cache.manage_cache('recheck', self.site,
                                             **self.kwargs())['state'], 'Restored')
+
+    def regenerated_audit(self, *args, **kwargs):
+        # The separate native/peer audit was validated independently; model
+        # its prepublication vs published Cache source state without bypassing
+        # the selected VHost drift and source checks under test.
+        if (self.vhost / cache._names(self.site['id'])[0]).exists():
+            return {
+                **self.native, 'zone_state': 'Direct Zone',
+                'cache_zone': 'ACHFC_' + str(self.site['id']),
+                'cache_directory': self.ref['cache_directory'],
+            }
+        return self.native
+
+    def test_regenerated_native_cache_full_preview_apply_recheck_restore(self):
+        # Keep the actual _compatibility(), _site_sources() and VHost drift
+        # checks in the operator path; only the separate global/peer source
+        # audit and process/cache-identity effects use the existing fixtures.
+        panel = SimpleNamespace(
+            get_webserver=lambda: 'nginx',
+            get_panel_version=lambda: '8.0.7',
+        )
+        vhost = self.vhost / 'qa.test.conf'
+        old = vhost.read_bytes()
+        mask = self.vhost / 'sub_dir' / self.site['name'] / '*.conf'
+        regenerated = old.decode().replace(
+            'root ' + self.site['path'] + ';',
+            'root ' + self.site['path'] + '/;').replace(
+            ' include ' + str(self.ext) + '/*.conf;',
+            ' include ' + str(mask) + ';\n'
+            ' include ' + str(self.ext) + '/*.conf;')
+        vhost.write_text(regenerated)
+        with patch.object(cache, '_compatibility',
+                          side_effect=REAL_COMPATIBILITY), patch.object(
+                cache, 'inspect_site_fastcgi_cache', side_effect=self.regenerated_audit):
+            plan = cache.preview_cache_activation(
+                self.site, panel, data_dir=str(self.state),
+                vhost_root=str(self.vhost), nginx_root=str(self.nginx),
+                probe=self.probe)
+            self.assertEqual(plan['state'], 'Ready for Review', plan)
+            self.assertTrue(plan['apply_supported'])
+            self.assertEqual(vhost.read_text(), regenerated)
+            self.assertFalse(list(self.state.iterdir()))
+            applied = cache.manage_cache(
+                'apply', self.site, public=panel,
+                expected_source=plan['source_sha256'],
+                expected_proposal=plan['proposal_sha256'],
+                cache_generation=plan['cache_generation'], approved=True,
+                **self.kwargs())
+            self.assertEqual(applied['state'], 'Applied', applied)
+            self.assertEqual(cache.manage_cache(
+                'recheck', self.site, **self.kwargs())['state'], 'Applied')
+            restored = cache.manage_cache(
+                'restore', self.site, public=panel, approved=True,
+                recovery_id=applied['recovery_id'], **self.kwargs())
+            self.assertEqual(restored['state'], 'Restored', restored)
+            self.assertEqual(cache.manage_cache(
+                'recheck', self.site, **self.kwargs())['state'], 'Restored')
+        self.assertEqual(vhost.read_text(), regenerated)
+        self.assertNotEqual(vhost.read_bytes(), old)
+
+    def test_cache_native_root_mismatch_blocks_preview_and_approved_apply(self):
+        panel = SimpleNamespace(
+            get_webserver=lambda: 'nginx',
+            get_panel_version=lambda: '8.0.7',
+        )
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        with patch.object(cache, '_compatibility',
+                          side_effect=REAL_COMPATIBILITY), patch.object(
+                cache, 'inspect_site_fastcgi_cache', side_effect=self.regenerated_audit):
+            # Existing layout also passes all original readiness gates.
+            before = cache.preview_cache_activation(
+                self.site, panel, data_dir=str(self.state),
+                vhost_root=str(self.vhost), nginx_root=str(self.nginx),
+                probe=self.probe)
+            self.assertEqual(before['state'], 'Ready for Review')
+            different = original.replace(
+                'root ' + self.site['path'] + ';',
+                'root ' + str(self.root / 'other') + ';')
+            vhost.write_text(different)
+            with self.assertRaises(cache.CacheManageError) as preview:
+                cache.preview_cache_activation(
+                    self.site, panel, data_dir=str(self.state),
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx),
+                    probe=self.probe)
+            self.assertEqual(preview.exception.stage, 'compatibility')
+            with self.assertRaises(cache.CacheManageError) as apply:
+                cache.manage_cache(
+                    'apply', self.site, public=panel,
+                    expected_source=before['source_sha256'],
+                    expected_proposal=before['proposal_sha256'],
+                    cache_generation=before['cache_generation'],
+                    approved=True, **self.kwargs())
+            self.assertEqual(apply.exception.stage, 'compatibility')
+        self.assertFalse((self.ext / 'ach_customizer_cache_7.conf').exists())
+        self.assertFalse((self.vhost / '0.ach_customizer_cache_7.conf').exists())
+        self.assertFalse(self.commands)
+
+    def test_quote_and_escape_balancing_never_authorizes_nested_cache_include(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        mask = self.vhost / 'sub_dir' / self.site['name'] / '*.conf'
+        variations = (
+            ('set $before "}";', 'set $after "{";', 'location = /nested {'),
+            (r'set $before \};', r'set $after \{;', 'if ($request_uri = /nested) {'),
+        )
+        panel = SimpleNamespace(
+            get_webserver=lambda: 'nginx', get_panel_version=lambda: '8.0.7')
+        for before, after, nested in variations:
+            with self.subTest(before=before):
+                vhost.write_text(original.replace(
+                    ' include ' + str(self.ext) + '/*.conf;',
+                    ' ' + before + '\n ' + nested + '\n'
+                    ' include ' + str(mask) + ';\n'
+                    ' }\n ' + after + '\n'
+                    ' include ' + str(self.ext) + '/*.conf;'))
+                with self.assertRaises(cache.CacheManageError) as rejected:
+                    cache._site_sources(
+                        self.site, '85', vhost_root=str(self.vhost),
+                        nginx_root=str(self.nginx))
+                self.assertEqual(rejected.exception.stage, 'compatibility')
+                with patch.object(cache, '_compatibility',
+                                  side_effect=REAL_COMPATIBILITY), patch.object(
+                        cache, 'inspect_site_fastcgi_cache',
+                        side_effect=self.regenerated_audit):
+                    with self.assertRaises(cache.CacheManageError) as readiness:
+                        cache.preview_cache_activation(
+                            self.site, panel, data_dir=str(self.state),
+                            vhost_root=str(self.vhost), nginx_root=str(self.nginx),
+                            probe=self.probe)
+                    self.assertEqual(readiness.exception.stage, 'compatibility')
+        self.assertFalse(self.commands)
+        self.assertFalse(list(self.state.iterdir()))
 
     def test_native_807_unused_subdir_source_is_accepted(self):
         vhost = self.vhost / 'qa.test.conf'

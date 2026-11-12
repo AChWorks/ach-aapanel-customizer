@@ -85,6 +85,32 @@ class GeneratedVhostDriftTests(unittest.TestCase):
         self.assertEqual(got["vhost_root"], "/www/another")
         self.assertIn("stale.test", got["vhost_names"])
 
+    def test_only_one_terminal_document_root_slash_is_equivalent(self):
+        cases = (
+            ("/www/alpha", "/www/alpha", "File Match"),
+            ("/www/alpha", "/www/alpha/", "File Match"),
+            ("/www/alpha/", "/www/alpha", "File Match"),
+            ("/www/alpha/", "/www/alpha/", "File Match"),
+            ("/www/alpha", "/www/other/", "File Drift"),
+            ("/www/alpha", "/www/alpha//", "Needs Review"),
+            ("/www/alpha", "/www/alpha/./", "Needs Review"),
+            ("/www/alpha", "/www/alpha/../alpha", "Needs Review"),
+            ("/www/alpha/./", "/www/alpha/./", "Needs Review"),
+            ("/www/alpha//", "/www/alpha//", "Needs Review"),
+        )
+        for native, generated, expected in cases:
+            with self.subTest(native=native, generated=generated):
+                self.site["path"] = native
+                self.write(
+                    "server { listen 80; server_name alpha.test www.alpha.test;"
+                    " root " + generated + "; }\n")
+                report = self.inspect()
+                self.assertEqual(report["state"], expected, report)
+                if expected == "File Drift":
+                    self.assertEqual(report["findings"], ["DOCUMENT_ROOT_MISMATCH"])
+                elif expected == "File Match":
+                    self.assertEqual(report["findings"], [])
+
     def test_refuses_ambiguous_or_nested_directives(self):
         sources = [
             "server { server_name alpha.test www.alpha.test; root /www/alpha;"

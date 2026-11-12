@@ -177,6 +177,47 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(list(self.state.iterdir()), [])
         self.assertFalse(self.commands)
 
+    def test_quoted_or_escaped_braces_do_not_fake_status_source_scope(self):
+        original = self.vhost.read_text()
+        mask = self.vhost_root / "sub_dir" / self.site["name"] / "*.conf"
+        ext_include = "include " + str(self.ext) + "/*.conf;"
+        for before, after, nested in (
+            ('set $before "}";', 'set $after "{";', 'location = /nested {'),
+            (r'set $before \};', r'set $after \{;', 'if ($uri = /nested) {'),
+        ):
+            with self.subTest(before=before):
+                self.vhost.write_text(original.replace(
+                    ext_include, before + "\n"
+                    + nested + "\ninclude " + str(mask) + ";\n}\n"
+                    + after + "\n" + ext_include))
+                with self.assertRaises(extension.ExtensionError):
+                    self.run_manager()
+                self.assertFalse(list(self.state.iterdir()))
+                self.assertFalse(self.commands)
+        # Also reject a nested version of the OWNED status extension include.
+        # A quoted closing brace must never make its location appear direct.
+        self.vhost.write_text(original.replace(
+            ext_include, 'set $quoted "}";\n'
+            + 'location = /nested {\n' + ext_include + '\n}\n'
+            + 'set $balance "{";'))
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager()
+        self.assertFalse(list(self.state.iterdir()))
+        self.assertFalse(self.commands)
+        # The direct server-scope form remains usable with braces in
+        # unrelated arguments and comments.
+        self.vhost.write_text(original.replace(
+            ext_include, 'set $quoted "}";\n'
+            + r'set $escaped \};' + "\n"
+            + "# ignored } {\n"
+            + "include " + str(mask) + ";\n" + ext_include))
+        applied = self.run_manager()
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+        self.assertEqual(
+            self.run_manager("restore", recovery=applied["recovery_id"])["state"],
+            "Restored")
+
     def test_regenerated_vhost_keeps_inspectable_saved_recovery(self):
         applied = self.run_manager()
         original = self.vhost.read_bytes()

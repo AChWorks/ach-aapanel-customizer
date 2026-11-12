@@ -111,14 +111,33 @@ def _server_statements(source):
     return result
 
 
+def _literal_document_root(path):
+    """A literal absolute path with at most one terminal slash.
+
+    Do not normalize traversal, doubled separators, or dot components into a
+    File Match; this is a byte-source comparison, not filesystem resolution.
+    """
+    return (isinstance(path, str) and ROOT.fullmatch(path) is not None
+            and "//" not in path
+            and all(component not in (".", "..")
+                    for component in path.split("/")[1:]))
+
+
+def _same_native_document_root(native, generated):
+    # Exactly one optional terminal slash; all other path bytes must agree.
+    return native == generated or (
+        generated.endswith("/") and generated[:-1] == native
+    ) or (
+        native.endswith("/") and native[:-1] == generated
+    )
+
+
 def _inspect(site, vhost_root):
     site_key = site.get("name")
     if not isinstance(site_key, str) or not SITE_KEY.fullmatch(site_key):
         raise VhostDriftError("Unsupported native website VHost key")
     native_root = site.get("path")
-    if not isinstance(native_root, str) or not ROOT.fullmatch(native_root) or (
-        "//" in native_root or "/../" in native_root or native_root.endswith("/..")
-    ):
+    if not _literal_document_root(native_root):
         raise VhostDriftError("Native document root uses an unsupported path shape")
     bindings = site.get("bound_domains")
     if not isinstance(bindings, list) or not 1 <= len(bindings) <= 100:
@@ -136,9 +155,7 @@ def _inspect(site, vhost_root):
     if len(statements["root"]) != 1 or len(statements["root"][0]) != 1:
         raise VhostDriftError("A single generated Nginx document root is required")
     generated_root = statements["root"][0][0]
-    if not ROOT.fullmatch(generated_root) or "//" in generated_root or (
-        "/../" in generated_root or generated_root.endswith("/..")
-    ):
+    if not _literal_document_root(generated_root):
         raise VhostDriftError("Generated Nginx document root is not a literal safe path")
     if len(statements["server_name"]) != 1 or not statements["server_name"][0]:
         raise VhostDriftError("A single generated server_name statement is required")
@@ -146,7 +163,7 @@ def _inspect(site, vhost_root):
     if len(set(generated_names)) != len(generated_names):
         raise VhostDriftError("Duplicate generated Nginx server_name entries")
     drift = []
-    if generated_root != native_root:
+    if not _same_native_document_root(native_root, generated_root):
         drift.append("DOCUMENT_ROOT_MISMATCH")
     if native_names - set(generated_names):
         drift.append("BOUND_HOST_MISSING_IN_VHOST")

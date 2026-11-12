@@ -23,6 +23,7 @@ from ach_customizer_cache_audit import inspect_site_fastcgi_cache
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
     _native_extension_fingerprint, _native_unused_subdir,
+    _native_server_direct_include,
     MAX_NGINX_SITE_BYTES,
 )
 from ach_customizer_state import DATA_DIR, _open_state_dir, _exclusive_lock
@@ -286,8 +287,8 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     if subdir_refs:
         if (subdir_refs != [native_subdir] or active.count(native_subdir) != 1
                 or active.find(native_subdir) > active.find(ext)
-                or active[:active.index(native_subdir)].count('{') -
-                active[:active.index(native_subdir)].count('}') != 1):
+                or not _native_server_direct_include(
+                    active, native_subdir[len('include '):-1])):
             raise CacheManageError(
                 'compatibility', 'Unverified native per-site subdirectory include')
         try:

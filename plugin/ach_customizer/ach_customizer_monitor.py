@@ -302,6 +302,96 @@ def _active_nginx_text(source):
     return "".join(active)
 
 
+def _native_server_direct_include(source, include_path):
+    """Require one literal include directly inside one native server block.
+
+    This is a small Nginx lexical scope check, not a general config parser.
+    Ignore quoted/escaped braces as delimiters and strip only real comments
+    via the existing Nginx argument lexer. Refuse ambiguous block structure,
+    duplicate includes, and includes nested in locations/if blocks.
+    """
+    active = _active_nginx_text(source)
+    stack = []
+    part = []
+    quote = None
+    escaped = False
+    in_variable = False
+    variable_chars = 0
+    dollar = False
+    matches = 0
+    servers = 0
+    exact = re.compile(r"include[ \t]+" + re.escape(include_path) + r"\Z")
+    for ch in active:
+        if escaped:
+            part.extend(("\\", ch))
+            escaped = False
+            dollar = False
+            continue
+        if ch == "\\":
+            escaped = True
+            dollar = False
+            continue
+        if quote is not None:
+            part.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            part.append(ch)
+            quote = ch
+            dollar = False
+            continue
+        if in_variable:
+            # Nginx ${name} expands a variable, not an Nginx block. Only
+            # a complete, literal ASCII variable name may consume braces.
+            if ch == "}":
+                if variable_chars == 0:
+                    return False
+                in_variable = False
+            elif ch.isascii() and (ch.isalnum() or ch == "_"):
+                variable_chars += 1
+            else:
+                return False
+            part.append(ch)
+            continue
+        if ch == "{" and dollar:
+            in_variable = True
+            variable_chars = 0
+            dollar = False
+            part.append(ch)
+            continue
+        if ch in "{};":
+            dollar = False
+            statement = "".join(part).strip()
+            part.clear()
+            if ch == "{":
+                if not statement:
+                    return False
+                if not stack:
+                    if statement != "server":
+                        return False
+                    servers += 1
+                    stack.append("server")
+                else:
+                    stack.append("nested")
+            elif ch == "}":
+                if statement or not stack:
+                    return False
+                stack.pop()
+            else:
+                if not statement or not stack:
+                    return False
+                if exact.fullmatch(statement):
+                    if stack != ["server"]:
+                        return False
+                    matches += 1
+            continue
+        part.append(ch)
+        dollar = ch == "$"
+    return (not quote and not escaped and not in_variable and not stack and
+            not "".join(part).strip() and servers == 1 and matches == 1)
+
+
 def _unsupported_nginx_upstream(active_text, *, allow_fastcgi=False):
     """Reject unsupported upstream directives consistently in every dependency."""
     return any(
@@ -990,10 +1080,7 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
             or name is None for name in extras)):
         raise MonitorInputError("Additional or unverified Nginx include/routing needs review")
     if native_subdir in extras and native_subdir is not None:
-        marker = re.search(r"(?m)^[ \t]*include[ \t]+" +
-                           re.escape(native_subdir) + r"[ \t]*;[ \t]*$", active)
-        if (marker is None or active[:marker.start()].count("{") -
-                active[:marker.start()].count("}") != 1):
+        if not _native_server_direct_include(active, native_subdir):
             raise MonitorInputError("Native subdirectory include is not server-scoped")
     return (php[0][0], php[0][1], native_rewrite in extras,
             native_extension in extras, native_subdir in extras)

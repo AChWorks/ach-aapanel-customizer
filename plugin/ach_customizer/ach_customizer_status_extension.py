@@ -24,7 +24,10 @@ from uuid import uuid4
 
 from ach_customizer_status_inspect import _directory, VHOST_ROOT, READ_FLAGS, StatusInspectError
 from ach_customizer_status_pages import StatusPageError
-from ach_customizer_monitor import MonitorInputError, _active_nginx_text, _native_unused_subdir
+from ach_customizer_monitor import (
+    MonitorInputError, _active_nginx_text, _native_unused_subdir,
+    _native_server_direct_include,
+)
 from ach_customizer_status_probe import _DeadlineSocket, _remaining
 
 NGINX = "/www/server/nginx/sbin/nginx"
@@ -291,11 +294,7 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
                         # Only a direct server-level native include is a
                         # recognized regeneration source. The same pathname
                         # nested in a location does not establish ownership.
-                        occurrences = list(re.finditer(
-                            r"\binclude\s+" + re.escape(mask) + r"\s*;", active))
-                        if (len(occurrences) != 1 or
-                                active[:occurrences[0].start()].count("{") -
-                                active[:occurrences[0].start()].count("}") != 1):
+                        if not _native_server_direct_include(active, mask):
                             raise ExtensionError(
                                 "ownership", "Native subdirectory include is not server-scoped")
                         try:
@@ -472,11 +471,7 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
         # Guard all selected native VHost error_page contexts before any
         # journal, asset, include publication or shared Nginx reload.
         _reject_50x_vhost_mappings(text)
-    native_include = re.search(
-        r"(?m)^\s*include\s+" + re.escape(expected_include) + r"\s*;", text)
-    before = "\n".join(line.split("#", 1)[0]
-                        for line in text[:native_include.start()].splitlines())
-    if before.count("{") - before.count("}") != 1:
+    if not _native_server_direct_include(text, expected_include):
         raise ExtensionError("source", "Status extension must be included at server scope")
     # Before preparing any owned content, prove the selected server is
     # the only reachable consumer in the bounded effective native include graph.

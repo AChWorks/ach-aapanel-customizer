@@ -1184,6 +1184,39 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         native.rmdir()
         self.assertEqual(self.inspect()["state"], "File Mapping")
 
+    def test_php_attribution_rejects_nested_native_subdir_with_quoted_braces(self):
+        self._native_qa_shapes()
+        vhost = self.vhost("site-a.example.test")
+        original = vhost.read_text()
+        mask = str(self.vhosts / "sub_dir" / "site-a.example.test" / "*.conf")
+        for before, after, nested in (
+            ('set $marker "}";', 'set $marker2 "{";', 'location /nested {'),
+            (r'set $marker \};', r'set $marker2 \{;', 'if ($uri = /nested) {'),
+        ):
+            with self.subTest(before=before):
+                vhost.write_text(original.replace(
+                    "include enable-php-85.conf;",
+                    before + "\n " + nested + "\n include " + mask
+                    + ";\n }\n " + after
+                    + "\n include enable-php-85.conf;"))
+                refused = self.inspect()
+                self.assertEqual(refused["state"], "Needs Review", refused)
+                self.assertFalse(refused["manual_apply_eligible"])
+                self.assertEqual([x["id"] for x in refused["unresolved_sites"]], [3])
+        # The same literal include at server scope is safe even when quoted,
+        # escaped or commented braces precede it.
+        vhost.write_text(original.replace(
+            "include enable-php-85.conf;",
+            'set $quoted "}";\n'
+            r'set $escaped \};' + "\n"
+            '# ignored } {\n'
+            'rewrite ^/special/$ /special.php?token=${request_uri} last;\n'
+            'include ' + mask + ';\n'
+            'include enable-php-85.conf;'))
+        accepted = self.inspect()
+        self.assertEqual(accepted["state"], "File Mapping", accepted)
+        self.assertTrue(accepted["manual_apply_eligible"])
+
     def test_native_extension_changes_invalidate_approval_identity(self):
         self._native_qa_shapes()
         good = self.inspect()
