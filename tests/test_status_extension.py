@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,7 +79,7 @@ class ExtensionTests(unittest.TestCase):
             data_fd=self.data_fd, vhost_root=str(self.vhost_root),
             public_root=str(self.public / ".pages"),
             nginx="/usr/sbin/nginx", nginx_conf=str(self.nginx_conf),
-            runner=self.runner, probe=self.probe)
+            runner=self.runner, probe=kw.get("probe", self.probe))
 
     def test_apply_recheck_restore_for_404_502_and_50x(self):
         for code in extension.CODES:
@@ -87,6 +88,8 @@ class ExtensionTests(unittest.TestCase):
                 self.assertEqual(self.run_manager("recheck")["state"], "Unmanaged")
                 applied = self.run_manager()
                 self.assertEqual(applied["state"], "Applied")
+                self.assertEqual(applied["before_sha256"],
+                    self.before if code == "404" else hashlib.sha256(b"").hexdigest())
                 self.assertEqual(self.run_manager("recheck")["state"], "Applied")
                 content = (self.ext / extension._include_name(7, code)).read_text()
                 self.assertIn("location = /" + ("502" if code == "50x" else code) + ".html", content)
@@ -150,6 +153,127 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(
             self.run_manager("restore", recovery=applied["recovery_id"])["state"],
             "Restored")
+
+    def test_restored_journal_can_be_reapproved_after_native_vhost_regeneration(self):
+        # A completed prior Restore does not own a live route. Rebuilding
+        # aaPanel's VHost changes its SHA, not the resolved site ownership.
+        for code in extension.CODES:
+            with self.subTest(code=code):
+                applied = self.run_manager(code=code)
+                self.assertEqual(self.run_manager(
+                    "restore", code=code, recovery=applied["recovery_id"])["state"],
+                    "Restored" if code == "404" else "Source Restored")
+                journal = self.state / extension._record_name(7, code)
+                self.assertEqual(json.loads(journal.read_text())["phase"], "restored")
+                original = self.vhost.read_text()
+                mask = str(self.vhost_root / "sub_dir" / self.site["name"]) + "/*.conf"
+                regenerated = original.replace(
+                    "root " + str(self.site_root) + ";",
+                    "root " + str(self.site_root) + "/;").replace(
+                    "include " + str(self.ext) + "/*.conf;",
+                    "include " + mask + ";\ninclude " + str(self.ext) + "/*.conf;")
+                self.vhost.write_text(regenerated)
+                old = self.run_manager("recheck", code=code)
+                with self.assertRaises(extension.ExtensionError) as old_restore:
+                    self.run_manager("restore", code=code, recovery=applied["recovery_id"])
+                self.assertEqual(old_restore.exception.stage, "identity")
+                self.assertEqual(old["state"], "Needs Review")
+                self.assertEqual(old["journal_phase"], "restored")
+                self.assertEqual(old["verification_scope"], "saved_journal_only")
+                self.assertEqual(old["recovery_id"], applied["recovery_id"])
+                counter = [0]
+                def count_retired(site, selected_code, operation):
+                    if operation == applied["recovery_id"]:
+                        counter[0] += 1
+                    return self.probe(site, selected_code, operation)
+                new_applied = self.run_manager(code=code, probe=count_retired)
+                self.assertGreaterEqual(counter[0], 3)
+                self.assertEqual(new_applied["state"], "Applied")
+                self.assertNotEqual(new_applied["recovery_id"], applied["recovery_id"])
+                self.assertEqual(json.loads(journal.read_text())["vhost_sha"],
+                                 hashlib.sha256(self.vhost.read_bytes()).hexdigest())
+                self.assertEqual(self.run_manager("recheck", code=code)["state"], "Applied")
+                self.assertEqual(self.run_manager(
+                    "restore", code=code, recovery=new_applied["recovery_id"])["state"],
+                    "Restored" if code == "404" else "Source Restored")
+                self.vhost.write_text(original)
+        self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
+
+    def test_reapproved_restored_404_records_current_not_historical_baseline(self):
+        first = self.run_manager()
+        self.run_manager("restore", recovery=first["recovery_id"])
+        journal = self.state / extension._record_name(7, "404")
+        historical = json.loads(journal.read_text())
+        previous_body = self.before
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "root " + str(self.site_root) + ";",
+            "root " + str(self.site_root) + "/;"))
+        current_body = hashlib.sha256(b"new 404 served after aaPanel regeneration").hexdigest()
+        self.before = current_body
+        with self.assertRaises(extension.ExtensionError) as stale:
+            self.run_manager(current=previous_body)
+        self.assertEqual(stale.exception.stage, "concurrency")
+        self.assertEqual(json.loads(journal.read_text()), historical)
+        second = self.run_manager(current=current_body)
+        self.assertEqual(second["state"], "Applied")
+        self.assertEqual(second["before_sha256"], current_body)
+        self.assertNotEqual(second["before_sha256"], historical["before_sha"])
+        updated = json.loads(journal.read_text())
+        self.assertEqual(updated["before_sha"], current_body)
+        self.assertNotEqual(updated["op"], historical["op"])
+        self.assertEqual(self.run_manager("restore", recovery=second["recovery_id"])["state"],
+                         "Restored")
+        checked = self.run_manager("recheck")
+        self.assertEqual(checked["page_file_sha256"], current_body)
+        self.assertEqual(checked["state"], "Restored")
+
+    def test_stale_restored_reapproval_refuses_stale_consent_and_active_route(self):
+        applied = self.run_manager()
+        self.run_manager("restore", recovery=applied["recovery_id"])
+        journal = self.state / extension._record_name(7, "404")
+        prior = journal.read_bytes()
+        old_source_sha = hashlib.sha256(self.vhost.read_bytes()).hexdigest()
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "root " + str(self.site_root) + ";",
+            "root " + str(self.site_root) + "/;"))
+        old_commands = len(self.commands)
+        with self.assertRaises(extension.ExtensionError) as stale:
+            self.run_manager(vhost=old_source_sha)
+        self.assertEqual(stale.exception.stage, "concurrency")
+        self.assertEqual(journal.read_bytes(), prior)
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager(current="f" * 64)
+        self.assertEqual(journal.read_bytes(), prior)
+        path = self.ext / extension._include_name(7, "404")
+        path.write_bytes(b"independent modified status snippet")
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager()
+        self.assertEqual(path.read_bytes(), b"independent modified status snippet")
+        self.assertEqual(journal.read_bytes(), prior)
+        path.unlink()
+        self.assertFalse(any("reload" in cmd for cmd in self.commands[old_commands:]))
+
+    def test_stale_restored_reapproval_refuses_observable_old_generation(self):
+        applied = self.run_manager()
+        self.run_manager("restore", recovery=applied["recovery_id"])
+        journal = self.state / extension._record_name(7, "404")
+        prior = journal.read_bytes()
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "root " + str(self.site_root) + ";",
+            "root " + str(self.site_root) + "/;"))
+        original_probe = self.probe
+        old_commands = len(self.commands)
+        def old_worker(site, code, operation):
+            if operation == applied["recovery_id"]:
+                return (404, self.before, operation)
+            return original_probe(site, code, operation)
+        with patch.object(extension.time, "monotonic", side_effect=[0, 9]):
+            with self.assertRaises(extension.ExtensionError) as blocked:
+                self.run_manager(probe=old_worker)
+        self.assertEqual(blocked.exception.stage, "postcheck")
+        self.assertEqual(journal.read_bytes(), prior)
+        self.assertFalse((self.ext / extension._include_name(7, "404")).exists())
+        self.assertFalse(any("reload" in cmd for cmd in self.commands[old_commands:]))
 
     def test_native_subdir_with_foreign_conf_refuses_extension_apply(self):
         old = self.vhost.read_text()
@@ -230,10 +354,29 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(observed["verification_scope"], "saved_journal_only")
         with self.assertRaises(extension.ExtensionError):
             self.run_manager("restore", recovery=applied["recovery_id"])
+        with self.assertRaises(extension.ExtensionError) as blocked_apply:
+            self.run_manager()
+        self.assertEqual(blocked_apply.exception.stage, "source")
         self.vhost.write_bytes(original)
         self.assertEqual(self.run_manager("recheck")["state"], "Applied")
         self.assertEqual(
             self.run_manager("restore", recovery=applied["recovery_id"])["state"], "Restored")
+
+    def test_active_journal_cannot_be_rebased_after_valid_regeneration(self):
+        applied = self.run_manager()
+        journal = self.state / extension._record_name(7, "404")
+        initial = journal.read_bytes()
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "root " + str(self.site_root) + ";",
+            "root " + str(self.site_root) + "/;"))
+        rechecked = self.run_manager("recheck")
+        self.assertEqual(rechecked["state"], "Needs Review")
+        self.assertEqual(rechecked["journal_phase"], "applied")
+        with self.assertRaises(extension.ExtensionError) as blocked:
+            self.run_manager()
+        self.assertEqual(blocked.exception.stage, "identity")
+        self.assertEqual(journal.read_bytes(), initial)
+        self.assertEqual(self.run_manager("recheck")["recovery_id"], applied["recovery_id"])
 
     def test_temporarily_missing_vhost_retains_saved_recovery_visibility(self):
         applied = self.run_manager()

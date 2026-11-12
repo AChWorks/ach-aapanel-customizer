@@ -3139,6 +3139,7 @@ function manage404Response(action,fields={}) {
     state:action==='apply'?'Applied':action==='restore'?'Restored':'Applied',
     page_file_sha256:action==='restore'?managed404Original:managed404Render,
     recovery_id:managed404Recovery,
+    ...(action==='apply'?{before_sha256:managed404Original}:{}),
     ...(action==='recheck'?{
       rendered_sha256:managed404Render,
       before_sha256:managed404Original,after_sha256:managed404Render
@@ -3174,6 +3175,8 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   apply.respond(manage404Response('apply'));
   assert.match(ui.state().statusManage,/Applied/);
   assert.match(ui.state().statusManage,/confirmed managed extension change/);
+  assert.match(ui.state().statusManage,
+    new RegExp('Previous HTTP 404 baseline SHA-256: ' + managed404Original));
   assert.equal(ui.state().statusManageApplyDisabled,true);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
   const recheck=ui.statusClick('#ach-status-manage-recheck');
@@ -3192,6 +3195,108 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   restore.respond(manage404Response('restore'));
   assert.match(ui.state().statusManage,/Restored/);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Status 404 Apply rejects a forged previous HTTP baseline in its success reply', () => {
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  apply.respond(manage404Response('apply',{before_sha256:'f'.repeat(64)}));
+  assert.match(ui.state().statusManage,/Write outcome unconfirmed/);
+  assert.doesNotMatch(ui.state().statusManage,/confirmed managed extension change/);
+});
+
+test('Extension 404/502/50x Applied must echo the newly approved previous baseline', () => {
+  const variants = [
+    ['valid', response => {}],
+    ['omitted', response => { delete response.before_sha256; }],
+    ['undefined', response => { response.before_sha256 = undefined; }],
+    ['null', response => { response.before_sha256 = null; }],
+    ['malformed', response => { response.before_sha256 = 'invalid'; }],
+    ['wrong-digest', response => { response.before_sha256 = 'f'.repeat(64); }],
+    ['wrong-type', response => { response.before_sha256 = 123; }],
+  ];
+  for (const template of ['404', '502', '50x']) {
+    for (const [variant, mutate] of variants) {
+      const ui=statusProbeUi();
+      if (template!=='404') ui.statusSetValue('#ach-status-template', template, 'change');
+      const proposal=template==='404' ? native404Proposal() : statusProbe({
+        template, state:'Source Ready', scope:'native_vhost_source_only',
+        page_file_sha256:managed404Original,body_sha256:null,http_status:null,
+        body_bytes:null,body_matches_file:false,body_matches_render:false,
+        http_404_observed:false,
+        adoption_preview:{
+          schema:1,state:'Source Ready',route_source_state:'Native VHost',
+          current_sha256:managed404Original,proposed_sha256:managed404Render,
+          vhost_sha256:managed404Vhost,
+          requires_adoption:false,requires_backup:false,
+          ownership_verified:false,recovery_verified:false,apply_supported:false,
+          reason:'Fresh source preflight and explicit approval required'
+        }
+      });
+      ui.statusClick('#ach-status-probe-button').respond(proposal);
+      ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+      assert.equal(ui.state().statusManageApplyDisabled,false, template+' '+variant);
+      const apply=ui.statusClick('#ach-status-manage-apply');
+      const reply=manage404Response('apply',{
+        template, runtime_verified:template==='50x',
+        verification_scope:template==='50x'?'http50x_body':
+          template==='502'?'source_and_nonce_only':'http404_body'
+      });
+      mutate(reply);
+      apply.respond(reply);
+      if (variant==='valid') {
+        assert.match(ui.state().statusManage,/Applied — confirmed managed extension change/,
+          template+' '+variant);
+        assert.match(ui.state().statusManage,new RegExp(
+          'Previous [^\n]*: '+managed404Original), template+' '+variant);
+        assert.doesNotMatch(ui.state().statusManage,/None stored/,
+          template+' '+variant);
+      } else {
+        assert.match(ui.state().statusManage,/Write outcome unconfirmed/,
+          template+' '+variant);
+        assert.doesNotMatch(ui.state().statusManage,/confirmed managed extension change/,
+          template+' '+variant);
+      }
+      assert.equal(ui.state().statusManageRestoreDisabled,true);
+    }
+  }
+});
+
+test('Native site-file Apply does not require extension-only baseline response', () => {
+  for (const template of ['404','502']) {
+    const ui=statusProbeUi();
+    ui.statusSetValue('#ach-status-delivery','file','change');
+    if (template==='502') ui.statusSetValue('#ach-status-template','502','change');
+    const proposal=template==='404' ? native404Proposal() : statusProbe({
+      template, state:'Source Ready', scope:'native_vhost_source_only',
+      page_file_sha256:managed404Original,body_sha256:null,http_status:null,
+      body_bytes:null,body_matches_file:false,body_matches_render:false,
+      http_404_observed:false,
+      adoption_preview:{
+        schema:1,state:'Source Ready',route_source_state:'Native VHost',
+        current_sha256:managed404Original,proposed_sha256:managed404Render,
+        vhost_sha256:managed404Vhost,
+        requires_adoption:true,requires_backup:true,
+        ownership_verified:false,recovery_verified:false,apply_supported:false,
+        reason:'Original site-file backup required'
+      }
+    });
+    ui.statusClick('#ach-status-probe-button').respond(proposal);
+    ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+    assert.equal(ui.state().statusManageApplyDisabled,false);
+    const apply=ui.statusClick('#ach-status-manage-apply');
+    const reply=manage404Response('apply',{
+      template,mode:'native_site_status_file',
+      runtime_verified:template==='404',
+      verification_scope:template==='404'?'http404_body':'source_only'
+    });
+    delete reply.before_sha256;
+    apply.respond(reply);
+    assert.match(ui.state().statusManage,/confirmed native site-file replacement/, template);
+    assert.doesNotMatch(ui.state().statusManage,/Write outcome unconfirmed/, template);
+  }
 });
 
 test('Stopped website keeps read-only journal Recheck without HTTP probes or Restore', () => {
@@ -3242,6 +3347,25 @@ test('Source-drift journal is visible but malformed or unverified states cannot 
     runtime_verified:true,note:'Forged verification'
   }));
   assert.match(ui.state().statusManage,/incomplete or incompatible/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Historical restored VHost journal never authorizes a write on its own', () => {
+  const ui=statusProbeUi();
+  const prior=ui.statusClick('#ach-status-manage-recheck');
+  prior.respond(manage404Response('recheck',{
+    state:'Needs Review',changed:false,
+    page_file_sha256:managed404Original,
+    journal_phase:'restored',verification_scope:'saved_journal_only',
+    runtime_verified:false,
+    note:'Old restored journal; independently preflight and explicitly approve a new Apply.'
+  }));
+  assert.match(ui.state().statusManage,/saved journal ONLY/);
+  assert.match(ui.state().statusManage,/this journal cannot authorize Apply\/Restore/);
+  assert.match(ui.state().statusManage,/Saved phase: restored/);
+  assert.match(ui.state().statusManage,/independently preflight/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
 });
 

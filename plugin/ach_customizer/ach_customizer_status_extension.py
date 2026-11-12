@@ -718,7 +718,10 @@ def _verified_absent(site, code, op, baseline_sha, *, probe=None):
     while True:
         _status, _sha_body, observed_proof = fn(site, code, op)
         valid = observed_proof != op
-        if valid and code == "404":
+        # A newly approved Apply after native VHost regeneration may supersede
+        # an already-restored journal. Its former HTTP body is no longer a
+        # current baseline; the fresh Apply preview checks that separately.
+        if valid and code == "404" and baseline_sha is not None:
             old_status, old_sha, old_proof = fn(site, code, None)
             valid = old_status == 404 and old_sha == baseline_sha and old_proof != op
         consecutive = consecutive + 1 if valid else 0
@@ -833,7 +836,9 @@ def _saved_recovery_unavailable(site, code, html_bytes, data_fd, *, stopped):
                  if stopped else
                  "Native status VHost/source changed; the saved recovery remains "
                  "visible, but the current status page is NOT verified. "
-                 "Reconcile source and Recheck before Restore."),
+                 "This journal cannot authorize Restore. A NEW Apply after a "
+                 "completed Restore requires an independent fresh preflight, "
+                 "explicit consent and proof that the old operation is absent."),
     }
 
 
@@ -872,12 +877,24 @@ def manage_site_extension(action, site, *, code, html, expected_current,
         _owned_dir(ext_fd)
         record = _record_load(data_fd, site_id, code)
         current_config = _bounded_file(ext_fd, include_name, limit=8192, permissions=0o600)
+        # A completed Restore has no active managed route to recover. The
+        # native generator may later replace its VHost; require fresh source,
+        # exact approval and retired-generation proof before a NEW Apply.
+        # Prepared/applied journals, foreign site identities and live includes
+        # never inherit this permission, and the old Restore stays forbidden.
+        historical_restored = bool(
+            record and record["phase"] == "restored" and
+            record["site_name"] == site["name"] and
+            record["vhost_sha"] != source_sha)
         if record and (record["site_name"] != site["name"]
                        or record["vhost_sha"] != source_sha):
             if (action == "recheck" and record["site_name"] == site["name"]):
                 return _saved_recovery_unavailable(
                     site, code, html_bytes, data_fd, stopped=False)
-            raise ExtensionError("identity", "Site or VHost changed; retain recovery for review")
+            if not (action == "apply" and historical_restored and
+                    current_config is None):
+                raise ExtensionError(
+                    "identity", "Site or VHost changed; retain recovery for review")
         expected_sha = _sha(html_bytes)
         if action == "recheck":
             state = ("Unmanaged" if record is None and current_config is None else
@@ -957,6 +974,11 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 if _previous_502_source(site, vhost_root, html) != expected_current:
                     raise ExtensionError(
                         "concurrency", "Existing 502 file differs from approved source preview")
+            if historical_restored:
+                # Three fresh connections must not observe the superseded
+                # operation nonce. The *current* native baseline was checked
+                # above, not silently equated to the old recovery's body.
+                _verified_absent(site, code, record["op"], None, probe=probe)
             op = uuid4().hex
             asset_path = _asset_path(public_root, site_id, code, expected_sha)
             include_bytes = _include(code, asset_path, op)
@@ -1026,7 +1048,8 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                     recovery_id=op,
                 ) from exc
             return {"state": "Applied", "changed": True, "site_id": site_id,
-                    "page_file_sha256": expected_sha, "recovery_id": op,
+                    "page_file_sha256": expected_sha,
+                    "before_sha256": record["before_sha"], "recovery_id": op,
                     "read_only": False, "mode": "native_status_extension",
                     "runtime_verified": code == "50x",
                     "verification_scope": "http50x_body" if code == "50x" else
