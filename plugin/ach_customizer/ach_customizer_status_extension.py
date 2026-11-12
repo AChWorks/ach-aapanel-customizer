@@ -24,6 +24,10 @@ from uuid import uuid4
 
 from ach_customizer_status_inspect import _directory, VHOST_ROOT, READ_FLAGS, StatusInspectError
 from ach_customizer_status_pages import StatusPageError
+from ach_customizer_monitor import (
+    MonitorInputError, _active_nginx_text, _native_unused_subdir,
+    _native_server_direct_include,
+)
 from ach_customizer_status_probe import _DeadlineSocket, _remaining
 
 NGINX = "/www/server/nginx/sbin/nginx"
@@ -247,7 +251,10 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
             raise ExtensionError("source", "Nginx include graph exceeds bounded read limit")
         if path == site_conf:
             selected_vhost_count += 1
-        active = "\n".join(line.split("#", 1)[0] for line in raw.decode("utf8", "replace").splitlines())
+        try:
+            active = _active_nginx_text(raw.decode("utf8", "replace"))
+        except MonitorInputError as exc:
+            raise ExtensionError("source", "Ambiguous native Nginx include syntax") from exc
         expressions = re.findall(
             r"(?<![A-Za-z0-9_])include\s+([^\s;{}]{1,512})\s*;", active
         )
@@ -273,14 +280,36 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
                     elif (path.startswith(vhost_root + "/") and
                           path.endswith(".conf") and
                           "/" not in path[len(vhost_root) + 1:]):
-                        allowed = (vhost_root + "/extension/" +
-                                   path.rsplit("/", 1)[-1][:-5] + "/*.conf",)
+                        native_key = path.rsplit("/", 1)[-1][:-5]
+                        allowed = (
+                            vhost_root + "/extension/" + native_key + "/*.conf",
+                            vhost_root + "/sub_dir/" + native_key + "/*.conf",
+                        )
                     else:
                         allowed = ()
+                    if mask not in allowed:
+                        raise ExtensionError(
+                            "ownership", "Unsupported native Nginx wildcard include")
+                    if "/sub_dir/" in mask:
+                        # Only a direct server-level native include is a
+                        # recognized regeneration source. The same pathname
+                        # nested in a location does not establish ownership.
+                        if not _native_server_direct_include(active, mask):
+                            raise ExtensionError(
+                                "ownership", "Native subdirectory include is not server-scoped")
+                        try:
+                            _native_unused_subdir(vhost_root, native_key)
+                        except (OSError, MonitorInputError) as exc:
+                            raise ExtensionError(
+                                "ownership", "Native per-site subdirectory routes need review") from exc
+                        # Scan a fresh glob too; an unexpected concurrent
+                        # creation cannot become an accepted route.
+                        if glob.glob(mask):
+                            raise ExtensionError(
+                                "ownership", "Native per-site subdirectory routes need review")
+                        continue
                     parent = os.path.dirname(mask)
-                    if (mask not in allowed or
-                            os.path.realpath(parent) != parent or
-                            not os.path.isdir(parent)):
+                    if os.path.realpath(parent) != parent or not os.path.isdir(parent):
                         raise ExtensionError(
                             "ownership", "Unsupported native Nginx wildcard include")
                 if matches(mask, proposed):
@@ -432,7 +461,7 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
             not isinstance(document_root, str) or
             not re.fullmatch(r"/[a-zA-Z0-9/_.-]{1,1023}", document_root) or
             ".." in document_root.split("/") or "//" in document_root or
-            not exact(r"^\s*root\s+" + re.escape(document_root) + r"\s*;") or
+            not exact(r"^\s*root\s+" + re.escape(document_root.rstrip("/")) + r"/?\s*;") or
             not exact(r"^\s*server_name\s+" + re.escape(name) + r"\s*;") or
             not exact(r"^\s*error_page\s+" + ("502" if code == "50x" else code) +
                       r"\s+/" + ("502" if code == "50x" else code) + r"\.html\s*;") or
@@ -442,11 +471,7 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
         # Guard all selected native VHost error_page contexts before any
         # journal, asset, include publication or shared Nginx reload.
         _reject_50x_vhost_mappings(text)
-    native_include = re.search(
-        r"(?m)^\s*include\s+" + re.escape(expected_include) + r"\s*;", text)
-    before = "\n".join(line.split("#", 1)[0]
-                        for line in text[:native_include.start()].splitlines())
-    if before.count("{") - before.count("}") != 1:
+    if not _native_server_direct_include(text, expected_include):
         raise ExtensionError("source", "Status extension must be included at server scope")
     # Before preparing any owned content, prove the selected server is
     # the only reachable consumer in the bounded effective native include graph.

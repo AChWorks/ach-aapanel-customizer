@@ -184,7 +184,8 @@ def _source(site, code, vhost_root):
     # inspector. A literal '#' in a quoted include argument is NOT a comment:
     # naive line splitting could otherwise conceal a foreign extension edge.
     from ach_customizer_monitor import (
-        MonitorInputError, _active_nginx_text, _native_extension_fingerprint)
+        MonitorInputError, _active_nginx_text, _native_extension_fingerprint,
+        _native_unused_subdir)
     try:
         active = _active_nginx_text(value)
     except MonitorInputError as exc:
@@ -197,7 +198,8 @@ def _source(site, code, vhost_root):
     if (sum(line.startswith("server_name ") for line in direct) != 1
             or "server_name " + name not in direct
             or sum(line.startswith("root ") for line in direct) != 1
-            or "root " + root not in direct
+            or not any(item in direct for item in ("root " + root.rstrip("/"),
+                                                   "root " + root.rstrip("/") + "/"))
             or _selected_error_page(server_text, code) != "native"
             or len(re.findall(r"(?m)^\s*server_name\s+", active)) != 1
             or len(re.findall(r"(?m)^\s*root\s+", active)) != 1
@@ -213,6 +215,18 @@ def _source(site, code, vhost_root):
     # Apply and Restore. Keep its inert logging bytes OUT of the recovery
     # identity: aaPanel may rotate/update analytics without changing routing,
     # and such unrelated changes must not strand an operator's Restore.
+    # Native 8.0.7 regeneration adds a second, optional server-scope
+    # sub_dir wildcard. Accept it only if its complete live glob is empty;
+    # a foreign subdirectory route can change the status response.
+    native_subdir = "include " + vhost_root + "/sub_dir/" + name + "/*.conf"
+    subdir_refs = re.findall(r"\binclude\s+[^;]*?/sub_dir/[^;]*;", active)
+    if subdir_refs:
+        if subdir_refs != [native_subdir + ";"] or direct.count(native_subdir) != 1:
+            raise ExtensionError("source", "Unverified native subdirectory include or context")
+        try:
+            _native_unused_subdir(vhost_root, name)
+        except (OSError, MonitorInputError) as exc:
+            raise ExtensionError("source", "Native subdirectory routes need review") from exc
     refs = re.findall(r"\binclude\s+[^;]*?/extension/[^;]*;", active)
     if not refs:
         return _sha(raw)

@@ -302,6 +302,96 @@ def _active_nginx_text(source):
     return "".join(active)
 
 
+def _native_server_direct_include(source, include_path):
+    """Require one literal include directly inside one native server block.
+
+    This is a small Nginx lexical scope check, not a general config parser.
+    Ignore quoted/escaped braces as delimiters and strip only real comments
+    via the existing Nginx argument lexer. Refuse ambiguous block structure,
+    duplicate includes, and includes nested in locations/if blocks.
+    """
+    active = _active_nginx_text(source)
+    stack = []
+    part = []
+    quote = None
+    escaped = False
+    in_variable = False
+    variable_chars = 0
+    dollar = False
+    matches = 0
+    servers = 0
+    exact = re.compile(r"include[ \t]+" + re.escape(include_path) + r"\Z")
+    for ch in active:
+        if escaped:
+            part.extend(("\\", ch))
+            escaped = False
+            dollar = False
+            continue
+        if ch == "\\":
+            escaped = True
+            dollar = False
+            continue
+        if quote is not None:
+            part.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            part.append(ch)
+            quote = ch
+            dollar = False
+            continue
+        if in_variable:
+            # Nginx ${name} expands a variable, not an Nginx block. Only
+            # a complete, literal ASCII variable name may consume braces.
+            if ch == "}":
+                if variable_chars == 0:
+                    return False
+                in_variable = False
+            elif ch.isascii() and (ch.isalnum() or ch == "_"):
+                variable_chars += 1
+            else:
+                return False
+            part.append(ch)
+            continue
+        if ch == "{" and dollar:
+            in_variable = True
+            variable_chars = 0
+            dollar = False
+            part.append(ch)
+            continue
+        if ch in "{};":
+            dollar = False
+            statement = "".join(part).strip()
+            part.clear()
+            if ch == "{":
+                if not statement:
+                    return False
+                if not stack:
+                    if statement != "server":
+                        return False
+                    servers += 1
+                    stack.append("server")
+                else:
+                    stack.append("nested")
+            elif ch == "}":
+                if statement or not stack:
+                    return False
+                stack.pop()
+            else:
+                if not statement or not stack:
+                    return False
+                if exact.fullmatch(statement):
+                    if stack != ["server"]:
+                        return False
+                    matches += 1
+            continue
+        part.append(ch)
+        dollar = ch == "$"
+    return (not quote and not escaped and not in_variable and not stack and
+            not "".join(part).strip() and servers == 1 and matches == 1)
+
+
 def _unsupported_nginx_upstream(active_text, *, allow_fastcgi=False):
     """Reject unsupported upstream directives consistently in every dependency."""
     return any(
@@ -817,6 +907,46 @@ def _verified_owned_status_extension(directory, site_id, site_key, name, text):
     return record
 
 
+def _native_unused_subdir(vhost_root, site_key):
+    """Verify an optional native aaPanel sub_dir/<site>/*.conf is inactive.
+
+    aaPanel 8.0.7 regeneration adds this wildcard independently of the
+    existing per-site Extension include. An absent directory is valid for
+    a wildcard, but any *.conf inside it can introduce application routes
+    that these adapters have not proven safe. Never follow a directory alias;
+    a present tree is checked twice by the existing bounded source scanner.
+    """
+    import os
+
+    root = Path(vhost_root)
+    if (not isinstance(site_key, str) or
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}", site_key) or
+            not root.is_absolute() or ".." in root.parts or
+            str(root) != os.path.normpath(str(root))):
+        raise MonitorInputError("Unsupported native subdirectory source identity")
+    directory = root / "sub_dir" / site_key
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open("/", flags)
+    try:
+        for index, part in enumerate(directory.parts[1:]):
+            try:
+                child = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                if index < len(root.parts) - 1:
+                    raise MonitorInputError("Native Nginx source root is missing")
+                return None
+            os.close(fd)
+            fd = child
+    except OSError as exc:
+        raise MonitorInputError("Native subdirectory source is not a trusted directory") from exc
+    finally:
+        os.close(fd)
+
+    # No .conf is accepted here, even when it looks inert: this directory
+    # is a separate aaPanel routing extension point, not the site_total log.
+    return _native_extension_fingerprint(directory, allowed_conf_names=frozenset())
+
+
 def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
                                   allowed_conf_names=None, cache_state_dir=None):
     """Read a single native per-site '*.conf' glob without following links.
@@ -929,8 +1059,8 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
 
 
 def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
-                              native_extension=None):
-    """Accept only an exact native PHP include, site rewrite and inert glob."""
+                              native_extension=None, native_subdir=None):
+    """Accept exact aaPanel PHP/rewrite/extension and optional unused sub_dir."""
     active = _active_nginx_text(vhost_text)
     includes = re.findall(
         r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$", active,
@@ -945,11 +1075,15 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
     if len(php) != 1:
         raise MonitorInputError("No unique native Nginx PHP include")
     extras = [name for name in includes if name != php[0][1]]
-    if (len(extras) > 2 or any(
-            name not in (native_rewrite, native_extension) or name is None
-            for name in extras)):
+    if (len(extras) > 3 or any(
+            name not in (native_rewrite, native_extension, native_subdir)
+            or name is None for name in extras)):
         raise MonitorInputError("Additional or unverified Nginx include/routing needs review")
-    return php[0][0], php[0][1], native_rewrite in extras, native_extension in extras
+    if native_subdir in extras and native_subdir is not None:
+        if not _native_server_direct_include(active, native_subdir):
+            raise MonitorInputError("Native subdirectory include is not server-scoped")
+    return (php[0][0], php[0][1], native_rewrite in extras,
+            native_extension in extras, native_subdir in extras)
 
 
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
@@ -1032,10 +1166,16 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 )
                 rewrite = rewrite_dir / (name + ".conf")
                 extension = vhost_dir / "extension" / name
-                assigned, php_name, has_rewrite, has_extension = _native_nginx_php_version(
+                assigned, php_name, has_rewrite, has_extension, has_subdir = _native_nginx_php_version(
                     vhost, native_rewrite=str(rewrite),
                     native_extension=str(extension / "*.conf"),
+                    native_subdir=str(vhost_dir / "sub_dir" / name / "*.conf"),
                 )
+                if has_subdir:
+                    dependencies.append({
+                        "kind": "native_unused_subdir", "id": site_id,
+                        "signature": _native_unused_subdir(vhost_dir, name),
+                    })
                 if has_rewrite:
                     rewrite_text, rewrite_signature = _bounded_file_text(
                         rewrite, MAX_NGINX_SITE_BYTES, with_fingerprint=True

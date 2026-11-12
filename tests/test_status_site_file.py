@@ -139,6 +139,40 @@ class NativeSiteFileTests(unittest.TestCase):
             b"include enable-php-85.conf;\n" + include))
         return overlay, analytics
 
+    def test_native_807_regenerated_root_and_unused_subdir(self):
+        self._native_log_only_include()
+        original = self.vhost.read_text()
+        mask_dir = self.vhost_root / "sub_dir" / self.site["name"]
+        regenerated = original.replace(
+            "root " + str(self.root_site) + ";",
+            "root " + str(self.root_site) + "/;")
+        regenerated = regenerated.replace(
+            "include enable-php-85.conf;",
+            "include " + str(mask_dir) + "/*.conf;\n"
+            "include enable-php-85.conf;")
+        self.vhost.write_text(regenerated)
+        expected = manager._source(self.site, "502", str(self.vhost_root))
+        applied = self.operate("apply", code="502", expected_vhost=expected)
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(
+            self.operate("restore", code="502",
+                         expected_recovery=applied["recovery_id"])["state"],
+            "Source Restored")
+
+    def test_native_807_subdir_foreign_routing_refused_without_write(self):
+        original = self.vhost.read_text()
+        mask_dir = self.vhost_root / "sub_dir" / self.site["name"]
+        mask_dir.mkdir(parents=True)
+        self.vhost.write_text(original.replace(
+            "include enable-php-85.conf;",
+            "include " + str(mask_dir) + "/*.conf;\n"
+            "include enable-php-85.conf;"))
+        (mask_dir / "foreign.conf").write_text("location = /502.html { return 200; }\n")
+        with self.assertRaises(ExtensionError):
+            manager._source(self.site, "502", str(self.vhost_root))
+        self.assertEqual(self.files["502"].read_bytes(), b"original 502")
+        self.assertFalse(list(self.state.iterdir()))
+
     def test_inert_native_site_total_include_allows_guarded_recovery(self):
         overlay, analytics = self._native_log_only_include()
         source_identity = manager._source(self.site, "502", str(self.vhost_root))
