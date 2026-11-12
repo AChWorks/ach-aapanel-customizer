@@ -3139,6 +3139,7 @@ function manage404Response(action,fields={}) {
     state:action==='apply'?'Applied':action==='restore'?'Restored':'Applied',
     page_file_sha256:action==='restore'?managed404Original:managed404Render,
     recovery_id:managed404Recovery,
+    ...(action==='apply'?{before_sha256:managed404Original}:{}),
     ...(action==='recheck'?{
       rendered_sha256:managed404Render,
       before_sha256:managed404Original,after_sha256:managed404Render
@@ -3174,6 +3175,8 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   apply.respond(manage404Response('apply'));
   assert.match(ui.state().statusManage,/Applied/);
   assert.match(ui.state().statusManage,/confirmed managed extension change/);
+  assert.match(ui.state().statusManage,
+    new RegExp('Previous HTTP 404 baseline SHA-256: ' + managed404Original));
   assert.equal(ui.state().statusManageApplyDisabled,true);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
   const recheck=ui.statusClick('#ach-status-manage-recheck');
@@ -3192,6 +3195,16 @@ test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and 
   restore.respond(manage404Response('restore'));
   assert.match(ui.state().statusManage,/Restored/);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Status 404 Apply rejects a forged previous HTTP baseline in its success reply', () => {
+  const ui=statusProbeUi();
+  ui.statusClick('#ach-status-probe-button').respond(native404Proposal());
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  const apply=ui.statusClick('#ach-status-manage-apply');
+  apply.respond(manage404Response('apply',{before_sha256:'f'.repeat(64)}));
+  assert.match(ui.state().statusManage,/Write outcome unconfirmed/);
+  assert.doesNotMatch(ui.state().statusManage,/confirmed managed extension change/);
 });
 
 test('Stopped website keeps read-only journal Recheck without HTTP probes or Restore', () => {
@@ -3242,6 +3255,25 @@ test('Source-drift journal is visible but malformed or unverified states cannot 
     runtime_verified:true,note:'Forged verification'
   }));
   assert.match(ui.state().statusManage,/incomplete or incompatible/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+});
+
+test('Historical restored VHost journal never authorizes a write on its own', () => {
+  const ui=statusProbeUi();
+  const prior=ui.statusClick('#ach-status-manage-recheck');
+  prior.respond(manage404Response('recheck',{
+    state:'Needs Review',changed:false,
+    page_file_sha256:managed404Original,
+    journal_phase:'restored',verification_scope:'saved_journal_only',
+    runtime_verified:false,
+    note:'Old restored journal; independently preflight and explicitly approve a new Apply.'
+  }));
+  assert.match(ui.state().statusManage,/saved journal ONLY/);
+  assert.match(ui.state().statusManage,/this journal cannot authorize Apply\/Restore/);
+  assert.match(ui.state().statusManage,/Saved phase: restored/);
+  assert.match(ui.state().statusManage,/independently preflight/);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
   assert.equal(ui.state().statusManageRestoreDisabled,true);
 });
 

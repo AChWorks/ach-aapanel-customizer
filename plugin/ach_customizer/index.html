@@ -3337,6 +3337,8 @@
         !token(r.request_id) || r.operation_id !== r.request_id ||
         typeof r.changed !== 'boolean' || !hash(r.page_file_sha256) ||
         (r.recovery_id !== null && !token(r.recovery_id)) ||
+        (action !== 'recheck' && r.before_sha256 !== undefined &&
+         !hash(r.before_sha256)) ||
         r.read_only !== (action === 'recheck')) return false;
     // Site-file 502 is always source-only. File 404 may assert live status
     // only after the backend actually matched HTTP 404 and body bytes.
@@ -3457,6 +3459,8 @@
       if (!same || !validStatusManage(r, action, scope.site_id, snapshot, revision) ||
           (action === 'apply' && r &&
             (r.page_file_sha256 !== proposal.proposed ||
+             (delivery === 'extension' && r.state === 'Applied' &&
+              r.before_sha256 !== undefined && r.before_sha256 !== proposal.current) ||
              r.state === 'Already Current' && r.recovery_id !== null)) ||
           (action === 'restore' && r &&
             (r.page_file_sha256 !== recovery.before_sha256 ||
@@ -3487,7 +3491,7 @@
              delivery === 'file' ? ' — original 502.html source restored; live HTTP 502 NOT verified' :
              ' — original 502 response NOT verified; source and retired operation nonce checked') : '') +
           (r.verification_scope === 'saved_journal_only' ?
-            ' — saved journal ONLY; current Nginx/HTTP state NOT verified; no Apply/Restore permitted' : '') +
+            ' — saved journal ONLY; current Nginx/HTTP state NOT verified; this journal cannot authorize Apply/Restore' : '') +
           (action === 'recheck' && r.state === 'Applied' &&
            r.rendered_sha256 !== r.after_sha256 ?
             ' — saved page differs from current selected branding/template' : '') +
