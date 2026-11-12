@@ -3460,7 +3460,7 @@
           (action === 'apply' && r &&
             (r.page_file_sha256 !== proposal.proposed ||
              (delivery === 'extension' && r.state === 'Applied' &&
-              r.before_sha256 !== undefined && r.before_sha256 !== proposal.current) ||
+              r.before_sha256 !== proposal.current) ||
              r.state === 'Already Current' && r.recovery_id !== null)) ||
           (action === 'restore' && r &&
             (r.page_file_sha256 !== recovery.before_sha256 ||
