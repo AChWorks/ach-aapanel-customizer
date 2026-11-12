@@ -5,7 +5,8 @@
     "policy_file": "plugin/ach_customizer/ach_customizer_cache_policy.py",
     "policy_sha256": "571d05754b3b2b23cbb300184b898adb38ebca76a40076191eba96ae3ec86a56",
     "test_file": "scripts/qa_woocommerce_cache_runtime.py",
-    "test_sha256": "ada1b13dd95c31a330bbdf4ebcb7e6cba75ee190fbb4eadc70dfbc2770cd1d7c"
+    "test_sha256": "ada1b13dd95c31a330bbdf4ebcb7e6cba75ee190fbb4eadc70dfbc2770cd1d7c",
+    "test_sha256_scope": "Historical successful nonproduction WooCommerce run; do not attribute its results to the later corrected script."
   },
   "environment": {
     "aapanel": "8.0.7",
@@ -76,6 +77,18 @@
   },
   "recorded_utc": "2026-11-12",
   "repository": "AChWorks/ach-aapanel-customizer",
+  "review_remediation": {
+    "corrected_script_guest_rerun": "NOT PERFORMED: guest transfer was rejected by a platform safety check; rejected action not bypassed; partial staging file verified removed without execution",
+    "corrected_script_sha256": "9c5180559a42cbd9d0d90d62cd4e354d8e9cbf498e3c9ae06f39aa34ec3a361d",
+    "focused_failure_injection_tests": "12 PASS in isolated local mocks; no guest accounts or services modified by failure injection",
+    "focused_test_file": "tests/test_qa_woocommerce_lifecycle.py",
+    "historical_test_unchanged": true,
+    "initial_review": "COMPLETE / CHANGES_REQUIRED (2026-11-12; 0 BLOCKER, 1 REQUIRED)",
+    "integration_status": "Candidate in PR #57; no Merge/Release authorization and independent delta review remains necessary",
+    "php_embedded_syntax": "PASS on PHP 8.4.24 CLI in AI Dev Server",
+    "production_actions": false,
+    "required_finding": "Recover precisely scoped WordPress customer identities after an unconfirmed prepare or cleanup subprocess."
+  },
   "schema": 1,
   "target_tree": "81f78e7bd899e6b17b18ce1b76b6ae39abd97497"
 }

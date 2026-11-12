@@ -66,6 +66,32 @@ regeneration, HTTPS/all loaded native workers, other private extensions and
 Production remain unverified. Keep Issues #2/#21 OPEN. No source policy
 behavior change, Release or Production action is implied.
 
+**Interrupted-run QA recovery (review-required lifecycle hardening):** This
+test harness now generates a cryptographically random per-run ID and first
+checks that its two exact usernames do not exist. Before creating either
+customer, it writes a mode-`0600` non-secret manifest
+`qa-account-recovery.json` inside the dedicated temporary QA directory.
+Even if PHP creates users but its preparation response times out or is
+malformed, `finally` removes **only those two exact run usernames** with
+their matching generated email addresses and independently re-queries
+WordPress to verify absence. It never deletes arbitrary users matching an
+`achqa_cache_*` prefix. Nginx control commands are bounded; an uncertain
+stop or unverified customer cleanup is **not** reported as success.
+
+When cleanup cannot be verified, the runner prints the retained temporary
+directory and exact account names without passwords or cookies. An
+authorized nonproduction operator should inspect the manifest, reconcile
+those exact WordPress accounts and associated WooCommerce sessions, then
+remove only the verified task-owned recovery directory; never perform
+prefix-wide user deletion. Historical successful A/B runtime results above
+belong to the original QA runner SHA256
+`ada1b13dd95c31a330bbdf4ebcb7e6cba75ee190fbb4eadc70dfbc2770cd1d7c`.
+Corrected recovery paths were validated with local failure-injection tests.
+The corrected runner was not rerun against the native QA guest after a
+protected transfer action was rejected; the partial staging file was
+removed without execution. No new native WooCommerce acceptance or
+Production certification is implied.
+
 ## Manual site-owned Cache file clear: physical ownership and limits (PR #56 merged)
 
 This is a **new separately approved site-maintenance operation**, not the

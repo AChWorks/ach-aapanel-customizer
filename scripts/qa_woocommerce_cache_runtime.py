@@ -37,7 +37,18 @@ require 'wp-load.php';
 $in = json_decode(stream_get_contents(STDIN), true);
 if (!is_array($in) || !function_exists('WC')) { fwrite(STDERR,"Woo unavailable"); exit(3); }
 add_filter('pre_wp_mail','__return_true');
-if ($in['op'] === 'prepare') {
+$run_id = $in['run_id'] ?? null;
+if (!is_string($run_id) || !preg_match('/\A[0-9a-f]{32}\z/', $run_id)) {
+  fwrite(STDERR,'Invalid QA run identity'); exit(3);
+}
+$names = array('a'=>'achqa_cache_a_'.$run_id, 'b'=>'achqa_cache_b_'.$run_id);
+if ($in['op'] === 'observe') {
+  $present = array();
+  foreach ($names as $login) {
+    if (get_user_by('login', $login)) $present[] = $login;
+  }
+  echo json_encode(array('present'=>$present));
+} elseif ($in['op'] === 'prepare') {
   $users = array(); $products = array();
   foreach (get_posts(array('post_type'=>'product','post_status'=>'publish','posts_per_page'=>30)) as $p) {
     $product = wc_get_product($p->ID);
@@ -45,10 +56,13 @@ if ($in['op'] === 'prepare') {
       $products[] = array('id'=>$p->ID,'name'=>$p->post_title);
   }
   if (count($products)<2) { fwrite(STDERR,'Need two buyable real Woo products'); exit(4); }
+  // Check both names BEFORE any write, not after creating the first user.
+  foreach ($names as $login) {
+    if (get_user_by('login',$login)) { fwrite(STDERR,'QA identity already in use'); exit(4); }
+  }
   $created = array();
   try {
-    foreach (array('a','b') as $suffix) {
-      $user = 'achqa_cache_' . $suffix . '_' . bin2hex(random_bytes(5));
+    foreach ($names as $suffix=>$user) {
       $id = wp_insert_user(array('user_login'=>$user,'user_pass'=>wp_generate_password(40,true,true),
            'user_email'=>$user.'@example.invalid','role'=>'customer','display_name'=>$user));
       if (is_wp_error($id)) { throw new RuntimeException('QA user creation failed'); }
@@ -61,7 +75,7 @@ if ($in['op'] === 'prepare') {
   } catch (Throwable $e) {
     require_once ABSPATH.'wp-admin/includes/user.php';
     foreach ($created as $id) wp_delete_user($id);
-    fwrite(STDERR,'QA customer preparation failed (created users rolled back)');
+    fwrite(STDERR,'QA customer preparation failed; caller will independently reconcile exact run');
     exit(5);
   }
   echo json_encode(array('users'=>$users,'products'=>array_slice($products,0,2),
@@ -73,27 +87,115 @@ if ($in['op'] === 'prepare') {
 } elseif ($in['op'] === 'remove') {
   require_once ABSPATH.'wp-admin/includes/user.php';
   global $wpdb;
-  foreach ($in['users'] as $user_id) {
-    $id = (int)$user_id;
-    $user = get_userdata($id);
-    if (!$user || !str_starts_with($user->user_login,'achqa_cache_'))
-      { fwrite(STDERR,'Unowned QA user; abort cleanup'); exit(6); }
-    $wpdb->delete($wpdb->prefix.'woocommerce_sessions',array('session_key'=>(string)$id),array('%s'));
-    if (!wp_delete_user($id)) { fwrite(STDERR,'Could not delete QA user'); exit(7); }
+  $removed = 0; $unresolved = array();
+  foreach ($names as $login) {
+    $user = get_user_by('login',$login);
+    if (!$user) continue;
+    // The unique, pre-observed login AND its exact generated email prove
+    // which accounts this run may delete, even after a partial PHP exit.
+    if ($user->user_email !== $login.'@example.invalid') {
+      $unresolved[] = $login;
+      continue;
+    }
+    $deleted_session = $wpdb->delete($wpdb->prefix.'woocommerce_sessions',
+                   array('session_key'=>(string)$user->ID),array('%s'));
+    if ($deleted_session === false) { $unresolved[] = $login; continue; }
+    if (wp_delete_user($user->ID)) $removed++;
+    else $unresolved[] = $login;
   }
-  echo json_encode(array('removed'=>count($in['users'])));
+  echo json_encode(array('removed'=>$removed,'unresolved'=>$unresolved));
 } else { fwrite(STDERR,'Unknown QA action'); exit(8); }
 """
 
 
 def wp_action(php, root, data):
-    p = subprocess.run(
-        [php, "-d", "display_errors=0", "-r", WP_ACTION, str(root)],
-        input=json.dumps(data), text=True, capture_output=True, timeout=35)
+    action = data["op"]
+    try:
+        p = subprocess.run(
+            [php, "-d", "display_errors=0", "-r", WP_ACTION, str(root)],
+            input=json.dumps(data), text=True, capture_output=True, timeout=35)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("WordPress QA %s exceeded 35 seconds" % action) from exc
     if p.returncode:
-        raise RuntimeError("WordPress QA action failed (code %s): %s" %
-                           (p.returncode, p.stderr[-350:]))
-    return json.loads(p.stdout)
+        raise RuntimeError("WordPress QA %s failed (exit %s)" % (action,p.returncode))
+    try:
+        return json.loads(p.stdout)
+    except (ValueError, TypeError) as exc:
+        # PHP prepare output contains signed session cookies; never echo it.
+        raise RuntimeError("WordPress QA %s returned invalid JSON" % action) from exc
+
+
+def qa_usernames(run_id):
+    if not isinstance(run_id,str) or not re.fullmatch(r"[0-9a-f]{32}",run_id):
+        raise ValueError("Invalid QA run identity")
+    return ["achqa_cache_%s_%s" % (suffix,run_id) for suffix in ("a","b")]
+
+
+def observe_qa_accounts(php, root, run_id):
+    result = wp_action(php,root,{"op":"observe","run_id":run_id})
+    expected = set(qa_usernames(run_id))
+    if (not isinstance(result,dict) or not isinstance(result.get("present"),list)
+            or any(x not in expected for x in result["present"])):
+        raise RuntimeError("WordPress QA account observation is invalid")
+    return set(result["present"])
+
+
+def claim_qa_accounts(php, root, temp):
+    # A confirmed empty exact-name preflight precedes the FIRST DB mutation.
+    # A run-specific recovery identity is then persisted before prepare.
+    run_id = secrets.token_hex(16)
+    if observe_qa_accounts(php,root,run_id):
+        raise RuntimeError("Generated QA identities already exist; refusing preparation")
+    recovery = temp/"qa-account-recovery.json"
+    fd = os.open(recovery,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+    with os.fdopen(fd,"w",encoding="utf-8") as handle:
+        json.dump({"run_id":run_id,"usernames":qa_usernames(run_id),
+                   "site_root":str(root),"status":"prepare_or_cleanup_unknown"},handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return run_id
+
+
+def validate_prepared_accounts(data, run_id):
+    expected = qa_usernames(run_id)
+    if (not isinstance(data,dict) or not isinstance(data.get("users"),list)
+            or len(data["users"]) != 2 or
+            [x.get("login") for x in data["users"] if isinstance(x,dict)] != expected or
+            any(not isinstance(x.get("id"),int) or x["id"] <= 0 or
+                    not isinstance(x.get("cookie"),str) or "=" not in x["cookie"]
+                    for x in data["users"] if isinstance(x,dict))):
+        raise RuntimeError("WordPress QA prepare returned incomplete identities")
+    return data
+
+
+def cleanup_qa_accounts(php, root, run_id):
+    """Reconcile exact run users even if PHP prepare/remove response was lost.
+
+    A successful remove response alone is not proof. Independent fresh observe
+    is authoritative for actual absence. Errors include exact non-secret
+    usernames so the retained recovery manifest remains actionable.
+    """
+    attempted = 0
+    operation_error = None
+    try:
+        result = wp_action(php,root,{"op":"remove","run_id":run_id})
+        if (not isinstance(result,dict) or
+                type(result.get("removed")) is not int or
+                not 0 <= result["removed"] <= 2 or
+                not isinstance(result.get("unresolved"),list)):
+            raise RuntimeError("Invalid QA cleanup response")
+        attempted = result["removed"]
+    except Exception as exc:
+        operation_error = str(exc)
+    try:
+        observed = observe_qa_accounts(php,root,run_id)
+    except Exception as exc:
+        raise RuntimeError("QA account deletion unverified for exact users %s; %s" %
+                           (", ".join(qa_usernames(run_id)), str(exc))) from exc
+    if observed:
+        raise RuntimeError("QA accounts remain for exact users: "+", ".join(sorted(observed))+
+                           ("; cleanup call: "+operation_error if operation_error else ""))
+    return attempted
 
 
 def file_digest(path):
@@ -189,8 +291,10 @@ def run(args):
         "/www/server/panel/vhost/nginx/"+args.host+".conf",
         "/www/server/panel/vhost/rewrite/"+args.host+".conf"]
     before = {p:file_digest(p) for p in native_config}
-    identities = []
+    run_id = None
+    removed_accounts = 0
     started = False
+    start_attempted = False
     verified = {}
     www = pwd.getpwnam("www")
     temp = Path(tempfile.mkdtemp(prefix="ach-woo-real-cache-"))
@@ -219,11 +323,22 @@ def run(args):
         conf.write_text(config_text(temp,port,root,args.host,plan,args.php_version))
         run_cmd = [args.nginx,"-p",str(temp)+"/","-c",str(conf)]
         try:
-            check = subprocess.run([*run_cmd,"-t"],capture_output=True,text=True)
+            try:
+                check = subprocess.run([*run_cmd,"-t"],capture_output=True,
+                                       text=True,timeout=12)
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError("Standalone Nginx syntax check timed out") from exc
             if check.returncode: raise RuntimeError("Standalone Nginx syntax failed: "+check.stderr[-800:])
-            users = wp_action(wp_php, root, {"op":"prepare"})
-            identities = [int(u["id"]) for u in users["users"]]
-            started_cmd = subprocess.run(run_cmd,capture_output=True,text=True)
+            run_id = claim_qa_accounts(wp_php,root,temp)
+            users = validate_prepared_accounts(
+                wp_action(wp_php,root,{"op":"prepare","run_id":run_id}),run_id)
+            start_attempted = True
+            try:
+                started_cmd = subprocess.run(run_cmd,capture_output=True,
+                                             text=True,timeout=12)
+            except subprocess.TimeoutExpired as exc:
+                safe_remove = False  # A daemon may have started before timeout.
+                raise RuntimeError("Standalone Nginx start timed out; retained recovery files") from exc
             if started_cmd.returncode:
                 raise RuntimeError("Standalone Nginx startup failed: "+started_cmd.stderr[-800:])
             started = True
@@ -294,39 +409,44 @@ def run(args):
                 "nginx_syntax":"PASS","qa_cache_isolated":True}
         finally:
             errors=[]
-            if started:
-                stopped=subprocess.run([*run_cmd,"-s","quit"],capture_output=True,text=True)
-                if stopped.returncode:
-                    safe_remove = False
-                    errors.append("Standalone Nginx stop not confirmed")
-                for _ in range(50):
-                    if not (temp/"nginx.pid").exists():break
-                    time.sleep(0.1)
-                if (temp/"nginx.pid").exists():
-                    safe_remove = False
-                    errors.append("Isolated Nginx pid not retired; retain QA source")
-            if identities:
+            pidfile = temp/"nginx.pid"
+            if started or (start_attempted and pidfile.exists()):
                 try:
-                    x=wp_action(wp_php,root,{"op":"remove","users":identities})
-                    if x["removed"]!=len(identities):
-                        errors.append("QA customers not fully removed")
+                    stopped = subprocess.run([*run_cmd,"-s","quit"],
+                                             capture_output=True,text=True,timeout=12)
+                    if stopped.returncode:
+                        safe_remove = False
+                        errors.append("Standalone Nginx quit was rejected")
+                except (subprocess.TimeoutExpired,OSError) as exc:
+                    safe_remove = False
+                    errors.append("Standalone Nginx stop unconfirmed: "+type(exc).__name__)
+                for _ in range(50):
+                    if not pidfile.exists():break
+                    time.sleep(0.1)
+                if pidfile.exists():
+                    safe_remove = False
+                    errors.append("Standalone Nginx pid not retired")
+            if run_id is not None:
+                try:
+                    removed_accounts=cleanup_qa_accounts(wp_php,root,run_id)
                 except Exception as exc:
-                    errors.append("QA user cleanup failed: "+str(exc))
+                    safe_remove = False
+                    errors.append("Exact QA account cleanup/recheck failed: %s; recovery file: %s" %
+                                  (str(exc),temp/"qa-account-recovery.json"))
             changed=[p for p in native_config if file_digest(p)!=before[p]]
             if changed:
                 errors.append("Native config changed unexpectedly: "+", ".join(changed))
             if errors:
-                # Preserve original temp process files if Nginx stop was not confirmed.
                 raise RuntimeError("; ".join(errors))
     finally:
         if safe_remove:
             shutil.rmtree(temp)
         else:
-            print("Unconfirmed isolated Nginx stop; retained recovery root: "+str(temp),
+            print("Incomplete QA cleanup or Nginx stop; retained recovery root: "+str(temp),
                   file=sys.stderr)
     print(json.dumps({"result":"PASS","checks":verified,
          "preserved_native_configs":len(before),
-         "ephemeral_qa_users_removed":len(identities),
+         "ephemeral_qa_users_removed":removed_accounts,
          "loopback_nginx_stopped":True,"temporary_test_files_removed":True},sort_keys=True))
 
 
