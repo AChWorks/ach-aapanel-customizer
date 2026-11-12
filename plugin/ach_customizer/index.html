@@ -1756,6 +1756,15 @@
         r.vhost_root === null && r.findings.length === 0 &&
         r.native_names.length === 0 && r.vhost_names.length === 0 &&
         r.listen_ports.length === 0 && r.reason.length > 0;
+    // Mirror the backend's exact literal-root rule: only one final slash is
+    // a spelling variant, never a general path canonicalization or alias.
+    var literalRoot = x => typeof x === 'string' && x.length <= 2048 &&
+      /^\/[A-Za-z0-9_./-]{1,2047}$/.exec(x)?.[0] === x && !x.includes('//') &&
+      !x.split('/').slice(1).some(part => part === '.' || part === '..');
+    var sameRoot = (a, b) => a === b ||
+      (a.endsWith('/') && a.slice(0, -1) === b) ||
+      (b.endsWith('/') && b.slice(0, -1) === a);
+    if (!literalRoot(r.native_root) || !literalRoot(r.vhost_root)) return false;
     if (r.native_names.length === 0 || r.vhost_names.length === 0 ||
         !/^[0-9a-f]{64}$/.test(r.vhost_sha256 || '') ||
         typeof r.native_root !== 'string' || !r.native_root || r.native_root.length > 2048 ||
@@ -1765,7 +1774,7 @@
     // independent labels. Reject internally contradictory backend replies.
     var nativeNames = new Set(r.native_names), vhostNames = new Set(r.vhost_names);
     var expected = [];
-    if (r.native_root !== r.vhost_root) expected.push('DOCUMENT_ROOT_MISMATCH');
+    if (!sameRoot(r.native_root, r.vhost_root)) expected.push('DOCUMENT_ROOT_MISMATCH');
     if (r.native_names.some(x => !vhostNames.has(x)))
       expected.push('BOUND_HOST_MISSING_IN_VHOST');
     if (r.vhost_names.some(x => !nativeNames.has(x)))
