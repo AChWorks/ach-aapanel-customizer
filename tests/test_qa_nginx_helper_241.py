@@ -1,9 +1,9 @@
-"""Safe offline test of the Nginx Helper 2.4.1 QA harness itself.
+"""Offline rejection tests for the exact-source-pinned Nginx Helper QA harness.
 
-The real vendor methods are exercised only in the isolated aaPanel guest; they
-are not copied into this repository. These checks catch accidental execution
-of unsupported versions and ensure failed fixture runs clean their own files.
+The approved upstream vendor methods are exercised in the isolated aaPanel QA
+guest; CI uses synthetic PHP only to prove it is rejected without execution.
 """
+import json
 import os
 from pathlib import Path
 import shutil
@@ -58,14 +58,28 @@ class NginxHelperQaHarnessTests(unittest.TestCase):
         self.assertIn("pinned to Nginx Helper v2.4.1", result.stderr)
         self.assertEqual(list(self.temp.iterdir()), [])
 
-    def test_vendor_failure_cleans_only_isolated_fixture(self):
+    def test_spoofed_241_header_modified_vendor_code_never_executes(self):
+        # A malicious class body must not run just because nginx-helper.php
+        # declares the accepted version. We observe an external sentinel.
+        marker = self.root / "executable-class-was-loaded"
+        self.purger.write_text(
+            "<?php file_put_contents(" + json.dumps(str(marker)) +
+            ", 'UNEXPECTED'); class Purger {}\n",
+            encoding="utf-8",
+        )
         result = self.run_harness("2.4.1")
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("injected vendor failure", result.stderr)
-        self.assertEqual(list(self.temp.iterdir()), [])
-        # The installed plugin source/fixture files must not be modified.
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("source SHA-256 mismatch: class-purger.php", result.stderr)
+        self.assertFalse(marker.exists(), "Unverified vendor PHP was executed")
+        self.assertEqual(list(self.temp.iterdir()), [], "Rejected code left a fixture")
         self.assertIn("FastCGI_Purger", self.fastcgi.read_text(encoding="utf-8"))
-        self.assertIn("class Purger", self.purger.read_text(encoding="utf-8"))
+
+    def test_missing_vendor_class_rejected_without_fixture(self):
+        self.purger.unlink()
+        result = self.run_harness("2.4.1")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("source is incomplete", result.stderr)
+        self.assertEqual(list(self.temp.iterdir()), [])
 
 
 if __name__ == "__main__":
