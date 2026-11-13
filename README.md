@@ -2,7 +2,18 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Status: 0.1.38 UNRELEASED development; no public Release or Production deployment.** Following independently reviewed and Owner-merged [PR #59](https://github.com/AChWorks/ach-aapanel-customizer/pull/59), the exact `0.1.37` package was natively installed and its VHost-comparison UI passed for both aaPanel 8.0.7 regenerated and original site sources in an isolated guest (see [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)). The **0.1.38 candidate** addresses a separate observed Status Pages usability defect: a verified `Restored` extension journal with no active snippet was preventing an explicitly approved new Apply after aaPanel regenerates the site VHost. Only a new Apply may supersede that historical journal, after revalidating the current native source, current HTTP 404 or 502 source baseline, exact browser approval and three fresh checks that the old generation nonce is absent. Stopped, foreign, prepared, applied, active-snippet, unsupported, or uncertain recoveries remain blocked; historical Recheck never authorizes Restore or a write by itself. An initial exact 0.1.38 ZIP passed the real native site #5 restored-journal reapproval and Restore cycle; that exercise exposed a missing prior-baseline value in the immediate Apply response. The follow-up to the independent review now also rejects a missing, null, malformed or contradictory baseline in an otherwise successful extension Apply response; 404/502/50x and distinct site-file handling are covered by source regression tests. The corrected current 0.1.38 ZIP passes source tests but has **not** been natively reinstalled; a previous 0.1.38 ZIP replay was blocked by a tool Safety Check. See Issue #21 for precise SHA-256 identities and QA rollback evidence. This feature has no automatic reconciliation, vendor/core edit or Production effect. Broader HTTPS/all-worker, lifecycle fault, WooCommerce private-session, Nginx Helper generation/Purge All and release criteria remain open under [Issues #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10), [#17](https://github.com/AChWorks/ach-aapanel-customizer/issues/17) and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21). Integration requires exact-head CI, independent review and separate Owner Merge authorization.
+**Status: v0.1.38 UNRELEASED; no public Release or Production deployment.**
+The installed package has passed bounded genuine aaPanel 8.0.7 QA for native
+Status Pages and Cache recovery, real WooCommerce HTTP/HTTPS A/B session
+privacy and Nginx worker adoption. Those results are not full Release
+acceptance. Nginx Helper's generation-aware WordPress integration and safe
+live Purge All, native SSL installation UI, all-site regeneration and broader
+fault/lifecycle cases remain tracked under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2),
+[#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10),
+[#17](https://github.com/AChWorks/ach-aapanel-customizer/issues/17)
+and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+Use the live PR, Actions and Issue evidence for exact candidate and acceptance
+status; new integration, Release and Production require their own gates.
 
 **0.1.22 guarded native stopped-site HTTP503 candidate (unreleased):** On aaPanel 8.0.7 Nginx only, select a native running website, the `stopped` EN/FA template, then explicitly Recheck and approve a site-scoped Nginx Apply. A plugin-owned inline server rewrite survives aaPanel's native SiteStop/Start include-commenting and root substitutions; it serves **actual HTTP 503 with HTML MIME** only while the site is stopped, without editing aaPanel core or the shared `/www/server/stop/index.html`. The saved root-owned original VHost and recovery journal stay outside plugin source. An explicitly approved Restore removes only the validated managed block and reloads shared Nginx; unknown or edited ownership fails to recovery review rather than overwriting an operator's changes. The rule checks the raw request Host (including verified native aliases) together with the native stopped root, so an unknown or absent Host does not accidentally inherit a selected default VHost's 503. After Nginx reload, the selected VHost's current bytes and Nginx -T source are rechecked before journal success; uncertain results retain recovery, and the UI separates prepared, observed HTTP503 and restored-route evidence. This is neither automatic enforcement nor a claim of generic 50x/HTTPS unknown-host coverage. The earlier R1 ZIP passed isolated native HTTP/HTTPS, Stop/Start and Restore testing; the final R2 proof-contract correction passed source tests and independent review, but its exact ZIP was not replayed in native aaPanel. The change was merged in PR #38; Release/Production and real authenticated Browser Phase B remain separate gates.
 
@@ -251,6 +262,16 @@ approved Cache operations. Other Helper versions remain unverified until
 independently assessed. Physical site-scoped Purge All and actual
 WordPress/WooCommerce/Nginx Helper behavior remain separate native acceptance
 work, not silently satisfied by this read-only feature.
+
+A later **test-only**, exact-source-pinned Nginx Helper 2.4.1 isolated QA run
+verified its supported `rt_nginx_helper_purge_cached_file` filter can remap a
+URL to the active generation-specific cache file in a private fixture,
+without editing vendor code. It also proved that vendor Purge All is strictly
+*configured-path-scoped*: an independent sibling site's cache survives,
+while misconfigured peer entries under the same path do not. This is not a
+production WordPress bridge or permission to enable Purge All; effective
+per-site runtime configuration and native integration remain open. See the
+[reproducible source and bounded QA evidence](docs/evidence/aaPanel-8.0.7-2026-11-13-nginx-helper-scope-hook-qa.json).
 
 ## Unreleased 0.1.30: guarded native per-site FastCGI Cache operations (Issue #2)
 

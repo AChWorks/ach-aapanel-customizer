@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-13",
+  "project": "AChWorks/ach-aapanel-customizer",
+  "work_item": "https://github.com/AChWorks/ach-aapanel-customizer/issues/2",
+  "source_parent_main": "63167e995dc4891ab0833b03626f21147d8a5ce1",
+  "environment": {
+    "kind": "nonproduction managed Incus guest",
+    "project": "ach-aapanel-qa",
+    "instance": "aac-native-qa",
+    "instance_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "aapanel_version": "8.0.7",
+    "vendor_install": "root-level WP plugin on qa21-wordpress-native.test",
+    "execution": "php -n with source-hash pinned vendor purger classes, verified private copy, WordPress functions stubbed",
+    "real_wordpress_runtime_bootstrapped": false,
+    "external_network_requested": false,
+    "real_cache_paths_touched": false
+  },
+  "vendor_qa_stdout": {
+    "schema": 2,
+    "source_version": "2.4.1",
+    "source_sha256": "4783c975c2942d0917e6fb4236a79b1939bcbb0026fd6003f99bd188d134838a",
+    "class_purger_sha256": "5e8a5f6cbf2e16342f5acb99a3cadc774f798e43a51d7cdfe6c6fc8b38abd1a5",
+    "fastcgi_purger_sha256": "3561fbc01a26e28225d5368ce958a92cfb0a27898ded6fec3a699594d6877d9f",
+    "vendor_code_executed_from_verified_private_snapshot": true,
+    "unlink_files_legacy_key_deleted": true,
+    "unlink_files_query_legacy_key_ignored": true,
+    "unlink_files_query_generation_key_preserved": true,
+    "unlink_files_peer_site_preserved": true,
+    "unlink_files_verified_filter_deleted_generation_key": true,
+    "unlink_files_verified_filter_deleted_query_generation_key": true,
+    "unlink_files_generation_key_preserved": true,
+    "get_request_remote_urls": [
+      "http://qa-helper-a.invalid/purge/post",
+      "http://qa-helper-a.invalid/purge/post?draft=1"
+    ],
+    "get_request_http_200_simulated_not_proof": true,
+    "get_request_generation_key_preserved": true,
+    "get_request_query_generation_key_preserved": true,
+    "get_request_peer_site_preserved": true,
+    "get_request_purge_all_site_a_deleted": true,
+    "get_request_purge_all_retained_generation_deleted": true,
+    "get_request_purge_all_mis_scoped_peer_deleted": true,
+    "get_request_purge_all_physically_separate_peer_preserved": true,
+    "wp_remote_get_calls_stubbed": 2,
+    "remote_http_response_simulated": true,
+    "tested_cache_root": "private_temporary_fixture",
+    "process_network_monitoring_performed": false,
+    "safe_customizer_purge_inferred": false,
+    "fixture_cleaned": true
+  },
+  "verified_additional_checks": {
+    "injected_failure_after_verified_load_returns_failure_and_private_fixture_is_clean": true,
+    "native_nginx_t_passed": true,
+    "host_staging_file_absent_after_execution": true,
+    "guest_staging_file_absent_after_execution": true,
+    "guest_temporary_vendor_fixture_absent_after_execution": true
+  },
+  "outcome": {
+    "legacy_no_query_unlink_files_removes_legacy_key": true,
+    "vendor_query_url_hash_excludes_query": true,
+    "generation_suffix_requires_supported_filename_filter": true,
+    "documented_rt_nginx_helper_purge_cached_file_filter_maps_plain_and_query_generation_keys": true,
+    "simulated_get_request_200_is_not_actual_purge": true,
+    "vendor_purge_all_removes_all_contents_below_configured_root": true,
+    "separate_physical_site_cache_remains_untouched": true
+  },
+  "not_proven": [
+    "Nginx Helper plugin activation or effective WordPress settings in installed site",
+    "real WordPress/WooCommerce event-triggered purge and actual Nginx worker cache objects",
+    "approved WordPress adapter deployment and dynamic Cache generation source",
+    "safe real Purge All with symlink/bind-mount peers and PHP permissions",
+    "external HTTP purge route, third-party webhook safety, Production/Release approval"
+  ],
+  "production_or_public_release_changed": false,
+  "customer_site_or_native_vhost_modified": false
+}
