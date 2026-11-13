@@ -2,8 +2,8 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Development candidate: v0.1.40 UNRELEASED; last independently accepted and merged source/QA package: v0.1.39. No public Release or Production deployment.**
-The installed package has passed bounded genuine aaPanel 8.0.7 QA for native
+**Development candidate: v0.1.41 UNRELEASED; last independently accepted and merged source/QA package: v0.1.40. No public Release or Production deployment.**
+The last merged v0.1.40 package passed bounded genuine aaPanel 8.0.7 QA for native
 Status Pages and Cache recovery, real WooCommerce HTTP/HTTPS A/B session
 privacy and Nginx worker adoption. Those results are not full Release
 acceptance. Nginx Helper's generation-aware WordPress integration and safe
@@ -14,6 +14,27 @@ fault/lifecycle cases remain tracked under [Issue #2](https://github.com/AChWork
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
+
+### v0.1.41 candidate: native ZIP upgrade resident-worker observation (Issues #21/#2)
+
+After native aaPanel ZIP installation, the current HTML may load before its
+Python workers re-import changed modules. **Overview** now compares the UI's
+packaged source version against an import-time `get_overview` entrypoint
+version. An older/missing value prompts a visible **Upgrade needs review**
+notice, pointing operators to Activity/Operation ID and a **controlled,
+operator-authorized** panel reload only when justified; no automatic reload
+or changes to Nginx/PHP/cache, login, authorization, or update lifecycle.
+A match only covers the Python entrypoint, **not** all imported helpers or
+active Nginx workers. An unavailable/invalid Overview response remains
+**unverified**, not falsely diagnosed as a stale worker. See the
+[native upgrade recovery runbook](docs/aapanel-upgrade-recovery.md) for the
+verified v0.1.40 QA incident, evidence to collect and post-reload checks.
+v0.1.41 is a new **unreviewed** source candidate; none of the v0.1.40 native
+ZIP/CI acceptance automatically applies to it.
+The exact 0.1.41 ZIP was installed through native aaPanel QA and the worker
+entrypoint version **matched** in that run (no stale worker reproduced);
+see the [candidate-only evidence](docs/evidence/aapanel-8.0.7-2026-11-14-native-zip-worker-v041.json).
+Independent review, integration and Release remain separately gated.
 
 ### v0.1.40 candidate: repeatable default WooCommerce guest-route Cache observations (Issues #21/#2)
 

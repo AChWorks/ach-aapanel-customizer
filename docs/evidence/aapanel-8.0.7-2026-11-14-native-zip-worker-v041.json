@@ -1,0 +1,68 @@
+{
+  "app": "ACh aaPanel Customizer",
+  "candidate_zip": {
+    "host_path": "/srv/ai-workspace/ach-aapanel-qa/ach-customizer-qa21-v0.1.41-worker.zip",
+    "member_count": 55,
+    "sha256": "29fa7439f0346812bac688f0a9f57d2a53942dc6002c5fd690028ec8b0d725bf",
+    "size_bytes": 318672
+  },
+  "environment": {
+    "guest_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "incus_guest": "aac-native-qa",
+    "incus_project": "ach-aapanel-qa",
+    "platform": "aaPanel 8.0.7 Nginx PHP 8.1/8.5",
+    "server": "AI Test Server",
+    "test_only": true
+  },
+  "integration": {
+    "existing_0_1_40_zip_preserved": true,
+    "installed_members_matching": 55,
+    "installed_members_total": 55,
+    "installed_version": "0.1.41",
+    "nginx_reloads_by_plugin": 0,
+    "official_native_import": "Installation succeeded!",
+    "panel_auto_restarts_by_plugin": 0,
+    "production_changes": false,
+    "unexpected_installed_source_members": 0
+  },
+  "limits": [
+    "No real stale-worker adoption reproduced in the installed 0.1.41 QA session",
+    "Version handshake checks Python entrypoint, not imported helper hashes",
+    "No managed WordPress wpfastcgi Apply, Nginx Helper Purge All, or production acceptance",
+    "No public Release or merge authorization",
+    "Independent exact-candidate review still required"
+  ],
+  "post_install_checks": {
+    "all_nine_sites_checked": false,
+    "nginx_syntax": "PASS",
+    "woocommerce_native_https_status": 200,
+    "wordpress_native_https_status": 200
+  },
+  "qa_date": "2026-11-14",
+  "read_only_native_browser": {
+    "overview_get_http_status": 200,
+    "protected_primary_admin_login": "authenticated, no secret output",
+    "registered_origin": "https://aapaneltest.ach.li",
+    "stale_worker_reproduced_on_current_install": false,
+    "synthetic_browser_old_reply": {
+      "outcome": "unverified",
+      "reason": "Browser session script completion uncertain; session was inspected and closed; do not claim acceptance"
+    },
+    "ui_worker_version_status": "matched",
+    "worker_source_version": "0.1.41"
+  },
+  "recovery": {
+    "prior_exact_zip": "/srv/ai-workspace/ach-aapanel-qa/ach-customizer-pr66-exact-0.1.40.zip",
+    "prior_guest_snapshot_tar": "/root/achqa/qa21-pr66-before-040-installed-039.tar.gz",
+    "prior_zip_sha256": "de3640333fbae98d208b4453048c0f9b02a2ea395caddd262760a696ec6137e1"
+  },
+  "scope": "ACh aaPanel Customizer issue #21 native QA, unreleased 0.1.41 candidate",
+  "source_test_results": {
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "install_sh_syntax": "PASS",
+    "javascript_node_tests_pass": 315,
+    "python_unittest_pass": 731
+  },
+  "version": "0.1.41"
+}

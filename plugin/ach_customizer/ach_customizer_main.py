@@ -37,6 +37,10 @@ from ach_customizer_status_pages import (
     read_preferences, render_page, select_brand, update_preferences, validate_brand,
 )
 
+# Worker-loaded constant: do not read fresh disk metadata at request time.
+# In-place ZIP upgrades may leave old Python imports resident in aaPanel.
+WORKER_SOURCE_VERSION = '0.1.41'
+
 _STATE_DIR = DATA_DIR
 
 
@@ -160,6 +164,7 @@ class ach_customizer_main:
             "enforcement": False,
             "state_schema": state["schema_version"],
             "state_revision": state["revision"],
+            "worker_source_version": WORKER_SOURCE_VERSION,
             "overall_enabled": active,
             "modules_enabled": dict(state["modules"]),
             "modules": {

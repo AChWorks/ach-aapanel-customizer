@@ -22,6 +22,20 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn('ExecShell(', main)
         self.assertNotIn('def apply(', main)
 
+    def test_native_version_handshake_is_baked_into_loaded_python_and_shipped_ui(self):
+        import re
+        info = json.loads((PACKAGE / 'info.json').read_text())
+        main = (PACKAGE / 'ach_customizer_main.py').read_text()
+        ui = (PACKAGE / 'index.html').read_text()
+        worker = re.search(r"(?m)^WORKER_SOURCE_VERSION = '([0-9]+\.[0-9]+\.[0-9]+)'$", main)
+        shipped = re.search(r"var shippedUiVersion = '([0-9]+\.[0-9]+\.[0-9]+)'", ui)
+        self.assertIsNotNone(worker)
+        self.assertIsNotNone(shipped)
+        self.assertEqual(info['versions'], worker.group(1))
+        self.assertEqual(info['versions'], shipped.group(1))
+        self.assertIn('worker_source_version', main)
+        self.assertNotIn("json.load(open", main)
+
     def test_build_is_reproducible_and_contents_are_bounded(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / 'dev.zip'
