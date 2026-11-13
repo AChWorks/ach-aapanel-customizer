@@ -51,6 +51,7 @@ function loadUi() {
     '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
+    '#ach-cache-private-probe-button', '#ach-cache-private-probe-result',
     '#ach-cache-plan-button', '#ach-cache-plan-result',
     '#ach-cache-activation-preview', '#ach-cache-activation-recheck',
     '#ach-cache-activation-result', '#ach-cache-activation-reviewed',
@@ -315,6 +316,8 @@ function loadUi() {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
       cacheResult: elements.get('#ach-cache-result').textContent,
+      privateCacheProbeResult: elements.get('#ach-cache-private-probe-result').textContent,
+      privateCacheProbeDisabled: elements.get('#ach-cache-private-probe-button').props.disabled,
       cacheSummary: elements.get('#ach-cache-summary').textContent,
       cacheSummaryTone: elements.get('#ach-cache-summary').attributes['data-tone'],
       hostsSummary: elements.get('#ach-hosts-summary').textContent,
@@ -7351,4 +7354,76 @@ test('Status Pages identifies Apply and Restore prerequisites separately before 
   assert.match(ui.gate('ach-status-site-apply-why').text,/running website/);
   assert.match(ui.gate('ach-status-stopped-apply-why').text,/running website/);
   assert.match(ui.gate('ach-status-unbound-restore-why').text,/saved global HTTP\/80 recovery/);
+});
+
+
+const privateCacheProbe = (overrides={}) => ({
+  status:true,schema:1,site_id:7,site_key:'site.test',
+  state:'Observed BYPASS',read_only:true,runtime_verified:false,
+  cache_safe_verified:false,purge_supported:false,
+  private_probe_bypass_observed:true,request_method:'HEAD',
+  origin:'127.0.0.1:80',reason:'',
+  note:'Synthetic local HTTP/80 HEAD requests, no real user safety proof.',
+  probes:[
+    {path:'/',route:'home',scenario:'authorization',http_status:200,cache:'BYPASS'},
+    {path:'/',route:'home',scenario:'cookie',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/',route:'rest',scenario:'authorization',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/',route:'rest',scenario:'cookie',http_status:200,cache:'BYPASS'}
+  ],
+  ...overrides
+});
+
+test('Native private Cache probe reports synthetic BYPASS without unsafe action', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  assert.equal(ui.state().privateCacheProbeDisabled,false);
+  const req=ui.statusClick('#ach-cache-private-probe-button');
+  assert.match(req.options.url,/s=probe_private_cache$/);
+  assert.equal(req.options.data.site_id,'7');
+  assert.equal(ui.state().privateCacheProbeDisabled,true);
+  req.respond(privateCacheProbe());
+  assert.match(ui.state().privateCacheProbeResult,/Observed BYPASS/);
+  assert.match(ui.state().privateCacheProbeResult,/rest \/ authorization: HTTP 200, Cache BYPASS/);
+  assert.match(ui.state().privateCacheProbeResult,/never authorizes Apply, Restore or Purge All/);
+  assert.equal(ui.state().privateCacheProbeDisabled,false);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.state().cacheClearDisabled,true);
+});
+
+test('Private Cache probe refuses forged success and stale selection', () => {
+  for (const bad of [
+    {cache_safe_verified:true},
+    {runtime_verified:true},
+    {purge_supported:true},
+    {origin:'https://evil.test'},
+    {private_probe_bypass_observed:false},
+    {probes:privateCacheProbe().probes.slice(1)},
+    {probes:privateCacheProbe().probes.map((x,i)=>
+      i===2 ? {...x,cache:'HIT'} : x)},
+  ]) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-cache-private-probe-button').respond(privateCacheProbe(bad));
+    assert.match(ui.state().privateCacheProbeResult,/unavailable or unconfirmed/,
+      JSON.stringify(bad));
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  const stale=ui.statusClick('#ach-cache-private-probe-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  stale.respond(privateCacheProbe());
+  assert.doesNotMatch(ui.state().privateCacheProbeResult,/Observed BYPASS/);
+  assert.equal(ui.state().privateCacheProbeDisabled,false);
+});
+
+test('Private Cache probe can render an actual unsafe-cache observation', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const probes=privateCacheProbe().probes;
+  const bad=probes.map((x,i)=>i===1?{...x,cache:'HIT'}:x);
+  ui.statusClick('#ach-cache-private-probe-button').respond(privateCacheProbe({
+    state:'Needs Review',private_probe_bypass_observed:false,
+    reason:'A synthetic identity-bearing request did not bypass cache',
+    probes:bad
+  }));
+  assert.match(ui.state().privateCacheProbeResult,/Needs Review/);
+  assert.match(ui.state().privateCacheProbeResult,/home \/ cookie: HTTP 200, Cache HIT/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
 });

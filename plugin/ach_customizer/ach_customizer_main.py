@@ -632,6 +632,44 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("cache_inspection", exc, request_id)
 
+    def probe_private_cache(self, args):
+        """Full-admin synthetic cache-bypass observations on local HTTP/80.
+
+        Never accept a browser-supplied URL, header or cache path. This is
+        separate from source inspection, real-session tests and Purge All.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            from ach_customizer_cache_audit import inspect_site_fastcgi_cache
+            from ach_customizer_cache_runtime import probe_private_cache
+            public, before, current_site = self._selected_native_website(args)
+            audited = inspect_site_fastcgi_cache(
+                public, before["id"], before["name"])
+            result = probe_private_cache(before, audited)
+            if current_site() != before:
+                raise MonitorInputError(
+                    "Native website/root/bindings changed during Cache runtime probe")
+            # A positive loopback response cannot be assigned to a changed
+            # source snapshot. Never upgrade a stale file audit to success.
+            if result["state"] == "Observed BYPASS":
+                after = inspect_site_fastcgi_cache(
+                    public, before["id"], before["name"])
+                if (after.get("state") != "Source Observed" or
+                        after.get("source_sha256") != audited.get("source_sha256")):
+                    result["state"] = "Needs Review"
+                    result["private_probe_bypass_observed"] = False
+                    result["reason"] = "Native Cache source changed during runtime observation"
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "probe_private_cache", target=str(before["id"]),
+                level="DEBUG" if result["state"] == "Observed BYPASS" else "WARNING")
+        except PermissionError as exc:
+            return self._fail("cache_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("cache_runtime_probe", exc, request_id)
+
     def preview_cache_safety(self, args):
         """Reference-only per-site cache layout; no site, service or cache write.
 

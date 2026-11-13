@@ -32,7 +32,7 @@ class PackageContractTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), first)
             with ZipFile(target) as archive:
                 names = archive.namelist()
-                self.assertEqual(len(names), 54)
+                self.assertEqual(len(names), 55)
                 self.assertTrue(all(n.startswith('ach_customizer/') and '..' not in n for n in names))
                 self.assertIn('ach_customizer/info.json', names)
                 self.assertIn('ach_customizer/install.sh', names)
@@ -60,6 +60,11 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_cache_audit.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_policy.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_manage.py', names)
+                self.assertIn('ach_customizer/ach_customizer_cache_runtime.py', names)
+                self.assertEqual(
+                    {Path(x).name for x in names if x.endswith('.py')},
+                    {p.name for p in PACKAGE.glob('*.py') if p.is_file()},
+                    'Every shipped Python module must exist in the ZIP')
                 self.assertIn('ach_customizer/ach_customizer_vhost_drift.py', names)
                 self.assertIn('ach_customizer/ach_customizer_nginx_observation.py', names)
                 self.assertIn('ach_customizer/status_pages/manifest.json', names)

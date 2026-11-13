@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Status: v0.1.38 UNRELEASED; no public Release or Production deployment.**
+**Development candidate: v0.1.39 UNRELEASED; previously installed QA package: v0.1.38. No public Release or Production deployment.**
 The installed package has passed bounded genuine aaPanel 8.0.7 QA for native
 Status Pages and Cache recovery, real WooCommerce HTTP/HTTPS A/B session
 privacy and Nginx worker adoption. Those results are not full Release
@@ -14,6 +14,31 @@ fault/lifecycle cases remain tracked under [Issue #2](https://github.com/AChWork
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
+
+### v0.1.39 candidate: local synthetic WordPress Cache header probe (Issue #21)
+
+The native **FastCGI Cache** screen adds `Probe local private-request Cache
+headers`, a separate, bounded observation for a running registered aaPanel
+8.0.7 Nginx site with one native PHP 8.1/8.5 `-wpfastcgi.conf` include and
+a completed source audit. Only the full primary aaPanel administrator through
+the existing POST/CSRF site-selection endpoint can invoke it. Four fixed
+`HEAD` requests to literal `127.0.0.1:80` use the registered Host and
+**synthetic invalid** Authorization or Cookie headers against `/` and
+`/wp-json/`. The probe never accepts request URLs, user cookies, headers,
+cache directories or remote hosts from the browser; it does not follow
+redirects, edit Nginx, purge cache, or change WordPress. Defective Nginx
+rules might cache a public response as a side effect of the HEAD request.
+
+A positive result means only those four actual Nginx `X-Cache` responses
+were HTTP 200 and `BYPASS From <selected host>`, with the site identity and
+source snapshot checked before/after. `HIT`/`MISS` for a synthetic identity
+request requires review; missing headers, redirects, unsupported handlers
+and unavailable local HTTP never certify safety. This **is not** a real
+logged-in session/anonymous Woo Cart/Checkout or HTTPS-edge proof, does not
+make a shared physical Cache safe to `Purge All`, and does not unlock
+`Apply`/`Restore` or change the current Nginx Helper default. Existing
+native WordPress `wpfastcgi` remains unsupported by the separate
+site-owned Cache Apply; its guarded `Needs Review` stays intact.
 
 **0.1.22 guarded native stopped-site HTTP503 candidate (unreleased):** On aaPanel 8.0.7 Nginx only, select a native running website, the `stopped` EN/FA template, then explicitly Recheck and approve a site-scoped Nginx Apply. A plugin-owned inline server rewrite survives aaPanel's native SiteStop/Start include-commenting and root substitutions; it serves **actual HTTP 503 with HTML MIME** only while the site is stopped, without editing aaPanel core or the shared `/www/server/stop/index.html`. The saved root-owned original VHost and recovery journal stay outside plugin source. An explicitly approved Restore removes only the validated managed block and reloads shared Nginx; unknown or edited ownership fails to recovery review rather than overwriting an operator's changes. The rule checks the raw request Host (including verified native aliases) together with the native stopped root, so an unknown or absent Host does not accidentally inherit a selected default VHost's 503. After Nginx reload, the selected VHost's current bytes and Nginx -T source are rechecked before journal success; uncertain results retain recovery, and the UI separates prepared, observed HTTP503 and restored-route evidence. This is neither automatic enforcement nor a claim of generic 50x/HTTPS unknown-host coverage. The earlier R1 ZIP passed isolated native HTTP/HTTPS, Stop/Start and Restore testing; the final R2 proof-contract correction passed source tests and independent review, but its exact ZIP was not replayed in native aaPanel. The change was merged in PR #38; Release/Production and real authenticated Browser Phase B remain separate gates.
 

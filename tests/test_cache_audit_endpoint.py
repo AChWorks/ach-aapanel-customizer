@@ -220,5 +220,67 @@ class NativeCacheAuditEndpointTests(unittest.TestCase):
         self.assertTrue(self.plugin.get_overview({})["status"])
 
 
+    def test_private_probe_uses_current_native_identity_and_rechecks_source(self):
+        from ach_customizer_cache_runtime import probe_private_cache
+        result = {
+            "schema": 1, "state": "Observed BYPASS",
+            "site_id": 7, "site_key": "site.test",
+            "private_probe_bypass_observed": True,
+        }
+        with patch.dict(sys.modules, {
+                "public": self.native(), "flask": self.flask()
+        }), patch.object(audit, "inspect_site_fastcgi_cache",
+                         return_value=self.sample()) as audit_call, \
+             patch("ach_customizer_cache_runtime.probe_private_cache",
+                   return_value=result) as probe:
+            got = self.plugin.probe_private_cache(self.args())
+        self.assertTrue(got["status"], got)
+        self.assertEqual(got["state"], "Observed BYPASS")
+        self.assertEqual(audit_call.call_count, 2)
+        self.assertEqual(audit_call.call_args.args[1:], (7, "site.test"))
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(probe.call_args.args[0]["name"], "site.test")
+        self.assertEqual(probe.call_args.args[1]["source_sha256"], "a" * 64)
+        self.assertEqual(self.reads, 3)
+
+    def test_private_probe_source_changed_cannot_claim_success(self):
+        from ach_customizer_cache_runtime import probe_private_cache
+        result = {"schema": 1, "state": "Observed BYPASS",
+                  "private_probe_bypass_observed": True}
+        other = {**self.sample(), "source_sha256": "b" * 64}
+        with patch.dict(sys.modules, {
+                "public": self.native(), "flask": self.flask()
+        }), patch.object(audit, "inspect_site_fastcgi_cache",
+                         side_effect=[self.sample(), other]), \
+             patch("ach_customizer_cache_runtime.probe_private_cache",
+                   return_value=result):
+            got = self.plugin.probe_private_cache(self.args())
+        self.assertTrue(got["status"], got)
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertFalse(got["private_probe_bypass_observed"])
+        self.assertIn("changed", got["reason"])
+
+    def test_private_probe_rejects_nonprimary_or_get_without_any_http(self):
+        with patch.dict(sys.modules, {
+                "public": self.native(), "flask": self.flask(uid=2)
+        }), patch("ach_customizer_cache_runtime.probe_private_cache") as probe:
+            got = self.plugin.probe_private_cache(self.args())
+        self.assertFalse(got["status"])
+        self.assertEqual(got["stage"], "cache_authorization")
+        probe.assert_not_called()
+        self.assertEqual(self.reads, 0)
+
+    def test_private_probe_changed_native_site_rejects_racy_result(self):
+        with patch.dict(sys.modules, {
+                "public": self.native(drift="domain"), "flask": self.flask()
+        }), patch.object(audit, "inspect_site_fastcgi_cache",
+                         return_value=self.sample()), \
+             patch("ach_customizer_cache_runtime.probe_private_cache",
+                   return_value={"state": "Observed BYPASS"}):
+            got = self.plugin.probe_private_cache(self.args())
+        self.assertFalse(got["status"])
+        self.assertEqual(got["stage"], "cache_runtime_probe")
+        self.assertEqual(self.reads, 3)
+
 if __name__ == "__main__":
     unittest.main()
