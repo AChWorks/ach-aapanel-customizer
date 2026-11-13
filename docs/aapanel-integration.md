@@ -568,6 +568,26 @@ successful real-plugin integration test or permission for automatic purge.
 See [Nginx Helper upstream 2.4.1 source](https://github.com/rtCamp/nginx-helper/tree/2.4.1)
 and [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2).
 
+**Verified isolated vendor-class QA (2026-11-13, Issue #2):** The installed
+Nginx Helper 2.4.1 exact-source-pinned PHP classes were executed from a private
+snapshot on the nonproduction native aaPanel 8.0.7 guest, *without* WordPress
+bootstrap, external HTTP, real site files or a running FastCGI Cache. Ordinary
+`unlink_files` removed the no-query **legacy** key, ignored a query-specific
+legacy key and could not remove Customizer's `|generation` objects. The
+upstream **`rt_nginx_helper_purge_cached_file`** filter, when supplied a
+strict site-owned URL-to-generation-key mapping in the isolated test, deleted
+both plain and query-specific generation objects. This identifies a supported
+WordPress hook for a **future optional adapter**, **not** an installed or
+supported integration. Simulated `get_request` HTTP 200 deleted no file.
+The actual vendor `purge_all()` removed all entries **inside its configured
+site-A directory**, including an incorrectly co-located peer fixture, while
+an independent physical site-B directory remained intact. The after-load
+failure-injection fixture was also cleaned. These results do not establish
+actual WordPress activation, Nginx Helper settings, real cache-file permissions,
+concurrent writes, bind-mount/symlink isolation, real HTTP purge, or native
+Customizer integration. `Purge All` stays OFF. Full reproducible report:
+[`docs/evidence/aaPanel-8.0.7-2026-11-13-nginx-helper-scope-hook-qa.json`](evidence/aaPanel-8.0.7-2026-11-13-nginx-helper-scope-hook-qa.json).
+
 ### Guarded site-owned native FastCGI Cache lifecycle candidate (0.1.30, Issue #2)
 
 The 0.1.29 `preview_cache_safety` route remains **reference-only**. The separate 0.1.30 `preview_cache_activation` route uses a primary-admin aaPanel POST with the native website ID, key, root, status and bound-domain snapshot. It requires aaPanel 8.0.7, Nginx, a verified site-matching generated VHost, a single stock `enable-php-81.conf` or `enable-php-85.conf` include, safe precedence of the native per-site extension glob **before** PHP, a direct known HTTP-scope VHost include glob, no site cache source already in force, and complete two-pass peer source attribution. The result contains a reviewable site-specific zone/path and source/proposal SHA256 and a fresh 128-bit **cache generation** included in the Nginx Cache Key. Each new approval binds that generation to exact source bytes; the backend rejects reuse across the active journal and every intact archived restored journal, so reactivating after a Restore cannot HIT stale objects left by an older generation. The original per-site physical Cache directory device/inode is persisted alongside the recovery identity; read-only Recheck requires current VHost/rewrite, main Nginx and stock PHP/parameter source hashes, physical ownership and identity, managed snippets, and the loopback PHP marker before returning Applied. Drift returns Needs Review with the original recovery ID and a diagnostic, without touching files or reloading Nginx. This is **not** a loaded-worker/visitor-session safety finding.

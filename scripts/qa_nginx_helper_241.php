@@ -6,8 +6,10 @@
  *
  * Only the two real vendor purger classes are loaded, without WordPress
  * bootstrap, external HTTP, website/config writes or a real cache directory.
- * The fixture's cache root is a new private temp directory, never a caller
- * argument. Purge All is intentionally executed ONLY against this fixture.
+ * Two physically separate site fixtures are created under one new private
+ * temp directory, never a caller argument. The documented WordPress cache
+ * filename filter is simulated through apply_filters; this does NOT install
+ * a bridge in WordPress. Purge All runs ONLY against the site A fixture.
  */
 declare(strict_types=1);
 
@@ -93,7 +95,14 @@ foreach ($auditedSources as $file => $expected) {
 // Minimal WordPress function surface, with no WordPress/plugin bootstrap.
 $remoteCalls = [];
 function wp_parse_url(string $url): array|false { return parse_url($url); }
-function apply_filters(string $name, mixed $value, mixed ...$args): mixed { return $value; }
+$cacheFilenameFilter = null;
+function apply_filters(string $name, mixed $value, mixed ...$args): mixed {
+    global $cacheFilenameFilter;
+    if ($name === 'rt_nginx_helper_purge_cached_file' && $cacheFilenameFilter !== null) {
+        return $cacheFilenameFilter($value, ...$args);
+    }
+    return $value;
+}
 function do_action(string $name, mixed ...$args): void {}
 function home_url(): string { return 'http://qa-helper-a.invalid'; }
 function untrailingslashit(string $path): string { return rtrim($path, '/'); }
@@ -109,11 +118,16 @@ function wp_remote_get(string $url): array {
 
 $scratch = sys_get_temp_dir() . '/ach-nginx-helper-241-' . bin2hex(random_bytes(10));
 require_true(mkdir($scratch, 0700), 'Cannot allocate isolated QA fixture');
-$cache = $scratch . '/cache';
+$cacheRoot = $scratch . '/cache';
+// Mirror Customizer's physical per-site partition, not a shared directory.
+$cache = $cacheRoot . '/site-a';
+$peerCache = $cacheRoot . '/site-b';
 $failure = null;
 $report = null;
 try {
-    require_true(mkdir($cache, 0700), 'Cannot create isolated cache');
+    require_true(mkdir($cacheRoot, 0700), 'Cannot create isolated cache parent');
+    require_true(mkdir($cache, 0700), 'Cannot create site A cache');
+    require_true(mkdir($peerCache, 0700), 'Cannot create site B cache');
     // Copy only the already verified bytes into our own private directory.
     // Rehash the copies before including them, so changes in installed source
     // after verification cannot change what PHP actually executes.
@@ -147,46 +161,108 @@ try {
     };
     $purger = new FastCGI_Purger();
     $url = 'http://qa-helper-a.invalid/post';
+    $urlQuery = 'http://qa-helper-a.invalid/post?draft=1';
     $key = 'httpGETqa-helper-a.invalid/post';
     $generation = str_repeat('a', 32);
     $legacy = fixture_file($cache, $key);
     $current = fixture_file($cache, $key . '|' . $generation);
-    require_true($legacy !== $current, 'Fixture keys unexpectedly overlap');
+    $legacyQuery = fixture_file($cache, $key . '?draft=1');
+    $currentQuery = fixture_file($cache, $key . '?draft=1|' . $generation);
+    // Site B has its own physical cache tree, with a separate generation.
+    $isolatedPeer = fixture_file($peerCache, $key . '|' . str_repeat('b', 32));
+    require_true($legacy !== $current && $legacyQuery !== $currentQuery,
+        'Fixture keys unexpectedly overlap');
 
     $purger->purge_url($url, false);
-    require_true(!file_exists($legacy), 'unlink_files failed to purge its legacy-key fixture');
-    require_true(file_exists($current), 'unlink_files unexpectedly targeted generation-keyed cache');
+    $purger->purge_url($urlQuery, false);
+    // Unmodified v2.4.1 intentionally ignores query strings when hashing
+    // URL-based unlink_files. Its query-specific cache key is untouched.
+    require_true(!file_exists($legacy) && file_exists($legacyQuery),
+        'Expected vendor unlink_files to ignore query components');
+    require_true(file_exists($current) && file_exists($currentQuery),
+        'unlink_files unexpectedly targeted generation-keyed cache');
+    require_true(file_exists($isolatedPeer), 'URL purge changed a separate site cache');
 
     $nginx_helper_admin->options['purge_method'] = 'get_request';
     $purger->purge_url($url, false);
-    require_true(count($remoteCalls) === 1, 'get_request did not call the remote helper');
-    require_true($remoteCalls[0] === 'http://qa-helper-a.invalid/purge/post', 'Unexpected remote URL');
-    require_true(file_exists($current), 'Fake 200 unexpectedly changed a cache fixture');
+    $purger->purge_url($urlQuery, false);
+    require_true(count($remoteCalls) === 2, 'get_request did not call both remote purge URLs');
+    require_true($remoteCalls[0] === 'http://qa-helper-a.invalid/purge/post'
+        && $remoteCalls[1] === 'http://qa-helper-a.invalid/purge/post?draft=1',
+        'Unexpected remote URL or query handling');
+    require_true(file_exists($current) && file_exists($currentQuery),
+        'Fake 200 unexpectedly changed a cache fixture');
+    require_true(file_exists($isolatedPeer), 'get_request changed the separate site');
 
-    // This tests the actual vendor Purge All implementation, against a NEW
-    // fixture containing two sites. Never supply a production cache path.
-    $peer = $cache . '/site-b-private-file';
+    // Nginx Helper 2.4.1 exposes the documented WordPress filter below.
+    // A site-owned adapter can map a URL to Customizer's generation-suffixed
+    // exact Nginx key *without patching the vendor class*. The fixture filter
+    // is intentionally active only for these owned, isolated test URLs.
+    $cacheFilenameFilter = static function(string $vendorPath, string $targetUrl) use ($cache, $generation): string {
+        $parts = wp_parse_url($targetUrl);
+        require_true(is_array($parts) && ($parts['scheme'] ?? '') === 'http'
+            && ($parts['host'] ?? '') === 'qa-helper-a.invalid'
+            && !isset($parts['port']) && !isset($parts['user'])
+            && !isset($parts['pass']),
+            'Unexpected URL reached generation-aware purge filter');
+        $uri = ($parts['path'] ?? '/')
+            . (isset($parts['query']) ? '?' . $parts['query'] : '');
+        $hash = md5($parts['scheme'] . 'GET' . $parts['host'] . $uri . '|' . $generation);
+        return $cache . '/' . substr($hash, -1) . '/' . substr($hash, -3, 2) . '/' . $hash;
+    };
+    $nginx_helper_admin->options['purge_method'] = 'unlink_files';
+    $purger->purge_url($url, false);
+    $purger->purge_url($urlQuery, false);
+    require_true(!file_exists($current) && !file_exists($currentQuery),
+        'Verified Nginx Helper cache-file filter did not remove generation-keyed entries');
+    require_true(file_exists($legacyQuery) && file_exists($isolatedPeer),
+        'Generation remap unexpectedly removed legacy query or a peer site');
+    $cacheFilenameFilter = null;
+
+    // The actual vendor Purge All ignores the per-URL filter. Keep another
+    // live generated site A object to test that path separately.
+    $retainedSiteA = fixture_file($cache, $key . '|' . str_repeat('c', 32));
+
+    // Exercise the real vendor Purge All with both a mis-scoped peer file
+    // INSIDE its configured root and an independent sibling site cache.
+    // A shared-directory setting deletes everything under it; a verified
+    // site-specific setting cannot touch an independently owned sibling.
+    $misScopedPeer = $cache . '/shared-peer-private-file';
     $siteA = $cache . '/site-a-private-file';
-    require_true(file_put_contents($peer, 'PEER ONLY') !== false, 'Cannot seed peer');
+    require_true(file_put_contents($misScopedPeer, 'SHARED PEER ONLY') !== false,
+        'Cannot seed mis-scoped peer');
     require_true(file_put_contents($siteA, 'SITE A ONLY') !== false, 'Cannot seed site A');
+    require_true(file_exists($isolatedPeer), 'Cannot find isolated site B cache entry');
     $purger->purge_all();
-    require_true(!file_exists($peer) && !file_exists($siteA) && !file_exists($current),
-        'Expected shared-root Purge All to remove both sites and generated objects');
+    require_true(!file_exists($misScopedPeer) && !file_exists($siteA)
+        && !file_exists($retainedSiteA) && !file_exists($current) && !file_exists($currentQuery),
+        'Expected Nginx Helper Purge All to clear every object under its path');
+    require_true(file_exists($isolatedPeer),
+        'Purge All changed physically isolated site B cache outside its configured path');
 
     $report = [
-        'schema' => 1,
+        'schema' => 2,
         'source_version' => '2.4.1',
         'source_sha256' => hash('sha256', $verifiedSource[$main]),
         'class_purger_sha256' => hash('sha256', $verifiedSource[$purgerFile]),
         'fastcgi_purger_sha256' => hash('sha256', $verifiedSource[$fastcgiFile]),
         'vendor_code_executed_from_verified_private_snapshot' => true,
         'unlink_files_legacy_key_deleted' => true,
+        'unlink_files_query_legacy_key_ignored' => true,
+        'unlink_files_query_generation_key_preserved' => true,
+        'unlink_files_peer_site_preserved' => true,
+        'unlink_files_verified_filter_deleted_generation_key' => true,
+        'unlink_files_verified_filter_deleted_query_generation_key' => true,
         'unlink_files_generation_key_preserved' => true,
-        'get_request_remote_url' => $remoteCalls[0],
+        'get_request_remote_urls' => $remoteCalls,
         'get_request_http_200_simulated_not_proof' => true,
         'get_request_generation_key_preserved' => true,
-        'get_request_purge_all_shared_site_a_deleted' => true,
-        'get_request_purge_all_shared_peer_deleted' => true,
+        'get_request_query_generation_key_preserved' => true,
+        'get_request_peer_site_preserved' => true,
+        'get_request_purge_all_site_a_deleted' => true,
+        'get_request_purge_all_retained_generation_deleted' => true,
+        'get_request_purge_all_mis_scoped_peer_deleted' => true,
+        'get_request_purge_all_physically_separate_peer_preserved' => true,
         'wp_remote_get_calls_stubbed' => count($remoteCalls),
         'remote_http_response_simulated' => true,
         'tested_cache_root' => 'private_temporary_fixture',
