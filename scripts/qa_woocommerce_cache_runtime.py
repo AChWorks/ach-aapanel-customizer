@@ -16,6 +16,7 @@ import pwd
 import re
 import shutil
 import socket
+import ssl
 import secrets
 import sqlite3
 import subprocess
@@ -230,17 +231,39 @@ def config_text(tmp, port, root, hostname, plan, php):
     )
 
 
+class LoopbackHTTPSConnection(http.client.HTTPSConnection):
+    """Use the real native 443 loopback listener with the site's SNI identity.
+
+    Connecting to 127.0.0.1 must not disable certificate-chain or hostname
+    validation; the certificate is verified for the requested native site.
+    """
+
+    def connect(self):
+        raw = socket.create_connection(("127.0.0.1", self.port), self.timeout)
+        try:
+            self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+        except BaseException:
+            raw.close()
+            raise
+
+
 class Client:
-    def __init__(self, port, hostname, cookie=""):
+    def __init__(self, port, hostname, cookie="", *, tls_ca_file=None):
         self.port = port
         self.host = hostname
         self.cookies = {}
+        self.tls_context = (ssl.create_default_context(cafile=str(tls_ca_file))
+                            if tls_ca_file is not None else None)
         if cookie:
             k, v = cookie.split("=", 1)
             self.cookies[k] = v
 
     def get(self, path, method="GET"):
-        con = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        if self.tls_context is not None:
+            con = LoopbackHTTPSConnection(self.host, self.port,
+                                          timeout=10, context=self.tls_context)
+        else:
+            con = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         headers = {"Host": self.host, "User-Agent": "ACh-QA-Woo-Isolation/1"}
         if self.cookies:
             headers["Cookie"] = "; ".join(k+"="+v for k,v in self.cookies.items())
@@ -269,13 +292,14 @@ class Client:
             con.close()
 
 
-def exercise_store_clients(port, hostname, site_id, users, *, allow_pre_warmed=False):
+def exercise_store_clients(port, hostname, site_id, users, *,
+                           allow_pre_warmed=False, tls_ca_file=None):
     """Exercise one real Woo storefront with two independent logged-in sessions.
 
     The caller owns setup and exact-account cleanup. Native mode permits an
     already-warm public Cache but still requires an actual HIT.
     """
-    public = Client(port,hostname)
+    public = Client(port,hostname,tls_ca_file=tls_ca_file)
     anonymous = [public.get("/") for _ in range(2)]
     # Warm only publicly cacheable homepage traffic; private traffic always bypasses.
     if any(r["status"]!=200 for r in anonymous):
@@ -286,7 +310,8 @@ def exercise_store_clients(port, hostname, site_id, users, *, allow_pre_warmed=F
             raise AssertionError("Native Woo storefront did not use private site Cache")
     elif cache_states != ["MISS", "HIT"]:
         raise AssertionError("Real anonymous Woo storefront did not warm public Cache")
-    a,b = (Client(port,hostname,u["cookie"]) for u in users["users"])
+    a,b = (Client(port,hostname,u["cookie"],tls_ca_file=tls_ca_file)
+           for u in users["users"])
     names = [u["login"] for u in users["users"]]
     profile = "?page_id="+str(users["account_page"])
     for client,login,other in ((a,names[0],names[1]),(b,names[1],names[0])):

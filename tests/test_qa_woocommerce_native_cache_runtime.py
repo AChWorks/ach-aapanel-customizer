@@ -3,6 +3,7 @@
 All native files, account calls and Nginx commands are fixtures/mocks.
 """
 import contextlib
+import http.server
 import hashlib
 import importlib.util
 import io
@@ -10,6 +11,8 @@ import json
 from pathlib import Path
 import os
 import shutil
+import ssl
+import threading
 import subprocess
 import tempfile
 import types
@@ -98,7 +101,7 @@ class NativeWooCachePreflightTests(unittest.TestCase):
             php_version="85",expected_guest_hostname="aac-native-qa",
             expected_recovery_id=TOKEN,expected_policy_sha256=qa.digest(self.policy),
             nginx=str(self.base/"nginx-binary"),wp_php=str(self.php_path),
-            explicit_nonproduction_qa=True)
+            explicit_nonproduction_qa=True,transport="http",tls_ca_file=None)
         self.gen=patch.object(qa.woo,"generate_reference",return_value=self.reference)
         self.check=patch.object(qa.subprocess,"run",return_value=subprocess.CompletedProcess(
             ["nginx","-t"],0,"",""))
@@ -184,7 +187,7 @@ class NativeWooCachePreflightTests(unittest.TestCase):
             result=json.loads(output.getvalue())
         self.assertEqual(result["result"],"PASS")
         self.assertEqual(result["ephemeral_qa_users_removed"],2)
-        self.assertEqual(result["native_nginx_mutations"],0)
+        self.assertEqual(result["runner_direct_nginx_mutations"],0)
 
     def test_unknown_account_cleanup_retains_exact_recovery_manifest(self):
         # Real mkdtemp belongs under this test's automatically cleaned root,
@@ -224,6 +227,129 @@ class NativeWooCachePreflightTests(unittest.TestCase):
             manifest=retained/"qa-account-recovery.json"
             self.assertEqual(json.loads(manifest.read_text())["run_id"],TOKEN)
             self.assertEqual(manifest.stat().st_mode & 0o777,0o600)
+
+
+    def test_https_requires_absolute_regular_ca_before_accounts(self):
+        self.args.transport="https"
+        self.args.tls_ca_file="relative-qa-ca.pem"
+        with (
+            patch.object(qa.os, "geteuid", return_value=0),
+            patch.object(qa.socket, "gethostname", return_value="aac-native-qa"),
+            patch.object(qa.woo, "assert_store_site", return_value=None),
+            patch.object(qa, "snapshot_native", return_value={"native":"sha"}),
+            patch.object(qa.woo, "claim_qa_accounts") as create,
+        ):
+            with self.assertRaisesRegex(RuntimeError,"absolute regular CA"):
+                qa.run(self.args)
+            create.assert_not_called()
+
+    def test_https_probe_fails_before_accounts_and_preserves_native(self):
+        ca=self.base/"test-ca.pem"
+        ca.write_text("not-used-as-a-real-cert")
+        self.args.transport="https"
+        self.args.tls_ca_file=str(ca)
+        with (
+            patch.object(qa.os, "geteuid", return_value=0),
+            patch.object(qa.socket, "gethostname", return_value="aac-native-qa"),
+            patch.object(qa.woo, "assert_store_site", return_value=None),
+            patch.object(qa, "snapshot_native", return_value={"native":"sha"}),
+            patch.object(qa.woo, "Client") as client,
+            patch.object(qa.woo, "claim_qa_accounts") as create,
+        ):
+            client.return_value.get.return_value={
+                "status":200,"site":"9","cache":"HIT","body":""}
+            with self.assertRaisesRegex(RuntimeError,"approved site Cache"):
+                qa.run(self.args)
+            create.assert_not_called()
+            client.assert_called_once_with(443,"woo.test",tls_ca_file=str(ca))
+
+    def test_both_transports_reuse_two_users_and_verify_cleanup(self):
+        ca=self.base/"test-ca.pem"
+        ca.write_text("ca-verification-mocked")
+        self.args.transport="both"
+        self.args.tls_ca_file=str(ca)
+        users={"users":[{"id":1,"login":"a","cookie":"auth=a"},
+                        {"id":2,"login":"b","cookie":"auth=b"}]}
+        with contextlib.ExitStack() as stack:
+            for p in [
+                patch.object(qa.os,"geteuid",return_value=0),
+                patch.object(qa.socket,"gethostname",return_value="aac-native-qa"),
+                patch.object(qa.woo,"assert_store_site",return_value=None),
+                patch.object(qa,"snapshot_native",return_value={"a":"sha"}),
+                patch.object(qa.woo,"Client"),
+                patch.object(qa.woo,"claim_qa_accounts",return_value=TOKEN),
+                patch.object(qa.woo,"wp_action",return_value=users),
+                patch.object(qa.woo,"validate_prepared_accounts",return_value=users),
+                patch.object(qa.woo,"exercise_store_clients"),
+                patch.object(qa.woo,"cleanup_qa_accounts",return_value=2),
+            ]: stack.enter_context(p)
+            client=qa.woo.Client
+            client.return_value.get.return_value={
+                "status":200,"site":"10","cache":"HIT","body":""}
+            ab=qa.woo.exercise_store_clients
+            ab.side_effect=[{"anonymous_cache":["HIT","HIT"]},
+                            {"anonymous_cache":["HIT","HIT"]}]
+            with contextlib.redirect_stdout(io.StringIO()) as capture:
+                qa.run(self.args)
+        payload=json.loads(capture.getvalue())
+        self.assertEqual(payload["transport"],"both")
+        self.assertEqual(payload["ephemeral_qa_users_removed"],2)
+        self.assertEqual(set(payload["checks"]),{"http","https"})
+        self.assertEqual([x.args[0] for x in ab.call_args_list],[80,443])
+        self.assertEqual(ab.call_args_list[1].kwargs["tls_ca_file"],str(ca))
+        self.assertEqual(payload["https_preflight_cache"],"HIT")
+
+
+class LoopbackTlsClientTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("openssl"),"OpenSSL fixture generation unavailable")
+    def test_verified_tls_sni_and_wrong_hostname_rejection(self):
+        tmp=tempfile.TemporaryDirectory(prefix="ach-native-tls-fixture-")
+        self.addCleanup(tmp.cleanup)
+        ca=Path(tmp.name)/"qa-only.pem"
+        key=Path(tmp.name)/"qa-only.key"
+        created=subprocess.run(["openssl","req","-x509","-newkey","rsa:2048",
+             "-nodes","-days","1","-keyout",str(key),"-out",str(ca),
+             "-subj","/CN=woo.test","-addext","subjectAltName=DNS:woo.test"],
+             capture_output=True,text=True,timeout=20)
+        self.assertEqual(created.returncode,0,created.stderr[-300:])
+        seen=[]
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("X-ACh-Cache","HIT")
+                self.send_header("X-ACh-Cache-Site","10")
+                self.end_headers()
+                self.wfile.write(b"test-public-body")
+            def log_message(self,*args):
+                pass
+        server=http.server.ThreadingHTTPServer(("127.0.0.1",0),Handler)
+        self.addCleanup(server.server_close)
+        server.daemon_threads=True
+        context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(str(ca),str(key))
+        context.set_servername_callback(lambda sock,name,ctx: seen.append(name))
+        server.socket=context.wrap_socket(server.socket,server_side=True)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        try:
+            ok=qa.woo.Client(server.server_port,"woo.test",tls_ca_file=ca).get("/")
+            self.assertEqual((ok["status"],ok["cache"],ok["site"]),
+                             (200,"HIT","10"))
+            self.assertEqual(seen[0],"woo.test")
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                qa.woo.Client(server.server_port,"wrong.test",tls_ca_file=ca).get("/")
+            other_ca=Path(tmp.name)/"other-ca.pem"
+            other_key=Path(tmp.name)/"other-ca.key"
+            other=subprocess.run(["openssl","req","-x509","-newkey","rsa:2048",
+                 "-nodes","-days","1","-keyout",str(other_key),"-out",str(other_ca),
+                 "-subj","/CN=other.test"],
+                 capture_output=True,text=True,timeout=20)
+            self.assertEqual(other.returncode,0,other.stderr[-300:])
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                qa.woo.Client(server.server_port,"woo.test",tls_ca_file=other_ca).get("/")
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
 
 
 if __name__=="__main__":

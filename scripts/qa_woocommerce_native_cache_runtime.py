@@ -101,6 +101,22 @@ def snapshot_native(args, *, nginx_root="/www/server/nginx/conf",
     return {str(source):digest(source) for source in native_sources}
 
 
+def probe_https(args):
+    """Check validated TLS, native site identity and Cache before user writes."""
+    ca = Path(args.tls_ca_file or "")
+    if (not args.tls_ca_file or not ca.is_absolute() or
+            not ca.is_file() or ca.is_symlink()):
+        raise RuntimeError("HTTPS native QA requires an absolute regular CA certificate file")
+    try:
+        result = woo.Client(443, args.host, tls_ca_file=str(ca)).get("/")
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("HTTPS native TLS/site readiness failed before customer creation") from exc
+    if (result["status"] != 200 or result["site"] != str(args.site_id) or
+            result["cache"] not in ("MISS", "HIT")):
+        raise RuntimeError("HTTPS native listener lacks the approved site Cache response")
+    return result["cache"]
+
+
 def run(args):
     if (os.geteuid() != 0 or not args.explicit_nonproduction_qa or
             socket.gethostname() != args.expected_guest_hostname):
@@ -114,6 +130,14 @@ def run(args):
     if not Path(php).is_file():
         raise RuntimeError("Native QA WordPress PHP binary is missing")
     before=snapshot_native(args)
+    transport = getattr(args, "transport", "http")
+    if transport not in ("http", "https", "both"):
+        raise RuntimeError("Unsupported native QA transport")
+    https_ready = None
+    if transport in ("https", "both"):
+        https_ready = probe_https(args)
+    elif getattr(args, "tls_ca_file", None):
+        raise RuntimeError("CA option requires HTTPS transport")
     temp=Path(tempfile.mkdtemp(prefix="ach-woo-native-ab-"))
     temp.chmod(0o700)
     run_id=None
@@ -125,8 +149,16 @@ def run(args):
             run_id=woo.claim_qa_accounts(php,root,temp)
             users=woo.validate_prepared_accounts(
                 woo.wp_action(php,root,{"op":"prepare","run_id":run_id}),run_id)
-            verified=woo.exercise_store_clients(
-                80,args.host,args.site_id,users,allow_pre_warmed=True)
+            if transport in ("http", "both"):
+                http_checks = woo.exercise_store_clients(
+                    80,args.host,args.site_id,users,allow_pre_warmed=True)
+                verified = http_checks if transport == "http" else {"http": http_checks}
+            if transport in ("https", "both"):
+                https_checks = woo.exercise_store_clients(
+                    443,args.host,args.site_id,users,allow_pre_warmed=True,
+                    tls_ca_file=args.tls_ca_file)
+                verified = (https_checks if transport == "https"
+                            else {**verified, "https": https_checks})
         finally:
             errors=[]
             if run_id is not None:
@@ -152,7 +184,9 @@ def run(args):
             print("Native Woo QA incomplete; task-owned recovery retained: "+str(temp),
                   file=sys.stderr)
     print(json.dumps({"result":"PASS","checks":verified,"native_qa":True,
-                      "native_nginx_mutations":0,
+                      "runner_direct_nginx_mutations":0,
+                      "transport":transport,
+                      "https_preflight_cache":https_ready,
                       "pre_post_native_source_sha_match":True,
                       "native_config_sources_verified":len(before),
                       "ephemeral_qa_users_removed":removed,
@@ -170,5 +204,8 @@ if __name__=="__main__":
     p.add_argument("--expected-policy-sha256",required=True)
     p.add_argument("--nginx",default="/www/server/nginx/sbin/nginx")
     p.add_argument("--wp-php",default=None)
+    p.add_argument("--transport",choices=("http","https","both"),default="http")
+    p.add_argument("--tls-ca-file",default=None,
+                   help="Absolute PEM CA for validated site-SNI TLS on native port 443")
     p.add_argument("--explicit-nonproduction-qa",action="store_true")
     run(p.parse_args())
