@@ -269,6 +269,75 @@ class Client:
             con.close()
 
 
+def exercise_store_clients(port, hostname, site_id, users, *, allow_pre_warmed=False):
+    """Exercise one real Woo storefront with two independent logged-in sessions.
+
+    The caller owns setup and exact-account cleanup. Native mode permits an
+    already-warm public Cache but still requires an actual HIT.
+    """
+    public = Client(port,hostname)
+    anonymous = [public.get("/") for _ in range(2)]
+    # Warm only publicly cacheable homepage traffic; private traffic always bypasses.
+    if any(r["status"]!=200 for r in anonymous):
+        raise AssertionError("Real anonymous WordPress homepage not HTTP 200")
+    cache_states = [r["cache"] for r in anonymous]
+    if allow_pre_warmed:
+        if cache_states not in (["MISS", "HIT"], ["HIT", "HIT"]):
+            raise AssertionError("Native Woo storefront did not use private site Cache")
+    elif cache_states != ["MISS", "HIT"]:
+        raise AssertionError("Real anonymous Woo storefront did not warm public Cache")
+    a,b = (Client(port,hostname,u["cookie"]) for u in users["users"])
+    names = [u["login"] for u in users["users"]]
+    profile = "?page_id="+str(users["account_page"])
+    for client,login,other in ((a,names[0],names[1]),(b,names[1],names[0])):
+        r = client.get("/"+profile)
+        if r["status"]!=200 or r["cache"]!="BYPASS" or login not in r["body"] or other in r["body"]:
+            raise AssertionError("Logged-in Woo account identity or bypass not verified")
+    for client,product in zip((a,b),users["products"]):
+        r = client.get("/?add-to-cart="+str(product["id"]))
+        if r["cache"] not in ("BYPASS",None):
+            raise AssertionError("Add-to-cart was cacheable")
+    cart = "?page_id="+str(users["cart_page"])
+    checkout = "?page_id="+str(users["checkout_page"])
+    for client,mine,other in ((a,users["products"][0],users["products"][1]),
+                              (b,users["products"][1],users["products"][0])):
+        for label,path in (("cart",cart),("checkout",checkout),("account",profile)):
+            r=client.get("/"+path)
+            if r["status"]!=200 or r["cache"]!="BYPASS":
+                raise AssertionError(label+" did not bypass for logged-in customer")
+        # Woo Cart/Checkout blocks hydrate items via the Store API.
+        # Their HTML shell is not evidence of product isolation.
+        api = client.get("/?rest_route=/wc/store/v1/cart")
+        if api["status"] != 200 or api["cache"] != "BYPASS":
+            raise AssertionError("Live Woo Store API cart was not private: HTTP=%s cache=%s" %
+                                 (api["status"],api["cache"]))
+        try:
+            products = [int(item["id"]) for item in json.loads(api["body"])["items"]]
+        except (ValueError,KeyError,TypeError) as exc:
+            raise AssertionError("Woo Store API cart response invalid") from exc
+        if int(mine["id"]) not in products or int(other["id"]) in products:
+            raise AssertionError("Real Woo Store API cart isolation failed: found product IDs %s" % products)
+    for path in ("/?rest_route=/wc/v3/orders","/?wc-ajax=get_refreshed_fragments",
+                 "/wp-login.php","/?wc-api=qa_cache_no_gateway"):
+        resp=public.get(path)
+        if resp["cache"] not in ("BYPASS",None):
+            raise AssertionError("Private Woo/WordPress API or login was cached: "+path)
+    for client in (a,b):
+        r=client.get("/")
+        if r["status"]!=200 or r["cache"]!="BYPASS":
+            raise AssertionError("Logged-in public URI served shared Cache")
+    if any(r["site"] != str(site_id) for r in anonymous):
+        raise AssertionError("Expected plugin Cache site markers absent")
+    return {"native_id":site_id,"woo_version":users["woo"],
+        "wp_permalink":users["permalink"] or "plain",
+        "anonymous_cache": [r["cache"] for r in anonymous],
+        "session_a_authenticated":True,"session_b_authenticated":True,
+        "different_real_cart_items":True,"cart_checkout_account":"BYPASS",
+        "logged_in_public":"BYPASS",
+        "api_login_webhook_requests":"BYPASS_or_uncacheable",
+        "nginx_syntax":"PASS","qa_cache_isolated":True}
+
+
 def run(args):
     if os.geteuid() != 0 or not args.explicit_nonproduction_qa:
         raise RuntimeError("Requires root in authorized isolated QA guest and --explicit-nonproduction-qa")
@@ -350,63 +419,7 @@ def run(args):
                     time.sleep(0.12)
             else:
                 raise RuntimeError("Standalone Nginx listener not ready")
-            public = Client(port,args.host)
-            anonymous = [public.get("/") for _ in range(2)]
-            # Woo may send max-age=0, so no public HIT is required on real storefront.
-            if any(r["status"]!=200 for r in anonymous):
-                raise AssertionError("Real anonymous WordPress homepage not HTTP 200")
-            if [r["cache"] for r in anonymous] != ["MISS","HIT"]:
-                raise AssertionError("Real anonymous Woo storefront did not warm public Cache")
-            a,b = (Client(port,args.host,u["cookie"]) for u in users["users"])
-            names = [u["login"] for u in users["users"]]
-            profile = "?page_id="+str(users["account_page"])
-            for client,login,other in ((a,names[0],names[1]),(b,names[1],names[0])):
-                r = client.get("/"+profile)
-                if r["status"]!=200 or r["cache"]!="BYPASS" or login not in r["body"] or other in r["body"]:
-                    raise AssertionError("Logged-in Woo account identity or bypass not verified")
-            for client,product in zip((a,b),users["products"]):
-                r = client.get("/?add-to-cart="+str(product["id"]))
-                if r["cache"] not in ("BYPASS",None):
-                    raise AssertionError("Add-to-cart was cacheable")
-            cart = "?page_id="+str(users["cart_page"])
-            checkout = "?page_id="+str(users["checkout_page"])
-            for client,mine,other in ((a,users["products"][0],users["products"][1]),
-                                      (b,users["products"][1],users["products"][0])):
-                for label,path in (("cart",cart),("checkout",checkout),("account",profile)):
-                    r=client.get("/"+path)
-                    if r["status"]!=200 or r["cache"]!="BYPASS":
-                        raise AssertionError(label+" did not bypass for logged-in customer")
-                # Woo Cart/Checkout blocks hydrate items via the Store API.
-                # Their HTML shell is not evidence of product isolation.
-                api = client.get("/?rest_route=/wc/store/v1/cart")
-                if api["status"] != 200 or api["cache"] != "BYPASS":
-                    raise AssertionError("Live Woo Store API cart was not private: HTTP=%s cache=%s" %
-                                         (api["status"],api["cache"]))
-                try:
-                    products = [int(item["id"]) for item in json.loads(api["body"])["items"]]
-                except (ValueError,KeyError,TypeError) as exc:
-                    raise AssertionError("Woo Store API cart response invalid") from exc
-                if int(mine["id"]) not in products or int(other["id"]) in products:
-                    raise AssertionError("Real Woo Store API cart isolation failed: found product IDs %s" % products)
-            for path in ("/?rest_route=/wc/v3/orders","/?wc-ajax=get_refreshed_fragments",
-                         "/wp-login.php","/?wc-api=qa_cache_no_gateway"):
-                resp=public.get(path)
-                if resp["cache"] not in ("BYPASS",None):
-                    raise AssertionError("Private Woo/WordPress API or login was cached: "+path)
-            for client in (a,b):
-                r=client.get("/")
-                if r["status"]!=200 or r["cache"]!="BYPASS":
-                    raise AssertionError("Logged-in public URI served shared Cache")
-            if any(r["site"] != str(args.site_id) for r in anonymous):
-                raise AssertionError("Expected plugin Cache site markers absent")
-            verified={"native_id":args.site_id,"woo_version":users["woo"],
-                "wp_permalink":users["permalink"] or "plain",
-                "anonymous_cache": [r["cache"] for r in anonymous],
-                "session_a_authenticated":True,"session_b_authenticated":True,
-                "different_real_cart_items":True,"cart_checkout_account":"BYPASS",
-                "logged_in_public":"BYPASS",
-                "api_login_webhook_requests":"BYPASS_or_uncacheable",
-                "nginx_syntax":"PASS","qa_cache_isolated":True}
+            verified=exercise_store_clients(port,args.host,args.site_id,users)
         finally:
             errors=[]
             pidfile = temp/"nginx.pid"
