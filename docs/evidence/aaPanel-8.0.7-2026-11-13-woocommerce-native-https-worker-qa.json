@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-13",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "base_main_sha": "96bf85a0af0484ed4abf35e68b98500a26a7774a",
+  "work_items": [
+    "#2",
+    "#21"
+  ],
+  "scope": "Native WooCommerce Cache HTTPS/443 and HTTP/80 customer isolation, reloaded-worker acceptance and exact QA recovery",
+  "environment": {
+    "authorized": "isolated nonproduction managed Incus QA only",
+    "project": "ach-aapanel-qa",
+    "instance": "aac-native-qa",
+    "uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "aapanel": "8.0.7",
+    "nginx": "1.28.3",
+    "installed_customizer": "0.1.38 UNRELEASED",
+    "installed_cache_policy_sha256": "571d05754b3b2b23cbb300184b898adb38ebca76a40076191eba96ae3ec86a56",
+    "website_id": 10,
+    "website_name": "qa21-woocommerce-native.test",
+    "wordpress": "7.1.4",
+    "woocommerce": "11.2.2",
+    "php_adapter": "85"
+  },
+  "tls_setup": {
+    "source": "Temporary task-only root-owned self-signed SAN certificate generated inside the QA guest; private key never left the guest",
+    "certificate_sha256": "4728799bdaecb7c94d1d4292ef6c1ae94b15555ad779a1cd85209e82db49ee5d",
+    "trusted": "Certificate-authority PEM used explicitly by the bounded QA client; certificate chain and exact hostname/SNI verified, never disable TLS verification",
+    "native_vhost": "One QA site temporarily received a standard listen 443 ssl and local certificate reference before Cache Apply; no production change",
+    "native_aapanel_ssl_certificate_import_tested": false,
+    "external_dns_or_public_tls_tested": false
+  },
+  "native_operator_actions": {
+    "old_wp_toolkit_cache": "Temporarily toggled OFF only for native site #10 to replace conflicting shared WORDPRESS handler with stock PHP include; later toggled ON",
+    "successful_customizer_apply": "Explicit authenticated primary-admin Ready for Review, consented Apply, fresh Applied Recheck",
+    "applied_generation": "e01a748230154226ab799cc06473f483",
+    "approved_recovery_id": "40c40cbeacf34d1f98fd20f20f757bca",
+    "observed_cache_status_before_test": {
+      "http80": "MISS",
+      "https443": "MISS"
+    }
+  },
+  "customer_ab_results": {
+    "before_worker_reload": {
+      "transport": "http+https",
+      "anonymous_cache_per_transport": [
+        "HIT",
+        "HIT"
+      ],
+      "two_distinct_real_customers": true,
+      "separate_authenticated_account_identity": true,
+      "different_actual_woocommerce_store_api_cart_products": true,
+      "no_cross_customer_cart_products": true,
+      "private_cart_checkout_account": "BYPASS",
+      "logged_in_homepage": "BYPASS",
+      "sampled_api_login_webhook_like_paths": "BYPASS or not cacheable",
+      "native_sources_pre_post_sha_match": "10/10",
+      "exact_temporary_customers_deleted": 2,
+      "result": "PASS"
+    },
+    "after_worker_reload": {
+      "transport": "http+https",
+      "anonymous_cache_per_transport": [
+        "HIT",
+        "HIT"
+      ],
+      "two_distinct_real_customers": true,
+      "different_actual_woocommerce_store_api_cart_products": true,
+      "no_cross_customer_cart_products": true,
+      "private_cart_checkout_account": "BYPASS",
+      "logged_in_homepage": "BYPASS",
+      "native_sources_pre_post_sha_match": "10/10",
+      "exact_temporary_customers_deleted": 2,
+      "result": "PASS"
+    }
+  },
+  "worker_adoption": {
+    "master_pid": 217671,
+    "old_worker_pids": [
+      217703,
+      217704
+    ],
+    "new_worker_pids": [
+      218051,
+      218052
+    ],
+    "old_worker_pids_retired": true,
+    "reload_method": "Native QA nginx -s reload with unchanged listener shape",
+    "origin_http80_after_reload": "HTTP200 cache HIT site10",
+    "origin_https443_after_reload": "HTTP200 cache HIT site10 with validated CA/SNI",
+    "result": "PASS"
+  },
+  "fault_and_recovery": {
+    "initial_listener_rebind": "A temporary QA listen 127.0.0.1:443 ssl source was replaced with normal listen 443 ssl; nginx -t passed but reload did not bind the new address",
+    "first_apply": "NOT CONFIRMED; journal prepared; no active worker cache marker. No blind retry",
+    "recovery": "Fresh native Recheck Recovery Required, explicit consented Restore removed owned snippets and retained exact recovery",
+    "stable_setup": "Controlled QA-only systemctl restart nginx changed master 368 to 217671 and bound standard 0.0.0.0:443",
+    "retry": "Fresh native readiness/consent after verified recovery, not a replay of uncertain Apply"
+  },
+  "final_recovery": {
+    "native_customizer_restore": "Consented Restore then fresh Restored Recheck; active ACHFC_10 global/site snippets absent",
+    "native_wp_toolkit_cache": "Original ON restored",
+    "original_site10_vhost_sha256": "39e8c80177d73f6ed73225a2eb9e0cac6b5d50a0b38fe3785fe4d62cd69b0795",
+    "original_site10_journal_sha256": "cb839016bcfb4baf50e0faf48a6e34247e1c3c98117fdfd2f77c1684da0d7823",
+    "sources_exactly_restored": "11/11 SHA256 PASS",
+    "new_test_generation_recovery": "Archived restored journal 40c40cbeacf34d1f98fd20f20f757bca with retained inactive fragments",
+    "https_443_listener_removed": true,
+    "nginx_syntax": "PASS",
+    "qa_http_200": "9/9 registered native sites",
+    "remaining_task_pattern_wordpress_customers": 0,
+    "remaining_task_pattern_qa_temp_dirs": 0,
+    "protected_preexisting_incus_snapshots_modified": false,
+    "production_or_release_change": false
+  },
+  "interpretation": {
+    "runner_direct_nginx_mutations": 0,
+    "concurrent_system_wide_writes_excluded": false,
+    "native_sources_fingerprint_check": "The QA runner verifies ten selected native paths before and after its own Woo HTTP calls; not arbitrary host mutation instrumentation",
+    "not_proven": [
+      "Native aaPanel SSL certificate installation UI",
+      "public internet TLS",
+      "all certificate/proxy/TLS configurations",
+      "real payment gateways",
+      "live external third-party webhooks",
+      "all possible Nginx concurrent writers",
+      "Nginx Helper generation-aware purge",
+      "Purge All",
+      "Production or Release readiness"
+    ]
+  },
+  "qa_driver": {
+    "source": "scripts/qa_woocommerce_native_cache_runtime.py",
+    "http_tls_transport": "both",
+    "tls_certificate_validation": "Required; verified hostname/SNI and CA",
+    "preflight": "Fail-closed identity, exact active recovery and config source SHA, native nginx -t, and HTTPS marker readiness before temporary customers",
+    "result_format": "sanitized single JSON summary without session cookies, passwords, private keys or token contents"
+  }
+}
