@@ -186,24 +186,44 @@ class NativeWooCachePreflightTests(unittest.TestCase):
         self.assertEqual(result["ephemeral_qa_users_removed"],2)
         self.assertEqual(result["native_nginx_mutations"],0)
 
-    def test_unknown_account_cleanup_retains_recovery_and_fails(self):
+    def test_unknown_account_cleanup_retains_exact_recovery_manifest(self):
+        # Real mkdtemp belongs under this test's automatically cleaned root,
+        # so an intentionally uncertain cleanup never pollutes host /tmp.
+        retained = self.base/"task-owned-recovery"
+        def make_temp(*, prefix):
+            self.assertEqual(prefix,"ach-woo-native-ab-")
+            retained.mkdir(mode=0o700)
+            return str(retained)
+
+        def claim(_php,_root,temp):
+            manifest=temp/"qa-account-recovery.json"
+            manifest.write_text(json.dumps({
+                "run_id":TOKEN,"usernames":qa.woo.qa_usernames(TOKEN),
+                "site_root":str(self.site),"status":"prepare_or_cleanup_unknown"}))
+            manifest.chmod(0o600)
+            return TOKEN
+
         patches=[
             patch.object(qa.os,"geteuid",return_value=0),
             patch.object(qa.socket,"gethostname",return_value="aac-native-qa"),
             patch.object(qa.woo,"assert_store_site",return_value=None),
             patch.object(qa,"snapshot_native",return_value={"a":"sha"}),
-            patch.object(qa.woo,"claim_qa_accounts",return_value=TOKEN),
+            patch.object(qa.tempfile,"mkdtemp",side_effect=make_temp),
+            patch.object(qa.woo,"claim_qa_accounts",side_effect=claim),
             patch.object(qa.woo,"wp_action",return_value={"users":[]}),
             patch.object(qa.woo,"validate_prepared_accounts",return_value={"users":[]}),
             patch.object(qa.woo,"exercise_store_clients",side_effect=RuntimeError("failure")),
             patch.object(qa.woo,"cleanup_qa_accounts",side_effect=RuntimeError("unknown cleanup")),
         ]
         with contextlib.ExitStack() as stack:
-            for p in patches:stack.enter_context(p)
+            for patcher in patches:stack.enter_context(patcher)
             with contextlib.redirect_stderr(io.StringIO()) as diagnostic:
                 with self.assertRaisesRegex(RuntimeError,"cleanup/recheck failed"):
                     qa.run(self.args)
             self.assertIn("recovery retained",diagnostic.getvalue())
+            manifest=retained/"qa-account-recovery.json"
+            self.assertEqual(json.loads(manifest.read_text())["run_id"],TOKEN)
+            self.assertEqual(manifest.stat().st_mode & 0o777,0o600)
 
 
 if __name__=="__main__":
