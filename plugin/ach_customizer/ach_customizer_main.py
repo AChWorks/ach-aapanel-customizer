@@ -644,10 +644,13 @@ class ach_customizer_main:
             self._require_enabled("site_inventory")
             from ach_customizer_cache_audit import inspect_site_fastcgi_cache
             from ach_customizer_cache_runtime import probe_private_cache
+            profile = args.get("probe_profile", "wordpress")
+            if type(profile) is not str or profile not in ("wordpress", "woocommerce_default"):
+                raise MonitorInputError("Unsupported fixed Cache diagnostic profile")
             public, before, current_site = self._selected_native_website(args)
             audited = inspect_site_fastcgi_cache(
                 public, before["id"], before["name"])
-            result = probe_private_cache(before, audited)
+            result = probe_private_cache(before, audited, profile=profile)
             if current_site() != before:
                 raise MonitorInputError(
                     "Native website/root/bindings changed during Cache runtime probe")
@@ -660,6 +663,8 @@ class ach_customizer_main:
                         after.get("source_sha256") != audited.get("source_sha256")):
                     result["state"] = "Needs Review"
                     result["private_probe_bypass_observed"] = False
+                    if "default_guest_bypass_observed" in result:
+                        result["default_guest_bypass_observed"] = False
                     result["reason"] = "Native Cache source changed during runtime observation"
             return self._activity_result(
                 {"status": True, "request_id": request_id, **result},

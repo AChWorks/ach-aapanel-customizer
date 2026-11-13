@@ -52,6 +52,7 @@ function loadUi() {
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-cache-private-probe-button', '#ach-cache-private-probe-result',
+    '#ach-cache-woo-probe-button', '#ach-cache-woo-probe-result',
     '#ach-cache-plan-button', '#ach-cache-plan-result',
     '#ach-cache-activation-preview', '#ach-cache-activation-recheck',
     '#ach-cache-activation-result', '#ach-cache-activation-reviewed',
@@ -318,6 +319,8 @@ function loadUi() {
       cacheResult: elements.get('#ach-cache-result').textContent,
       privateCacheProbeResult: elements.get('#ach-cache-private-probe-result').textContent,
       privateCacheProbeDisabled: elements.get('#ach-cache-private-probe-button').props.disabled,
+      wooCacheProbeResult: elements.get('#ach-cache-woo-probe-result').textContent,
+      wooCacheProbeDisabled: elements.get('#ach-cache-woo-probe-button').props.disabled,
       cacheSummary: elements.get('#ach-cache-summary').textContent,
       cacheSummaryTone: elements.get('#ach-cache-summary').attributes['data-tone'],
       hostsSummary: elements.get('#ach-hosts-summary').textContent,
@@ -7425,5 +7428,110 @@ test('Private Cache probe can render an actual unsafe-cache observation', () => 
   }));
   assert.match(ui.state().privateCacheProbeResult,/Needs Review/);
   assert.match(ui.state().privateCacheProbeResult,/home \/ cookie: HTTP 200, Cache HIT/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+});
+
+
+// The exact shipped native WooCommerce default-route probe response contract,
+// not a copy of the validator implementation.
+const wooCacheProbe = (overrides={}) => ({
+  ...privateCacheProbe(),schema:2,profile:'woocommerce_default',
+  default_guest_bypass_observed:true,
+  note:'Default WooCommerce HTTP/80 HEAD only. Custom slugs, VHost and real sessions unverified.',
+  probes:[
+    ...privateCacheProbe().probes,
+    {path:'/cart/',route:'cart',scenario:'anonymous',http_status:200,cache:'BYPASS'},
+    {path:'/checkout/',route:'checkout',scenario:'anonymous',http_status:200,cache:'BYPASS'},
+    {path:'/my-account/',route:'account',scenario:'anonymous',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/wc/store/v1/cart/',route:'store-cart',scenario:'anonymous',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/wc/store/v1/checkout/',route:'store-checkout',scenario:'anonymous',http_status:200,cache:'BYPASS'}
+  ],
+  ...overrides
+});
+
+test('Default WooCommerce guest route cache probe executes 9 HEAD observations without Cache grants', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  assert.equal(ui.state().wooCacheProbeDisabled,false);
+  const req=ui.statusClick('#ach-cache-woo-probe-button');
+  assert.match(req.options.url,/s=probe_private_cache$/);
+  assert.equal(req.options.data.site_id,'7');
+  assert.equal(req.options.data.probe_profile,'woocommerce_default');
+  assert.equal(req.options.timeout,45000);
+  assert.equal(ui.state().wooCacheProbeDisabled,true);
+  assert.equal(ui.state().privateCacheProbeDisabled,true);
+  req.respond(wooCacheProbe());
+  assert.match(ui.state().wooCacheProbeResult,/Observed BYPASS/);
+  assert.match(ui.state().wooCacheProbeResult,
+    /store-checkout \/ anonymous: HTTP 200, Cache BYPASS/);
+  assert.match(ui.state().wooCacheProbeResult,
+    /never authorizes Apply, Restore, Clear or Purge All/);
+  assert.equal(ui.state().wooCacheProbeDisabled,false);
+  assert.equal(ui.state().privateCacheProbeDisabled,false);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.state().cacheClearDisabled,true);
+});
+
+test('WooCommerce guest route probe rejects forged success and wrong route data', () => {
+  const baseline=wooCacheProbe();
+  const bad=[
+    {schema:1},{profile:'wordpress'}, {default_guest_bypass_observed:false},
+    {cache_safe_verified:true},{purge_supported:true},{runtime_verified:true},
+    {origin:'other-host:80'},
+    {probes:baseline.probes.slice(0,4)},
+    {probes:baseline.probes.map((p,i)=>i===8?{...p,cache:'HIT'}:p)},
+    {probes:baseline.probes.map((p,i)=>i===5?{...p,path:'/private/'}:p)},
+    {probes:baseline.probes.map((p,i)=>i===6?{...p,scenario:'cookie'}:p)}
+  ];
+  for (const change of bad) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-cache-woo-probe-button').respond(wooCacheProbe(change));
+    assert.match(ui.state().wooCacheProbeResult,/unavailable or unconfirmed/,
+      JSON.stringify(change));
+    assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  }
+});
+
+test('WooCommerce default guest cache HIT renders Needs Review without enabling writes', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const probes=wooCacheProbe().probes.map((p,i)=>
+    i===4 ? {...p,cache:'HIT'} : p);
+  ui.statusClick('#ach-cache-woo-probe-button').respond(wooCacheProbe({
+    state:'Needs Review',private_probe_bypass_observed:false,
+    default_guest_bypass_observed:false,
+    reason:'A default anonymous WooCommerce path may be cached',probes
+  }));
+  assert.match(ui.state().wooCacheProbeResult,/Needs Review/);
+  assert.match(ui.state().wooCacheProbeResult,/cart \/ anonymous: HTTP 200, Cache HIT/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.state().cacheClearDisabled,true);
+});
+
+test('WooCommerce default routes missing or incompatible source never imply safety', () => {
+  for (const variant of [
+    {state:'Unavailable',private_probe_bypass_observed:false,
+      default_guest_bypass_observed:false,reason:'Default route unavailable',
+      probes:wooCacheProbe().probes.map((p,i)=>i===5 ? {...p,http_status:404,cache:'Not Observed'} : p)},
+    {state:'Needs Review',private_probe_bypass_observed:false,
+      default_guest_bypass_observed:false,reason:'Source audit incomplete',probes:[]},
+    {state:'Unsupported',private_probe_bypass_observed:false,
+      default_guest_bypass_observed:false,reason:'Native PHP include unsupported',probes:[]},
+  ]) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-cache-woo-probe-button').respond(wooCacheProbe(variant));
+    assert.doesNotMatch(ui.state().wooCacheProbeResult,/unavailable or unconfirmed/);
+    assert.match(ui.state().wooCacheProbeResult,/Needs Review|Unavailable|Unsupported/);
+    assert.doesNotMatch(ui.state().wooCacheProbeResult,/^Observed BYPASS/);
+  }
+});
+
+test('WooCommerce route results invalidate on native site change while pending', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const request=ui.statusClick('#ach-cache-woo-probe-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.match(ui.state().wooCacheProbeResult,/Site selection changed/);
+  request.respond(wooCacheProbe());
+  assert.doesNotMatch(ui.state().wooCacheProbeResult,/Observed BYPASS/);
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
 });

@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Development candidate: v0.1.39 UNRELEASED; previously installed QA package: v0.1.38. No public Release or Production deployment.**
+**Development candidate: v0.1.40 UNRELEASED; last independently accepted and merged source/QA package: v0.1.39. No public Release or Production deployment.**
 The installed package has passed bounded genuine aaPanel 8.0.7 QA for native
 Status Pages and Cache recovery, real WooCommerce HTTP/HTTPS A/B session
 privacy and Nginx worker adoption. Those results are not full Release
@@ -14,6 +14,52 @@ fault/lifecycle cases remain tracked under [Issue #2](https://github.com/AChWork
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
+
+### v0.1.40 candidate: repeatable default WooCommerce guest-route Cache observations (Issues #21/#2)
+
+The native **FastCGI Cache** screen now offers **Probe default WooCommerce
+guest Cache routes** beside the existing WordPress diagnostic. This is a
+distinct **read-only, primary-admin-only native POST/CSRF profile** bound to
+the selected registered native site's ID, root, Host, domain bindings and
+complete source audit. The operator cannot submit URLs, arbitrary routes,
+headers, credentials or a remote address. The allowed `probe_profile`
+is strictly `wordpress` (existing four requests, schema 1) or
+`woocommerce_default` (schema 2): four synthetic invalid Authorization /
+Cookie WordPress `HEAD` requests plus **five additional anonymous HEAD**
+requests to these exact default paths:
+
+- `/cart/`, `/checkout/`, `/my-account/`;
+- `/wp-json/wc/store/v1/cart/` and `/wp-json/wc/store/v1/checkout/`.
+
+All requests use literal `127.0.0.1:80`, the registered native Host, no
+real session cookies or authentication, no response bodies, redirects,
+DNS, external requests, Nginx reload, source writes or purge. Each local
+request has a 4-second timeout and the native UI request has a dedicated
+45-second timeout for the bounded nine-request set. A defective cache
+configuration can warm an *anonymous public response* during HEAD.
+
+`Observed BYPASS` requires **all 9** exact HTTP 200 responses with
+`X-Cache: BYPASS From <registered Host>`; a successful request showing
+`HIT`/`MISS`/other recognized non-BYPASS signals `Needs Review`.
+Missing/unrecognized headers, redirects, missing default pages, transport
+failure and unsupported/missing source never produce positive evidence.
+After success, the full native site identity and source audit are rechecked;
+changed evidence revokes the result. The UI validates the complete ordered
+response and ignores stale results after switching sites. No approval or
+state is persisted by the observation, and the existing Apply, Restore, Clear
+and Purge All gates are unchanged.
+
+**Boundary:** This matrix verifies only those **anonymous HTTP/80 HEAD
+response headers**, not actual WooCommerce installation, custom/localized
+cart/checkout page slugs, real authenticated/guest sessions, cookies,
+POST/GET semantics, HTTPS edge, responding Nginx VHost identity (the
+`From $host` header is request-derived), worker adoption, or physical
+cache/purge isolation. Default WooCommerce URLs can be configured
+differently; a missing/redirecting route is `Unavailable`, not an
+assertion that a website is unsafe or lacks WooCommerce. Site-owned
+`wpfastcgi` Apply, Nginx Helper automatic invalidation and safe
+Purge All remain separate open acceptance. The previously accepted
+v0.1.39 WordPress four-request behavior is preserved.
 
 ### v0.1.39 candidate: local synthetic WordPress Cache header probe (Issue #21)
 
