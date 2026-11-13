@@ -243,6 +243,54 @@ class NativeCacheAuditEndpointTests(unittest.TestCase):
         self.assertEqual(probe.call_args.args[1]["source_sha256"], "a" * 64)
         self.assertEqual(self.reads, 3)
 
+    def test_woo_profile_uses_native_authorization_and_snapshot(self):
+        with patch.dict(sys.modules, {
+                "public": self.native(), "flask": self.flask()
+        }), patch.object(audit, "inspect_site_fastcgi_cache",
+                         return_value=self.sample()) as inspect, \
+             patch("ach_customizer_cache_runtime.probe_private_cache",
+                   return_value={"state": "Observed BYPASS"}) as probe:
+            got = self.plugin.probe_private_cache({
+                **self.args(), "probe_profile": "woocommerce_default"})
+        self.assertTrue(got["status"], got)
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(probe.call_args.kwargs["profile"], "woocommerce_default")
+        self.assertEqual(inspect.call_count, 2)
+        self.assertEqual(self.reads, 3)
+
+    def test_woo_source_drift_revokes_both_success_claims(self):
+        result = {"schema": 2, "state": "Observed BYPASS",
+                  "private_probe_bypass_observed": True,
+                  "default_guest_bypass_observed": True,
+                  "profile": "woocommerce_default"}
+        other = {**self.sample(), "source_sha256": "b"*64}
+        with patch.dict(sys.modules, {
+                "public": self.native(), "flask": self.flask()
+        }), patch.object(audit, "inspect_site_fastcgi_cache",
+                         side_effect=[self.sample(), other]), \
+             patch("ach_customizer_cache_runtime.probe_private_cache",
+                   return_value=result):
+            got = self.plugin.probe_private_cache({
+                **self.args(), "probe_profile": "woocommerce_default"})
+        self.assertTrue(got["status"], got)
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertFalse(got["private_probe_bypass_observed"])
+        self.assertFalse(got["default_guest_bypass_observed"])
+        self.assertEqual(self.reads, 3)
+
+    def test_woo_profile_refuses_arbitrary_profile_before_native_read(self):
+        for profile in (None, [], {}, "https://invalid.example", "guest"):
+            self.reads = 0
+            with patch.dict(sys.modules, {
+                    "public": self.native(), "flask": self.flask()
+            }), patch("ach_customizer_cache_runtime.probe_private_cache") as probe:
+                got = self.plugin.probe_private_cache({
+                    **self.args(), "probe_profile": profile})
+            self.assertFalse(got["status"])
+            self.assertEqual(got["stage"], "cache_runtime_probe")
+            self.assertEqual(self.reads, 0)
+            probe.assert_not_called()
+
     def test_private_probe_source_changed_cannot_claim_success(self):
         from ach_customizer_cache_runtime import probe_private_cache
         result = {"schema": 1, "state": "Observed BYPASS",

@@ -131,6 +131,150 @@ class RuntimePrivateCacheTests(unittest.TestCase):
                 self.assertEqual(got["state"], "Unsupported")
                 self.assertFalse(self.calls)
 
+    def woo(self):
+        self.responses = [
+            Response(200, "BYPASS From " + self.name) for _ in range(9)
+        ]
+        return runtime.probe_private_cache(
+            self.site, self.audit, profile="woocommerce_default",
+            vhost_root=str(self.root), connection_factory=self.factory)
+
+    def test_default_woo_guest_routes_9_of_9_without_credentials(self):
+        got = self.woo()
+        self.assertEqual(got["schema"], 2)
+        self.assertEqual(got["profile"], "woocommerce_default")
+        self.assertEqual(got["state"], "Observed BYPASS")
+        self.assertTrue(got["default_guest_bypass_observed"])
+        self.assertTrue(got["private_probe_bypass_observed"])
+        self.assertFalse(got["runtime_verified"])
+        self.assertFalse(got["cache_safe_verified"])
+        self.assertFalse(got["purge_supported"])
+        self.assertEqual(len(self.calls), 9)
+        self.assertEqual([x["route"] for x in got["probes"][4:]],
+                         ["cart", "checkout", "account", "store-cart", "store-checkout"])
+        self.assertEqual([x["path"] for x in got["probes"][4:]],
+                         ["/cart/", "/checkout/", "/my-account/",
+                          "/wp-json/wc/store/v1/cart/",
+                          "/wp-json/wc/store/v1/checkout/"])
+        for method, path, headers in self.calls[4:]:
+            self.assertEqual(method, "HEAD")
+            self.assertEqual(headers, {"Host": self.name})
+        self.assertTrue(all(x["scenario"] == "anonymous" for x in got["probes"][4:]))
+        self.assertIn("responding VHost", got["note"])
+        self.assertIn("Page slugs can be customized", got["note"])
+        self.assertTrue(all(c.closed for c in self.connections))
+
+    def test_woo_guest_hit_is_a_visible_review_not_a_false_success(self):
+        self.responses = [
+            Response(200, "BYPASS From " + self.name) for _ in range(9)
+        ]
+        self.responses[6] = Response(200, "HIT From " + self.name)
+        got = runtime.probe_private_cache(
+            self.site, self.audit, profile="woocommerce_default",
+            vhost_root=str(self.root), connection_factory=self.factory)
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertIn("anonymous WooCommerce", got["reason"])
+        self.assertEqual(got["probes"][6]["route"], "account")
+        self.assertFalse(got["default_guest_bypass_observed"])
+        self.assertFalse(got["private_probe_bypass_observed"])
+        self.assertEqual(len(self.calls), 9)
+
+    def test_woo_default_custom_slug_redirect_remains_unavailable(self):
+        self.responses = [
+            Response(200, "BYPASS From " + self.name) for _ in range(9)
+        ]
+        self.responses[4] = Response(301, "BYPASS From " + self.name)
+        got = runtime.probe_private_cache(
+            self.site, self.audit, profile="woocommerce_default",
+            vhost_root=str(self.root), connection_factory=self.factory)
+        self.assertEqual(got["state"], "Unavailable")
+        self.assertIn("customized slugs", got["reason"])
+        self.assertFalse(got["default_guest_bypass_observed"])
+        self.assertEqual(got["probes"][4]["http_status"], 301)
+
+    def test_woo_missing_cache_header_cannot_verify_guest_routes(self):
+        self.responses = [
+            Response(200, "BYPASS From " + self.name) for _ in range(9)
+        ]
+        self.responses[7] = Response(200, "BYPASS From other.test")
+        got = runtime.probe_private_cache(
+            self.site, self.audit, profile="woocommerce_default",
+            vhost_root=str(self.root), connection_factory=self.factory)
+        self.assertEqual(got["state"], "Unavailable")
+        self.assertEqual(got["probes"][7]["cache"], "Not Observed")
+        self.assertFalse(got["default_guest_bypass_observed"])
+
+    def test_woo_profile_is_fixed_and_source_guards_precede_transport(self):
+        for profile in (None, 1, "", "https://outside.test", {}, [], "WooCommerce"):
+            with self.subTest(profile=profile):
+                with self.assertRaises(MonitorInputError):
+                    runtime.probe_private_cache(
+                        self.site, self.audit, profile=profile,
+                        vhost_root=str(self.root), connection_factory=self.factory)
+        self.assertEqual(self.calls, [])
+        self.audit["state"] = "Partial"
+        got = self.woo()
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertEqual(got["probes"], [])
+        self.assertFalse(got["default_guest_bypass_observed"])
+        self.assertEqual(self.calls, [])
+
+    def test_woo_transport_failure_no_partial_verification(self):
+        self.responses = [
+            Response(200, "BYPASS From " + self.name) for _ in range(9)
+        ]
+        class Failing(Connection):
+            def request(self, method, path, headers):
+                if path == "/my-account/":
+                    raise ConnectionError("private runtime detail")
+                super().request(method, path, headers)
+        def factory():
+            conn = Failing(self.responses[len(self.connections)], self.calls)
+            self.connections.append(conn)
+            return conn
+        got = runtime.probe_private_cache(
+            self.site, self.audit, profile="woocommerce_default",
+            vhost_root=str(self.root), connection_factory=factory)
+        self.assertEqual(got["state"], "Unavailable")
+        self.assertEqual(len(got["probes"]), 6)
+        self.assertFalse(got["default_guest_bypass_observed"])
+        self.assertNotIn("private runtime detail", str(got))
+        self.assertTrue(all(c.closed for c in self.connections))
+
+    def test_partial_woo_hit_then_transport_failure_remains_needs_review(self):
+        self.responses = [
+            Response(200, "BYPASS From " + self.name) for _ in range(9)
+        ]
+        self.responses[4] = Response(200, "HIT From " + self.name)
+        class Failing(Connection):
+            def request(self, method, path, headers):
+                if path == "/checkout/":
+                    raise ConnectionError("late HTTP timeout")
+                super().request(method, path, headers)
+        def factory():
+            conn = Failing(self.responses[len(self.connections)], self.calls)
+            self.connections.append(conn)
+            return conn
+        got = runtime.probe_private_cache(
+            self.site, self.audit, profile="woocommerce_default",
+            vhost_root=str(self.root), connection_factory=factory)
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertEqual(len(got["probes"]), 5)
+        self.assertFalse(got["default_guest_bypass_observed"])
+        self.assertEqual(got["probes"][4]["cache"], "HIT")
+        self.assertNotIn("late HTTP timeout", str(got))
+
+    def test_woo_connect_error_does_not_leak_exception(self):
+        def factory():
+            raise OSError("private connector reason")
+        got = runtime.probe_private_cache(
+            self.site, self.audit, profile="woocommerce_default",
+            vhost_root=str(self.root), connection_factory=factory)
+        self.assertEqual(got["state"], "Unavailable")
+        self.assertEqual(got["reason"], "Origin-local HTTP connection failed")
+        self.assertEqual(got["probes"], [])
+        self.assertNotIn("private connector reason", str(got))
+
     def test_unverified_site_identity_rejected_before_http(self):
         for site in (
             {**self.site, "name": "bad/host"},

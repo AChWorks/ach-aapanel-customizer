@@ -481,6 +481,9 @@
       <p class="ach-note"><strong>Local WordPress cache header probe (synthetic, no login):</strong> four fixed HTTP/80 HEAD requests to localhost with invalid Authorization or test Cookie headers. Tests homepage and WordPress REST bypass, not real users, anonymous WooCommerce routes, HTTPS edge or safe Purge All. A defective cache policy might warm a public cache entry.</p>
       <div class="ach-controls"><button type="button" id="ach-cache-private-probe-button" disabled>Probe local private-request Cache headers</button></div>
       <p id="ach-cache-private-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to test synthetic request bypass without changing configuration.</p>
+      <p class="ach-note"><strong>Default WooCommerce guest-route probe (no login):</strong> five extra fixed anonymous HTTP/80 HEAD checks for <code>/cart/</code>, <code>/checkout/</code>, <code>/my-account/</code> and Store API cart/checkout, after four synthetic WordPress checks. Customized page slugs, GET behavior, identity/session cookies and the responding VHost are not verified. A faulty policy could warm a guest response.</p>
+      <div class="ach-controls"><button type="button" id="ach-cache-woo-probe-button" disabled>Probe default WooCommerce guest Cache routes</button></div>
+      <p id="ach-cache-woo-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native WooCommerce website to test fixed default routes without login or configuration changes.</p>
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
       <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
@@ -973,7 +976,7 @@
     if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy)$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -1577,6 +1580,8 @@
     cacheProbeBusy = false;
     root.find('#ach-cache-private-probe-result').text(
       'Site selection changed; run a new local Cache header probe.');
+    root.find('#ach-cache-woo-probe-result').text(
+      'Site selection changed; run a fresh WooCommerce Cache route observation.');
     ++cachePlanTicket;
     cachePlanBusy = false;
     ++cacheActivationTicket;
@@ -1599,6 +1604,7 @@
     var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
     root.find('#ach-cache-inspect-button').prop('disabled', cacheBusy || unready);
     root.find('#ach-cache-private-probe-button').prop('disabled', cacheProbeBusy || unready);
+    root.find('#ach-cache-woo-probe-button').prop('disabled', cacheProbeBusy || unready);
     root.find('#ach-cache-plan-button').prop('disabled', cachePlanBusy || unready);
     cacheActivationLock();
     vhostLock();
@@ -2140,16 +2146,20 @@
         '\nDO NOT infer that private routes are safe or that site-scoped Purge All is isolated.');
     });
   });
-  function validPrivateCacheProbe(r, id) {
+  function validPrivateCacheProbe(r, id, profile = 'wordpress') {
     var same = hostsPageSites.get(id);
-    if (!r || r.status !== true || r.schema !== 1 ||
+    var woo = profile === 'woocommerce_default';
+    if (!r || r.status !== true || r.schema !== (woo ? 2 : 1) ||
         r.site_id !== Number(id) || r.site_key !== same?.name ||
         r.read_only !== true || r.runtime_verified !== false ||
         r.cache_safe_verified !== false || r.purge_supported !== false ||
         typeof r.private_probe_bypass_observed !== 'boolean' ||
         r.request_method !== 'HEAD' || r.origin !== '127.0.0.1:80' ||
         !['Observed BYPASS','Needs Review','Unsupported','Unavailable'].includes(r.state) ||
-        !Array.isArray(r.probes) || r.probes.length > 4 ||
+        !Array.isArray(r.probes) || r.probes.length > (woo ? 9 : 4) ||
+        (woo && (r.profile !== 'woocommerce_default' ||
+          typeof r.default_guest_bypass_observed !== 'boolean' ||
+          r.default_guest_bypass_observed !== r.private_probe_bypass_observed)) ||
         typeof r.reason !== 'string' || r.reason.length > 250 ||
         typeof r.note !== 'string' || r.note.length > 600 ||
         (r.private_probe_bypass_observed !== (r.state === 'Observed BYPASS')))
@@ -2159,6 +2169,13 @@
       for (const scenario of ['authorization', 'cookie'])
         expected.push({path:path,route:path === '/' ? 'home' : 'rest',scenario:scenario});
     }
+    if (woo) {
+      for (const [path, route] of [
+        ['/cart/', 'cart'], ['/checkout/', 'checkout'], ['/my-account/', 'account'],
+        ['/wp-json/wc/store/v1/cart/', 'store-cart'],
+        ['/wp-json/wc/store/v1/checkout/', 'store-checkout']
+      ]) expected.push({path:path,route:route,scenario:'anonymous'});
+    }
     return r.probes.every((p, i) => p &&
       p.path === expected[i].path && p.route === expected[i].route &&
       p.scenario === expected[i].scenario &&
@@ -2166,7 +2183,7 @@
       p.http_status <= 599 &&
       ['BYPASS','HIT','MISS','EXPIRED','STALE','UPDATING','REVALIDATED','Not Observed'].includes(p.cache)) &&
       (r.state !== 'Observed BYPASS' ||
-        r.probes.length === 4 &&
+        r.probes.length === expected.length &&
         r.probes.every(p => p.cache === 'BYPASS' && p.http_status === 200));
   }
   root.find('#ach-cache-private-probe-button').on('click', function () {
@@ -2197,6 +2214,37 @@
         '\n' + (details.join('\n') || 'No local requests were made.') +
         '\n' + r.note +
         '\nThis check never authorizes Apply, Restore or Purge All.');
+    });
+  });
+
+  root.find('#ach-cache-woo-probe-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cacheProbeBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var ticket = ++cacheProbeTicket;
+    cacheProbeBusy = true;
+    cacheLock();
+    root.find('#ach-cache-woo-probe-result').text(
+      'Sending nine fixed HEAD requests to localhost; no login, purge or settings changes…');
+    request('probe_private_cache', {
+      site_id:id, probe_profile:'woocommerce_default',
+      expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r) {
+      if (ticket !== cacheProbeTicket) return;
+      cacheProbeBusy = false;
+      cacheLock();
+      if (id !== hostsSiteId() || !validPrivateCacheProbe(r, id, 'woocommerce_default')) {
+        root.find('#ach-cache-woo-probe-result').text(
+          'Default WooCommerce Cache observation unavailable or unconfirmed; do not infer safety.');
+        return;
+      }
+      var details = r.probes.map(p =>
+        p.route + ' / ' + p.scenario + ': HTTP ' + p.http_status + ', Cache ' + p.cache);
+      root.find('#ach-cache-woo-probe-result').text(
+        r.state + (r.reason ? ' — ' + r.reason : '') +
+        '\n' + (details.join('\n') || 'No local requests were made.') +
+        '\n' + r.note +
+        '\nThis check never authorizes Apply, Restore, Clear or Purge All.');
     });
   });
 
