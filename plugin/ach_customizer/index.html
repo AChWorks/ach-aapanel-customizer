@@ -478,6 +478,9 @@
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-cache-result" class="ach-status-metadata" role="status">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
       </details>
+      <p class="ach-note"><strong>Local WordPress cache header probe (synthetic, no login):</strong> four fixed HTTP/80 HEAD requests to localhost with invalid Authorization or test Cookie headers. Tests homepage and WordPress REST bypass, not real users, anonymous WooCommerce routes, HTTPS edge or safe Purge All. A defective cache policy might warm a public cache entry.</p>
+      <div class="ach-controls"><button type="button" id="ach-cache-private-probe-button" disabled>Probe local private-request Cache headers</button></div>
+      <p id="ach-cache-private-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to test synthetic request bypass without changing configuration.</p>
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
       <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
@@ -1495,6 +1498,7 @@
   });
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
   var cacheBusy = false, cacheTicket = 0;
+  var cacheProbeBusy = false, cacheProbeTicket = 0;
   var cachePlanBusy = false, cachePlanTicket = 0;
   var cacheActivationBusy = false, cacheActivationTicket = 0;
   var cacheActivationSnapshot = null, cacheRecoveryIdentity = null, cacheClearIdentity = null;
@@ -1569,6 +1573,10 @@
     invalidateVhostInspection('Website selection or inventory changed; compare VHost again.');
     ++cacheTicket;
     cacheBusy = false;
+    ++cacheProbeTicket;
+    cacheProbeBusy = false;
+    root.find('#ach-cache-private-probe-result').text(
+      'Site selection changed; run a new local Cache header probe.');
     ++cachePlanTicket;
     cachePlanBusy = false;
     ++cacheActivationTicket;
@@ -1590,6 +1598,7 @@
   function cacheLock() {
     var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
     root.find('#ach-cache-inspect-button').prop('disabled', cacheBusy || unready);
+    root.find('#ach-cache-private-probe-button').prop('disabled', cacheProbeBusy || unready);
     root.find('#ach-cache-plan-button').prop('disabled', cachePlanBusy || unready);
     cacheActivationLock();
     vhostLock();
@@ -2131,6 +2140,66 @@
         '\nDO NOT infer that private routes are safe or that site-scoped Purge All is isolated.');
     });
   });
+  function validPrivateCacheProbe(r, id) {
+    var same = hostsPageSites.get(id);
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== same?.name ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.cache_safe_verified !== false || r.purge_supported !== false ||
+        typeof r.private_probe_bypass_observed !== 'boolean' ||
+        r.request_method !== 'HEAD' || r.origin !== '127.0.0.1:80' ||
+        !['Observed BYPASS','Needs Review','Unsupported','Unavailable'].includes(r.state) ||
+        !Array.isArray(r.probes) || r.probes.length > 4 ||
+        typeof r.reason !== 'string' || r.reason.length > 250 ||
+        typeof r.note !== 'string' || r.note.length > 600 ||
+        (r.private_probe_bypass_observed !== (r.state === 'Observed BYPASS')))
+      return false;
+    var expected = [];
+    for (const path of ['/', '/wp-json/']) {
+      for (const scenario of ['authorization', 'cookie'])
+        expected.push({path:path,route:path === '/' ? 'home' : 'rest',scenario:scenario});
+    }
+    return r.probes.every((p, i) => p &&
+      p.path === expected[i].path && p.route === expected[i].route &&
+      p.scenario === expected[i].scenario &&
+      Number.isSafeInteger(p.http_status) && p.http_status >= 100 &&
+      p.http_status <= 599 &&
+      ['BYPASS','HIT','MISS','EXPIRED','STALE','UPDATING','REVALIDATED','Not Observed'].includes(p.cache)) &&
+      (r.state !== 'Observed BYPASS' ||
+        r.probes.length === 4 &&
+        r.probes.every(p => p.cache === 'BYPASS' && p.http_status === 200));
+  }
+  root.find('#ach-cache-private-probe-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cacheProbeBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var ticket = ++cacheProbeTicket;
+    cacheProbeBusy = true;
+    cacheLock();
+    root.find('#ach-cache-private-probe-result').text(
+      'Sending four fixed synthetic HEAD probes to this site on local HTTP/80…');
+    request('probe_private_cache', {
+      site_id:id,
+      expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot
+    }, function (r) {
+      if (ticket !== cacheProbeTicket) return;
+      cacheProbeBusy = false;
+      cacheLock();
+      if (id !== hostsSiteId() || !validPrivateCacheProbe(r, id)) {
+        root.find('#ach-cache-private-probe-result').text(
+          'Local Cache header observation unavailable or unconfirmed; do not infer safety.');
+        return;
+      }
+      var details = r.probes.map(p =>
+        p.route + ' / ' + p.scenario + ': HTTP ' + p.http_status + ', Cache ' + p.cache);
+      root.find('#ach-cache-private-probe-result').text(
+        r.state + (r.reason ? ' — ' + r.reason : '') +
+        '\n' + (details.join('\n') || 'No local requests were made.') +
+        '\n' + r.note +
+        '\nThis check never authorizes Apply, Restore or Purge All.');
+    });
+  });
+
   function validCachePlan(r, id) {
     var same = hostsPageSites.get(id);
     var sha = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
