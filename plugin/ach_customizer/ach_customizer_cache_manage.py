@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from ach_customizer_cache_policy import generate_reference, CACHE_ROOT
+from ach_customizer_cache_policy import generate_reference, CACHE_ROOT, HSTS_DIRECTIVE
 from ach_customizer_cache_audit import inspect_site_fastcgi_cache
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
@@ -78,11 +78,16 @@ def _record_decode(raw, site_id):
         raise CacheManageError('recovery', 'Untrusted Cache journal')
     schema = record.get('schema')
     expected = needed | ({'cache_identity'} if schema == 2 else set())
+    if schema == 2 and 'inherited_hsts' in record:
+        expected.add('inherited_hsts')
     identity = record.get('cache_identity')
     valid_identity = (identity is None and record.get('phase') in ('prepared', 'restored') or
                       isinstance(identity, list) and len(identity) == 2 and
                       all(type(value) is int and value > 0 for value in identity))
     if (schema not in (1, 2) or set(record) != expected
+            or ('inherited_hsts' in record and (
+                type(record['inherited_hsts']) is not str or
+                not HSTS_DIRECTIVE.fullmatch(record['inherited_hsts'])))
             or (schema == 2 and not valid_identity)
             or record['site_id'] != site_id
             or not isinstance(record['site_key'], str)
@@ -212,6 +217,69 @@ def _missing_extension_inventory(site, vhost_root):
             'No VHost or Cache change was made.') from exc
 
 
+def _direct_server_scope_id(source, offset):
+    """Lexically verify a statement is directly inside a single server block.
+
+    Quoted and escaped braces are not Nginx block delimiters. This is a
+    conservative source-scope check, not interpretation of arbitrary includes.
+    """
+    blocks = []
+    start = 0
+    quote = None
+    escaped = False
+    for pos, char in enumerate(source[:offset]):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+            continue
+        if char == "{":
+            heading = source[start:pos].strip()
+            blocks.append(pos if not blocks and heading == "server" else None)
+            start = pos + 1
+        elif char == "}":
+            if not blocks:
+                return None
+            blocks.pop()
+            start = pos + 1
+        elif char == ";":
+            start = pos + 1
+    return (blocks[0] if quote is None and not escaped and len(blocks) == 1
+            else None)
+
+
+def _site_hsts_header(active_vhost, extension_line, php_line):
+    """Copy one recognized native server HSTS, or refuse header inheritance.
+
+    A managed PHP location declares X-ACh-Cache headers and thus suppresses
+    inherited server add_header on Nginx 1.28. Never guess at unknown security
+    headers or silently drop them.
+    """
+    entries = list(re.finditer(r"\badd_header(?=\s)", active_vhost))
+    if not entries:
+        return None
+    if len(entries) != 1:
+        raise CacheManageError(
+            'compatibility', 'Selected VHost response headers need source-matched Cache review')
+    entry = entries[0]
+    match = HSTS_DIRECTIVE.match(active_vhost, entry.start())
+    block = _direct_server_scope_id(active_vhost, entry.start())
+    if (not match or block is None or
+            block != _direct_server_scope_id(active_vhost, active_vhost.find(extension_line)) or
+            block != _direct_server_scope_id(active_vhost, active_vhost.find(php_line))):
+        raise CacheManageError(
+            'compatibility', 'Selected VHost response headers cannot be safely inherited')
+    return match.group(0)
+
+
 def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     if (site.get('status') not in ('1',1) or not SITE_KEY.fullmatch(site['name'])
             or not any(binding.get('name') == site['name'] and binding.get('port') == 80
@@ -242,12 +310,10 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
             'Native PHP PATH_INFO parameters need manual compatibility review')
     # The managed location defines Cache diagnostics via add_header. On Nginx
     # 1.28 this suppresses inherited http/server-level response headers.
-    # Only the bounded stock shape without site-level header overrides is safe.
-    if re.search(r'\badd_header\s', active):
-        raise CacheManageError('compatibility',
-            'Selected VHost response headers cannot be inherited by Cache handler')
+    # Preserve only the exact native server HSTS in a source-pinned journal.
     ext = 'include '+vhost_root+'/extension/'+site['name']+'/*.conf;'
     php_line = 'include enable-php-'+php+'.conf;'
+    inherited_hsts = _site_hsts_header(active, ext, php_line)
     # A native aaPanel PHP switch leaves the saved Cache extension pinned to
     # its original PHP handler. Explain the two independently observed versions
     # without treating the new include as approved or changing recovery gates.
@@ -323,7 +389,8 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
             raise CacheManageError('compatibility',
                 'Native rewrite response headers need manual Cache review')
     return {'vhost_sha':_hash(vhost+b'\0'+rewrite), 'main_sha':_hash(main),
-            'php_sha':_hash(php_include+b'\0'+fastcgi+b'\0'+pathinfo)}
+            'php_sha':_hash(php_include+b'\0'+fastcgi+b'\0'+pathinfo),
+            'inherited_hsts': inherited_hsts}
 
 
 def _path_owned(site_id, *, cache_root=CACHE_ROOT, allow_missing=False):
@@ -978,7 +1045,8 @@ def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT
     sources=_site_sources(site,native['php_version'],
                           vhost_root=vhost_root,nginx_root=nginx_root)
     reference=generate_reference(site['id'],native['php_version'],
-                                 cache_generation=cache_generation)
+                                 cache_generation=cache_generation,
+                                 inherited_hsts=sources['inherited_hsts'])
     return native,reference,sources
 
 
@@ -991,7 +1059,8 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
     """
     prior_reference = generate_reference(
         site['id'], old['php_version'],
-        cache_generation=old['cache_generation'])
+        cache_generation=old['cache_generation'],
+        inherited_hsts=old.get('inherited_hsts'))
     if (old['phase'] != 'restored' or old['site_key'] != site['name'] or
             old['php_version'] != reference['php_version'] or
             old['cache_generation'] == reference['cache_generation'] or
@@ -1083,6 +1152,7 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
                 'proposal_sha256':reference['proposal_sha256'],
                 'cache_generation':cache_generation,
                 'php_version':native['php_version'],
+                'preserved_server_hsts': bool(sources['inherited_hsts']),
                 'cache_zone':reference['cache_zone'],
                 'cache_directory':reference['cache_directory'],
                 'impact':'One selected HTTP/80 VHost and Nginx service reload; '
@@ -1093,9 +1163,10 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
         os.close(statefd)
 
 
-def _fragments(site_id, php_version, cache_generation):
+def _fragments(site_id, php_version, cache_generation, *, inherited_hsts=None):
     reference=generate_reference(site_id,php_version,
-                                 cache_generation=cache_generation)
+                                 cache_generation=cache_generation,
+                                 inherited_hsts=inherited_hsts)
     global_bytes=reference['global_http_fragment'].encode()
     extension_bytes=reference['site_server_fragment'].encode()
     return reference,global_bytes,extension_bytes
@@ -1113,7 +1184,9 @@ def verified_cache_extension(directory,site_id,site_key,name,text,*,state_dir=No
     if (not record or record['site_key'] != site_key
             or record['phase'] not in ('prepared','applied')):
         raise CacheManageError('ownership','Cache extension lacks live recovery ownership')
-    ref,_,extension_bytes=_fragments(site_id,record['php_version'],record['cache_generation'])
+    ref, _, extension_bytes = _fragments(
+        site_id, record['php_version'], record['cache_generation'],
+        inherited_hsts=record.get('inherited_hsts'))
     if (record['proposal_sha'] != ref['proposal_sha256']
             or record['extension_sha'] != _hash(extension_bytes)
             or text.encode() != extension_bytes):
@@ -1138,7 +1211,9 @@ def verified_cache_global(vhost_root, site_id, name, *, state_dir=None):
         os.close(statefd)
     if not record or record['phase'] not in ('prepared','applied'):
         raise CacheManageError('ownership','Global Cache source lacks recovery ownership')
-    ref,global_bytes,_=_fragments(site_id,record['php_version'],record['cache_generation'])
+    ref, global_bytes, _ = _fragments(
+        site_id, record['php_version'], record['cache_generation'],
+        inherited_hsts=record.get('inherited_hsts'))
     fd=_directory(vhost_root)
     try:
         _owned_dir(fd)
@@ -1157,6 +1232,8 @@ def _same_site_sources(site, record, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_
         ('vhost_sha', 'VHost/rewrite'), ('main_sha', 'main Nginx'),
         ('php_sha', 'PHP handler/parameters'))
         if source[key] != record[key]]
+    if source['inherited_hsts'] != record.get('inherited_hsts'):
+        drift.append('server HSTS')
     if drift:
         raise CacheManageError('concurrency',
             'Native Cache source changed since approval: ' + ', '.join(drift))
@@ -1223,7 +1300,9 @@ def _safe_retire(fd, name, expected, operation):
 
 
 def _expected_files(record):
-    _, global_bytes, extension_bytes = _fragments(record['site_id'], record['php_version'], record['cache_generation'])
+    _, global_bytes, extension_bytes = _fragments(
+        record['site_id'], record['php_version'], record['cache_generation'],
+        inherited_hsts=record.get('inherited_hsts'))
     if (_hash(global_bytes) != record['global_sha'] or
             _hash(extension_bytes) != record['extension_sha']):
         raise CacheManageError('recovery', 'Generated Cache source no longer matches saved journal')
@@ -1484,10 +1563,24 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                         expected_proposal != readiness['proposal_sha256']):
                     raise CacheManageError('concurrency', 'Cache approval snapshot is stale')
                 php = readiness['php_version']
-                reference, global_bytes, ext_bytes = _fragments(site['id'], php, cache_generation)
+                sources = _site_sources(
+                    site, php, vhost_root=vhost_root, nginx_root=nginx_root)
+                reference, global_bytes, ext_bytes = _fragments(
+                    site['id'], php, cache_generation,
+                    inherited_hsts=sources['inherited_hsts'])
+                # The current source may have changed after Preview and
+                # before these bytes were generated. Rebind exact consent
+                # to the actual candidate, not only the earlier Preview.
+                if reference['proposal_sha256'] != expected_proposal:
+                    raise CacheManageError(
+                        'concurrency', 'Native HSTS/Cache proposal changed after approval')
                 _nginx('-t', nginx=NGINX, conf=nginx_root+'/nginx.conf', runner=runner)
                 initial = (probe or _probe)(site, marker=None)
-                sources = _site_sources(site, php, vhost_root=vhost_root, nginx_root=nginx_root)
+                verified_sources = _site_sources(
+                    site, php, vhost_root=vhost_root, nginx_root=nginx_root)
+                if verified_sources != sources:
+                    raise CacheManageError(
+                        'concurrency', 'Native Cache source changed during Apply preflight')
                 record = {
                     'schema': 2, 'site_id': site['id'], 'site_key': site['name'],
                     'php_version': php, 'op': uuid4().hex, 'phase': 'prepared',
@@ -1497,6 +1590,8 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     'proposal_sha': reference['proposal_sha256'],
                     'vhost_sha': sources['vhost_sha'], 'main_sha': sources['main_sha'],
                     'php_sha': sources['php_sha'],
+                    **({'inherited_hsts': sources['inherited_hsts']}
+                       if sources['inherited_hsts'] else {}),
                     'global_sha': _hash(global_bytes),
                     'extension_sha': _hash(ext_bytes),
                     'cache_directory': reference['cache_directory'],

@@ -2,12 +2,14 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Development candidate: v0.1.42 UNRELEASED; last independently accepted and merged source/QA package: v0.1.41 ([PR #67](https://github.com/AChWorks/ach-aapanel-customizer/pull/67)). No public Release or Production deployment.**
-The merged v0.1.41 diagnostic passed bounded native aaPanel 8.0.7 ZIP/primary-admin
-matching-entrypoint QA; it does **not** prove stale-worker negative/reload or
-freshness of all Python helpers. Previous v0.1.40 and earlier native Cache,
-Status Pages, real WooCommerce session and Nginx worker checks have separate
-bounded acceptance records, not general Release certification. Nginx Helper's
+**Development candidate: v0.1.43 UNRELEASED; last independently reviewed and Owner-merged source/QA package: v0.1.42 ([PR #68](https://github.com/AChWorks/ach-aapanel-customizer/pull/68)). No public Release or Production deployment.**
+v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
+exact-URL Clear, including current-generation single-object removal, unchanged
+peer/other URL, recheck and consented Restore
+([live QA evidence](https://github.com/AChWorks/ach-aapanel-customizer/pull/68#issuecomment-6870008305)).
+Native worker-version matching and earlier WooCommerce session, Cache, Status
+Pages and Nginx worker observations have bounded independent evidence; they do
+not prove all-worker or general production certification. Nginx Helper's
 generation-aware WordPress integration and safe live Purge All, native SSL
 installation UI, all-site regeneration and broader fault/lifecycle cases
 remain tracked under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2),
@@ -17,7 +19,40 @@ and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
 
-### v0.1.42 candidate: exact URL invalidation for an already managed site Cache (Issue #2)
+### v0.1.43 candidate: preserve native server HSTS in isolated Cache PHP handlers (Issue #2)
+
+aaPanel's stock PHP 8.1/8.5 VHost can have a direct server-level
+`add_header Strict-Transport-Security` (including its native TLS/443
+binding). The managed PHP Cache location defines its own diagnostic
+`add_header` directives; on Nginx 1.28 this suppresses otherwise inherited
+server headers. A bounded source-matched adapter now copies **the exact one
+recognized native HSTS directive** into that managed PHP location. The
+operator's preview visibly identifies whether it was preserved; the selected native source,
+generated proposal and recovery journal pin the bytes and detect subsequent
+changes before Apply, Recheck, Clear or Restore. Older Cache recovery records
+without the optional HSTS field remain readable.
+
+This enables a narrowly proven path for genuine HTTPS-enabled *stock PHP*
+aaPanel websites without weakening response-header protections. Unrecognized
+security headers, multiple headers, alternate scopes, unexpected PHP/rewrite
+layout and native `enable-php-*-wpfastcgi.conf` (shared `WORDPRESS` Cache,
+extra PHP rewrite and purge semantics) still require **Needs Review**.
+The adapter does not certify WordPress/WooCommerce privacy, Nginx Helper
+`unlink_files`, generic Purge All, automatic invalidation, VHost regeneration
+or Production. **Exact v0.1.43 native QA** (55/55 installed source members,
+ZIP SHA256 `0e9dee31ada3d7714e73dada4c302b66124858984dc7ff3cecb76b28d778c984`)
+passed an actual aaPanel 8.0.7 primary-admin Apply/Recheck/Restore/Recheck on
+isolated native HTTPS/HTTP stock-PHP site #8. Both transports preserved HSTS
+through `MISS -> HIT` public GETs and `BYPASS` Authorization/Cookie GETs;
+post-Restore, the original VHost/global Nginx hashes matched, the temporary
+PHP fixture was removed, and the original response returned. See the
+[exact bounded native QA record](docs/evidence/aaPanel-8.0.7-2026-11-14-native-hsts-cache-v043.json).
+This is not a TLS trust-chain certification (isolated QA used `curl -k`),
+nor real WordPress/WooCommerce private-session acceptance. v0.1.43 is
+**not yet independently reviewed or merged**; new Merge, public Release
+and Production actions remain independently gated.
+
+### v0.1.42 merged: exact URL invalidation for an already managed site Cache (Issue #2)
 
 The native **FastCGI Cache** panel adds a **Clear selected URL Cache** action
 for an existing, freshly **Applied** and Rechecked site-owned Cache generation.
@@ -45,17 +80,19 @@ reference cache policy (which bypasses queries and `%` paths). The feature
 is **not** a general/automatic WordPress invalidation solution, nor evidence
 that native `-wpfastcgi.conf` site-owned Apply or Purge All is supported.
 
-Source tests and the exact native aaPanel 8.0.7 ZIP installation passed;
-**55/55** source members matched, primary-admin UI/worker versions matched,
-and a **private copy** of a real Nginx 1.28.3 cache file was selectively
-invalidated without modifying the original or a peer copy. See the
-[exact QA evidence](docs/evidence/aapanel-8.0.7-2026-11-14-native-url-clear-v042.json).
-A live native `Applied`-state URL clear was **not executed**: the selected
-native fixture was ineligible because its server-level HSTS `add_header`
-would be suppressed by the current managed PHP handler, and existing older
-journals belong to renamed native site keys. The guarded UI correctly
-kept URL Clear disabled. v0.1.42 is **unreviewed / unmerged**, pending
-independent review; no Merge, Release or Production permission is implied.
+Source tests and exact native aaPanel 8.0.7 ZIP installation passed
+(**55/55** source members, matched UI and Python entrypoint).
+A source-pinned native **Applied** Cache on HTTP-only QA test site #16
+passed manual exact-URL Clear (one removed, repeat zero, target MISS/HIT,
+another URL and independent WordPress peer HIT), fresh Recheck and approved
+Restore. The earlier copied-file-only record
+[remains historical](docs/evidence/aapanel-8.0.7-2026-11-14-native-url-clear-v042.json);
+the [actual native acceptance](https://github.com/AChWorks/ach-aapanel-customizer/pull/68#issuecomment-6870008305)
+resolved the independent review's missing evidence. PR #68 received
+`COMPLETE / APPROVE` and Owner-authorized Merge to
+[`main@71612cfe`](https://github.com/AChWorks/ach-aapanel-customizer/commit/71612cfedcf4d63c91f894921e25dac0d85ac085)
+with [post-merge CI success](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/43547225404).
+No public Release or Production deployment was performed.
 
 ### v0.1.41 candidate: native ZIP upgrade resident-worker observation (Issues #21/#2)
 

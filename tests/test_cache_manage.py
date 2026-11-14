@@ -1,5 +1,6 @@
 """Guarded native Cache operation ownership, recovery and failure tests."""
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -1271,6 +1272,121 @@ class CacheManageTests(unittest.TestCase):
                     inspect()
                 path.write_text(data)
         self.assertEqual(inspect(),original)
+
+    def test_native_server_hsts_kept_by_managed_php_with_recovery(self):
+        """A real aaPanel HTTPS site's HSTS must survive Cache Apply/Restore."""
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        hsts = 'add_header Strict-Transport-Security "max-age=31536000";'
+        vhost.write_text(original.replace(
+            ' include enable-php-85.conf;',
+            ' ' + hsts + '\n include enable-php-85.conf;'))
+        sources = cache._site_sources(
+            self.site, '85', vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+        self.assertEqual(sources['inherited_hsts'], hsts)
+
+        def native_compat(site, public, **kwargs):
+            return (self.native, cache.generate_reference(
+                7, '85', cache_generation=kwargs.get('cache_generation'),
+                inherited_hsts=sources['inherited_hsts']), sources)
+
+        with patch.object(cache, '_compatibility', side_effect=native_compat):
+            preview = self.preview()
+            self.assertTrue(preview['preserved_server_hsts'])
+            applied = self.apply()
+            self.assertEqual(applied['state'], 'Applied')
+            journal_path = self.state / cache._names(7)[2]
+            journal = json.loads(journal_path.read_text())
+            self.assertEqual(journal['inherited_hsts'], hsts)
+            self.assertEqual(cache._record_decode(journal_path.read_bytes(), 7), journal)
+            fragment = (self.ext / cache._names(7)[1]).read_text()
+            self.assertEqual(fragment.count('    ' + hsts + '\n'), 1)
+            self.assertIn('add_header X-ACh-Cache-Site 7 always;', fragment)
+            self.assertEqual(
+                cache.manage_cache('recheck', self.site, public=object(),
+                                   **self.kwargs())['state'], 'Applied')
+
+            # Recheck and recovery must not trust a different native HSTS.
+            changed = vhost.read_text().replace('31536000', '63072000')
+            vhost.write_text(changed)
+            self.assertEqual(
+                cache.manage_cache('recheck', self.site, public=object(),
+                                   **self.kwargs())['state'], 'Needs Review')
+            with self.assertRaises(cache.CacheManageError):
+                cache.manage_cache('restore', self.site, recovery_id=applied['recovery_id'],
+                                   approved=True, **self.kwargs())
+            self.assertTrue((self.ext / cache._names(7)[1]).exists())
+            vhost.write_text(original.replace(
+                ' include enable-php-85.conf;',
+                ' ' + hsts + '\n include enable-php-85.conf;'))
+            self.assertEqual(cache.manage_cache(
+                'restore', self.site, recovery_id=applied['recovery_id'],
+                approved=True, **self.kwargs())['state'], 'Restored')
+            self.assertNotIn('ach_customizer_cache_7.conf', [p.name for p in self.ext.iterdir()])
+            self.assertEqual(
+                cache.manage_cache('recheck', self.site, public=object(),
+                                   **self.kwargs())['state'], 'Restored')
+
+    def test_hsts_changes_between_preview_and_fragment_publication_rejected(self):
+        """A stale approved proposal must not publish newly observed HSTS."""
+        preview = self.preview()
+        header = 'add_header Strict-Transport-Security "max-age=31536000";'
+        current = cache._site_sources(
+            self.site, '85', vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+        observed = dict(current, inherited_hsts=header)
+        with patch.object(cache, '_site_sources', return_value=observed):
+            with self.assertRaisesRegex(cache.CacheManageError,
+                                        'proposal changed after approval'):
+                cache.manage_cache(
+                    'apply', self.site, public=object(), approved=True,
+                    cache_generation=preview['cache_generation'],
+                    expected_source=preview['source_sha256'],
+                    expected_proposal=preview['proposal_sha256'],
+                    **self.kwargs())
+        self.assertFalse((self.state / cache._names(7)[2]).exists())
+        self.assertFalse((self.ext / cache._names(7)[1]).exists())
+        self.assertFalse((self.vhost / cache._names(7)[0]).exists())
+
+    def test_unverified_native_response_headers_are_not_replaced(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        valid = 'add_header Strict-Transport-Security "max-age=31536000";'
+        cases = (
+            'add_header X-Frame-Options SAMEORIGIN;',
+            'add_header Strict-Transport-Security "$unknown";',
+            valid + '\n add_header X-Frame-Options SAMEORIGIN;',
+            'location /private { ' + valid + ' }',
+            'server { ' + valid + ' }',
+            'add_header Strict-Transport-Security "max-age=31536000"; '
+            'add_header X-Test unsafe;',
+            'if ($host = "qa.test") { ' + valid + ' }',
+            'add_header Strict-Transport-Security "max-age=31536000" always; '
+            'add_header Strict-Transport-Security "max-age=63072000";',
+            'add_header Strict-Transport-Security "max-age=31536000; preload; '
+            'unexpected" always;',
+        )
+        for extra in cases:
+            with self.subTest(extra=extra):
+                vhost.write_text(original.replace(
+                    ' include enable-php-85.conf;',
+                    ' ' + extra + '\n include enable-php-85.conf;'))
+                with self.assertRaises(cache.CacheManageError):
+                    cache._site_sources(self.site, '85', vhost_root=str(self.vhost),
+                                        nginx_root=str(self.nginx))
+        vhost.write_text(original)
+
+    def test_hsts_journal_is_strict_and_legacy_journal_still_reads(self):
+        applied = self.apply()
+        journal = json.loads((self.state / cache._names(7)[2]).read_text())
+        self.assertNotIn('inherited_hsts', journal)
+        self.assertEqual(cache._record_decode(json.dumps(journal), 7), journal)
+        for unsafe in ('add_header X-Test ok;', 'add_header Strict-Transport-Security "$var";',
+                       'add_header Strict-Transport-Security "max-age=31536000";\ninclude /etc/passwd;',
+                       None, True, 15):
+            with self.subTest(unsafe=unsafe):
+                forged = dict(journal, inherited_hsts=unsafe)
+                with self.assertRaises(cache.CacheManageError):
+                    cache._record_decode(json.dumps(forged), 7)
 
     def test_reapply_rejects_tampered_retained_source_without_mutation(self):
         first=self.apply()

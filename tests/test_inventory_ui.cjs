@@ -807,7 +807,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
 const monitorOverview = (overrides = {}) => ({
   status: true,
   mode: 'Monitor',
-  worker_source_version: '0.1.42',
+  worker_source_version: '0.1.43',
   notice: 'Read-only Monitor controls',
   enforcement: false,
   state_schema: 1,
@@ -1908,7 +1908,8 @@ const cacheActivationReady = (overrides={}) => ({
   apply_supported:true, runtime_verified:false, site_id:7,
   site_key:'site.test', source_sha256:'a'.repeat(64),
   proposal_sha256:'b'.repeat(64), cache_generation:'c'.repeat(32),
-  php_version:'85', php_probe_status:301, cache_zone:'ACHFC_7',
+  php_version:'85', php_probe_status:301, preserved_server_hsts:false,
+  cache_zone:'ACHFC_7',
   cache_directory:'/www/server/ach-customizer-fastcgi/site-7',
   impact:'One selected HTTP/80 VHost and Nginx service reload',
   note:'Runtime WordPress and WooCommerce acceptance remains separate',
@@ -1925,6 +1926,25 @@ const cacheOperationRestored = (overrides={}) => ({
   site_key:'site.test',journal_phase:'restored',
   recovery_id:'f'.repeat(32),runtime_verified:true,
   purge_supported:false, ...overrides
+});
+
+test('Native Cache preview binds explicit HSTS identity and rejects a stale helper response', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-preview').respond(
+    cacheActivationReady({preserved_server_hsts:true}));
+  assert.match(ui.state().cacheActivationResult,
+    /Native server HSTS: exact directive preserved in PHP Cache handler/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,false);
+  ui.statusClick('#ach-cache-activation-preview').respond(
+    cacheActivationReady({preserved_server_hsts:false}));
+  assert.match(ui.state().cacheActivationResult,/Native server HSTS: none detected/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  const stale=cacheActivationReady(); delete stale.preserved_server_hsts;
+  ui.statusClick('#ach-cache-activation-preview').respond(stale);
+  assert.match(ui.state().cacheActivationResult,/source or response could not be verified/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
 });
 
 test('Native Cache preflight and Recheck show controlled failure stage and ID inline', () => {
