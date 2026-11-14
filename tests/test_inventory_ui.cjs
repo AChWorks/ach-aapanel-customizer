@@ -837,7 +837,7 @@ test('Installed UI checks resident Python entrypoint without claiming helper fre
   const ui = loadUi();
   ui.respondOverview(monitorOverview());
   assert.equal(ui.state().workerVersionState, 'matched');
-  assert.match(ui.state().workerVersionNotice, /matches UI v0\.1\.44/);
+  assert.match(ui.state().workerVersionNotice, /matches UI v0\.1\.45/);
   assert.match(ui.state().workerVersionNotice, /not certified/);
 });
 
