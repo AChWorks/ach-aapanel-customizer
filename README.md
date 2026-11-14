@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Development candidate: v0.1.43 UNRELEASED; last independently reviewed and Owner-merged source/QA package: v0.1.42 ([PR #68](https://github.com/AChWorks/ach-aapanel-customizer/pull/68)). No public Release or Production deployment.**
+**Latest integrated development source: v0.1.43 UNRELEASED ([Owner-approved PR #69](https://github.com/AChWorks/ach-aapanel-customizer/pull/69), [main@8cdc1ec](https://github.com/AChWorks/ach-aapanel-customizer/commit/8cdc1ec8435ac64a17d9fac2a76a3cb7b576cc2a)). No public Release or Production deployment.**
 v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
 exact-URL Clear, including current-generation single-object removal, unchanged
 peer/other URL, recheck and consented Restore
@@ -19,7 +19,7 @@ and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
 
-### v0.1.43 candidate: preserve native server HSTS in isolated Cache PHP handlers (Issue #2)
+### v0.1.43 merged: preserve native server HSTS in isolated Cache PHP handlers (Issue #2)
 
 aaPanel's stock PHP 8.1/8.5 VHost can have a direct server-level
 `add_header Strict-Transport-Security` (including its native TLS/443
@@ -48,9 +48,12 @@ post-Restore, the original VHost/global Nginx hashes matched, the temporary
 PHP fixture was removed, and the original response returned. See the
 [exact bounded native QA record](docs/evidence/aaPanel-8.0.7-2026-11-14-native-hsts-cache-v043.json).
 This is not a TLS trust-chain certification (isolated QA used `curl -k`),
-nor real WordPress/WooCommerce private-session acceptance. v0.1.43 is
-**not yet independently reviewed or merged**; new Merge, public Release
-and Production actions remain independently gated.
+nor real WordPress/WooCommerce private-session acceptance. v0.1.43 received
+`COMPLETE / APPROVE` independent review and Owner-authorized integration
+([PR #69](https://github.com/AChWorks/ach-aapanel-customizer/pull/69),
+[main@8cdc1ec](https://github.com/AChWorks/ach-aapanel-customizer/commit/8cdc1ec8435ac64a17d9fac2a76a3cb7b576cc2a));
+[exact merge CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/43578787669)
+succeeded. Public Release and Production remain separately gated.
 
 ### v0.1.42 merged: exact URL invalidation for an already managed site Cache (Issue #2)
 
