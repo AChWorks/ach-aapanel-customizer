@@ -19,6 +19,11 @@ class CachePolicyError(ValueError):
 # unlink_files/Purge All operating on the shared filesystem directory.
 CACHE_ROOT = "/www/server/ach-customizer-fastcgi"
 PHP_ADAPTERS = frozenset(("81", "85"))
+# Source-pinned aaPanel server-scope HSTS only. Never infer or rewrite policy.
+HSTS_DIRECTIVE = re.compile(
+    r'add_header[ \t]+Strict-Transport-Security[ \t]+"max-age=[0-9]{1,10}'
+    r'(?:; includeSubDomains)?(?:; preload)?"(?:[ \t]+always)?;'
+)
 NOTE = (
     "Reference config for isolated review only: not installed, not syntax-"
     "checked on this host, not loaded, not an Apply permission or purge API. "
@@ -30,7 +35,7 @@ NOTE = (
 
 
 def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
-                       cache_generation=None):
+                       cache_generation=None, inherited_hsts=None):
     """Render reviewable http/server fragments with no side effects.
 
     Only a caller that has independently established a native website, PHP
@@ -51,6 +56,10 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
             type(cache_generation) is not str or
             not re.fullmatch(r"[0-9a-f]{32}", cache_generation)):
         raise CachePolicyError("Invalid cache generation")
+    if inherited_hsts is not None and (
+            type(inherited_hsts) is not str or
+            not HSTS_DIRECTIVE.fullmatch(inherited_hsts)):
+        raise CachePolicyError("Unverified native HSTS response header")
     zone = "ACHFC_%d" % site_id
     var = "achfc_%d" % site_id
     directory = "%s/site-%d" % (cache_root, site_id)
@@ -109,6 +118,7 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         + "    fastcgi_no_cache $%s_skip $upstream_http_set_cookie $upstream_http_vary $upstream_http_www_authenticate $%s_private_response $%s_expired_response;\n" % (var, var, var)
         + "    add_header X-ACh-Cache $upstream_cache_status always;\n"
         + "    add_header X-ACh-Cache-Site %d always;\n" % site_id
+        + (("    " + inherited_hsts + "\n") if inherited_hsts else "")
         + "}\n"
     )
     digest = hashlib.sha256(json.dumps(

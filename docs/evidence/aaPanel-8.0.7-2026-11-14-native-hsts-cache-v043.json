@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "repo": "AChWorks/ach-aapanel-customizer",
+  "version": "0.1.43 UNRELEASED",
+  "qa_guest": {
+    "incus_project": "ach-aapanel-qa",
+    "name": "aac-native-qa",
+    "uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040"
+  },
+  "package_sha256": "0e9dee31ada3d7714e73dada4c302b66124858984dc7ff3cecb76b28d778c984",
+  "package_installed_members_verified": "55/55",
+  "native_plugin_import": "Installation succeeded!",
+  "panel_service_restarted_for_fresh_helpers": true,
+  "site": {
+    "id": 8,
+    "name": "qa-fixture-woo85.digikalashop.top",
+    "handler": "stock PHP 8.5",
+    "hsts": "add_header Strict-Transport-Security \"max-age=31536000\";",
+    "generation": "aa71de91c46d4865830b2b8e49e096ff",
+    "recovery_id": "2efb95c3d4d04bd8973e73c3f9aea86d"
+  },
+  "runtime_http_https": {
+    "http": {
+      "public_get_first": {
+        "http": "HTTP/1.1 200 OK",
+        "cache": "MISS",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      },
+      "public_get_second": {
+        "http": "HTTP/1.1 200 OK",
+        "cache": "HIT",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      },
+      "invalid_authorization_get": {
+        "http": "HTTP/1.1 200 OK",
+        "cache": "BYPASS",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      },
+      "test_cookie_get": {
+        "http": "HTTP/1.1 200 OK",
+        "cache": "BYPASS",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      }
+    },
+    "https": {
+      "public_get_first": {
+        "http": "HTTP/2 200 ",
+        "cache": "MISS",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      },
+      "public_get_second": {
+        "http": "HTTP/2 200 ",
+        "cache": "HIT",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      },
+      "invalid_authorization_get": {
+        "http": "HTTP/2 200 ",
+        "cache": "BYPASS",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      },
+      "test_cookie_get": {
+        "http": "HTTP/2 200 ",
+        "cache": "BYPASS",
+        "site": "8",
+        "hsts": "max-age=31536000"
+      }
+    }
+  },
+  "post_restore": {
+    "state": "Restored",
+    "runtime_verified": true,
+    "recovery_id": "2efb95c3d4d04bd8973e73c3f9aea86d",
+    "journal_sha256": "1945cca53a72a84fdf38158ed6055bdf2e7e4d45358bd20be81b12341825b53d",
+    "source_sha256s_match_pretest": {
+      "/www/server/panel/vhost/nginx/qa-fixture-woo85.digikalashop.top.conf": "6190749a7db0ccc0bd9e614232235627b49d9159367fcd9eda6b8c7610c7b1bc",
+      "/www/server/panel/vhost/nginx/0.fastcgi_cache.conf": "1db1d19ab113df6707d98f551e1d5e8daade8c4ff2825c39fed7879ee0613035",
+      "/www/server/nginx/conf/nginx.conf": "dd87d0dad8fd394fb7e5f0fbe6420bc2fc02a50196d144600b732b87771c65ef"
+    },
+    "active_cache_global_file": false,
+    "active_cache_site_extension": false,
+    "http_https_without_managed_cache": {
+      "http": {
+        "http": "HTTP/1.1 200 OK",
+        "hsts": "max-age=31536000",
+        "managed_cache_header": "absent"
+      },
+      "https": {
+        "http": "HTTP/2 200 ",
+        "hsts": "max-age=31536000",
+        "managed_cache_header": "absent"
+      }
+    },
+    "temporary_qa_php_file_removed": true,
+    "original_qa_index_php_status": 404,
+    "nginx_syntax": "PASS",
+    "guest_snapshots_journals_retained": true
+  },
+  "limits": [
+    "TLS certificate chain verification disabled for isolated QA curl",
+    "No real WordPress/WooCommerce authenticated session acceptance",
+    "No shared WORDPRESS purge, Nginx Helper integration or VHost regeneration claim",
+    "No Production/Release or independent review approval"
+  ]
+}

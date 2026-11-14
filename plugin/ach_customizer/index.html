@@ -754,7 +754,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.42'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.43'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2411,6 +2411,7 @@
       response.site_id === Number(id) && response.site_key === site.name &&
       response.read_only === true && response.apply_supported === true &&
       response.runtime_verified === false &&
+      typeof response.preserved_server_hsts === 'boolean' &&
       hash.test(response.source_sha256 || '') &&
       hash.test(response.proposal_sha256 || '') &&
       /^[0-9a-f]{32}$/.test(response.cache_generation || '') &&
@@ -2458,6 +2459,8 @@
         'Manual Cache Apply preflight ready (NOT activated or runtime-safe-verified).' +
         '\nSelected site #'+id+' / PHP '+r.php_version+
         '\nOrigin PHP route: HTTP '+r.php_probe_status+
+        '\nNative server HSTS: '+(r.preserved_server_hsts ?
+          'exact directive preserved in PHP Cache handler' : 'none detected')+
         '\nZone: '+r.cache_zone+'; directory: '+r.cache_directory+
         '\nCurrent source SHA-256: '+r.source_sha256+
         '\nReference SHA-256: '+r.proposal_sha256+

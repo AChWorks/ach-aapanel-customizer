@@ -64,6 +64,22 @@ class CachePolicyRenderTests(unittest.TestCase):
                 self.assertNotIn('try_files $uri $uri/ /index.php?$args;',fragment)
                 self.assertIn('fastcgi_pass unix:/tmp/php-cgi-'+version+'.sock;',fragment)
 
+    def test_source_pinned_server_hsts_is_emitted_once_without_policy_drift(self):
+        header = 'add_header Strict-Transport-Security "max-age=31536000";'
+        plain = policy.generate_reference(7, '85', cache_generation='a'*32)
+        secure = policy.generate_reference(
+            7, '85', cache_generation='a'*32, inherited_hsts=header)
+        self.assertNotIn('Strict-Transport-Security', plain['site_server_fragment'])
+        self.assertIn('    '+header+'\n', secure['site_server_fragment'])
+        self.assertEqual(secure['site_server_fragment'].count(header), 1)
+        self.assertEqual(secure['global_http_fragment'], plain['global_http_fragment'])
+        self.assertNotEqual(secure['proposal_sha256'], plain['proposal_sha256'])
+        for invalid in ('', 'add_header X-Test ok;',
+                        'add_header Strict-Transport-Security "$unsafe";',
+                        header + '\n include /etc/nginx/foo.conf;', True, None.__class__):
+            with self.subTest(invalid=invalid), self.assertRaises(policy.CachePolicyError):
+                policy.generate_reference(7, '85', inherited_hsts=invalid)
+
     def test_operational_cache_generations_never_reuse_old_cache_keys(self):
         initial = policy.generate_reference(7, "85", cache_generation="a"*32)
         next_gen = policy.generate_reference(7, "85", cache_generation="b"*32)
