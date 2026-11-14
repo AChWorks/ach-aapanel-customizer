@@ -74,5 +74,10 @@ environment** during an acceptable maintenance window:
 **Limits:** No automatic restart, new privileged endpoint, logout bypass,
 new Apply/Purge permissions, or public Release is part of the 0.1.41
 observation. One matching version is not a full module-integrity or live
-routing certification. Real browser and failure/reload acceptance is
-required for any new exact 0.1.41 candidate.
+routing certification. Exact v0.1.41 positive native Browser acceptance
+confirmed the matching-version path. Real native stale-worker mismatch and
+subsequent authorized reload **did not reproduce** for that ZIP; the synthetic
+Browser negative attempt is unverified, while local negative-response tests
+passed. A later controlled mismatch/reload reproduction remains a separate
+native QA objective, not a retrospective claim of success or an unapproved
+mandatory integration gate for the narrow read-only v0.1.41 diagnostic.

@@ -2,18 +2,60 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Development candidate: v0.1.41 UNRELEASED; last independently accepted and merged source/QA package: v0.1.40. No public Release or Production deployment.**
-The last merged v0.1.40 package passed bounded genuine aaPanel 8.0.7 QA for native
-Status Pages and Cache recovery, real WooCommerce HTTP/HTTPS A/B session
-privacy and Nginx worker adoption. Those results are not full Release
-acceptance. Nginx Helper's generation-aware WordPress integration and safe
-live Purge All, native SSL installation UI, all-site regeneration and broader
-fault/lifecycle cases remain tracked under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2),
+**Development candidate: v0.1.42 UNRELEASED; last independently accepted and merged source/QA package: v0.1.41 ([PR #67](https://github.com/AChWorks/ach-aapanel-customizer/pull/67)). No public Release or Production deployment.**
+The merged v0.1.41 diagnostic passed bounded native aaPanel 8.0.7 ZIP/primary-admin
+matching-entrypoint QA; it does **not** prove stale-worker negative/reload or
+freshness of all Python helpers. Previous v0.1.40 and earlier native Cache,
+Status Pages, real WooCommerce session and Nginx worker checks have separate
+bounded acceptance records, not general Release certification. Nginx Helper's
+generation-aware WordPress integration and safe live Purge All, native SSL
+installation UI, all-site regeneration and broader fault/lifecycle cases
+remain tracked under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2),
 [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10),
 [#17](https://github.com/AChWorks/ach-aapanel-customizer/issues/17)
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
+
+### v0.1.42 candidate: exact URL invalidation for an already managed site Cache (Issue #2)
+
+The native **FastCGI Cache** panel adds a **Clear selected URL Cache** action
+for an existing, freshly **Applied** and Rechecked site-owned Cache generation.
+It is a narrow alternative to clearing the entire selected site's files. The
+primary aaPanel administrator selects the registered website, enters **one
+canonical absolute URL path** (e.g. `/news/`, not an external URL, query,
+fragment or percent-encoded path), reviews the target and explicitly approves.
+The backend uses the **saved site and generation**, not a browser-supplied
+cache root, zone, Host, key, scheme or file path. It hashes the exact Nginx
+`$scheme$request_method$host$request_uri|generation` key and checks up to
+four `http`/`https` and `GET`/`HEAD` candidate cache objects. Each existing
+object must have the exact native Nginx cache `KEY:` header, owned path and
+file identity before it can be unlinked.
+
+The existing full site identity, recovery journal, Nginx source and native
+registered-peer **physical isolation** checks are unchanged and run before
+unlinking. Missing candidates return **0 removed**; unexpected objects or
+uncertain removal require Recheck and preserve the recovery identity. No Nginx
+reload, shared `WORDPRESS` purge, WP/Nginx Helper hook, automatic
+invalidation, PHP policy change or cache key migration occurs. Other URL
+paths and Host aliases are intentionally untouched; new requests can
+immediately recreate the entry. Invalid/noncanonical URLs, percent-encoded
+Persian slugs and query-specific variants are not covered by the current
+reference cache policy (which bypasses queries and `%` paths). The feature
+is **not** a general/automatic WordPress invalidation solution, nor evidence
+that native `-wpfastcgi.conf` site-owned Apply or Purge All is supported.
+
+Source tests and the exact native aaPanel 8.0.7 ZIP installation passed;
+**55/55** source members matched, primary-admin UI/worker versions matched,
+and a **private copy** of a real Nginx 1.28.3 cache file was selectively
+invalidated without modifying the original or a peer copy. See the
+[exact QA evidence](docs/evidence/aapanel-8.0.7-2026-11-14-native-url-clear-v042.json).
+A live native `Applied`-state URL clear was **not executed**: the selected
+native fixture was ineligible because its server-level HSTS `add_header`
+would be suppressed by the current managed PHP handler, and existing older
+journals belong to renamed native site keys. The guarded UI correctly
+kept URL Clear disabled. v0.1.42 is **unreviewed / unmerged**, pending
+independent review; no Merge, Release or Production permission is implied.
 
 ### v0.1.41 candidate: native ZIP upgrade resident-worker observation (Issues #21/#2)
 
@@ -29,12 +71,14 @@ active Nginx workers. An unavailable/invalid Overview response remains
 **unverified**, not falsely diagnosed as a stale worker. See the
 [native upgrade recovery runbook](docs/aapanel-upgrade-recovery.md) for the
 verified v0.1.40 QA incident, evidence to collect and post-reload checks.
-v0.1.41 is a new **unreviewed** source candidate; none of the v0.1.40 native
-ZIP/CI acceptance automatically applies to it.
-The exact 0.1.41 ZIP was installed through native aaPanel QA and the worker
-entrypoint version **matched** in that run (no stale worker reproduced);
-see the [candidate-only evidence](docs/evidence/aapanel-8.0.7-2026-11-14-native-zip-worker-v041.json).
-Independent review, integration and Release remain separately gated.
+The exact v0.1.41 ZIP passed native aaPanel matching-entrypoint QA (no stale
+worker reproduced), [independent APPROVE](https://github.com/AChWorks/ach-aapanel-customizer/pull/67)
+and Owner-authorized Merge to
+[`main@ad842d9`](https://github.com/AChWorks/ach-aapanel-customizer/commit/ad842d9767ed2269f094f07558c6d99401f9715a);
+[post-merge CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/43538882119)
+was successful. See the [exact evidence](docs/evidence/aapanel-8.0.7-2026-11-14-native-zip-worker-v041.json).
+The negative stale-worker/reload scenario remains **unverified** for v0.1.41.
+No public Release or Production deployment occurred.
 
 ### v0.1.40 candidate: repeatable default WooCommerce guest-route Cache observations (Issues #21/#2)
 

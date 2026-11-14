@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "recorded_utc": "2026-11-14",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "issues": [
+    "#2",
+    "#21"
+  ],
+  "scope": "manual exact current-generation site-owned Cache URL invalidation; no Nginx Helper or wpfastcgi support",
+  "source_base_sha": "ad842d9767ed2269f094f07558c6d99401f9715a",
+  "candidate_version": "0.1.42 UNRELEASED",
+  "exact_zip": {
+    "sha256": "e4eceac020e983a9841f57a7db09ddde01fd39276928fa7a78cd75b6a7f24ad6",
+    "bytes": 321114,
+    "source_members": 55,
+    "test_host_archive": "/srv/ai-workspace/ach-aapanel-qa/ach-customizer-qa21-v0.1.42-url-clear.zip",
+    "guest_archive": "/root/achqa/qa21-v042-url-clear.zip"
+  },
+  "environment": {
+    "kind": "nonproduction isolated native aaPanel Incus guest",
+    "project": "ach-aapanel-qa",
+    "instance": "aac-native-qa",
+    "instance_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "aapanel": "8.0.7",
+    "nginx": "1.28.3",
+    "admin_login": "protected service_access credential login using official panel form",
+    "production_mutated": false
+  },
+  "official_native_install": {
+    "path": "authenticated App Store > Third-party Plug-ins > Import plugins > Install",
+    "result": "Installation succeeded!",
+    "installed_version": "0.1.42",
+    "zip_files_compared": 55,
+    "byte_identical_source_files": 55,
+    "missing_or_mismatched_source_files": 0,
+    "browser_plugin_dialog_opened": true,
+    "browser_url_clear_button_present": true,
+    "native_overview_worker_source_version": "0.1.42",
+    "native_worker_version_ui_state": "matched"
+  },
+  "real_cache_file_qa": {
+    "execution": "candidate ZIP Python module on private copied Nginx/1.28.3 cache object under guest-only /root/achqa temp directory; private fixture deleted afterward",
+    "reference_original_path": "/www/server/ach-customizer-fastcgi/site-7/c/4b/b7ee5ddd7f4903955a0a242e39ab04bc",
+    "reference_original_sha256": "9b9f392197208696625804ffb6c38bc731b4ee056248a532d5709b4f356f5297",
+    "original_object_unchanged": true,
+    "actual_key_md5_matched_filename": true,
+    "actual_KEY_header_matched": true,
+    "private_selected_copied_objects_removed": 1,
+    "second_pass_objects_removed": 0,
+    "private_peer_copied_object_unchanged": true,
+    "no_real_cache_object_removed": true,
+    "private_fixture_cleanup_verified": true,
+    "isolated_fixture_overrides": [
+      "Redirect CACHE_ROOT to a private temporary directory",
+      "Replace _path_owned with the private fixture inode only"
+    ],
+    "full_native_manage_cache_endpoint_executed_for_url_clear": false
+  },
+  "native_compatibility_negative": [
+    {
+      "site_id": 8,
+      "site_type": "test Woo fixture with stock PHP 8.5 include",
+      "recheck": "Unmanaged",
+      "apply_readiness": "Needs Review: selected VHost response headers cannot be inherited by Cache handler",
+      "url_clear_consent_disabled": true,
+      "url_clear_action_disabled": true,
+      "action_executed": false
+    },
+    {
+      "site_id": 9,
+      "site_type": "WordPress with native enable-php-85-wpfastcgi.conf",
+      "apply_readiness": "Needs Review: existing shared cache/unsupported native PHP include",
+      "url_clear_action_disabled": true,
+      "action_executed": false
+    }
+  ],
+  "postconditions": {
+    "nginx_syntax": "PASS",
+    "test_host_https_sites_checked": 9,
+    "https_status_200": 9,
+    "qa_tls_verification": "disabled for test-only TLS ingress (-k)",
+    "plugin_installed_version": "0.1.42",
+    "previous_installed_version": "0.1.41",
+    "qa_only_browser_session_closed": true,
+    "temporary_loopback_zip_server_stopped": true,
+    "temporary_transfer_directory_and_qa_script_removed": true
+  },
+  "rollback": {
+    "preinstall_root_only_plugin_archive": "/root/achqa/qa21-v042-before-041-plugin.tar.gz",
+    "sha256": "a903de1cc3eadf88944018429738d9c17ce76bbca3a045bb3f2233d709e4dc44",
+    "retained": true
+  },
+  "limitations": [
+    "Real official native Applied-state URL clear was not executed: all reused historic cache journals are Restored with renamed native site keys; candidate site #8 is ineligible due to VHost add_header inheritance and #9 uses unsupported shared WordPress wpfastcgi.",
+    "Copied actual Nginx cache-object deletion proves bounded filesystem algorithm, not native controller end-to-end deletion on an eligible running site.",
+    "Matching Python entrypoint version does not prove all resident helpers or worker generations.",
+    "No Nginx Helper unlink_files/get_request runtime integration, no automatic invalidation, no broad Purge All, no Woo customer privacy certification, no Production or public Release.",
+    "Version 0.1.42 remains an unmerged source candidate pending independent exact-diff review and Owner integration approval."
+  ]
+}

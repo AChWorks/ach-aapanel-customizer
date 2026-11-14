@@ -1467,6 +1467,69 @@ class CacheManageTests(unittest.TestCase):
             finally:
                 os.close(fd)
 
+    def test_manual_url_clear_requires_applied_recheck_and_only_target_url(self):
+        with patch.object(cache, '_clear_site_cache_url', return_value=2) as targeted, \
+             patch.object(cache, '_scan_site_cache_files', return_value=4) as scan:
+            with self.assertRaises(cache.CacheManageError):
+                cache.manage_cache('clear_url', self.site, public=object(),
+                    approved=True, recovery_id='f'*32, cache_url_path='/news/',
+                    **self.kwargs())
+            targeted.assert_not_called()
+            applied = self.apply()
+            for approval, operation in ((False, applied['recovery_id']),
+                                         (True, 'f'*32)):
+                with self.assertRaises(cache.CacheManageError):
+                    cache.manage_cache('clear_url', self.site, public=object(),
+                        approved=approval, recovery_id=operation,
+                        cache_url_path='/news/', **self.kwargs())
+            targeted.assert_not_called()
+            outcome = cache.manage_cache('clear_url', self.site, public=object(),
+                approved=True, recovery_id=applied['recovery_id'],
+                cache_url_path='/news/', **self.kwargs())
+            self.assertEqual(outcome['state'], 'Applied')
+            self.assertEqual(outcome['cache_url_path'], '/news/')
+            self.assertEqual(outcome['cache_files_removed'], 2)
+            self.assertEqual(targeted.call_count, 1)
+            self.assertEqual(targeted.call_args.args,
+                (7,[19,23], 'qa.test', self._active_cache_generation(), '/news/'))
+            scan.assert_not_called()
+            self.assertEqual(self.commands.count((cache.NGINX,'-s','reload',
+                '-c',str(self.nginx/'nginx.conf'))),1)
+
+    def _active_cache_generation(self):
+        fd=cache._open_state_dir(str(self.state))
+        try:
+            return cache._record_read(fd,7)['cache_generation']
+        finally:
+            os.close(fd)
+
+    def test_manual_url_clear_blocks_physical_peer_drift_before_any_delete(self):
+        applied=self.apply()
+        with patch.object(cache, '_verify_cache_peer_isolation',
+                side_effect=cache.CacheManageError('compatibility',
+                    'Registered Cache directories physically overlap')):
+            with patch.object(cache, '_clear_site_cache_url') as targeted:
+                with self.assertRaisesRegex(cache.CacheManageError,
+                                            'physically overlap'):
+                    cache.manage_cache('clear_url', self.site, public=object(),
+                        approved=True, recovery_id=applied['recovery_id'],
+                        cache_url_path='/', **self.kwargs())
+                targeted.assert_not_called()
+
+    def test_manual_url_clear_uncertain_outcome_requires_recheck(self):
+        applied=self.apply()
+        with patch.object(cache, '_scan_site_cache_files',return_value=0), \
+             patch.object(cache, '_clear_site_cache_url',
+                 side_effect=OSError('unlink failed')):
+            with self.assertRaises(cache.CacheManageError) as caught:
+                cache.manage_cache('clear_url', self.site, public=object(),
+                    approved=True, recovery_id=applied['recovery_id'],
+                    cache_url_path='/news/', **self.kwargs())
+        self.assertEqual(caught.exception.stage,'uncertain')
+        self.assertEqual(caught.exception.recovery_id,applied['recovery_id'])
+        self.assertEqual(cache.manage_cache('recheck',self.site,
+            public=object(),**self.kwargs())['state'], 'Applied')
+
     def test_cache_file_clear_blocks_new_physical_peer_alias_before_unlink(self):
         applied = self.apply()
         with patch.object(cache, '_scan_site_cache_files') as physical:
@@ -1711,3 +1774,121 @@ class CacheManageTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+
+
+class CacheExactUrlFileTests(unittest.TestCase):
+    """One URL's real Nginx levels=1:2 key files, not a recursive purge."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='ach-cache-url-')
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.parent = self.base/'cache'
+        self.parent.mkdir()
+        self.selected = self.parent/'site-7'
+        self.selected.mkdir(mode=0o750)
+        self.peer = self.parent/'site-8'
+        self.peer.mkdir(mode=0o750)
+        s = self.selected.stat()
+        self.identity = (s.st_dev, s.st_ino)
+        self.generation = 'a'*32
+        self.owner = SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid())
+        for target in ('CACHE_ROOT',):
+            p = patch.object(cache, target, str(self.parent))
+            p.start(); self.addCleanup(p.stop)
+        p = patch.object(cache, '_path_owned', return_value=self.identity)
+        p.start(); self.addCleanup(p.stop)
+        p = patch.object(cache.pwd, 'getpwnam', return_value=self.owner)
+        p.start(); self.addCleanup(p.stop)
+
+    def object(self, *, scheme='http', method='GET', path='/news/',
+               host='qa.test', generation=None, target=None, corrupt=False):
+        gen = self.generation if generation is None else generation
+        key = (scheme + method + host + path + '|' + gen).encode('ascii')
+        import hashlib
+        digest = hashlib.md5(key).hexdigest()
+        directory = (target or self.selected)/digest[-1]/digest[-3:-1]
+        directory.mkdir(parents=True, exist_ok=True)
+        directory.parent.chmod(0o700)
+        directory.chmod(0o700)
+        cached = directory/digest
+        cached.write_bytes(b'\0'*337+b'KEY: '+(b'untrusted' if corrupt else key)+b'\n'+b'HTTP/1.1 200 OK\r\n\r\n')
+        cached.chmod(0o600)
+        return cached
+
+    def clear(self, path='/news/'):
+        return cache._clear_site_cache_url(7, self.identity, 'qa.test', self.generation, path)
+
+    def test_exact_four_keys_only_and_no_missing_file_failure(self):
+        targets = [self.object(scheme=s, method=m)
+                   for s in ('http', 'https') for m in ('GET', 'HEAD')]
+        old = self.object(generation='b'*32)
+        other = self.object(path='/another/')
+        aliased = self.object(host='alias.qa.test')
+        peer = self.object(target=self.peer)
+        self.assertEqual(self.clear(), 4)
+        self.assertTrue(all(not p.exists() for p in targets))
+        self.assertTrue(all(p.is_file() for p in (old, other, aliased, peer)))
+        self.assertEqual(self.clear(), 0)
+
+    def test_foreign_object_elsewhere_is_unaffected_by_targeted_clear(self):
+        cache_file = self.object()
+        unrelated = self.selected/'foreign-note.txt'
+        unrelated.write_text('not a Cache object')
+        self.assertEqual(self.clear(),1)
+        self.assertFalse(cache_file.exists())
+        self.assertEqual(unrelated.read_text(),'not a Cache object')
+
+    def test_single_target_file_and_root_path(self):
+        root = self.object(path='/')
+        self.assertEqual(self.clear('/'), 1)
+        self.assertFalse(root.exists())
+        self.assertEqual(self.clear('/'), 0)
+
+    def test_wrong_key_header_cannot_delete_matching_md5_filename(self):
+        forged = self.object(corrupt=True)
+        original = forged.read_bytes()
+        with self.assertRaisesRegex(cache.CacheManageError, 'KEY header'):
+            self.clear()
+        self.assertEqual(forged.read_bytes(), original)
+
+    def test_symlink_file_is_not_followed_or_deleted(self):
+        target = self.base/'retain'
+        target.write_text('protected')
+        file = self.object()
+        file.unlink()
+        file.symlink_to(target)
+        with self.assertRaisesRegex(cache.CacheManageError, 'Untrusted Cache key file'):
+            self.clear()
+        self.assertTrue(file.is_symlink())
+        self.assertEqual(target.read_text(), 'protected')
+
+    def test_symlink_directory_does_not_escape_cache_root(self):
+        file = self.object()
+        parent = file.parent
+        renamed = parent.with_name(parent.name+'-held')
+        parent.rename(renamed)
+        parent.symlink_to(renamed, target_is_directory=True)
+        with self.assertRaisesRegex(cache.CacheManageError, 'Untrusted Cache key directory'):
+            self.clear()
+        self.assertTrue((renamed/file.name).is_file())
+
+    def test_hardlink_file_is_not_modified(self):
+        original = self.object()
+        peer_link = self.base/'also-linked'
+        os.link(original, peer_link)
+        with self.assertRaisesRegex(cache.CacheManageError, 'Untrusted Cache key file'):
+            self.clear()
+        self.assertTrue(original.is_file())
+        self.assertTrue(peer_link.is_file())
+
+    def test_untrusted_path_has_no_filesystem_effect(self):
+        file = self.object()
+        for invalid in ('', 'news/', 'https://qa.test/news/',
+                        '//qa.test/news/', '/news?draft=1', '/news#anchor',
+                        '/fa%20name/', '/a//b/', '/a/./b', '/a/../b',
+                        '/a\\b', '/a b', '/☃/', '/'+'x'*1024, None):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(cache.CacheManageError):
+                    self.clear(invalid)
+                self.assertTrue(file.is_file())

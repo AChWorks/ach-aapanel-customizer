@@ -60,6 +60,8 @@ function loadUi() {
     '#ach-cache-apply-why', '#ach-cache-restore-why',
     '#ach-cache-activation-restore', '#ach-cache-clear-why',
     '#ach-cache-clear-reviewed', '#ach-cache-clear-files',
+    '#ach-cache-url-path', '#ach-cache-url-why',
+    '#ach-cache-url-reviewed', '#ach-cache-clear-url',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
@@ -127,6 +129,7 @@ function loadUi() {
     elements.set(name, node);
     return node;
   });
+  elements.get('#ach-cache-url-path').props.value = '/';
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
   elements.get('#ach-fpm-recovery-version').props.value = '85';
@@ -339,6 +342,9 @@ function loadUi() {
       cacheRestoreConsentDisabled: elements.get('#ach-cache-restore-reviewed').props.disabled,
       cacheClearDisabled: elements.get('#ach-cache-clear-files').props.disabled,
       cacheClearConsentDisabled: elements.get('#ach-cache-clear-reviewed').props.disabled,
+      cacheUrlClearDisabled: elements.get('#ach-cache-clear-url').props.disabled,
+      cacheUrlConsentDisabled: elements.get('#ach-cache-url-reviewed').props.disabled,
+      cacheUrlPath: elements.get('#ach-cache-url-path').props.value,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       nginxCandidateDisabled: elements.get('#ach-nginx-candidate-button').props.disabled,
@@ -801,7 +807,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
 const monitorOverview = (overrides = {}) => ({
   status: true,
   mode: 'Monitor',
-  worker_source_version: '0.1.41',
+  worker_source_version: '0.1.42',
   notice: 'Read-only Monitor controls',
   enforcement: false,
   state_schema: 1,
@@ -831,7 +837,7 @@ test('Installed UI checks resident Python entrypoint without claiming helper fre
   const ui = loadUi();
   ui.respondOverview(monitorOverview());
   assert.equal(ui.state().workerVersionState, 'matched');
-  assert.match(ui.state().workerVersionNotice, /matches UI v0\.1\.41/);
+  assert.match(ui.state().workerVersionNotice, /matches UI v0\.1\.42/);
   assert.match(ui.state().workerVersionNotice, /not certified/);
 });
 
@@ -2125,6 +2131,88 @@ test('Manual site Cache file clear requires fresh Applied Recheck and separate a
   assert.match(ui.state().cacheActivationResult,/shared cache or Nginx Helper purge/);
   assert.equal(ui.state().cacheClearDisabled,true);
   assert.equal(ui.state().cacheClearConsentDisabled,true);
+});
+
+test('Exact URL Cache clear is a separate consented action with site and path identity', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  assert.equal(ui.state().cacheUrlClearDisabled,true);
+  assert.equal(ui.state().cacheUrlConsentDisabled,true);
+  ui.statusClick('#ach-cache-activation-recheck').respond({
+    status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false
+  });
+  assert.equal(ui.state().cacheUrlConsentDisabled,false);
+  assert.equal(ui.state().cacheUrlClearDisabled,true);
+  ui.statusSetValue('#ach-cache-url-path','/news/','input');
+  ui.statusSetChecked('#ach-cache-url-reviewed',true);
+  assert.equal(ui.state().cacheUrlClearDisabled,false);
+  assert.equal(ui.state().cacheClearDisabled,true,
+    'URL consent must not authorize full-tree Cache clear');
+  const req=ui.statusClick('#ach-cache-clear-url');
+  assert.match(req.options.url,/s=manage_cache_policy$/);
+  assert.deepEqual(Object.keys(req.options.data).sort(),[
+    'approved','cache_action','cache_url_path','expected_site_key',
+    'expected_site_snapshot','recovery_id','site_id']);
+  assert.equal(req.options.data.cache_action,'clear_url');
+  assert.equal(req.options.data.cache_url_path,'/news/');
+  assert.equal(req.options.data.recovery_id,'f'.repeat(32));
+  assert.equal(ui.state().cacheUrlClearDisabled,true);
+  req.respond({status:true,schema:1,state:'Applied',site_id:7,
+    site_key:'site.test',journal_phase:'applied',recovery_id:'f'.repeat(32),
+    runtime_verified:true,purge_supported:false,cache_files_removed:2,
+    cache_url_path:'/news/',changed:true});
+  assert.match(ui.state().cacheActivationResult,/Exact current-generation entries removed: 2/);
+  assert.equal(ui.state().cacheUrlClearDisabled,true,
+    'Post-clear always requires fresh Applied Recheck');
+  assert.equal(ui.state().cacheUrlConsentDisabled,true);
+});
+
+test('URL Cache clear never sends invalid paths or accepts forged/stale success', () => {
+  const applied={status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false};
+  for (const invalid of ['https://evil.invalid/x','/news?draft=1','/a%20b/',
+                          '/a//b','/../secret','/a#frag','/a b']) {
+    const ui=loadUi(); selectHostsSite(ui);
+    ui.statusClick('#ach-cache-activation-recheck').respond(applied);
+    ui.statusSetValue('#ach-cache-url-path',invalid,'input');
+    ui.statusSetChecked('#ach-cache-url-reviewed',true);
+    assert.equal(ui.state().cacheUrlClearDisabled,true,invalid);
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-recheck').respond(applied);
+  ui.statusSetValue('#ach-cache-url-path','/one/','input');
+  ui.statusSetChecked('#ach-cache-url-reviewed',true);
+  ui.statusSetValue('#ach-cache-url-path','/two/','input');
+  assert.equal(ui.state().cacheUrlClearDisabled,true,
+    'Changing target path must revoke previous approval');
+  ui.statusSetChecked('#ach-cache-url-reviewed',true);
+  assert.equal(ui.state().cacheUrlClearDisabled,false);
+  const requestsBeforeScriptChange = ui.requests.length;
+  ui.statusSetValue('#ach-cache-url-path','/three/');
+  ui.statusClick('#ach-cache-clear-url');
+  assert.equal(ui.requests.length,requestsBeforeScriptChange,
+    'Even silent script-driven path changes cannot use previous approval');
+  ui.statusSetValue('#ach-cache-url-path','/two/','input');
+  ui.statusSetChecked('#ach-cache-url-reviewed',true);
+  const pending=ui.statusClick('#ach-cache-clear-url');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond({status:true,schema:1,state:'Applied',site_id:7,
+    site_key:'site.test',journal_phase:'applied',recovery_id:'f'.repeat(32),
+    runtime_verified:true,purge_supported:false,cache_files_removed:1,
+    cache_url_path:'/two/',changed:true});
+  assert.doesNotMatch(ui.state().cacheActivationResult,/entries removed/);
+  assert.equal(ui.state().cacheUrlClearDisabled,true);
+  const current=loadUi();selectHostsSite(current);
+  current.statusClick('#ach-cache-activation-recheck').respond(applied);
+  current.statusSetValue('#ach-cache-url-path','/news/','input');
+  current.statusSetChecked('#ach-cache-url-reviewed',true);
+  current.statusClick('#ach-cache-clear-url').respond({status:true,schema:1,
+    state:'Applied',site_id:7,site_key:'site.test',journal_phase:'applied',
+    recovery_id:'f'.repeat(32),runtime_verified:true,purge_supported:false,
+    cache_files_removed:5,cache_url_path:'/news/',changed:true});
+  assert.match(current.state().cacheActivationResult,/NOT CONFIRMED/);
 });
 
 test('Cache clear is blocked by non-Applied states and invalidated by selection', () => {
