@@ -743,6 +743,113 @@ def _scan_site_cache_files(site_id, expected_identity, *, remove=False):
         os.close(root_fd)
 
 
+# A deliberately narrow invalidation path for the site-owned Cache policy.
+# Its key is $scheme$request_method$host$request_uri|<saved generation>.
+# Nginx stores MD5(key) under levels=1:2. A verified Nginx KEY header is
+# required; a matching filename alone is not proof of the cached response.
+_CACHEABLE_URI = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@/-]{0,1023}\Z")
+
+
+def _cache_url_path(value):
+    if (type(value) is not str or not _CACHEABLE_URI.fullmatch(value)
+            or '//' in value or re.search(r'(^|/)\.{1,2}(?:/|$)', value)):
+        raise CacheManageError('input',
+            'Cache URL must be a canonical path beginning with /; no query, '
+            'fragment, encoded/ambiguous path or external URL is supported')
+    return value
+
+
+def _clear_site_cache_url(site_id, identity, site_key, generation, path):
+    """Remove only exact current-generation HTTP(S) GET/HEAD cache objects.
+
+    This is NOT a WordPress/Nginx Helper purge hook. It deliberately accepts
+    only the selected site's primary Host and already-cacheable ASCII paths.
+    Missing objects mean no cached entry; traffic can refill them immediately.
+    """
+    path = _cache_url_path(path)
+    if not SITE_KEY.fullmatch(site_key) or not TOKEN.fullmatch(generation):
+        raise CacheManageError('recovery', 'Unverified Cache key identity')
+    if _path_owned(site_id) != tuple(identity):
+        raise CacheManageError('ownership', 'Selected Cache directory identity changed')
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    root_fd = os.open(CACHE_ROOT + '/site-' + str(site_id), flags)
+    www = pwd.getpwnam('www')
+    removed = 0
+
+    def directory(parent_fd, name, dev):
+        try:
+            before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        if (not stat.S_ISDIR(before.st_mode) or before.st_dev != dev
+                or (before.st_uid, before.st_gid) != (www.pw_uid, www.pw_gid)
+                or stat.S_IMODE(before.st_mode) != 0o700):
+            raise CacheManageError('ownership', 'Untrusted Cache key directory')
+        fd = os.open(name, flags, dir_fd=parent_fd)
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+            os.close(fd)
+            raise CacheManageError('concurrency', 'Cache key directory changed')
+        return fd
+
+    try:
+        top = os.fstat(root_fd)
+        if (top.st_dev, top.st_ino) != tuple(identity):
+            raise CacheManageError('concurrency', 'Selected Cache directory changed')
+        for scheme in ('http', 'https'):
+            for method in ('GET', 'HEAD'):
+                key = (scheme + method + site_key.lower() + path + '|' + generation).encode('ascii')
+                digest = hashlib.md5(key).hexdigest()  # Nginx disk key, not a security digest.
+                first_fd = directory(root_fd, digest[-1], top.st_dev)
+                if first_fd is None:
+                    continue
+                try:
+                    second_fd = directory(first_fd, digest[-3:-1], top.st_dev)
+                    if second_fd is None:
+                        continue
+                    try:
+                        try:
+                            before = os.stat(digest, dir_fd=second_fd, follow_symlinks=False)
+                        except FileNotFoundError:
+                            continue
+                        if (not stat.S_ISREG(before.st_mode) or
+                                before.st_dev != top.st_dev or before.st_nlink != 1 or
+                                (before.st_uid, before.st_gid) != (www.pw_uid, www.pw_gid) or
+                                stat.S_IMODE(before.st_mode) != 0o600):
+                            raise CacheManageError('ownership', 'Untrusted Cache key file')
+                        fd = os.open(digest, os.O_RDONLY | os.O_NOFOLLOW |
+                                     os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=second_fd)
+                        try:
+                            actual = os.fstat(fd)
+                            if (actual.st_dev, actual.st_ino) != (before.st_dev, before.st_ino):
+                                raise CacheManageError('concurrency', 'Cache key file changed')
+                            header = os.read(fd, 4096)
+                            marker = b'KEY: ' + key + b'\n'
+                            # Native 1.28.x cache headers precede the KEY line;
+                            # reject an unsupported object instead of guessing.
+                            offset = header.find(marker)
+                            if offset < 0 or offset > 1536:
+                                raise CacheManageError('ownership',
+                                                       'Cached object KEY header differs from the requested URL')
+                            current = os.stat(digest, dir_fd=second_fd, follow_symlinks=False)
+                            if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                                raise CacheManageError('concurrency', 'Cache key filename changed')
+                            os.unlink(digest, dir_fd=second_fd)
+                            removed += 1
+                        finally:
+                            os.close(fd)
+                        os.fsync(second_fd)
+                    finally:
+                        os.close(second_fd)
+                finally:
+                    os.close(first_fd)
+        if _path_owned(site_id) != tuple(identity):
+            raise CacheManageError('concurrency', 'Selected Cache directory changed during URL clear')
+        return removed
+    finally:
+        os.close(root_fd)
+
+
 def _create_site_cache(site_id):
     parent = Path(CACHE_ROOT).parent
     parent_fd = _directory(str(parent))
@@ -1220,14 +1327,14 @@ def _cache_observation(site, record, public, *, vhost_root=VHOST_ROOT,
 def manage_cache(action, site, public=None, *, expected_source=None,
                  expected_proposal=None, recovery_id=None, approved=False,
                  data_dir=DATA_DIR, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
-                 runner=None, probe=None, cache_generation=None):
-    """Serialized guarded per-site cache Apply/Recheck/Restore/clear_files.
+                 runner=None, probe=None, cache_generation=None, cache_url_path=None):
+    """Serialized guarded per-site cache Apply/Recheck/Restore/clear_files/clear_url.
 
     Neither successful Nginx -t nor reload signaling by itself proves the
     target worker. A lost/ambiguous reload retains the journal and both source
     fragments for explicit reconciliation, never an automatic blind retry.
     """
-    if action not in ('apply', 'restore', 'recheck', 'clear_files'):
+    if action not in ('apply', 'restore', 'recheck', 'clear_files', 'clear_url'):
         raise CacheManageError('input', 'Unsupported Cache management operation')
     if (type(site.get('id')) is not int or
             not isinstance(site.get('name'), str) or
@@ -1268,7 +1375,9 @@ def manage_cache(action, site, public=None, *, expected_source=None,
 
             if approved is not True:
                 raise CacheManageError('authorization', 'Explicit current Cache approval required')
-            if action == 'clear_files':
+            if action in ('clear_files', 'clear_url'):
+                if action == 'clear_url':
+                    cache_url_path = _cache_url_path(cache_url_path)
                 if (record is None or record['site_key'] != site['name']
                         or record['schema'] != 2 or record['phase'] != 'applied' or
                         recovery_id != record['op']):
@@ -1307,22 +1416,30 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 peer_paths = native.get('physical_peer_cache_paths')
                 identities = _verify_cache_peer_isolation(
                     record['cache_directory'], record['cache_identity'], peer_paths)
-                # First pass rejects foreign entries before unlinking any file.
-                # Nginx workers can write concurrently, so a changed tree or
-                # uncertain removal must never be reported as completed.
-                try:
-                    _scan_site_cache_files(site['id'], record['cache_identity'])
-                except OSError as exc:
-                    raise CacheManageError('ownership',
-                        'Selected Cache files are not safely enumerable') from exc
+                # Whole-tree Clear must inspect every object before deleting.
+                # Single-URL clear checks only the exact MD5/key objects and
+                # their parents; scanning the entire cache is unnecessary.
+                if action == 'clear_files':
+                    try:
+                        _scan_site_cache_files(site['id'], record['cache_identity'])
+                    except OSError as exc:
+                        raise CacheManageError('ownership',
+                            'Selected Cache files are not safely enumerable') from exc
+                # Nginx may concurrently repopulate cache objects. An uncertain
+                # unlink cannot be reported as a confirmed successful purge.
                 try:
                     if _verify_cache_peer_isolation(
                             record['cache_directory'], record['cache_identity'],
                             peer_paths) != identities:
                         raise CacheManageError(
                             'concurrency', 'Registered Cache directory topology changed')
-                    removed = _scan_site_cache_files(
-                        site['id'], record['cache_identity'], remove=True)
+                    if action == 'clear_url':
+                        removed = _clear_site_cache_url(
+                            site['id'], record['cache_identity'], site['name'],
+                            record['cache_generation'], cache_url_path)
+                    else:
+                        removed = _scan_site_cache_files(
+                            site['id'], record['cache_identity'], remove=True)
                     if _verify_cache_peer_isolation(
                             record['cache_directory'], record['cache_identity'],
                             peer_paths) != identities:
@@ -1343,7 +1460,11 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                         'recovery_id': record['op'], 'journal_phase': 'applied',
                         'runtime_verified': True, 'purge_supported': False,
                         'cache_files_removed': removed,
-                        'note': 'Only verified site-owned Cache files were unlinked. '
+                        **({'cache_url_path': cache_url_path} if action == 'clear_url' else {}),
+                        'note': ('Only exact current-generation GET/HEAD entries for the '
+                                 'selected primary Host and URL were removed. Other Host '
+                                 'aliases and queries are not covered. ' if action == 'clear_url' else
+                                 'Only verified site-owned Cache files were unlinked. ') +
                                 'No Nginx reload, shared WORDPRESS purge or Nginx Helper '
                                 'operation. Concurrent traffic may repopulate the Cache; '
                                 'recheck application behavior independently.'}

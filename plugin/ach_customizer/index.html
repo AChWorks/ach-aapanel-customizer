@@ -506,6 +506,12 @@
         <p id="ach-cache-clear-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm the selected site's Cache is Applied before file clear.</p>
         <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" disabled /> I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" disabled>Clear selected-site Cache files</button></div>
+        <p class="ach-note"><strong>Clear one cached URL (manual):</strong> restrict removal to this site's primary Host and exact current-generation GET/HEAD Cache files for one canonical URL path. Only paths with no query, encoding, or fragment are supported by this Cache policy. Covers HTTP and HTTPS keys; other site aliases are separate. Requires a fresh Applied Recheck and independent approval. This is not an Nginx Helper hook.</p>
+        <label for="ach-cache-url-path">Cached URL path (for example, /news/ or /)</label>
+        <input id="ach-cache-url-path" type="text" maxlength="1024" value="/" spellcheck="false" autocomplete="off" aria-describedby="ach-cache-url-why" />
+        <p id="ach-cache-url-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm this site's Cache is Applied; enter a canonical URL path.</p>
+        <label><input id="ach-cache-url-reviewed" type="checkbox" aria-describedby="ach-cache-url-why" disabled /> I approve removing only this site's exact URL Cache entries, leaving other paths and sites unchanged.</label>
+        <div class="ach-controls"><button type="button" id="ach-cache-clear-url" class="btn btn-warning" disabled>Clear selected URL Cache</button></div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
@@ -748,7 +754,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.41'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.42'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1528,6 +1534,12 @@
   var cachePlanBusy = false, cachePlanTicket = 0;
   var cacheActivationBusy = false, cacheActivationTicket = 0;
   var cacheActivationSnapshot = null, cacheRecoveryIdentity = null, cacheClearIdentity = null;
+  var cacheUrlApprovedPath = null;
+  function validCacheUrlPath(path) {
+    return typeof path === 'string' && path.length <= 1024 &&
+      /^\/[A-Za-z0-9._~!$&'()*+,;=:@\/-]*$/.test(path) &&
+      !path.includes('//') && !/(^|\/)\.{1,2}(?:\/|$)/.test(path);
+  }
   function cacheActivationLock() {
     var id = hostsSiteId(), unready = hostsBusy || siteBusy ||
       websitePolicyState !== 'stable' || !id;
@@ -1553,6 +1565,19 @@
       'Monitor state is unverified. Open Overview and Refresh state first.' :
       !id ? 'Select a website above before checking Cache readiness.' :
       siteBusy || hostsBusy ? 'Website inventory or selection is loading. Try again after it is verified.' : '';
+    var urlValid = validCacheUrlPath(root.find('#ach-cache-url-path').val());
+    root.find('#ach-cache-url-reviewed')
+      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity || !urlValid);
+    root.find('#ach-cache-url-path').prop('disabled', cacheActivationBusy);
+    root.find('#ach-cache-clear-url')
+      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity || !urlValid ||
+        cacheUrlApprovedPath !== root.find('#ach-cache-url-path').val() ||
+        root.find('#ach-cache-url-reviewed').prop('checked') !== true);
+    explainGate('ach-cache-url-why',
+      !unready && !cacheActivationBusy && cacheClearIdentity && urlValid ? 'ready' : 'blocked',
+      common || (!cacheClearIdentity ? 'Locked: fresh Applied Cache Recheck required.' :
+        !urlValid ? 'Use a canonical /path/ with no URL scheme, query, fragment, percent escapes or ambiguous segments.' :
+        'Current-generation URL Cache can be removed for the primary Host only. Approve this exact path; other aliases and URLs are unchanged.'));
     explainGate('ach-cache-apply-why', !unready && !cacheActivationBusy && cacheActivationSnapshot ? 'ready' : 'blocked',
       common || (cacheActivationBusy ? 'Checking current Cache sources. Approval is locked until the result arrives.' :
         !cacheActivationSnapshot ?
@@ -1612,7 +1637,8 @@
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
     cacheClearIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
       .prop('checked', false);
     root.find('#ach-cache-activation-result').text(
       'Native website selection changed; recheck Cache readiness and recovery.');
@@ -2406,7 +2432,8 @@
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
     cacheClearIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Inspecting current native sources for manual Cache approval...');
     cacheActivationLock();
@@ -2486,7 +2513,8 @@
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
     cacheClearIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Rechecking site-specific Cache journal and worker marker...');
     cacheActivationLock();
@@ -2538,6 +2566,52 @@
       r.purge_supported === false && Number.isSafeInteger(r.cache_files_removed) &&
       r.cache_files_removed >= 0 && r.changed === (r.cache_files_removed > 0));
   }
+  root.find('#ach-cache-url-path').on('input', function () {
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-url-reviewed').prop('checked', false);
+    cacheActivationLock();
+  });
+  root.find('#ach-cache-url-reviewed').on('change', function () {
+    var path = root.find('#ach-cache-url-path').val();
+    cacheUrlApprovedPath = root.find('#ach-cache-url-reviewed').prop('checked') === true &&
+      validCacheUrlPath(path) ? path : null;
+    cacheActivationLock();
+  });
+  root.find('#ach-cache-clear-url').on('click', function () {
+    var id = hostsSiteId(), recovery = cacheClearIdentity;
+    var path = root.find('#ach-cache-url-path').val();
+    if (!id || cacheActivationBusy || !recovery || !validCacheUrlPath(path) ||
+        path !== cacheUrlApprovedPath ||
+        root.find('#ach-cache-url-reviewed').prop('checked') !== true ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++cacheActivationTicket;
+    cacheActivationBusy = true;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    cacheClearIdentity = null;
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
+      .prop('checked', false);
+    cacheActivationNotice('Clearing exact site-owned URL Cache keys; recheck before any retry...');
+    cacheActivationLock();
+    request('manage_cache_policy', Object.assign(cacheNativeArgs(id), {
+      cache_action:'clear_url', cache_url_path:path, recovery_id:recovery, approved:'true'
+    }), function (r, failure) {
+      if (ticket !== cacheActivationTicket) return;
+      cacheActivationBusy = false;
+      var ok = id === hostsSiteId() && validCacheClearReply(r,id,recovery) &&
+        r.cache_url_path === path && r.cache_files_removed <= 4;
+      cacheActivationNotice(ok ?
+        'Selected URL Cache clear completed for '+path+'.'+
+        '\nExact current-generation entries removed: '+r.cache_files_removed+
+        '\nPrimary Host only; other aliases/paths, shared Cache and Nginx Helper unchanged.'+
+        '\nRecovery ID: '+recovery+' (Recheck before another operation).' :
+        'URL Cache clear NOT CONFIRMED. Recheck before any retry. '+
+        (cacheBackendFailure(failure,'cache_manage') ||
+          'Inspect Activity and saved Cache recovery.'));
+      cacheActivationLock();
+    });
+  });
   root.find('#ach-cache-clear-files').on('click', function () {
     var id = hostsSiteId(), recovery = cacheClearIdentity;
     if (!id || cacheActivationBusy || !recovery ||
@@ -2548,7 +2622,8 @@
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
     cacheClearIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Clearing only verified selected-site Cache files; do not retry blindly...');
     cacheActivationLock();
@@ -2579,7 +2654,8 @@
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
     cacheClearIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Applying approved site cache and verifying Nginx reload; do not retry uncertain operations...');
     cacheActivationLock();
@@ -2623,7 +2699,8 @@
     cacheActivationSnapshot = null;
     cacheRecoveryIdentity = null;
     cacheClearIdentity = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
+    cacheUrlApprovedPath = null;
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
       .prop('checked', false);
     cacheActivationNotice('Restoring saved Cache generation; do not retry until Recheck...');
     cacheActivationLock();

@@ -58,7 +58,10 @@ class CacheEndpointTests(unittest.TestCase):
                          ('preview_cache_activation',self.args()),
                          ('manage_cache_policy',{**self.args(),'cache_action':'apply','approved':'true'}),
                          ('manage_cache_policy',{**self.args(),'cache_action':'clear_files',
-                                                 'approved':'true','recovery_id':'f'*32})):
+                                                 'approved':'true','recovery_id':'f'*32}),
+                         ('manage_cache_policy',{**self.args(),'cache_action':'clear_url',
+                                                 'cache_url_path':'/news/', 'approved':'true',
+                                                 'recovery_id':'f'*32})):
                         result=getattr(self.plugin,endpoint)(payload)
                         self.assertFalse(result['status'],result)
                         self.assertEqual(result['stage'],'cache_authorization')
@@ -119,6 +122,33 @@ class CacheEndpointTests(unittest.TestCase):
             self.assertNotIn('cache_root',kwargs)
             self.assertNotIn('cache_directory',kwargs)
             self.assertNotIn('purge_all',kwargs)
+            self.assertEqual(self.checks,2)
+
+    def test_exact_site_url_clear_passes_only_canonical_path_and_recovery(self):
+        sample={'schema':1,'state':'Applied','changed':True,'site_id':7,
+                'site_key':'qa.test','journal_phase':'applied',
+                'recovery_id':'f'*32,'runtime_verified':True,
+                'purge_supported':False,'cache_files_removed':1,
+                'cache_url_path':'/news/'}
+        with patch.dict(sys.modules,{'flask':self.flask()}), \
+             patch.object(self.plugin,'_require_enabled'), \
+             patch.object(self.plugin,'_selected_native_website',
+                          side_effect=self.selected), \
+             patch.object(manager,'manage_cache',return_value=sample) as operation:
+            result=self.plugin.manage_cache_policy({
+                **self.args(),'cache_action':'clear_url','cache_url_path':'/news/',
+                'recovery_id':'f'*32,'approved':'true',
+                'site_key':'other.invalid', 'cache_root':'/etc',
+                'source_path':'/etc/passwd','purge_all':'true'})
+            self.assertTrue(result['status'],result)
+            self.assertEqual(result['cache_url_path'],'/news/')
+            self.assertEqual(operation.call_args.args,('clear_url',self.site,operation.call_args.args[2]))
+            self.assertEqual(operation.call_args.kwargs['cache_url_path'],'/news/')
+            self.assertEqual(operation.call_args.kwargs['recovery_id'],'f'*32)
+            self.assertTrue(operation.call_args.kwargs['approved'])
+            self.assertNotIn('cache_root',operation.call_args.kwargs)
+            self.assertNotIn('source_path',operation.call_args.kwargs)
+            self.assertNotIn('purge_all',operation.call_args.kwargs)
             self.assertEqual(self.checks,2)
 
     def test_native_route_action_is_not_reused_as_cache_operation(self):
