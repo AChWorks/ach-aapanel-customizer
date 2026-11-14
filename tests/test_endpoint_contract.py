@@ -71,6 +71,16 @@ class EntrypointTests(unittest.TestCase):
         state_path.start()
         self.addCleanup(state_path.stop)
 
+    def test_resident_overview_version_is_worker_loaded_not_new_manifest(self):
+        # Patching the import-time version emulates an old panel worker with
+        # new ZIP bytes already installed. The returned version must remain old.
+        with patch.object(MODULE, 'WORKER_SOURCE_VERSION', '0.1.40'):
+            response = self.plugin.get_overview({})
+        self.assertTrue(response['status'], response)
+        self.assertEqual(response['worker_source_version'], '0.1.40')
+        self.assertNotIn('restart', response)
+        self.assertFalse(response['enforcement'])
+
     def test_manual_fpm_methods_dispatch_once_and_preserve_durable_recovery_id(self):
         class Controller:
             calls = []

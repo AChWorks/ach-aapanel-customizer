@@ -43,7 +43,7 @@ function loadUi() {
     tab.scrollIntoView = () => { tabScrollCalls++; };
   }
   for (const name of [
-    '#ach-message', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
+    '#ach-message', '#ach-worker-version-status', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-site-changes-compare', '#ach-site-changes-approve', '#ach-site-changes-why',
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-summary', '#ach-site-changes-rows',
@@ -355,6 +355,8 @@ function loadUi() {
       nextDisabled: elements.get('#ach-next').props.disabled,
       page: elements.get('#ach-page').textContent,
       overview: elements.get('#ach-overview-status').textContent,
+      workerVersionNotice: elements.get('#ach-worker-version-status').textContent,
+      workerVersionState: elements.get('#ach-worker-version-status').attributes['data-state'],
       overviewControlResult: elements.get('#ach-overview-control-result').textContent,
       overviewFeedbackState: elements.get('#ach-overview-control-result').attributes['data-state'],
       stateRevision: elements.get('#ach-state-revision').textContent,
@@ -799,6 +801,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
 const monitorOverview = (overrides = {}) => ({
   status: true,
   mode: 'Monitor',
+  worker_source_version: '0.1.41',
   notice: 'Read-only Monitor controls',
   enforcement: false,
   state_schema: 1,
@@ -822,6 +825,47 @@ test('Native overview shows all three safe Monitor switches and revision', () =>
     assert.equal(flag.disabled, false);
   }
   assert.equal(state.error, '');
+});
+
+test('Installed UI checks resident Python entrypoint without claiming helper freshness', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  assert.equal(ui.state().workerVersionState, 'matched');
+  assert.match(ui.state().workerVersionNotice, /matches UI v0\.1\.41/);
+  assert.match(ui.state().workerVersionNotice, /not certified/);
+});
+
+test('Stale or missing imported worker version produces read-only recovery guidance', () => {
+  for (const worker of ['0.1.40', null, '<script>alert(1)</script>']) {
+    const ui = loadUi();
+    const r = monitorOverview({worker_source_version: worker});
+    ui.respondOverview(r);
+    assert.equal(ui.state().workerVersionState, 'review');
+    assert.match(ui.state().workerVersionNotice, /Upgrade needs review/);
+    assert.match(ui.state().workerVersionNotice, /Activity Operation ID/);
+    assert.match(ui.state().workerVersionNotice, /controlled aaPanel reload/);
+    assert.match(ui.state().workerVersionNotice, /This diagnostic does not restart services/);
+    assert.doesNotMatch(ui.state().workerVersionNotice, /<script>/);
+    assert.equal(ui.requests.length, 1, 'Mismatch must not request a write or restart');
+    const refresh = ui.refreshOverview();
+    refresh.respond(monitorOverview());
+    assert.equal(ui.state().workerVersionState, 'matched');
+    assert.equal(ui.requests.length, 2, 'Refresh remains read-only');
+  }
+  const old = loadUi();
+  old.respondOverview(monitorOverview({worker_source_version: undefined}));
+  assert.equal(old.state().workerVersionState, 'review', 'Legacy get_overview lacks the new field');
+});
+
+test('Unavailable Overview is not misdiagnosed as an old resident worker', () => {
+  const ui = loadUi();
+  ui.respondOverview({status:false,stage:'monitor_state_read',msg:'No session'});
+  const rejected = loadUi();
+  rejected.respondOverview(monitorOverview({status:false,worker_source_version:'0.1.40'}));
+  assert.equal(rejected.state().workerVersionState, 'pending');
+  assert.equal(ui.state().workerVersionState, 'pending');
+  assert.match(ui.state().workerVersionNotice, /not checked/);
+  assert.doesNotMatch(ui.state().workerVersionNotice, /Upgrade needs review/);
 });
 
 test('Overall Monitor disable updates only the intended switch and preserves module preferences', () => {
