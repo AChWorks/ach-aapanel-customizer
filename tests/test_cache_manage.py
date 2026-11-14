@@ -1888,8 +1888,117 @@ class CacheManageTests(unittest.TestCase):
 
 
 
-if __name__=='__main__':
-    unittest.main()
+    def _configure_native_wordpress(self):
+        from ach_customizer_cache_policy import WP_NATIVE_CANONICAL
+        vhost=self.vhost/'qa.test.conf'
+        text=vhost.read_text().replace(
+            'include enable-php-85.conf;',
+            'add_header Strict-Transport-Security "max-age=31536000";\n'
+            ' include enable-php-85-wpfastcgi.conf;')
+        vhost.write_text(text)
+        (self.nginx/'enable-php-85-wpfastcgi.conf').write_text(
+            WP_NATIVE_CANONICAL.replace('NATIVE_PHP','85'))
+        return cache._site_sources(
+            self.site,'85',native_handler='wpfastcgi',
+            vhost_root=str(self.vhost),nginx_root=str(self.nginx))
+
+    def test_known_native_wordpress_php_and_headers_generate_distinct_source(self):
+        source=self._configure_native_wordpress()
+        self.assertEqual(source['native_handler'],'wpfastcgi')
+        self.assertIsNone(source['inherited_hsts'])
+        self.assertEqual(len(source['php_sha']),64)
+        from ach_customizer_cache_policy import WP_PHP_RESPONSE_DIRECTIVES
+        generation='b'*32
+        plan=cache.generate_reference(7,'85',cache_generation=generation,
+                                      native_handler='wpfastcgi')
+        other=cache.generate_reference(7,'85',cache_generation=generation)
+        self.assertNotEqual(plan['proposal_sha256'],other['proposal_sha256'])
+        self.assertEqual(plan['native_handler'],'wpfastcgi')
+        self.assertIn('try_files $uri $uri/ /index.php?$args;',plan['site_server_fragment'])
+        self.assertNotIn('include pathinfo.conf;',plan['site_server_fragment'])
+        self.assertIn('fastcgi_cache ACHFC_7;',plan['site_server_fragment'])
+        self.assertNotIn('fastcgi_cache WORDPRESS;',plan['site_server_fragment'])
+        self.assertIn('fastcgi_ignore_headers Set-Cookie;',plan['site_server_fragment'])
+        for directive in WP_PHP_RESPONSE_DIRECTIVES:
+            self.assertIn(directive,plan['site_server_fragment'])
+        self.assertNotIn('fastcgi_cache_purge',plan['site_server_fragment'])
+        self.assertNotIn('add_header Strict-Transport-Security "max-age=31536000"',
+                         plan['site_server_fragment'])
+
+    def test_native_wordpress_drift_and_foreign_php_fail_closed(self):
+        sources=self._configure_native_wordpress()
+        php=self.nginx/'enable-php-85-wpfastcgi.conf'
+        original=php.read_text()
+        for before,after in (
+                ('try_files $uri $uri/ /index.php?$args;','try_files $uri =404;'),
+                ('fastcgi_cache WORDPRESS;','fastcgi_cache FOREIGN;'),
+                ('fastcgi_cache_bypass $skip_cache;','fastcgi_cache_bypass off;'),
+                ('fastcgi_cache_purge WORDPRESS','fastcgi_cache_purge FOREIGN'),
+                ('add_header X-Content-Type-Options nosniff;',''),
+                ('add_header Strict-Transport-Security','add_header X-Fake-Header'),
+                ('fastcgi_cache_valid 200 1d;','fastcgi_cache_valid 200 30d;'),
+                ('allow 127.0.0.1;','allow all;'),
+                ('fastcgi_pass unix:/tmp/php-cgi-85.sock;',
+                 'fastcgi_pass unix:/tmp/php-cgi-81.sock;'),
+        ):
+            with self.subTest(change=before):
+                self.assertIn(before,original)
+                php.write_text(original.replace(before,after))
+                with self.assertRaisesRegex(cache.CacheManageError,
+                                            'WordPress handler differs'):
+                    cache._site_sources(self.site,'85',native_handler='wpfastcgi',
+                                        vhost_root=str(self.vhost),
+                                        nginx_root=str(self.nginx))
+        php.write_text(original)
+        self.assertEqual(
+            cache._site_sources(self.site,'85',native_handler='wpfastcgi',
+                                vhost_root=str(self.vhost),
+                                nginx_root=str(self.nginx)),sources)
+
+    def test_wordpress_native_approved_lifecycle_and_journal(self):
+        self.sources=self._configure_native_wordpress()
+        self.native=dict(self.native,zone_state='Direct Zone',
+                         cache_zone='WORDPRESS',purge_directive_seen=True)
+        def wp_compat(site,public,**kw):
+            return (self.native,
+                    cache.generate_reference(
+                        site['id'],'85',
+                        cache_generation=kw.get('cache_generation'),
+                        native_handler='wpfastcgi'),
+                    self.sources)
+        with patch.object(cache,'_compatibility',side_effect=wp_compat):
+            plan=self.preview()
+            self.assertEqual(plan['native_handler'],'wpfastcgi')
+            self.assertFalse(plan['preserved_server_hsts'])
+            applied=cache.manage_cache(
+                'apply',self.site,public=object(),
+                expected_source=plan['source_sha256'],
+                expected_proposal=plan['proposal_sha256'],
+                cache_generation=plan['cache_generation'],
+                approved=True,**self.kwargs())
+        self.assertEqual(applied['state'],'Applied')
+        journal=self.state/cache._names(7)[2]
+        record=json.loads(journal.read_text())
+        self.assertEqual(record['native_handler'],'wpfastcgi')
+        self.assertEqual(record['phase'],'applied')
+        _, owned_extension=cache._expected_files(record)
+        self.assertIn(b'try_files $uri $uri/ /index.php?$args;',owned_extension)
+        rechecked=cache.manage_cache(
+            'recheck',self.site,public=object(),**self.kwargs())
+        self.assertEqual(rechecked['state'],'Applied')
+        restored=cache.manage_cache(
+            'restore',self.site,public=object(),recovery_id=applied['recovery_id'],
+            approved=True,**self.kwargs())
+        self.assertEqual(restored['state'],'Restored')
+        self.assertFalse((self.ext/cache._names(7)[1]).exists())
+        self.assertEqual(json.loads(journal.read_text())['phase'],'restored')
+        record['native_handler']='unknown'
+        with self.assertRaisesRegex(cache.CacheManageError,'Untrusted'):
+            cache._record_decode(json.dumps(record),7)
+        record.pop('native_handler')
+        # A historical stock-PHP journal remains decodable as before.
+        record['phase']='restored'
+        self.assertNotIn('native_handler',cache._record_decode(json.dumps(record),7))
 
 
 class CacheExactUrlFileTests(unittest.TestCase):
@@ -2008,3 +2117,6 @@ class CacheExactUrlFileTests(unittest.TestCase):
                 with self.assertRaises(cache.CacheManageError):
                     self.clear(invalid)
                 self.assertTrue(file.is_file())
+
+if __name__=='__main__':
+    unittest.main()

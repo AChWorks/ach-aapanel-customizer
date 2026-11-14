@@ -490,7 +490,7 @@
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
       <div class="ach-note" aria-label="Guarded site-specific FastCGI Cache activation">
         <strong>Site-owned FastCGI Cache — manual Apply / Restore</strong>
-        <p>For a matching aaPanel 8.0.7 Nginx HTTP/80 site using standard PHP 8.1/8.5. Writes an isolated HTTP cache zone and site-owned PHP handler extension, checks Nginx syntax, requests an explicit reload and verifies an origin-local PHP marker. Existing WORDPRESS cache files are never touched. This is not a WooCommerce/Nginx Helper safety certification. No automatic Apply or Purge All.</p>
+        <p>For a verified aaPanel 8.0.7 Nginx HTTP/80 site using stock PHP 8.1/8.5 or an exactly source-matched native WordPress wpfastcgi handler. A site-owned extension takes precedence over the matching native PHP location, retaining its routing and response headers; no aaPanel vendor configuration is edited. Applies an isolated zone, validates Nginx, reloads with consent and verifies the PHP route. Existing shared WORDPRESS Cache and native /purge remain untouched. Nginx Helper automatic invalidation, authenticated WooCommerce privacy and Purge All are NOT certified or enabled.</p>
         <div class="ach-controls">
           <button type="button" id="ach-cache-activation-preview" disabled>Check site-specific Cache Apply readiness</button>
           <button type="button" id="ach-cache-activation-recheck" disabled>Recheck Cache / recovery</button>
@@ -754,7 +754,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.43'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.44'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2418,6 +2418,9 @@
       Number.isInteger(response.php_probe_status) &&
       response.php_probe_status >= 200 && response.php_probe_status < 400 &&
       ['81','85'].includes(response.php_version) &&
+      ['stock','wpfastcgi'].includes(response.native_handler) &&
+      (response.native_handler !== 'wpfastcgi' ||
+        response.preserved_server_hsts === false) &&
       response.cache_zone === 'ACHFC_' + id &&
       response.cache_directory === '/www/server/ach-customizer-fastcgi/site-' + id &&
       typeof response.impact === 'string' && response.impact.length < 500);
@@ -2458,9 +2461,13 @@
       cacheActivationNotice(
         'Manual Cache Apply preflight ready (NOT activated or runtime-safe-verified).' +
         '\nSelected site #'+id+' / PHP '+r.php_version+
+        '\nNative PHP mode: '+(r.native_handler === 'wpfastcgi' ?
+          'WordPress wpfastcgi (source-matched, manual cache)' : 'stock PHP')+
         '\nOrigin PHP route: HTTP '+r.php_probe_status+
-        '\nNative server HSTS: '+(r.preserved_server_hsts ?
-          'exact directive preserved in PHP Cache handler' : 'none detected')+
+        (r.native_handler === 'wpfastcgi' ?
+          '\nNative wpfastcgi PHP response headers: source-matched and preserved; server HSTS is not inherited in this location' :
+          '\nNative server HSTS: '+(r.preserved_server_hsts ?
+            'exact directive preserved in PHP Cache handler' : 'none detected'))+
         '\nZone: '+r.cache_zone+'; directory: '+r.cache_directory+
         '\nCurrent source SHA-256: '+r.source_sha256+
         '\nReference SHA-256: '+r.proposal_sha256+

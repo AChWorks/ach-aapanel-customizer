@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Latest integrated development source: v0.1.43 UNRELEASED ([Owner-approved PR #69](https://github.com/AChWorks/ach-aapanel-customizer/pull/69), [main@8cdc1ec](https://github.com/AChWorks/ach-aapanel-customizer/commit/8cdc1ec8435ac64a17d9fac2a76a3cb7b576cc2a)). No public Release or Production deployment.**
+**Next development candidate: v0.1.44 UNRELEASED (native WordPress wpfastcgi Cache adapter, pending independent review). Latest Owner-merged source: v0.1.43 ([main@2aa5fe5](https://github.com/AChWorks/ach-aapanel-customizer/commit/2aa5fe5c9f49ba41be67ad7b5e68b260b44815d0)). No public Release or Production deployment.**
 v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
 exact-URL Clear, including current-generation single-object removal, unchanged
 peer/other URL, recheck and consented Restore
@@ -18,6 +18,60 @@ remain tracked under [Issue #2](https://github.com/AChWorks/ach-aapanel-customiz
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
+
+### v0.1.44 candidate: source-matched native WordPress `wpfastcgi` Cache (Issues #2/#21)
+
+The guarded, opt-in site-owned Cache Apply/Recheck/Restore and exact-URL Clear
+now support the **exact verified aaPanel 8.0.7 Nginx `enable-php-81/85-wpfastcgi.conf`**
+source, not just the previously accepted stock-PHP handler. The native PHP
+snippet must match a fixed source grammar including its `$skip_cache` rules,
+WordPress `try_files $uri $uri/ /index.php?$args`, versioned PHP socket,
+`fastcgi.conf`, response/security headers, legacy shared `WORDPRESS` Cache
+and loopback `/purge` directive. Unknown edits or alternate PHP versions
+remain `Needs Review`. Both native PHP 8.1 and 8.5 source shapes were
+inspected in QA; live requests exercised PHP 8.5.
+
+The managed per-site Extension include runs **before** the native PHP snippet
+and supplies a source-bound first-matching PHP regex location. It retains
+native WordPress routing and literal PHP-level security response headers,
+including its HSTS directive; the native server HSTS is not incorrectly
+copied into the WP PHP location. The original native snippet and `/purge`
+remain in place. The selected site's effective Cache is physically isolated
+by zone `ACHFC_<site-id>`, its own directory and per-Apply generation.
+The ownership-aware source audit recognizes precedence only for the verified
+journal-owned extension. Existing stock-PHP fragment digests and legacy
+recovery records are unchanged, and failed source checks preserve the
+`Needs Review`/recovery workflow.
+
+**Bounded native QA:** An isolated aaPanel 8.0.7 WordPress PHP 8.5 site
+(#9) completed authenticated primary-admin Preview, explicitly approved
+Apply → Recheck Applied → exact `/` Clear (2 current-generation files)
+→ Recheck → Restore → Recheck Restored. HTTP/80 and HTTPS/443 public GET
+`MISS → HIT`, synthetic invalid Authorization and Cookie requests, and
+`/wp-json/`, `/cart/`, `/checkout/` and query requests were `BYPASS`.
+The legacy WooCommerce peer (#10) remained on its original shared Cache;
+all five files in the shared `WORDPRESS` Cache retained their SHA256 through
+the exact-URL Clear. Original VHost, top-level shared Cache and main Nginx
+sources matched their pre-Apply hashes after Restore. QA HTTPS skipped
+test-certificate trust verification. Synthetic requests are *not* real
+authenticated WooCommerce session/cart/checkout/order/payment proof. A
+second native WooCommerce site (#10) refused Preview due to a historical
+restored journal under an older site identity; this recovery boundary was
+preserved, not silently bypassed.
+
+Nginx Helper 2.4.1 file presence does not prove runtime activation or
+generation-aware automatic invalidation. Automatic `unlink_files`,
+the old shared `WORDPRESS` cache, legacy `/purge`, `get_request`,
+site-owned `Purge All`, real WooCommerce private-session testing, and
+broad aaPanel VHost regeneration remain **outside this candidate**.
+Generic Purge All remains OFF. The exact native-installed v0.1.44
+55-member ZIP SHA256 is
+`d5471444dc5fa8359061186d7681d6efb34583d4506106d548729562906f9def`;
+the [structured native acceptance](docs/evidence/aaPanel-8.0.7-2026-11-14-native-wpfastcgi-cache-v044.json)
+records the selected site, restored recovery ID, source hashes, shared Cache
+integrity and bounded limitations. There is no public Release or Production
+deployment, and independent review plus separate Owner Merge permission
+are still required.
 
 ### v0.1.43 merged: preserve native server HSTS in isolated Cache PHP handlers (Issue #2)
 

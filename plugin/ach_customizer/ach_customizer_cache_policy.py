@@ -19,6 +19,53 @@ class CachePolicyError(ValueError):
 # unlink_files/Purge All operating on the shared filesystem directory.
 CACHE_ROOT = "/www/server/ach-customizer-fastcgi"
 PHP_ADAPTERS = frozenset(("81", "85"))
+# The exact aaPanel 8.0.7 native WordPress response directives must remain
+# in the earlier matching managed PHP location; do not silently invent policy.
+# Any changed native snippet is rejected by source-matched preflight.
+WP_PHP_RESPONSE_DIRECTIVES = (
+    'add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload";',
+    'add_header X-Cache "$upstream_cache_status From $host";',
+    'add_header Cache-Control max-age=0;',
+    'add_header Nginx-Cache "$upstream_cache_status";',
+    'add_header Last-Modified $date_gmt;',
+    'add_header X-Frame-Options SAMEORIGIN;',
+    'add_header X-Content-Type-Options nosniff;',
+    'add_header X-XSS-Protection "1; mode=block";',
+    'etag on;',
+)
+# PHP socket is the only parameter; actual source is normalized after the
+# same comment-aware scanner used by stock-PHP source matching.
+WP_NATIVE_CANONICAL = r'''
+set $skip_cache 0;
+if ($request_method = POST) { set $skip_cache 1; }
+if ($query_string != "") { set $skip_cache 1; }
+if ($request_uri ~* "/wp-admin/|/xmlrpc.php|wp-.*.php|/feed/|index.php|sitemap(_index)?.xml") { set $skip_cache 1; }
+if ($http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") { set $skip_cache 1; }
+location ~ [^/]\.php(/|$) {
+    try_files $uri $uri/ /index.php?$args;
+    fastcgi_pass unix:/tmp/php-cgi-NATIVE_PHP.sock;
+    fastcgi_index index.php;
+    include fastcgi.conf;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload";
+    fastcgi_cache_bypass $skip_cache;
+    fastcgi_no_cache $skip_cache;
+    add_header X-Cache "$upstream_cache_status From $host";
+    fastcgi_cache WORDPRESS;
+    add_header Cache-Control max-age=0;
+    add_header Nginx-Cache "$upstream_cache_status";
+    add_header Last-Modified $date_gmt;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    etag on;
+    fastcgi_cache_valid 200 1d;
+}
+location ~ /purge(/.*) {
+    allow 127.0.0.1;
+    deny all;
+    fastcgi_cache_purge WORDPRESS "$scheme$request_method$host$1";
+}
+'''
 # Source-pinned aaPanel server-scope HSTS only. Never infer or rewrite policy.
 HSTS_DIRECTIVE = re.compile(
     r'add_header[ \t]+Strict-Transport-Security[ \t]+"max-age=[0-9]{1,10}'
@@ -35,7 +82,7 @@ NOTE = (
 
 
 def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
-                       cache_generation=None, inherited_hsts=None):
+                       cache_generation=None, inherited_hsts=None, native_handler="stock"):
     """Render reviewable http/server fragments with no side effects.
 
     Only a caller that has independently established a native website, PHP
@@ -46,6 +93,10 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         raise CachePolicyError("Invalid native website ID")
     if type(php_version) is not str or php_version not in PHP_ADAPTERS:
         raise CachePolicyError("PHP adapter has no verified FastCGI cache reference")
+    if native_handler not in ("stock", "wpfastcgi") or type(native_handler) is not str:
+        raise CachePolicyError("Unsupported native PHP Cache handler")
+    if native_handler == "wpfastcgi" and inherited_hsts is not None:
+        raise CachePolicyError("Native WordPress PHP headers must not inherit server HSTS")
     if (type(cache_root) is not str or
             not re.fullmatch(r"/[A-Za-z0-9_./-]{2,220}", cache_root) or
             re.search(r"//|/\./|/\.\./|/$", cache_root) or
@@ -96,11 +147,12 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         # private-route guard. Query-string hits are already bypassed.
         + r'if ($request_uri ~ "(?:%%|//|/\.\.?(?:/|$))") { set $%s_skip 1; }' % var + "\n"
         + "location ~ [^/]\\.php(/|$) {\n"
-        + "    try_files $uri =404;\n"
+        + ("    try_files $uri $uri/ /index.php?$args;\n" if native_handler == "wpfastcgi"
+           else "    try_files $uri =404;\n")
         + "    fastcgi_pass unix:/tmp/php-cgi-%s.sock;\n" % php_version
         + "    fastcgi_index index.php;\n"
         + "    include fastcgi.conf;\n"
-        + "    include pathinfo.conf;\n"
+        + ("" if native_handler == "wpfastcgi" else "    include pathinfo.conf;\n")
         + "    fastcgi_cache %s;\n" % zone
         # A fresh per-Apply cache key namespace prevents a later Reapply
         # from serving stale objects left by a completed Restore. Keep the
@@ -119,10 +171,13 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         + "    add_header X-ACh-Cache $upstream_cache_status always;\n"
         + "    add_header X-ACh-Cache-Site %d always;\n" % site_id
         + (("    " + inherited_hsts + "\n") if inherited_hsts else "")
+        + ("".join("    " + directive + "\n" for directive in WP_PHP_RESPONSE_DIRECTIVES)
+           if native_handler == "wpfastcgi" else "")
         + "}\n"
     )
     digest = hashlib.sha256(json.dumps(
-        [site_id, php_version, http_fragment, server_fragment],
+        ([site_id, php_version, http_fragment, server_fragment] if native_handler == "stock"
+         else [site_id, php_version, native_handler, http_fragment, server_fragment]),
         separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
     return {
         "schema": 1, "site_id": site_id, "php_version": php_version,
@@ -131,6 +186,7 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         "safe_verified": False, "apply_supported": False,
         "purge_supported": False, "cache_directory": directory,
         "cache_zone": zone, "cache_generation": cache_generation,
+        **({"native_handler":"wpfastcgi"} if native_handler == "wpfastcgi" else {}),
         "global_http_fragment": http_fragment,
         "site_server_fragment": server_fragment,
         "proposal_sha256": digest, "note": NOTE,
