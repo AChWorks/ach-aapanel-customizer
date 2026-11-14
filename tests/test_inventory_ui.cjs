@@ -807,7 +807,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
 const monitorOverview = (overrides = {}) => ({
   status: true,
   mode: 'Monitor',
-  worker_source_version: '0.1.43',
+  worker_source_version: '0.1.44',
   notice: 'Read-only Monitor controls',
   enforcement: false,
   state_schema: 1,
@@ -1909,6 +1909,7 @@ const cacheActivationReady = (overrides={}) => ({
   site_key:'site.test', source_sha256:'a'.repeat(64),
   proposal_sha256:'b'.repeat(64), cache_generation:'c'.repeat(32),
   php_version:'85', php_probe_status:301, preserved_server_hsts:false,
+  native_handler:'stock',
   cache_zone:'ACHFC_7',
   cache_directory:'/www/server/ach-customizer-fastcgi/site-7',
   impact:'One selected HTTP/80 VHost and Nginx service reload',
@@ -2542,6 +2543,20 @@ test('Cache no-op Restore response without prepublication proof is not confirmed
   assert.match(ui.state().cacheActivationResult,/NOT CONFIRMED/);
 });
 
+test('Native wpfastcgi Cache readiness names the exact PHP scope and preserves manual consent', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady({
+    native_handler:'wpfastcgi',preserved_server_hsts:false,
+    note:'Nginx Helper automatic purge is not enabled.'
+  }));
+  assert.match(ui.state().cacheActivationResult,/WordPress wpfastcgi/);
+  assert.match(ui.state().cacheActivationResult,/response headers: source-matched/);
+  assert.match(ui.state().cacheActivationResult,/not enabled/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,false);
+});
+
 test('Forged Cache readiness never permits Apply, HTML text stays inert', () => {
   const ui=loadUi(); selectHostsSite(ui);
   for (const bad of [
@@ -2551,7 +2566,9 @@ test('Forged Cache readiness never permits Apply, HTML text stays inert', () => 
     {source_sha256:'broken'},{proposal_sha256:'broken'},
     {cache_generation:'bad'},{cache_generation:'d'.repeat(31)},
     {php_probe_status:404},{php_probe_status:599},
-    {state:'Needs Review'},{php_version:'86'}
+    {state:'Needs Review'},{php_version:'86'},
+    {native_handler:null},{native_handler:'unknown'},
+    {native_handler:'wpfastcgi',preserved_server_hsts:true}
   ]) {
     ui.statusClick('#ach-cache-activation-preview').respond(
       cacheActivationReady(bad));

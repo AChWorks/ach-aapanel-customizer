@@ -16,7 +16,7 @@ from pathlib import Path
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
     _native_nginx_php_version, _native_extension_fingerprint,
-    _native_unused_subdir,
+    _native_unused_subdir, _native_server_direct_include,
     _unsupported_nginx_upstream, MAX_NGINX_SITE_BYTES,
     PHP_IMPACT_SITE_LIMIT,
 )
@@ -158,6 +158,8 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
             fingerprints.append(("extension", site_key, sig))
         return _merge_directives(vhost, snippet_source), fingerprints, "00"
     sources = [vhost, snippet_source]
+    managed_wp = False
+    managed_php_source = None
     fingerprints = ([("vhost", site_key, vhost_sig),
                      ("php-snippet", snippet, snippet_sig)] + extra_files)
     nested = re.findall(
@@ -202,11 +204,41 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
             managed_raw, managed_sig = _bounded_file_text(
                 managed_path, MAX_NGINX_SITE_BYTES, with_fingerprint=True)
             from ach_customizer_cache_manage import verified_cache_extension
-            verified_cache_extension(
+            record = verified_cache_extension(
                 extension, site_id, site_key, managed_name, managed_raw)
-            sources.append(_active_nginx_text(managed_raw))
+            managed_wp = record.get('native_handler') == 'wpfastcgi'
+            managed_php_source = _active_nginx_text(managed_raw)
+            sources.append(managed_php_source)
             fingerprints.append(("managed-cache-extension", managed_name, managed_sig))
-    return _merge_directives(*sources), fingerprints, version
+    combined = _merge_directives(*sources)
+    if managed_wp:
+        from ach_customizer_cache_policy import WP_NATIVE_CANONICAL
+        expected = re.sub(r'\s+', ' ',
+            WP_NATIVE_CANONICAL.replace('NATIVE_PHP', version)).strip()
+        if (version not in ('81', '85') or
+                re.sub(r'\s+', ' ', _active_nginx_text(snippet_source)).strip() != expected):
+            raise CacheAuditError('Managed WP override native PHP source changed')
+        active_vhost = _active_nginx_text(vhost)
+        native_ext = str(extension / '*.conf')
+        extension_line = 'include ' + native_ext + ';'
+        php_line = 'include enable-php-' + version + '-wpfastcgi.conf;'
+        if (active_vhost.count(extension_line) != 1 or
+                active_vhost.count(php_line) != 1 or
+                active_vhost.index(extension_line) > active_vhost.index(php_line) or
+                not _native_server_direct_include(active_vhost, native_ext)):
+            raise CacheAuditError('Managed WP Cache location precedence unverified')
+        # The owned extension is included before native wpfastcgi. Nginx uses
+        # the first matching regex PHP location, so the legacy WORDPRESS PHP
+        # handler is shadowed; its distinct /purge location is still active.
+        # Count only source-verified managed PHP cache directives for effective
+        # zone/path and physical peer-isolation checks, but retain /purge as a
+        # diagnostic. Without a journal-authorized extension, report both as
+        # ambiguous rather than claiming override or safe Cache Clear.
+        effective = _merge_directives(vhost, managed_php_source)
+        for directive in DIRECTIVES:
+            if directive != 'fastcgi_cache_purge':
+                combined[directive] = effective[directive]
+    return combined, fingerprints, version
 
 
 def _native_sites(panel_public):

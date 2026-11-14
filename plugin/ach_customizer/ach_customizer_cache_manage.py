@@ -18,7 +18,9 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from ach_customizer_cache_policy import generate_reference, CACHE_ROOT, HSTS_DIRECTIVE
+from ach_customizer_cache_policy import (
+    generate_reference, CACHE_ROOT, HSTS_DIRECTIVE, WP_NATIVE_CANONICAL,
+)
 from ach_customizer_cache_audit import inspect_site_fastcgi_cache
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
@@ -80,11 +82,14 @@ def _record_decode(raw, site_id):
     expected = needed | ({'cache_identity'} if schema == 2 else set())
     if schema == 2 and 'inherited_hsts' in record:
         expected.add('inherited_hsts')
+    if schema == 2 and 'native_handler' in record:
+        expected.add('native_handler')
     identity = record.get('cache_identity')
     valid_identity = (identity is None and record.get('phase') in ('prepared', 'restored') or
                       isinstance(identity, list) and len(identity) == 2 and
                       all(type(value) is int and value > 0 for value in identity))
     if (schema not in (1, 2) or set(record) != expected
+            or ('native_handler' in record and record['native_handler'] != 'wpfastcgi')
             or ('inherited_hsts' in record and (
                 type(record['inherited_hsts']) is not str or
                 not HSTS_DIRECTIVE.fullmatch(record['inherited_hsts'])))
@@ -280,27 +285,40 @@ def _site_hsts_header(active_vhost, extension_line, php_line):
     return match.group(0)
 
 
-def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
+def _site_sources(site, php, *, native_handler="stock",
+                  vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     if (site.get('status') not in ('1',1) or not SITE_KEY.fullmatch(site['name'])
             or not any(binding.get('name') == site['name'] and binding.get('port') == 80
                        for binding in site.get('bound_domains', []))):
         raise CacheManageError('identity', 'A running registered HTTP/80 site with exact site hostname is required')
+    if native_handler not in ('stock', 'wpfastcgi'):
+        raise CacheManageError('compatibility', 'Unknown native PHP handler')
     vhost, sig = _read_source(vhost_root+'/'+site['name']+'.conf')
     main, _ = _read_source(nginx_root+'/nginx.conf')
-    php_include, _ = _read_source(nginx_root+'/enable-php-'+php+'.conf')
+    php_suffix = '-wpfastcgi' if native_handler == 'wpfastcgi' else ''
+    php_include, _ = _read_source(nginx_root+'/enable-php-'+php+php_suffix+'.conf')
     fastcgi, _ = _read_source(nginx_root+'/fastcgi.conf')
-    pathinfo, _ = _read_source(nginx_root+'/pathinfo.conf')
+    pathinfo = (_read_source(nginx_root+'/pathinfo.conf')[0]
+                if native_handler == 'stock' else b'')
     active = _active_nginx_text(vhost.decode())
     php_active = re.sub(r'\s+', ' ', _active_nginx_text(php_include.decode())).strip()
     stock = (r'location ~ [^/]\.php(/|$) { try_files $uri =404; '
              'fastcgi_pass unix:/tmp/php-cgi-'+php+'.sock; '
              'fastcgi_index index.php; include fastcgi.conf; '
              'include pathinfo.conf; }')
-    if php_active != stock:
+    if native_handler == 'wpfastcgi':
+        # Both native 8.1 and 8.5 snippets were byte-source inspected on
+        # aaPanel 8.0.7; only spacing and the PHP socket may differ.
+        wp_expected = re.sub(r'\s+', ' ',
+            WP_NATIVE_CANONICAL.replace('NATIVE_PHP', php)).strip()
+        if php_active != wp_expected:
+            raise CacheManageError('compatibility',
+                'Native WordPress handler differs from known PHP/cache/header/purge source')
+    elif php_active != stock:
         raise CacheManageError('compatibility',
             'Native PHP handler has unverified routing or FastCGI parameters')
     params = _active_nginx_text(pathinfo.decode())
-    if (any(not re.search(r'\bfastcgi_param\s+'+key+r'\s+'+value+r'\s*;', params)
+    if native_handler == 'stock' and (any(not re.search(r'\bfastcgi_param\s+'+key+r'\s+'+value+r'\s*;', params)
             for key, value in (
                 ('SCRIPT_FILENAME', r'\$document_root\$real_script_name'),
                 ('SCRIPT_NAME', r'\$real_script_name'),
@@ -312,13 +330,16 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     # 1.28 this suppresses inherited http/server-level response headers.
     # Preserve only the exact native server HSTS in a source-pinned journal.
     ext = 'include '+vhost_root+'/extension/'+site['name']+'/*.conf;'
-    php_line = 'include enable-php-'+php+'.conf;'
-    inherited_hsts = _site_hsts_header(active, ext, php_line)
+    php_line = 'include enable-php-'+php+php_suffix+'.conf;'
+    native_server_hsts = _site_hsts_header(active, ext, php_line)
+    # Native WordPress PHP location already overrides server add_header;
+    # its exact native PHP-level response headers are copied separately.
+    inherited_hsts = native_server_hsts if native_handler == 'stock' else None
     # A native aaPanel PHP switch leaves the saved Cache extension pinned to
     # its original PHP handler. Explain the two independently observed versions
     # without treating the new include as approved or changing recovery gates.
     php_includes = re.findall(r'\binclude\s+enable-php-[^\s;]+\s*;', active)
-    if (len(php_includes) == 1 and php in ('81', '85')
+    if (native_handler == 'stock' and len(php_includes) == 1 and php in ('81', '85')
             and active.count(ext) == 1 and
             php_includes[0] != php_line):
         alternate = re.fullmatch(r'include enable-php-(81|85)\.conf;',
@@ -390,7 +411,7 @@ def _site_sources(site, php, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
                 'Native rewrite response headers need manual Cache review')
     return {'vhost_sha':_hash(vhost+b'\0'+rewrite), 'main_sha':_hash(main),
             'php_sha':_hash(php_include+b'\0'+fastcgi+b'\0'+pathinfo),
-            'inherited_hsts': inherited_hsts}
+            'inherited_hsts': inherited_hsts, 'native_handler': native_handler}
 
 
 def _path_owned(site_id, *, cache_root=CACHE_ROOT, allow_missing=False):
@@ -1030,11 +1051,16 @@ def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT
     native=inspect_site_fastcgi_cache(
         public, site['id'], site['name'],vhost_root=vhost_root,nginx_root=nginx_root,
         rewrite_root=str(Path(vhost_root).parent/'rewrite'))
+    wp_source = (native['zone_state'] == 'Direct Zone'
+                 and native['cache_zone'] == 'WORDPRESS'
+                 and native['purge_directive_seen'])
+    stock_source = (native['zone_state'] == 'No Direct Directive'
+                    and not native['purge_directive_seen'])
+    native_handler = 'wpfastcgi' if wp_source else 'stock'
     if (native['state'] != 'Source Observed'
-            or native['zone_state'] != 'No Direct Directive'
+            or not (stock_source or wp_source)
             or native['php_version'] not in ('81','85')
-            or native['unresolved_other_sites'] != 0
-            or native['purge_directive_seen']):
+            or native['unresolved_other_sites'] != 0):
         raise CacheManageError('compatibility',
             'Existing cache, unsupported native PHP/include, or unresolved peer site requires review')
     from ach_customizer_vhost_drift import inspect_vhost_drift
@@ -1043,10 +1069,12 @@ def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT
         raise CacheManageError('compatibility',
                                'Native VHost does not match the exact site/root/HTTP binding')
     sources=_site_sources(site,native['php_version'],
+                          native_handler=native_handler,
                           vhost_root=vhost_root,nginx_root=nginx_root)
     reference=generate_reference(site['id'],native['php_version'],
                                  cache_generation=cache_generation,
-                                 inherited_hsts=sources['inherited_hsts'])
+                                 inherited_hsts=sources['inherited_hsts'],
+                                 native_handler=native_handler)
     return native,reference,sources
 
 
@@ -1060,9 +1088,11 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
     prior_reference = generate_reference(
         site['id'], old['php_version'],
         cache_generation=old['cache_generation'],
-        inherited_hsts=old.get('inherited_hsts'))
+        inherited_hsts=old.get('inherited_hsts'),
+        native_handler=old.get('native_handler', 'stock'))
     if (old['phase'] != 'restored' or old['site_key'] != site['name'] or
             old['php_version'] != reference['php_version'] or
+            old.get('native_handler', 'stock') != reference.get('native_handler', 'stock') or
             old['cache_generation'] == reference['cache_generation'] or
             old['proposal_sha'] != prior_reference['proposal_sha256']):
         raise CacheManageError('recovery',
@@ -1152,21 +1182,29 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
                 'proposal_sha256':reference['proposal_sha256'],
                 'cache_generation':cache_generation,
                 'php_version':native['php_version'],
+                'native_handler': sources['native_handler'],
                 'preserved_server_hsts': bool(sources['inherited_hsts']),
                 'cache_zone':reference['cache_zone'],
                 'cache_directory':reference['cache_directory'],
                 'impact':'One selected HTTP/80 VHost and Nginx service reload; '
                 'requires exact browser approval and after-state recovery',
-                'note':'No cache writes, reload, or purge in this read-only preview. '
-                'Native WordPress/WooCommerce/Nginx Helper acceptance remains independent.'}
+                'note':('No writes/reload/purge in preview. Native wpfastcgi '
+                        'response headers and PHP routing source-matched; '
+                        'automatic Nginx Helper invalidation, live customer-session '
+                        'privacy and Purge All remain unverified.'
+                        if sources['native_handler'] == 'wpfastcgi' else
+                        'No cache writes, reload, or purge in this read-only preview. '
+                        'Native WordPress/WooCommerce/Nginx Helper acceptance remains independent.')}
     finally:
         os.close(statefd)
 
 
-def _fragments(site_id, php_version, cache_generation, *, inherited_hsts=None):
+def _fragments(site_id, php_version, cache_generation, *, inherited_hsts=None,
+               native_handler='stock'):
     reference=generate_reference(site_id,php_version,
                                  cache_generation=cache_generation,
-                                 inherited_hsts=inherited_hsts)
+                                 inherited_hsts=inherited_hsts,
+                                 native_handler=native_handler)
     global_bytes=reference['global_http_fragment'].encode()
     extension_bytes=reference['site_server_fragment'].encode()
     return reference,global_bytes,extension_bytes
@@ -1186,7 +1224,8 @@ def verified_cache_extension(directory,site_id,site_key,name,text,*,state_dir=No
         raise CacheManageError('ownership','Cache extension lacks live recovery ownership')
     ref, _, extension_bytes = _fragments(
         site_id, record['php_version'], record['cache_generation'],
-        inherited_hsts=record.get('inherited_hsts'))
+        inherited_hsts=record.get('inherited_hsts'),
+        native_handler=record.get('native_handler', 'stock'))
     if (record['proposal_sha'] != ref['proposal_sha256']
             or record['extension_sha'] != _hash(extension_bytes)
             or text.encode() != extension_bytes):
@@ -1213,7 +1252,8 @@ def verified_cache_global(vhost_root, site_id, name, *, state_dir=None):
         raise CacheManageError('ownership','Global Cache source lacks recovery ownership')
     ref, global_bytes, _ = _fragments(
         site_id, record['php_version'], record['cache_generation'],
-        inherited_hsts=record.get('inherited_hsts'))
+        inherited_hsts=record.get('inherited_hsts'),
+        native_handler=record.get('native_handler', 'stock'))
     fd=_directory(vhost_root)
     try:
         _owned_dir(fd)
@@ -1227,6 +1267,7 @@ def verified_cache_global(vhost_root, site_id, name, *, state_dir=None):
 
 def _same_site_sources(site, record, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT):
     source = _site_sources(site, record['php_version'],
+                           native_handler=record.get('native_handler', 'stock'),
                            vhost_root=vhost_root, nginx_root=nginx_root)
     drift = [label for key, label in (
         ('vhost_sha', 'VHost/rewrite'), ('main_sha', 'main Nginx'),
@@ -1302,7 +1343,8 @@ def _safe_retire(fd, name, expected, operation):
 def _expected_files(record):
     _, global_bytes, extension_bytes = _fragments(
         record['site_id'], record['php_version'], record['cache_generation'],
-        inherited_hsts=record.get('inherited_hsts'))
+        inherited_hsts=record.get('inherited_hsts'),
+        native_handler=record.get('native_handler', 'stock'))
     if (_hash(global_bytes) != record['global_sha'] or
             _hash(extension_bytes) != record['extension_sha']):
         raise CacheManageError('recovery', 'Generated Cache source no longer matches saved journal')
@@ -1564,10 +1606,12 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     raise CacheManageError('concurrency', 'Cache approval snapshot is stale')
                 php = readiness['php_version']
                 sources = _site_sources(
-                    site, php, vhost_root=vhost_root, nginx_root=nginx_root)
+                    site, php, native_handler=readiness['native_handler'],
+                    vhost_root=vhost_root, nginx_root=nginx_root)
                 reference, global_bytes, ext_bytes = _fragments(
                     site['id'], php, cache_generation,
-                    inherited_hsts=sources['inherited_hsts'])
+                    inherited_hsts=sources['inherited_hsts'],
+                    native_handler=readiness['native_handler'])
                 # The current source may have changed after Preview and
                 # before these bytes were generated. Rebind exact consent
                 # to the actual candidate, not only the earlier Preview.
@@ -1577,13 +1621,16 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 _nginx('-t', nginx=NGINX, conf=nginx_root+'/nginx.conf', runner=runner)
                 initial = (probe or _probe)(site, marker=None)
                 verified_sources = _site_sources(
-                    site, php, vhost_root=vhost_root, nginx_root=nginx_root)
+                    site, php, native_handler=readiness['native_handler'],
+                    vhost_root=vhost_root, nginx_root=nginx_root)
                 if verified_sources != sources:
                     raise CacheManageError(
                         'concurrency', 'Native Cache source changed during Apply preflight')
                 record = {
                     'schema': 2, 'site_id': site['id'], 'site_key': site['name'],
                     'php_version': php, 'op': uuid4().hex, 'phase': 'prepared',
+                    **({'native_handler': 'wpfastcgi'}
+                       if readiness['native_handler'] == 'wpfastcgi' else {}),
                     'cache_identity': None,
                     'cache_generation': cache_generation,
                     'source_sha': readiness['source_sha256'],
