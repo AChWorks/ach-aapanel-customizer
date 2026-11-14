@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Next development candidate: v0.1.44 UNRELEASED (native WordPress wpfastcgi Cache adapter, pending independent review). Latest Owner-merged source: v0.1.43 ([main@2aa5fe5](https://github.com/AChWorks/ach-aapanel-customizer/commit/2aa5fe5c9f49ba41be67ad7b5e68b260b44815d0)). No public Release or Production deployment.**
+**Latest Owner-integrated development source: v0.1.44 UNRELEASED ([independently reviewed PR #71](https://github.com/AChWorks/ach-aapanel-customizer/pull/71), [main@f246438](https://github.com/AChWorks/ach-aapanel-customizer/commit/f2464389913fd5bfbf43e582a8c6d13a8affacc1)). No public Release or Production deployment.**
 v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
 exact-URL Clear, including current-generation single-object removal, unchanged
 peer/other URL, recheck and consented Restore
@@ -19,7 +19,7 @@ and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
 
-### v0.1.44 candidate: source-matched native WordPress `wpfastcgi` Cache (Issues #2/#21)
+### v0.1.44 merged: source-matched native WordPress `wpfastcgi` Cache (Issues #2/#21)
 
 The guarded, opt-in site-owned Cache Apply/Recheck/Restore and exact-URL Clear
 now support the **exact verified aaPanel 8.0.7 Nginx `enable-php-81/85-wpfastcgi.conf`**
@@ -63,15 +63,24 @@ Nginx Helper 2.4.1 file presence does not prove runtime activation or
 generation-aware automatic invalidation. Automatic `unlink_files`,
 the old shared `WORDPRESS` cache, legacy `/purge`, `get_request`,
 site-owned `Purge All`, real WooCommerce private-session testing, and
-broad aaPanel VHost regeneration remain **outside this candidate**.
+broad aaPanel VHost regeneration remain **outside this v0.1.44 development integration**.
 Generic Purge All remains OFF. The exact native-installed v0.1.44
 55-member ZIP SHA256 is
 `d5471444dc5fa8359061186d7681d6efb34583d4506106d548729562906f9def`;
 the [structured native acceptance](docs/evidence/aaPanel-8.0.7-2026-11-14-native-wpfastcgi-cache-v044.json)
 records the selected site, restored recovery ID, source hashes, shared Cache
-integrity and bounded limitations. There is no public Release or Production
-deployment, and independent review plus separate Owner Merge permission
-are still required.
+integrity and bounded limitations. An independent read-only review later
+found those five historical shared Cache object paths absent and could not
+identify why; SHA preservation was verified **at the time of the URL Clear**,
+not again at review time. This does not establish that URL Clear removed them.
+
+v0.1.44 received `COMPLETE / APPROVE` independent review with no blocking
+findings and one optional read-only audit diagnostic improvement. The Owner
+authorized integration of [PR #71](https://github.com/AChWorks/ach-aapanel-customizer/pull/71)
+at [main@f246438](https://github.com/AChWorks/ach-aapanel-customizer/commit/f2464389913fd5bfbf43e582a8c6d13a8affacc1);
+[exact reviewed-HEAD CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/43581672488)
+succeeded with 752 Python and 319 JavaScript tests. Public Release and
+Production remain separately gated.
 
 ### v0.1.43 merged: preserve native server HSTS in isolated Cache PHP handlers (Issue #2)
 
@@ -87,7 +96,7 @@ changes before Apply, Recheck, Clear or Restore. Older Cache recovery records
 without the optional HSTS field remain readable.
 
 This enables a narrowly proven path for genuine HTTPS-enabled *stock PHP*
-aaPanel websites without weakening response-header protections. Unrecognized
+aaPanel websites without weakening response-header protections. At v0.1.43, unrecognized
 security headers, multiple headers, alternate scopes, unexpected PHP/rewrite
 layout and native `enable-php-*-wpfastcgi.conf` (shared `WORDPRESS` Cache,
 extra PHP rewrite and purge semantics) still require **Needs Review**.
