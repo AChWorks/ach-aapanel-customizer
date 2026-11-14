@@ -807,7 +807,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
 const monitorOverview = (overrides = {}) => ({
   status: true,
   mode: 'Monitor',
-  worker_source_version: '0.1.44',
+  worker_source_version: '0.1.45',
   notice: 'Read-only Monitor controls',
   enforcement: false,
   state_schema: 1,

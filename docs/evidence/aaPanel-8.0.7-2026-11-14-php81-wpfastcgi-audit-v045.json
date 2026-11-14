@@ -1,0 +1,86 @@
+{
+  "artifact": {
+    "candidate_source_location": "isolated /root/achqa/v045-source/ach_customizer",
+    "candidate_zip_members": 55,
+    "candidate_zip_sha256": "bcd4f9c64694e1625c686e89013b3b139336309391324b58edaed23c7425190d",
+    "installed_plugin_version_during_test": "0.1.44",
+    "native_plugin_upgrade_performed": false
+  },
+  "bounded_cache_lifecycle": {
+    "approved_backend_apply": "Applied, runtime_verified=true, site-owned ACHFC_17",
+    "authorization_GET": "BYPASS",
+    "cache_directory": "/www/server/ach-customizer-fastcgi/site-17",
+    "cache_generation": "2ca36e5b60e446bab217ad49ec0cbe20",
+    "cookie_GET": "BYPASS",
+    "exact_url_clear": "/ removed exactly 1 owned cache object; next public GET MISS then HIT",
+    "http80_php_header": "X-ACh-QA-PHP: 8.1",
+    "managed_recheck": "Applied, runtime_verified=true",
+    "post_test_phase": "applied; intentional retained QA fixture/managed cache, NOT restored",
+    "preview": "Ready for Review; PHP81 native_handler wpfastcgi; probe 200",
+    "private_path_probes": "/wp-json/, /cart/, /checkout/ returned native 404 (not a route-specific bypass proof)",
+    "public_GET": "MISS then HIT",
+    "purge_supported": false,
+    "query_GET": "BYPASS",
+    "recovery_id": "4a1d0b84669b42a5a16d8e05943ac3d6",
+    "restore_attempt": "Not executed: test environment call was blocked by platform safety checks before mutation",
+    "safe_next_step": "Use an authorized native Cache Restore with exact recovery ID followed by Recheck, source hash verification and nginx -t; do not delete fragments manually"
+  },
+  "candidate_version": "0.1.45 UNRELEASED",
+  "date_utc": "2026-11-14",
+  "environment": {
+    "guest": "ach-aapanel-qa/aac-native-qa",
+    "php_runtime": "PHP 8.1.35",
+    "platform": "aaPanel 8.0.7",
+    "scope": "isolated nonproduction guest only",
+    "uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "webserver": "Nginx 1.28.3"
+  },
+  "limitations": [
+    "No actual WordPress PHP8.1 DB/site/page installation or authenticated customer data test",
+    "No primary-admin browser acceptance for v0.1.45: protected credential login could not be confirmed",
+    "PHP8.1 preview/apply tests called isolated candidate backend directly on QA; installed native aaPanel plugin remains v0.1.44",
+    "QA site #17 and its managed Cache remain intentionally active; Restore unavailable through attempted execution route (safety check), not silently claimed",
+    "The policy's general safe-purge/private-data certification remains false; automatic Nginx Helper and generic Purge All unchanged",
+    "No Production, public Release, or source merge"
+  ],
+  "peer_integrity": {
+    "all_listed_hashes_unchanged_from_before_apply": true,
+    "main_nginx_source_sha256": "dd87d0dad8fd394fb7e5f0fbe6420bc2fc02a50196d144600b732b87771c65ef",
+    "nginx_syntax": "PASS",
+    "shared_fastcgi_cache_source_sha256": "1db1d19ab113df6707d98f551e1d5e8daade8c4ff2825c39fed7879ee0613035",
+    "site10_recovery_journal_sha256": "cb839016bcfb4baf50e0faf48a6e34247e1c3c98117fdfd2f77c1684da0d7823",
+    "site10_vhost_sha256": "12c67e69c242ebe463a0cf9732c9fdb051556f68a45ff8fa917f10482a86c403",
+    "site9_anonymous_http": "200",
+    "site9_recovery_journal_sha256": "d87d521b531c30d2c5f5df86225196bd4104926fa3dd7ed0dfbca1768830616f",
+    "site9_vhost_sha256": "ade4b88d50cbb56b301a4048a62dba6304970559a1176ff6add96f55751151af"
+  },
+  "php81_fixture": {
+    "baseline_wp_style_sha256": "9318fbcd7f83c178d4aad0e91bdb3ceefe607facd38dbd8fb9121d0b87020b63",
+    "mysql_database_created": false,
+    "native_extension_include": "auto-generated later by aaPanel after initial site registration",
+    "native_handler": "enable-php-81-wpfastcgi.conf",
+    "native_site_creation_note": "aaPanel native site creation registered PHP site and its VHost, then optional database creation failed because the native AddSite request lacked codeing; database repair was not authorized by tool safety; no database created; site is a running generic PHP test fixture",
+    "project_type": "PHP",
+    "runtime_type": "synthetic index.php header/body; NOT a WordPress installation",
+    "site_id": 17,
+    "site_key": "qa-wp81cache-20261114.test",
+    "site_root": "/www/wwwroot/qa-wp81cache-20261114.test",
+    "vhost_original_before_wp_style_sha256": "74a1ba4ad8d706a888d5235ea7fbad45992a17af48c900ddc4d16c9eb4c0e811"
+  },
+  "purpose": "Managed WordPress fastcgi source-audit earlier Regex precedence regression and bounded PHP 8.1 native handler acceptance",
+  "repo": "AChWorks/ach-aapanel-customizer",
+  "schema": 1,
+  "source_regression": {
+    "audit_after_source_restore": "Source Observed, ACHFC_17",
+    "earlier_regex_audit_state": "Needs Review",
+    "earlier_regex_cache_zone": null,
+    "earlier_regex_source_sha256": null,
+    "fixed_test_result": "PASS: 30 cache-audit unit tests",
+    "guarded_recheck_during_drift": "Needs Review, runtime_verified=false",
+    "inert_comment_control": "passed in local source fixture",
+    "initial_test_result": "FAIL: earlier location ~ and location ~* falsely accepted (2 failures)",
+    "management_after_source_restore": "Applied",
+    "native_fixture": "insert earlier location ~ or ~* in selected VHost source without Nginx reload",
+    "source_restored_sha256": "9318fbcd7f83c178d4aad0e91bdb3ceefe607facd38dbd8fb9121d0b87020b63"
+  }
+}
