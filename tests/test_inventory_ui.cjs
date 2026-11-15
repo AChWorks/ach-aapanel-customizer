@@ -15,6 +15,11 @@ const html = fs.readFileSync(
 const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
 assert.equal(scripts.length, 1, 'Test must execute the single deployed inline script');
 const script = scripts[0][1];
+const shippedPackageVersion = JSON.parse(fs.readFileSync(
+  path.join(__dirname, '../plugin/ach_customizer/info.json'), 'utf8'
+)).versions;
+assert.match(shippedPackageVersion, /^[0-9]+\.[0-9]+\.[0-9]+$/);
+
 
 function fakeNode(tag, attributes = {}) {
   return {
@@ -807,7 +812,7 @@ test('Panel endpoint error clears inventory and preserves explicit diagnostics',
 const monitorOverview = (overrides = {}) => ({
   status: true,
   mode: 'Monitor',
-  worker_source_version: '0.1.46',
+  worker_source_version: shippedPackageVersion,
   notice: 'Read-only Monitor controls',
   enforcement: false,
   state_schema: 1,
@@ -837,7 +842,7 @@ test('Installed UI checks resident Python entrypoint without claiming helper fre
   const ui = loadUi();
   ui.respondOverview(monitorOverview());
   assert.equal(ui.state().workerVersionState, 'matched');
-  assert.match(ui.state().workerVersionNotice, /matches UI v0\.1\.45/);
+  assert.ok(ui.state().workerVersionNotice.includes('matches UI v' + shippedPackageVersion));
   assert.match(ui.state().workerVersionNotice, /not certified/);
 });
 
