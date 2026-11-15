@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Latest Owner-integrated development source: v0.1.46 UNRELEASED ([independently reviewed PR #75](https://github.com/AChWorks/ach-aapanel-customizer/pull/75), [main@12e4a96](https://github.com/AChWorks/ach-aapanel-customizer/commit/12e4a96da518a131a47fc4f0231ccc2e41078f60)). No public Release or Production deployment.**
+**Latest integrated native development source: v0.1.46 UNRELEASED ([merged independently reviewed PR #78](https://github.com/AChWorks/ach-aapanel-customizer/pull/78), [main@dfec394](https://github.com/AChWorks/ach-aapanel-customizer/commit/dfec39485b5c5321b390df68e3b0f73eab06fd6a)). No public Release or Production deployment.**
 v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
 exact-URL Clear, including current-generation single-object removal, unchanged
 peer/other URL, recheck and consented Restore
@@ -18,6 +18,12 @@ remain tracked under [Issue #2](https://github.com/AChWorks/ach-aapanel-customiz
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
+
+### Optional WordPress companion: ACh aaPanel Bridge v0.1.0 (unreleased)
+
+The optional WordPress-side plugin is developed under [`wordpress/ach-aapanel-bridge/`](wordpress/ach-aapanel-bridge/README.md), **in this same repository but with its own version and independent ZIP**. It can be installed and disabled through WordPress independently of the native aaPanel plugin. The first candidate offers **read-only Nginx Helper diagnostics** under WordPress Tools; it does **not** yet install hooks, change WordPress options, touch Nginx/Cache or claim automatic invalidation or safe Purge All. The secure, generation-aware integration remains a separate Issue #2 acceptance task. Build the separate WordPress ZIP using `python3 -B scripts/build_wordpress_bridge.py`; its `Update URI` avoids WordPress.org same-slug replacement but does not provide automatic updates. No WordPress installation or public Release was performed.
+
+**Later live QA supersedes the old read-only v0.1.46 snapshot below:** the exact merged native ZIP was installed and fully checked, real two-customer WooCommerce HTTP/HTTPS cache isolation passed, and the selected QA site was subsequently Restored. See the [final Issue #21 acceptance receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6900380336).
 
 ### v0.1.46 merged: historical restored Cache re-Apply (Issues #2/#21)
 
@@ -38,16 +44,14 @@ Restored journal, and uses a distinct new key generation; no old Cache
 objects are deleted. Preview explicitly warns that matching ownership
 evidence does **not** prove application continuity.
 
-**Native read-only QA, not a deployed plugin upgrade:** On isolated aaPanel
+**Historical pre-PR78 read-only QA snapshot (superseded by the later installed acceptance above):** On isolated aaPanel
 8.0.7, current Site #10 is qa21-woocommerce-native.digikalashop.top,
 while its intact **Restored** journal records
 qa21-woocommerce-native.test and the former stock PHP85 adapter.
 An isolated, SHA-matched v0.1.46 source preview verified the real Retained
 fragments/directory, observed source WORDPRESS with zero unresolved peer
 sites and returned Ready for Review. Its journal bytes remained unchanged;
-the installed plugin remains v0.1.44. **No actual new Apply, native browser
-acceptance, WooCommerce customer/session privacy test, site-owned Purge All,
-public Release or Production deployment** was performed. Site #17 remains
+the installed plugin was then v0.1.44. **This earlier read-only snapshot did not include a new Apply or native browser acceptance.** The subsequent real native QA did; it still does not certify site-owned Purge All, public Release or Production deployment. Site #17 remains
 applied under its prior recovery ID and was never adopted/restored/cleaned.
 See Issues [#2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
