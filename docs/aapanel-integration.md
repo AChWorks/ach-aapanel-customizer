@@ -3,6 +3,18 @@
 This is **technical integration guidance**, not a second product specification.
 The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the active research/acceptance owner is [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1).
 
+## Native UI component contract (Issue #80; unreleased v0.1.47 candidate)
+
+Keep every UI rule scoped to #ach-customizer so the host aaPanel/Layui interface is unchanged.
+
+- **Stack owner:** .ach-main (scroll pane) and each .ach-view own their direct-child vertical rhythm through gap:var(--ach-space-md). Never bridge two independent bordered panels with an arbitrary sibling margin-top. Local .ach-controls and .ach-fields retain their compact internal spacing. Hide nonactive tabs/contexts with hidden.
+- **Component ownership:** .ach-site-context is the single shared website selector; .ach-note communicates operational context; .ach-inspection-summary communicates observed vs review/error evidence; .ach-availability supplies action-specific unmet prerequisites; .ach-technical-report and .ach-help reveal optional technical detail or explanatory help. Do not add a second prominent How to use card before each workflow.
+- **Version status:** a validated **entrypoint** version match appears as small text in Overview only; mismatch or unverifiable response stays visible on every tab with recovery guidance. Never imply this read certifies imported helpers, active Nginx workers, PHP services, or a successful deployment. The in-memory/UI mismatch is resolved by explicit inspection/recovery, not a silent service restart.
+- **Interaction:** keep one selected sidebar tab with keyboard-arrow/Home/End navigation and visible focus, preserve per-tab scroll and unsaved state, and place busy/empty/error/approval feedback beside its own action. Use real buttons for actions and details for optional guidance. No action becomes enabled solely from a styling change.
+- **Responsive acceptance:** inspect actual mounted aaPanel modal (not just source) at 390, 768, 1280px, check longer content, horizontally scrollable table owners, keyboard focus and no clipped actions. Test warning and matched-version states, not only the default screenshot.
+
+The rendered layout regression is exercised in tests/manual/layout_browser.cjs; shipped UI behavior is exercised in tests/test_inventory_ui.cjs. Source-only tests do **not** replace installed aaPanel acceptance.
+
 ## Primary source evidence
 
 1. Official [aaPanel third-party plugin documentation v1.1](https://www.aapanel.com/pkg/aaPanel_Linux_Panel_Plug-in_development_documentation_v1.1.pdf), pages 1-2: `plugin/<name>/<name>_main.py`, `index.html`, `info.json`, `icon.png`, `install.sh`; class matches `<name>_main`; conventional POST invocation uses `/plugin?action=a&name=<name>&s=<method>`.

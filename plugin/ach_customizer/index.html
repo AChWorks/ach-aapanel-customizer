@@ -35,7 +35,8 @@
     --ach-green:#20a53a; --ach-green-hover:#1d9534;
     --ach-primary-fill:#167a2f; --ach-primary-fill-hover:#146f2b;
     --ach-danger:#bd3935; --ach-warn:#986615; --ach-focus:#20a53a;
-    /* Shared spacing roles: field rows, stacked content and approval actions. */
+    /* Spacing tokens: controls (sm), independent stack items (md), major breaks (lg).
+       Never position unrelated bordered sections by guessing sibling margins. */
     --ach-space-xs:4px; --ach-space-sm:8px; --ach-space-md:12px; --ach-space-lg:20px;
     color:var(--ach-text); background:var(--ach-surface); width:100%;
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
@@ -67,7 +68,7 @@
   }
   #ach-customizer .ach-site-context {
     display:flex; align-items:center; flex-wrap:wrap; gap:10px 16px;
-    margin:0 0 18px; padding:13px 16px; border-radius:9px;
+    margin:0; padding:var(--ach-space-md) 16px; border-radius:9px;
     background:#f4f8f5; border:1px solid #d2e5d8;
   }
   #ach-customizer .ach-site-context > div { flex:1 1 200px; }
@@ -77,11 +78,8 @@
     display:flex; align-items:center; gap:8px; font-weight:600; color:#34463b;
   }
   #ach-customizer .ach-site-context select { min-width:180px; max-width:270px; }
-  #ach-customizer .ach-steps {
-    display:grid; gap:4px; padding:12px 14px; border:1px solid #dbe5ea;
-    border-radius:8px; background:#f7fafb; color:#334d5c; font-size:12px;
-  }
-  #ach-customizer .ach-steps strong { font-size:13px; color:#294155; }
+  /* Contextual help is optional disclosure, never a compulsory banner before
+     controls. Keep safety/recovery guidance beside the affected action. */
   #ach-customizer .ach-view > h4:not(.ach-sr-only) { font-size:17px; line-height:1.35; }
   #ach-customizer .ach-inspection-summary {
     padding:10px 12px; border-radius:8px; border:1px solid #d5e1ec;
@@ -155,6 +153,7 @@
     background:var(--ach-surface); color:#333; font-weight:500;
   }
   #ach-customizer .ach-main {
+    display:flex; flex-direction:column; gap:var(--ach-space-md);
     overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
     padding:16px 20px 28px; min-width:0; min-height:0; scrollbar-gutter:stable;
     background:var(--ach-surface);
@@ -162,8 +161,23 @@
   #ach-customizer .ach-main h4 {
     margin:0 0 12px; font-size:14px; line-height:21px; color:#263544; font-weight:600;
   }
-  #ach-customizer .ach-view > :not(h4) { margin-top:var(--ach-space-md); margin-bottom:0; }
-  #ach-customizer .ach-view > h4 + :not(h4) { margin-top:0; }
+  /* Both the main scroll pane and each active tab own their children's rhythm.
+     All independent direct children use gap; no per-panel top-margin patches.
+     Internal groups (.ach-controls/.ach-fields) retain their own compact gaps. */
+  #ach-customizer .ach-main > :is(#ach-message, #ach-worker-version-status, #ach-website-context, .ach-view) {
+    flex:0 0 auto; min-width:0; margin:0;
+  }
+  #ach-customizer .ach-view {
+    display:flex; flex-direction:column; gap:var(--ach-space-md); min-width:0;
+  }
+  #ach-customizer .ach-main .ach-view > * { margin-block:0; }
+  #ach-customizer #ach-worker-version-status[data-state="matched"] {
+    background:transparent; border:0; padding:0; color:var(--ach-muted);
+    font-size:12px; font-weight:400;
+  }
+  #ach-customizer #ach-worker-version-status[data-state="review"] {
+    background:#fff8eb; color:#77510f; border-color:#e8c68e; font-weight:600;
+  }
   #ach-customizer .ach-view > p.ach-note { padding:0; border:0; background:transparent; }
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
   #ach-customizer .ach-note {
@@ -289,7 +303,7 @@
   }
   #ach-customizer .ach-toolbar > button { flex:0 0 auto; }
   #ach-customizer #ach-message {
-    margin:0 0 14px; padding:9px 12px; border:1px solid #e1e7ed;
+    margin:0; padding:9px 12px; border:1px solid #e1e7ed;
     border-radius:8px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
   }
   #ach-customizer #ach-message:empty { display:none; }
@@ -391,9 +405,9 @@
       </nav>
       <main class="ach-main" id="ach-content" tabindex="-1">
         <p id="ach-message" role="status" aria-live="polite"></p>
-        <p id="ach-worker-version-status" class="ach-note" role="status" aria-live="polite" data-state="pending">Checking resident panel Python entrypoint version in Overview. ZIP installation alone does not reload imported modules.</p>
+        <p id="ach-worker-version-status" class="ach-note" role="status" aria-live="polite" data-state="pending">Checking resident Python entrypoint; this does not verify loaded helpers or Nginx workers.</p>
         <div id="ach-website-context" class="ach-site-context" hidden>
-          <div><strong>Website being inspected</strong><small>Shared selection for Website list, Routing &amp; Nginx, and FastCGI Cache. This list shows one inventory page at a time.</small><small id="ach-website-context-status" role="status" aria-live="polite">Open a website tool to load the site list.</small></div>
+          <div><strong>Selected website</strong><small>Shared across Website list, Routing &amp; Nginx and FastCGI Cache.</small><small id="ach-website-context-status" role="status" aria-live="polite">Open a website tool to load the site list.</small></div>
           <label for="ach-hosts-site-id">Website
             <select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select>
           </label>
@@ -401,28 +415,27 @@
         </div>
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
       <h4 class="ach-sr-only">Overview</h4>
-      <p class="ach-note">Unreleased preview. Monitoring is read-only; PHP 8.1/8.5 shared-service changes require explicit approval. No automatic enforcement.</p>
+      <p class="ach-note">Unreleased preview. Monitoring observes only; PHP-FPM changes require separate review and approval. No automatic enforcement.</p>
       <div class="ach-toolbar">
         <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
         <button type="button" id="ach-overview-refresh">Refresh state</button>
       </div>
       <div class="ach-note">
         <strong>Monitor controls</strong>
-        <p>Read-only checks only. Switching Monitor settings does not stop sites, reload services or approve PHP-FPM changes. Preferences survive reinstall.</p>
+        <p>Choose which read-only observations to keep enabled. Preferences survive reinstall; no services are stopped or restarted.</p>
         <div class="ach-switches">
           <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /> Overall Monitor</label>
           <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /> Website inventory</label>
           <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" disabled /> PHP-FPM preview</label>
         </div>
-        <p class="ach-note">These are saved <strong>read-only observation preferences</strong>, not service on/off switches. Overall Monitor controls observation, Website inventory allows site-record checks, and PHP-FPM preview allows source-file comparisons. They never stop a website, start PHP or enable Auto Apply. If the controls cannot be changed, use <strong>Refresh state</strong> and read the status above.</p>
+        <details class="ach-help"><summary>What do Monitor settings control?</summary><p>Overall Monitor enables observation, Website inventory checks site records, and PHP-FPM preview compares saved source settings. These switches never restart websites or approve PHP changes. If a control is unavailable, Refresh state and read the status above.</p></details>
         <p id="ach-overview-control-result" role="status" aria-live="polite" data-state="info">Change a Monitor control to update its saved state.</p>
         <p id="ach-state-revision" role="status">Monitor state unavailable</p>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-websites" aria-labelledby="ach-tab-websites" data-view="websites" role="tabpanel" hidden>
       <h4>Website list</h4>
-      <p class="ach-note">Browse the sites managed by aaPanel. Use this list to choose a website for Routing &amp; Nginx or FastCGI Cache. A site name in the database is not proof that public DNS or the live server points to it.</p>
-      <div class="ach-steps"><strong>How to use</strong><span>Refresh the list, choose a website in the selector above, then switch to its diagnostic section. Compare website records only when investigating site additions or configuration changes.</span></div>
+      <p class="ach-note">Browse native aaPanel website records and select a site above for routing or Cache checks. Database names do not prove public DNS or live routing.</p>
       <div class="ach-toolbar">
         <p id="ach-sites-status" role="status" aria-live="polite">Open this section to load native website inventory.</p>
         <button id="ach-sites-refresh" type="button">Refresh websites</button>
@@ -445,8 +458,7 @@
     </section>
     <section class="ach-view" id="ach-panel-routing" aria-labelledby="ach-tab-routing" data-view="routing" role="tabpanel" hidden>
       <h4>Routing &amp; Nginx</h4>
-      <p class="ach-note">Find out how a selected website is described in the local hosts file and Nginx configuration. These checks read existing sources; they do not change routing or prove which running Nginx worker answered a request.</p>
-      <div class="ach-steps" aria-label="Routing inspection guide"><strong>How to use</strong><span>1. Choose a website above. 2. Run the relevant check. 3. Read the result; expand Technical evidence only if you need file details.</span></div>
+      <p class="ach-note">Inspect local hosts and Nginx sources for the selected website. These checks do not change routing or prove active Nginx worker state. Expand Technical evidence when needed.</p>
       <p class="ach-note"><strong>Local hosts override check (read-only):</strong> inspect exact site-bound names in origin-local /etc/hosts. Loopback does not prove DNS or Gateway failure; no correction is offered.</p>
       <div class="ach-controls"><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts file</button></div>
       <p class="ach-note">Use the shared website selector above. For another page, choose Browse websites. This checks the server's local file, not public DNS or a remote host.</p>
@@ -472,7 +484,7 @@
     <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
       <h4>FastCGI Cache</h4>
       <p class="ach-note">Understand whether this website appears to use FastCGI Cache, where cached files may be stored, and what requires review before changing it. This is not a WordPress session safety certification, and Purge All is not available.</p>
-      <div class="ach-steps" aria-label="Cache workflow guide"><strong>How to use</strong><span>1. Choose a website above. 2. Inspect sources. 3. Review the isolated policy and Apply readiness. 4. Only if appropriate, explicitly approve Apply; use Recheck and the saved recovery path to restore.</span></div>
+      <details class="ach-help"><summary>Cache workflow and recovery</summary><p>Select a website, inspect its sources, preview a site-owned policy, then Recheck. Apply requires a separate approval; keep the recovery ID and use Restore when needed.</p></details>
       <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines native VHost/PHP snippets and aaPanel's known top-level 0.fastcgi_cache.conf include for cache-zone paths, shared-directory Purge All risk, bypass/write guards, host-key tokens and ignored response headers. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
       <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect Nginx cache sources and Nginx Helper presence.</p>
@@ -517,7 +529,7 @@
     <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
       <h4>PHP-FPM · Shared service settings</h4>
       <p class="ach-note">Check PHP service versions, see which sites share a pool and compare desired settings with saved configuration. Changes can affect multiple websites; viewing a report never applies changes.</p>
-      <div class="ach-steps"><strong>How to use</strong><span>1. Discover installed PHP. 2. Inspect its service and affected sites. 3. Preview configuration. 4. If needed, prepare and approve an explicit shared-service change. Recovery is available independently below.</span></div>
+      <details class="ach-help"><summary>PHP-FPM change and recovery steps</summary><p>Discover installed PHP, inspect the service and affected sites, then preview the settings. Applying shared-service changes requires explicit preparation and approval; the recovery workflow remains available below.</p></details>
       <div class="ach-controls"><button id="ach-php-discover" type="button">Refresh installed PHP</button></div>
       <p id="ach-php-discovery-status" role="status" aria-live="polite">Open PHP-FPM to discover installed versioned services. File presence does not verify running processes or enable Apply.</p>
       <div class="ach-controls ach-php-selection">
@@ -606,7 +618,7 @@
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
       <h4>Status Pages · Branding &amp; delivery</h4>
-      <p class="ach-note"><strong>Choose a template and scope to see its supported workflow.</strong> All eleven English/Persian templates can be previewed offline; Save/Reset affects branding preferences only. Live changes require a separate guarded Recheck, approval and Apply/Restore. Unsupported scope/template combinations remain preview-only. Unknown-host HTTPS/443 is not supported.</p>
+      <p class="ach-note">Choose a template and scope to preview. Save/Reset changes branding only; live Apply/Restore requires Recheck and explicit approval. Unsupported combinations are preview-only; unknown-host HTTPS/443 is not supported.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -731,7 +743,7 @@
     </section>
     <section class="ach-view" id="ach-panel-activity" aria-labelledby="ach-tab-activity" data-view="activity" role="tabpanel" hidden>
       <h4>Activity &amp; Logs</h4>
-      <p class="ach-note">See what the plugin checked or changed and why an operation may need attention. Filter warnings/errors first when troubleshooting, then use an operation or recovery ID to correlate with the exact step. Only the primary aaPanel administrator can read these records.</p>
+      <p class="ach-note">Filter by severity and module. Use Operation or Recovery IDs to investigate results and expand technical details when needed. Records are limited to the primary aaPanel administrator.</p>
       <div class="ach-controls">
         <label for="ach-activity-level">Severity</label>
         <select id="ach-activity-level"><option value="">All</option><option value="ERROR">Errors</option><option value="WARNING">Warnings</option><option value="INFO">Information</option><option value="DEBUG">Debug</option></select>
@@ -754,7 +766,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.46'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.47'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -834,6 +846,12 @@
   function monitorNotice(message, state) {
     root.find('#ach-overview-control-result').text(message).attr('data-state', state || 'info');
   }
+  // Normal version matches are low-emphasis Overview context only.
+  // Pending/unverified and genuine mismatches remain visible across all tabs.
+  function syncWorkerVersionVisibility() {
+    var notice = root.find('#ach-worker-version-status');
+    notice.prop('hidden', notice.attr('data-state') === 'matched' && activeSection !== 'overview');
+  }
   function showWorkerVersion(r) {
     // Validate the version of the resident Python entrypoint, not disk metadata.
     // Missing fields can indicate old imported code surviving ZIP replacement.
@@ -847,9 +865,12 @@
       '. Reopen the plugin to exclude a cached UI; check installed version and Activity Operation ID. '
       + 'an authorized operator may schedule a controlled aaPanel reload, then reopen the plugin and Refresh state. '
       + 'This diagnostic does not restart services.' :
-      'Resident Python entrypoint version matches UI v' + shippedUiVersion +
-      '; imported helper modules and Nginx workers are not certified by this check.')
-      .attr('data-state', stale ? 'review' : 'matched');
+      'Python entrypoint matches UI v' + shippedUiVersion +
+      '; imported helpers and Nginx workers are not certified.')
+      .attr('data-state', stale ? 'review' : 'matched')
+      .attr('role', stale ? 'alert' : 'status')
+      .attr('aria-live', stale ? 'assertive' : 'polite');
+    syncWorkerVersionVisibility();
   }
   function siteContextNotice(text) {
     root.find('#ach-website-context-status').text(text);
@@ -1188,7 +1209,8 @@
       if (accepted && r && r.status === true) showWorkerVersion(r);
       else root.find('#ach-worker-version-status')
         .text('Resident worker version not checked: Overview response is unavailable or unverified. Refresh state and inspect Activity before deciding on a panel reload.')
-        .attr('data-state', 'pending');
+        .attr('data-state', 'pending').attr('role', 'status').attr('aria-live', 'polite');
+      syncWorkerVersionVisibility();
       if (accepted) {
         // This request started after the uncertain write and is the only path
         // that can release the recheck gate.
@@ -4567,6 +4589,7 @@
     }
     root.find('#ach-website-context').prop('hidden',
       !['websites','routing','cache'].includes(tab));
+    syncWorkerVersionVisibility();
     msg('', false);
     if (tab === 'overview' && !sectionsLoaded.overview) overview();
     if (['websites','routing','cache'].includes(tab) && !sectionsLoaded.websites && !siteBusy) sites();

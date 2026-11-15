@@ -368,6 +368,7 @@ function loadUi() {
       overview: elements.get('#ach-overview-status').textContent,
       workerVersionNotice: elements.get('#ach-worker-version-status').textContent,
       workerVersionState: elements.get('#ach-worker-version-status').attributes['data-state'],
+      workerVersionHidden: elements.get('#ach-worker-version-status').props.hidden,
       overviewControlResult: elements.get('#ach-overview-control-result').textContent,
       overviewFeedbackState: elements.get('#ach-overview-control-result').attributes['data-state'],
       stateRevision: elements.get('#ach-state-revision').textContent,
@@ -844,6 +845,26 @@ test('Installed UI checks resident Python entrypoint without claiming helper fre
   assert.equal(ui.state().workerVersionState, 'matched');
   assert.ok(ui.state().workerVersionNotice.includes('matches UI v' + shippedPackageVersion));
   assert.match(ui.state().workerVersionNotice, /not certified/);
+});
+
+test('A matched version stays in Overview, while mismatch and uncertainty remain visible everywhere', () => {
+  const ui = loadUi();
+  ui.respondOverview(monitorOverview());
+  assert.equal(ui.state().workerVersionHidden, false);
+  ui.openTab('websites');
+  assert.equal(ui.state().workerVersionHidden, true, 'Routine version matches must not lead every tab');
+  ui.openTab('php');
+  assert.equal(ui.state().workerVersionHidden, true);
+  ui.openTab('overview');
+  assert.equal(ui.state().workerVersionHidden, false, 'Version context remains available in Overview');
+  const mismatched = loadUi();
+  mismatched.respondOverview(monitorOverview({worker_source_version:'0.1.40'}));
+  mismatched.openTab('cache');
+  assert.equal(mismatched.state().workerVersionHidden, false, 'Source mismatch must stay visible');
+  const unverified = loadUi();
+  unverified.respondOverview({status:false,stage:'monitor_state_read',msg:'No session'});
+  unverified.openTab('activity');
+  assert.equal(unverified.state().workerVersionHidden, false, 'Unverified worker cannot be silently suppressed');
 });
 
 test('Stale or missing imported worker version produces read-only recovery guidance', () => {
