@@ -73,11 +73,18 @@ const {chromium} = require('playwright');
           notice.dataset.state='matched'; notice.hidden=name!=='overview';
           const routine=distances();
           const style=getComputedStyle(notice);
-          return {warning,routine,matchedBorder:style.borderTopWidth,
+          const view=document.querySelector('.ach-view:not([hidden])');
+          const blocks=[...view.children].filter(el=>el.getClientRects().length &&
+            getComputedStyle(el).display!=='none' &&
+            getComputedStyle(el).position!=='absolute');
+          const sectionGaps=blocks.slice(1).map((el,i)=>Math.round(
+            el.getBoundingClientRect().top-blocks[i].getBoundingClientRect().bottom));
+          return {warning,routine,sectionGaps,matchedBorder:style.borderTopWidth,
             matchedBackground:style.backgroundColor};
         },name);
         if(rhythm.warning.length<1 || rhythm.warning.some(gap=>gap<10) ||
            rhythm.routine.some(gap=>gap<10) ||
+           rhythm.sectionGaps.some(gap=>gap<11 || gap>13) ||
            rhythm.matchedBorder!=='0px' ||
            rhythm.matchedBackground!=='rgba(0, 0, 0, 0)') {
           throw Error('Independent panel spacing/version hierarchy failed '+
