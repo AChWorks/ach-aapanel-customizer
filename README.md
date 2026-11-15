@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Next development candidate: v0.1.45 UNRELEASED (diagnostic parity, pending QA/review); latest Owner-integrated source: v0.1.44 UNRELEASED ([independently reviewed PR #71](https://github.com/AChWorks/ach-aapanel-customizer/pull/71), [main@f246438](https://github.com/AChWorks/ach-aapanel-customizer/commit/f2464389913fd5bfbf43e582a8c6d13a8affacc1)). No public Release or Production deployment.**
+**Latest Owner-integrated development source: v0.1.45 UNRELEASED ([independently reviewed PR #73](https://github.com/AChWorks/ach-aapanel-customizer/pull/73), [main@48b1716](https://github.com/AChWorks/ach-aapanel-customizer/commit/48b171665a2b20fc84b537069f5175ae8c0eed7a)). No public Release or Production deployment.**
 v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
 exact-URL Clear, including current-generation single-object removal, unchanged
 peer/other URL, recheck and consented Restore
@@ -19,7 +19,7 @@ and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
 
-### v0.1.45 candidate: trust managed WordPress source-audit precedence (Issues #2/#21)
+### v0.1.45 merged: trust managed WordPress source-audit precedence (Issues #2/#21)
 
 The read-only FastCGI Cache source observation now detects an active Nginx
 Regex location inserted **before** the journal-owned WordPress Cache extension,
