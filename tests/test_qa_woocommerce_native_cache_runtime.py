@@ -109,7 +109,15 @@ class NativeWooCachePreflightTests(unittest.TestCase):
         self.check=patch.object(qa.subprocess,"run",return_value=subprocess.CompletedProcess(
             ["nginx","-t"],0,"",""))
         self.generator=self.gen.start();self.check.start()
+        # Fixture cache files are not owned by the guest's native www user.
+        # Mock only the already unit-tested native backend ownership helpers;
+        # separate tests below prove that neither check can be skipped.
+        self.owner=patch.object(qa, "_path_owned", side_effect=lambda site_id: (
+            self.zone.stat().st_dev, self.zone.stat().st_ino))
+        self.scanner=patch.object(qa, "_scan_site_cache_files", return_value=0)
+        self.owner_mock=self.owner.start();self.scanner_mock=self.scanner.start()
         self.addCleanup(self.gen.stop);self.addCleanup(self.check.stop)
+        self.addCleanup(self.owner.stop);self.addCleanup(self.scanner.stop)
 
     def save_record(self):
         self.files["journal"].write_text(json.dumps(self.record))
@@ -298,6 +306,57 @@ class NativeWooCachePreflightTests(unittest.TestCase):
             ["nginx","-t"],1,"","synthetic failure")):
             with self.assertRaisesRegex(RuntimeError,"Nginx syntax"):
                 self.snapshot()
+
+    def test_native_ownership_checks_are_read_only_and_site_scoped(self):
+        self.snapshot()
+        self.assertEqual(self.owner_mock.call_count, 1)
+        self.assertEqual(self.owner_mock.call_args.args, (10,))
+        self.scanner_mock.assert_called_once_with(
+            10, tuple(self.record["cache_identity"]), remove=False)
+
+    def test_owned_cache_check_is_mandatory_before_customer_preflight(self):
+        # A previously pinned directory inode is not enough: ownership,
+        # ancestor trust and mount topology can drift without changing it.
+        with patch.object(qa, "_path_owned",
+                          side_effect=qa.CacheManageError("ownership", "untrusted cache ancestor")):
+            with self.assertRaisesRegex(RuntimeError, "ownership"):
+                self.snapshot()
+
+    def test_cache_root_rechecked_against_saved_applied_identity(self):
+        with patch.object(qa, "_path_owned",
+                          return_value=(12345678, 87654321)):
+            with self.assertRaisesRegex(RuntimeError, "identity"):
+                self.snapshot()
+
+    def test_qa_cache_contents_are_inspected_before_customers(self):
+        with patch.object(qa, "_path_owned",
+                          return_value=tuple(self.record["cache_identity"])), \
+             patch.object(qa, "_scan_site_cache_files",
+                          side_effect=qa.CacheManageError("ownership", "untrusted cache entry")):
+            with self.assertRaisesRegex(RuntimeError, "ownership"):
+                self.snapshot()
+
+    def test_cache_source_drift_after_transport_preflight_prevents_user_writes(self):
+        # A TLS/source check can be interrupted by another native operator.
+        # No user creation is permitted on a stale, previously good snapshot.
+        users = {"users": [{"id": 1}, {"id": 2}]}
+        with (
+            patch.object(qa.os, "geteuid", return_value=0),
+            patch.object(qa.socket, "gethostname", return_value="aac-native-qa"),
+            patch.object(qa.woo, "assert_store_site", return_value=None),
+            patch.object(qa, "snapshot_native", side_effect=[
+                {"source": "before"}, {"source": "changed"},
+                {"source": "changed"}]) as checked,
+            patch.object(qa.woo, "claim_qa_accounts", return_value=TOKEN) as created,
+            patch.object(qa.woo, "wp_action", return_value=users),
+            patch.object(qa.woo, "validate_prepared_accounts", return_value=users),
+            patch.object(qa.woo, "exercise_store_clients", return_value={}),
+            patch.object(qa.woo, "cleanup_qa_accounts", return_value=2),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "pre-account"):
+                qa.run(self.args)
+            created.assert_not_called()
+            self.assertEqual(checked.call_count, 2)
 
     def test_native_runner_verifies_cleanup_without_mutating_nginx(self):
         users={"users":[{"id":1,"login":"a","cookie":"auth=a"},

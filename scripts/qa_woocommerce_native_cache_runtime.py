@@ -24,6 +24,9 @@ import tempfile
 
 import qa_woocommerce_cache_runtime as woo
 from ach_customizer_monitor import _active_nginx_text
+from ach_customizer_cache_manage import (
+    CacheManageError, _path_owned, _scan_site_cache_files,
+)
 
 
 def digest(path):
@@ -87,6 +90,17 @@ def snapshot_native(args, *, nginx_root="/www/server/nginx/conf",
     identity = cache_root.stat()
     if [identity.st_dev, identity.st_ino] != record["cache_identity"]:
         raise RuntimeError("Native site-owned cache directory identity changed")
+    # A matching inode alone cannot attest to the current root/ancestor
+    # permissions, a bind-mounted cache tree, or foreign objects within it.
+    # Reuse the exact no-follow physical ownership checks that guard native
+    # Cache Clear, without doing any deletions or changing server state.
+    try:
+        verified_identity = _path_owned(site_id)
+        if verified_identity != tuple(record["cache_identity"]):
+            raise RuntimeError("Native site Cache physical ownership identity changed")
+        _scan_site_cache_files(site_id, verified_identity, remove=False)
+    except (CacheManageError, OSError) as exc:
+        raise RuntimeError("Native site Cache physical ownership unverified") from exc
 
     vhost = Path(vhost_root)/(hostname+".conf")
     rewrite = Path(vhost_root).parent/"rewrite"/(hostname+".conf")
@@ -181,6 +195,12 @@ def run(args):
         https_ready = probe_https(args)
     elif getattr(args, "tls_ca_file", None):
         raise RuntimeError("CA option requires HTTPS transport")
+    # The external TLS/HTTP probe (or operator changes while it runs) can
+    # invalidate the first snapshot. Recheck immediately before allocating
+    # resources or creating any WooCommerce customer; a mismatch must stop
+    # without a partial account lifecycle or misleading cleanup state.
+    if snapshot_native(args) != before:
+        raise RuntimeError("Native pre-account Cache source/ownership changed; no QA users created")
     temp=Path(tempfile.mkdtemp(prefix="ach-woo-native-ab-"))
     temp.chmod(0o700)
     run_id=None
