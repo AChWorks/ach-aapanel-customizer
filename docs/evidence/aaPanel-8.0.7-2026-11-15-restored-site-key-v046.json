@@ -1,0 +1,69 @@
+{
+  "candidate_version": "0.1.46 UNRELEASED / NOT MERGED",
+  "date_utc": "2026-11-15",
+  "environment": {
+    "aapanel": "8.0.7",
+    "candidate_module_sha256": "9109674c52397530e6f55a602e555307ed314300069e58779feb3fa6f94796f3",
+    "candidate_zip_sha256_local_unverified": "ab8cf33ef11102d46dbb3c1a55d4b3f44aa23a85ec94f6b409861a7b2c0e7aaa",
+    "incus_project": "ach-aapanel-qa",
+    "installed_native_plugin": "0.1.44",
+    "instance": "aac-native-qa",
+    "instance_uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "isolated_candidate_module": "/root/achqa/issue2-restored-key-readonly-20261115/plugin/ach_customizer/ach_customizer_cache_manage.py",
+    "nginx": "1.28.3",
+    "source_baseline_sha256": "370cadd0b7ec080746345a0e0cc69a5765e5a0b35a35f776eb40f78e76a52b2a"
+  },
+  "integration_base": "5941142f38ce82aa1bcb03507eb218e39a0ea6e8",
+  "remaining_gates": [
+    "Independent read-only review of exact PR head and successful GitHub Actions",
+    "Owner Merge approval",
+    "Native authorized site-10 Apply/Recheck/Restore, WooCommerce sessions, private responses and isolation",
+    "Site-17 explicit nonproduction Restore authorization and separate cleanup verification",
+    "Nginx Helper generation-aware unlink_files and verified Purge All remain unsupported",
+    "No public Release or Production deployment authorized"
+  ],
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "schema": 1,
+  "scope": "Nonproduction read-only recovery/source acceptance; no native Cache Apply, Restore or cleanup",
+  "site_10": {
+    "actual_apply_performed": false,
+    "current_handler": "wpfastcgi",
+    "current_native_key": "qa21-woocommerce-native.digikalashop.top",
+    "current_native_site_id": 10,
+    "journal_sha256_unchanged": true,
+    "php_version": "85",
+    "pinned_cache_directory_identity_match": true,
+    "prior_cache_generation": "a887b5c7f23249b8a9351561a8991249",
+    "prior_handler": "stock",
+    "prior_journal_phase": "restored",
+    "prior_recovery_id": "7700d54be9c44ef1a263dfff3eda5bd0",
+    "prior_restored_site_key": "qa21-woocommerce-native.test",
+    "prior_retained_global_and_extension_bytes_match": true,
+    "read_only_activation_preview": "Ready for Review",
+    "read_only_audit_state": "Source Observed",
+    "read_only_audit_zone": "WORDPRESS",
+    "unresolved_other_native_sites": 0,
+    "word_press_woocommerce_session_safety_verified": false
+  },
+  "site_17": {
+    "cache_generation": "2ca36e5b60e446bab217ad49ec0cbe20",
+    "candidate_read_only_recheck_state": "Applied",
+    "journal_phase": "applied",
+    "journal_vhost_nginx_and_managed_snippet_hashes_unchanged": true,
+    "native_site_key": "qa-wp81cache-20261114.test",
+    "recovery_id": "4a1d0b84669b42a5a16d8e05943ac3d6",
+    "restore_performed": false,
+    "site_id": 17,
+    "synthetic_php_fixture_not_real_wordpress": true
+  },
+  "source_validation": {
+    "dev_node_installed": false,
+    "javascript_tests": "PENDING exact-HEAD GitHub Actions CI",
+    "native_nginx_syntax": "PASS",
+    "package_entry_count": 55,
+    "python_compileall": "PASS",
+    "python_unittest_passed": 756,
+    "resident_native_browser_acceptance": "NOT RUN",
+    "shell_syntax": "PASS"
+  }
+}

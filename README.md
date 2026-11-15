@@ -19,6 +19,41 @@ and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
 
+### v0.1.46 development candidate (UNMERGED): historical restored Cache re-Apply (Issues #2/#21)
+
+The source-only package now permits an **explicitly reapproved new Cache generation**
+when an older, fully **Restored** schema-2 recovery journal belongs to the same
+native site ID but predates an aaPanel site-key rename or a verified
+stock → wpfastcgi PHP-handler change **on the same PHP version**.
+This is not a general journal-migration, orphan-recovery or ownership
+override. Before readiness is offered, the adapter regenerates the **old**
+policy and checks its proposal hash, byte-identical retired global/extension
+fragments under the current native site's verified Extension directory, the
+saved Cache directory's physical identity, and the fresh native site/source
+preflight. Only the supported stock→wpfastcgi handler direction can change.
+Legacy unpinned, prepared/applied, physically drifted, conflicting,
+nonmatching or already-reused generations still fail closed. Manual Apply
+requires fresh source/proposal/generation approval, archives the **original**
+Restored journal, and uses a distinct new key generation; no old Cache
+objects are deleted. Preview explicitly warns that matching ownership
+evidence does **not** prove application continuity.
+
+**Native read-only QA, not a deployed plugin upgrade:** On isolated aaPanel
+8.0.7, current Site #10 is qa21-woocommerce-native.digikalashop.top,
+while its intact **Restored** journal records
+qa21-woocommerce-native.test and the former stock PHP85 adapter.
+An isolated, SHA-matched v0.1.46 source preview verified the real Retained
+fragments/directory, observed source WORDPRESS with zero unresolved peer
+sites and returned Ready for Review. Its journal bytes remained unchanged;
+the installed plugin remains v0.1.44. **No actual new Apply, native browser
+acceptance, WooCommerce customer/session privacy test, site-owned Purge All,
+public Release or Production deployment** was performed. Site #17 remains
+applied under its prior recovery ID and was never adopted/restored/cleaned.
+See Issues [#2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
+and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
+for live QA and independent-review gates. See the
+[read-only v0.1.46 native QA evidence](docs/evidence/aaPanel-8.0.7-2026-11-15-restored-site-key-v046.json).
+
 ### v0.1.45 merged: trust managed WordPress source-audit precedence (Issues #2/#21)
 
 The read-only FastCGI Cache source observation now detects an active Nginx
