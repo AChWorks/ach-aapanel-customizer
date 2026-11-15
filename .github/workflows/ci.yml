@@ -29,5 +29,11 @@ jobs:
         run: node --test tests/test_inventory_ui.cjs
       - name: Check the shell script
         run: sh -n plugin/ach_customizer/install.sh
+      - name: Lint WordPress companion PHP
+        run: |
+          php --version
+          find wordpress/ach-aapanel-bridge -type f -name '*.php' -print0 | xargs -0 -n 1 php -l
+      - name: Build independent WordPress companion ZIP
+        run: python3 -B scripts/build_wordpress_bridge.py --output "$RUNNER_TEMP/ach-aapanel-bridge.zip"
       - name: Build local ZIP candidate
         run: python3 -B scripts/build_plugin.py --output "$RUNNER_TEMP/ach-customizer.zip"

@@ -14,6 +14,12 @@ The product manages *operator-approved desired behavior* rather than blindly ove
 
 **Identity:** This is an aaPanel **customization system**, not merely a WordPress optimization tool, generic hosting control panel, separate administration service, or automatic server optimizer.
 
+### Optional WordPress companion
+
+The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Future coordinated releases may attach both artifacts only after their respective review and release approvals.
+
+The name intentionally covers more than caching. Add only evidenced, explicitly supported WordPress-side integrations to this small companion. The initial v0.1.0 source is read-only Nginx Helper diagnostics and is **not** an operational Cache or invalidation bridge. A future automatic-invalidation protocol must have verified site identity, generation, physically owned scope, lifecycle/drift/restore handling and nonproduction acceptance; no shared `WORDPRESS` Purge All, vendor-core modifications, unstated remote service, or automatic production installation is authorized by the companion's existence.
+
 ## 2. Problem and desired outcomes
 
 aaPanel may regenerate shared and per-site configuration during normal operations. Manually edited files can change unexpectedly when a site is created, a module runs an optimization, or an upgrade replaces generated content. Repeating the same modification across websites is brittle, especially as additional sites or non-WordPress applications are added.
