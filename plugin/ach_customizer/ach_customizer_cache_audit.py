@@ -225,6 +225,8 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
         if (active_vhost.count(extension_line) != 1 or
                 active_vhost.count(php_line) != 1 or
                 active_vhost.index(extension_line) > active_vhost.index(php_line) or
+                re.search(r'\blocation\s+~',
+                    active_vhost[:active_vhost.index(extension_line)]) or
                 not _native_server_direct_include(active_vhost, native_ext)):
             raise CacheAuditError('Managed WP Cache location precedence unverified')
         # The owned extension is included before native wpfastcgi. Nginx uses

@@ -706,6 +706,30 @@ class FastCgiCacheSourceTests(unittest.TestCase):
                                           ' include enable-php-85-wpfastcgi.conf;\n'+prefix))
             with self.assertRaisesRegex(audit.CacheAuditError,'precedence unverified'):
                 inspect()
+            # An external Regex location inserted BEFORE the verified
+            # extension can shadow the managed PHP handler. Read-only audit
+            # must not report ACHFC_4 as the effective site Cache in this
+            # case, even when the external location contains no Cache directive.
+            for modifier in ("~", "~*"):
+                with self.subTest(modifier=modifier):
+                    competing = (
+                        " location " + modifier +
+                        " [^/]\\.php(/|$) { return 404; }\n"
+                    )
+                    source.write_text(old.replace(
+                        ' include enable-php-85-wpfastcgi.conf;',
+                        competing + prefix +
+                        ' include enable-php-85-wpfastcgi.conf;'))
+                    with self.assertRaisesRegex(
+                            audit.CacheAuditError, 'precedence unverified'):
+                        inspect()
+            # Comments do not introduce active competing locations.
+            source.write_text(old.replace(
+                ' include enable-php-85-wpfastcgi.conf;',
+                ' # location ~ .*\\.php { return 500; }\n' +
+                prefix + ' include enable-php-85-wpfastcgi.conf;'))
+            self.assertEqual(inspect()[1], ('Direct Zone', 'ACHFC_4'))
+            source.write_text(old)
 
 
 
