@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Real native-aaPanel WooCommerce cache A/B QA, with no Nginx mutation.
 
+Accepts exactly the saved Applied native stock or wpfastcgi PHP handler. A
+Restored journal never authorizes this runner to activate or migrate Cache.
+
 Run only in an explicitly authorized isolated nonproduction guest AFTER the
 primary administrator has used Customizer's guarded Cache Apply and Recheck.
 Never enables, purges, reloads, restores or modifies native Nginx configuration.
@@ -20,6 +23,7 @@ import sys
 import tempfile
 
 import qa_woocommerce_cache_runtime as woo
+from ach_customizer_monitor import _active_nginx_text
 
 
 def digest(path):
@@ -50,16 +54,32 @@ def snapshot_native(args, *, nginx_root="/www/server/nginx/conf",
             record.get("php_version") != args.php_version or
             record.get("phase") != "applied" or
             record.get("op") != args.expected_recovery_id or
+            not isinstance(record.get("cache_generation"), str) or
+            not re.fullmatch(r"[0-9a-f]{32}", record["cache_generation"]) or
+            not isinstance(record.get("proposal_sha"), str) or
+            not re.fullmatch(r"[0-9a-f]{64}", record["proposal_sha"]) or
             not isinstance(record.get("cache_identity"), list) or
             len(record["cache_identity"]) != 2 or
             any(type(x) is not int or x <= 0 for x in record["cache_identity"])):
         raise RuntimeError("Native Cache is not the exact approved Applied generation")
 
-    plan = woo.generate_reference(site_id, args.php_version,
-                                  cache_generation=record["cache_generation"])
+    # A current applied WordPress journal can use the native wpfastcgi PHP
+    # handler, not just the older stock PHP include. Never infer this from
+    # a filename alone: the saved approved journal and the exact current
+    # Nginx source must agree before creating either QA customer.
+    handler = record.get("native_handler", "stock")
+    if handler not in ("stock", "wpfastcgi"):
+        raise RuntimeError("Unrecognized native Cache PHP handler")
+    inherited_hsts = record.get("inherited_hsts")
+    if handler == "wpfastcgi" and inherited_hsts is not None:
+        raise RuntimeError("Native WordPress Cache journal has invalid inherited HSTS")
+    plan = woo.generate_reference(
+        site_id, args.php_version, cache_generation=record["cache_generation"],
+        native_handler=handler, inherited_hsts=inherited_hsts)
     if (record["cache_directory"] != plan["cache_directory"] or
             record["global_sha"] != hashlib.sha256(plan["global_http_fragment"].encode()).hexdigest() or
-            record["extension_sha"] != hashlib.sha256(plan["site_server_fragment"].encode()).hexdigest()):
+            record["extension_sha"] != hashlib.sha256(plan["site_server_fragment"].encode()).hexdigest() or
+            record.get("proposal_sha") != plan["proposal_sha256"]):
         raise RuntimeError("Saved Cache policy does not match installed generation")
     cache_root = Path(record["cache_directory"])
     if not cache_root.is_dir() or cache_root.is_symlink():
@@ -71,34 +91,57 @@ def snapshot_native(args, *, nginx_root="/www/server/nginx/conf",
     vhost = Path(vhost_root)/(hostname+".conf")
     rewrite = Path(vhost_root).parent/"rewrite"/(hostname+".conf")
     main = Path(nginx_root)/"nginx.conf"
-    php = Path(nginx_root)/("enable-php-"+args.php_version+".conf")
+    suffix = "-wpfastcgi" if handler == "wpfastcgi" else ""
+    php_name = "enable-php-"+args.php_version+suffix+".conf"
+    php = Path(nginx_root)/php_name
     fastcgi = Path(nginx_root)/"fastcgi.conf"
     pathinfo = Path(nginx_root)/"pathinfo.conf"
     global_conf = Path(vhost_root)/("0.ach_customizer_cache_%d.conf" % site_id)
     extension_conf = Path(vhost_root)/"extension"/hostname/("ach_customizer_cache_%d.conf" % site_id)
-    native_sources = [journal,vhost,rewrite,main,php,fastcgi,pathinfo,global_conf,
-                      extension_conf,Path(policy_path)]
-    for source in native_sources:
+    journal_sources = [journal,vhost,main,php,fastcgi,global_conf,
+                       extension_conf,Path(policy_path)]
+    for source in journal_sources:
         if not source.is_file() or source.is_symlink():
             raise RuntimeError("Native Cache QA source missing/aliased: "+source.name)
     if (stat.S_IMODE(global_conf.stat().st_mode) != 0o600 or
             stat.S_IMODE(extension_conf.stat().st_mode) != 0o600):
         raise RuntimeError("Installed Cache source ownership mode is unexpected")
-    content=vhost.read_text(encoding="utf-8")
-    if (content.count("include enable-php-"+args.php_version+".conf;") != 1 or
-            re.search(r"include\s+enable-php-[^;]*wpfastcgi\.conf;",content) or
-            content.count("include "+str(Path(vhost_root)/"extension"/hostname/"*.conf")+";") != 1):
-        raise RuntimeError("Native VHost does not use the supported stock PHP/extension sources")
+
+    content = _active_nginx_text(vhost.read_text(encoding="utf-8"))
+    php_line = "include "+php_name+";"
+    # Match the single approved native PHP handler, not a commented line or
+    # a stale/competing include that would make the A/B HTTP probe ambiguous.
+    handlers = re.findall(r"\binclude\s+enable-php-[^\s;]+\s*;", content)
+    extension_line = "include "+str(Path(vhost_root)/"extension"/hostname/"*.conf")+";"
+    if (handlers != [php_line] or content.count(extension_line) != 1 or
+            content.index(extension_line) > content.index(php_line)):
+        raise RuntimeError("Native VHost handler or extension source differs from approved Cache")
+    rewrite_line = "include "+str(rewrite)+";"
+    if rewrite_line in content:
+        if content.count(rewrite_line) != 1 or not rewrite.is_file() or rewrite.is_symlink():
+            raise RuntimeError("Native Cache QA rewrite source missing/aliased")
+        rewrite_data = rewrite.read_bytes()
+        journal_sources.append(rewrite)
+    else:
+        rewrite_data = b""
+    if handler == "stock":
+        if not pathinfo.is_file() or pathinfo.is_symlink():
+            raise RuntimeError("Native Cache QA stock PHP pathinfo source missing/aliased")
+        pathinfo_data = pathinfo.read_bytes()
+        journal_sources.append(pathinfo)
+    else:
+        pathinfo_data = b""
     if (digest(global_conf) != record["global_sha"] or
             digest(extension_conf) != record["extension_sha"] or
             digest(main) != record["main_sha"] or
-            hashlib.sha256(vhost.read_bytes()+b"\0"+rewrite.read_bytes()).hexdigest() != record["vhost_sha"] or
-            hashlib.sha256(php.read_bytes()+b"\0"+fastcgi.read_bytes()+b"\0"+pathinfo.read_bytes()).hexdigest() != record["php_sha"]):
+            hashlib.sha256(vhost.read_bytes()+b"\0"+rewrite_data).hexdigest() != record["vhost_sha"] or
+            hashlib.sha256(php.read_bytes()+b"\0"+fastcgi.read_bytes()+b"\0"+
+                           pathinfo_data).hexdigest() != record["php_sha"]):
         raise RuntimeError("Native Cache source differs from saved approved generation")
     check = subprocess.run([args.nginx,"-t"],capture_output=True,text=True,timeout=12)
     if check.returncode:
         raise RuntimeError("Native Nginx syntax check failed; do not test sessions")
-    return {str(source):digest(source) for source in native_sources}
+    return {str(source):digest(source) for source in journal_sources}
 
 
 def probe_https(args):

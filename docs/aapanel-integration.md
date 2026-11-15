@@ -619,6 +619,62 @@ and browser-native administration must be separately demonstrated before
 claiming them supported. The read-only preview is not a Release or Production
 authorization.
 
+### Native WooCommerce A/B QA runner: current handlers (Issues #2/#21)
+
+The test-only [`scripts/qa_woocommerce_native_cache_runtime.py`](../scripts/qa_woocommerce_native_cache_runtime.py)
+previously assumed every active Cache journal used stock `enable-php-<version>.conf`
+plus `pathinfo.conf` and always included the on-disk native rewrite file.
+That incorrectly rejected the real WordPress-style
+`enable-php-<version>-wpfastcgi.conf` native sites introduced in the
+guarded Cache manager, even if a new Cache generation was correctly approved.
+It also omitted verification of the saved generated proposal hash.
+
+The runner now selects the native handler **only from the currently Applied
+schema-2 recovery journal** (`stock` is the legacy default; `wpfastcgi` is the
+other supported shape). Before any temporary customer can be created, it
+reconstructs the exact cache generation/proposal bytes, verifies the saved
+proposal/global/Extension hashes, physical Cache identity, source Nginx
+include and PHP-handler identity, and the actual source SHA of the proper
+native PHP file and shared FastCGI parameters. `pathinfo.conf` is required
+and fingerprinted only for stock PHP, as in the Cache manager; the native
+rewrite source is fingerprinted only if its VHost include is active. A
+commented-out or competing PHP include, missing/modified source, unsupported
+handler, stale proposal, invalid generation, changed site identity or
+`restored`/`prepared` journal refuses testing before WordPress user writes.
+
+To run the **real** A/B privacy acceptance, first install/verify the exact
+authorized development ZIP on a separately approved nonproduction aaPanel
+guest. The operator must then explicitly perform a **new Cache Apply and
+read-only Recheck** on the verified native WordPress/Woo site, retaining the
+new recovery ID and generation. Obtain the installed Cache policy file SHA
+and use the runner's `--expected-policy-sha256`, the exact *new* recovery ID
+via `--expected-recovery-id`, current aaPanel site ID/name/root, actual
+PHP version, and exact guest hostname; pass `--explicit-nonproduction-qa`.
+Select `--transport http`, or `https`/`both` with a separately verified
+site-SNI CA. The runner validates these identities and Nginx syntax before
+creating two unique disposable customers, checks actual independent account,
+cart and checkout content plus Woo Store API isolation, then independently
+observes removal of the two exact accounts. An uncertain cleanup retains a
+mode-0600 task-specific recovery manifest; never claim success or delete it
+without verified recovery. The runner does **not** install/reconfigure Cache,
+alter vendor files or approve Restore. A separate operator-approved Restore
+and final source/site health verification are required after an accepted QA
+campaign.
+
+**Current actual QA boundary (2026-11-15):** native Site #10 still has the
+historical stock `restored` journal under a previous site key, although its
+current native VHost uses PHP85 `wpfastcgi` and the v0.1.46 *read-only*
+Preview passed. This is **not** the fresh Applied generation the runner
+requires, nor evidence of live account/cart/order privacy. Site #17's
+independent PHP81 `wpfastcgi` Cache recovery remains `applied` with ID
+`4a1d0b84669b42a5a16d8e05943ac3d6`; it is a synthetic PHP fixture,
+not a WooCommerce test store. Neither state was changed by this QA runner
+source package. Native source-only preflight details, exact SHA identities and
+negative restored-journal result are in the
+[2026-11-15 QA receipt](evidence/aaPanel-8.0.7-2026-11-15-native-woo-qa-runner-preflight.json).
+Nginx Helper automatic invalidation, Purge All, public
+Release and Production remain outside scope.
+
 ### Guarded site-owned native FastCGI Cache lifecycle candidate (0.1.30, Issue #2)
 
 The 0.1.29 `preview_cache_safety` route remains **reference-only**. The separate 0.1.30 `preview_cache_activation` route uses a primary-admin aaPanel POST with the native website ID, key, root, status and bound-domain snapshot. It requires aaPanel 8.0.7, Nginx, a verified site-matching generated VHost, a single stock `enable-php-81.conf` or `enable-php-85.conf` include, safe precedence of the native per-site extension glob **before** PHP, a direct known HTTP-scope VHost include glob, no site cache source already in force, and complete two-pass peer source attribution. The result contains a reviewable site-specific zone/path and source/proposal SHA256 and a fresh 128-bit **cache generation** included in the Nginx Cache Key. Each new approval binds that generation to exact source bytes; the backend rejects reuse across the active journal and every intact archived restored journal, so reactivating after a Restore cannot HIT stale objects left by an older generation. The original per-site physical Cache directory device/inode is persisted alongside the recovery identity; read-only Recheck requires current VHost/rewrite, main Nginx and stock PHP/parameter source hashes, physical ownership and identity, managed snippets, and the loopback PHP marker before returning Applied. Drift returns Needs Review with the original recovery ID and a diagnostic, without touching files or reloading Nginx. This is **not** a loaded-worker/visitor-session safety finding.
