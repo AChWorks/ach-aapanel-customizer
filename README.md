@@ -54,6 +54,33 @@ and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
 for live QA and independent-review gates. See the
 [read-only v0.1.46 native QA evidence](docs/evidence/aaPanel-8.0.7-2026-11-15-restored-site-key-v046.json).
 
+### Native WooCommerce A/B acceptance runner: wpfastcgi source parity (Issues #2/#21)
+
+The **nonproduction-only** real-customer QA runner
+[`scripts/qa_woocommerce_native_cache_runtime.py`](scripts/qa_woocommerce_native_cache_runtime.py)
+now reads the **current Applied schema-2 journal** to select the exact previously
+approved `stock` or `wpfastcgi` PHP handler. Its pre-account checks verify
+the saved generation/proposal, site Cache directory identity, active native
+handler/include ordering, actual required PHP parameter sources, optional
+native rewrite content, managed fragments and Nginx syntax. Changed or
+Restored/unapproved sources reject **before** customer creation. The runner
+still creates only two uniquely tagged QA customers, requires actual
+logged-in account/cart/checkout/Store API isolation and verifies exact
+cleanup/recovery; it never performs Cache Apply, Nginx reload or Restore.
+Regression tests cover both handlers and rejected drift/identity paths.
+A [real native read-only handler preflight](docs/evidence/aaPanel-8.0.7-2026-11-15-native-woo-qa-runner-preflight.json)
+independently verified Site #17 Applied wpfastcgi and Site #10 Restored refusal
+without altering either site's journal or VHost.
+
+**No new native customer/session acceptance is claimed by this runner change.**
+The preserved real QA Site #10 is still in its *older Restored* generation;
+it must first pass a separate fresh, explicitly authorized native Cache
+Apply → Recheck and source/identity verification before this runner can
+exercise the actual WooCommerce store. Site #17 remains Applied and is
+a synthetic PHP81 fixture, **not** a WordPress store. Follow the
+[exact QA preconditions](docs/aapanel-integration.md#native-woocommerce-ab-qa-runner-current-handlers-issues-221)
+and Issue #21; no production/release action is implied.
+
 ### v0.1.45 merged: trust managed WordPress source-audit precedence (Issues #2/#21)
 
 The read-only FastCGI Cache source observation now detects an active Nginx

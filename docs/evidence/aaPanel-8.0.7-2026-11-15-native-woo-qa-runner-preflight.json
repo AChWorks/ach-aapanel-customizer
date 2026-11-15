@@ -1,0 +1,65 @@
+{
+  "date_utc": "2026-11-15",
+  "work_items": [
+    2,
+    21
+  ],
+  "integration_base": "38509a18baf0f7773b23f41f43a497e1e96ab37f",
+  "scope": "test-only native WooCommerce A/B QA runner source parity; no plugin/runtime change",
+  "guest": {
+    "project": "ach-aapanel-qa",
+    "instance": "aac-native-qa",
+    "uuid": "df2e8224-480e-464b-b0b5-e2d33cb02040",
+    "generation": "ba97cfa3-c6c6-475b-8215-8f2cc108d2fc",
+    "platform": "aaPanel 8.0.7; native Nginx 1.28.3"
+  },
+  "pinned_code_sha256": {
+    "qa_woocommerce_native_cache_runtime.py": "2485657a65bc0330415b81ff1d99878d8a45f4de860b4ddd5f4438ff90543bcd",
+    "qa_woocommerce_cache_runtime.py": "332ac9b5f7a0eefd48847f8ea16f47a0774d813a1747326ccfd71d99806ae74f",
+    "ach_customizer_cache_policy.py": "a3087776ad6848b7f52fbaf6d16ae35f7831a0716341f4947eaed238be609b17",
+    "ach_customizer_monitor.py": "a2789d690a598fde69ee6eefe9ea92217d6e0ecc29be4ec709fb5dd5d4d85b1a"
+  },
+  "qa_staging": "Isolated task-owned source copies removed after verification; site files and installed plugin unchanged",
+  "observations": [
+    {
+      "site_id": 17,
+      "site_key": "qa-wp81cache-20261114.test",
+      "type": "synthetic PHP 8.1; NOT WordPress or WooCommerce",
+      "native_handler": "wpfastcgi",
+      "journal_phase": "applied",
+      "recovery_id": "4a1d0b84669b42a5a16d8e05943ac3d6",
+      "cache_generation": "2ca36e5b60e446bab217ad49ec0cbe20",
+      "read_only_snapshot_native": "PASS",
+      "source_files_verified": 9,
+      "journal_sha256_unchanged": "7771304c97da1860cd487e6ed0bebda815c85852cfc2277758f9d6052b91c22b",
+      "vhost_sha256_unchanged": "9318fbcd7f83c178d4aad0e91bdb3ceefe607facd38dbd8fb9121d0b87020b63"
+    },
+    {
+      "site_id": 10,
+      "site_key": "qa21-woocommerce-native.digikalashop.top",
+      "type": "actual native WooCommerce test site; no account request made",
+      "current_native_handler": "wpfastcgi",
+      "journal_phase": "restored",
+      "historical_handler": "stock",
+      "historical_recovery_id": "7700d54be9c44ef1a263dfff3eda5bd0",
+      "read_only_snapshot_native": "PASS: correctly refused historical Restored journal before customer creation",
+      "journal_sha256_unchanged": "cb839016bcfb4baf50e0faf48a6e34247e1c3c98117fdfd2f77c1684da0d7823",
+      "vhost_sha256_unchanged": "12c67e69c242ebe463a0cf9732c9fdb051556f68a45ff8fa917f10482a86c403"
+    }
+  ],
+  "effects": {
+    "qa_customer_creation": 0,
+    "nginx_reload_or_configuration_writes": 0,
+    "cache_apply_clear_purge_restore": 0,
+    "plugin_install_upgrade": 0,
+    "site17_recovery_modified": false,
+    "site10_historical_journal_modified": false
+  },
+  "limitations": [
+    "Source-pinned, read-only preflight only; no authenticated browser approval",
+    "Site 17 is synthetic PHP and cannot prove customer/cart/checkout privacy",
+    "Site 10 needs an explicitly authorized fresh Apply/Recheck before live A/B",
+    "No WordPress/WooCommerce customer/session/order data was created or tested",
+    "No Nginx Helper automatic invalidation, Purge All, Release or Production claim"
+  ]
+}

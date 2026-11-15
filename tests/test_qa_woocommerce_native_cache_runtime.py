@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0,str(SOURCE.parent))
 qa = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(qa)
+from ach_customizer_cache_policy import WP_NATIVE_CANONICAL, generate_reference
 
 TOKEN="a"*32
 
@@ -65,7 +66,7 @@ class NativeWooCachePreflightTests(unittest.TestCase):
         }
         contents={
             "vhost":("server { include "+str(self.vhost/"extension"/"woo.test"/"*.conf")+
-                     "; include enable-php-85.conf; }\n"),
+                     "; include enable-php-85.conf; include "+str(self.files["rewrite"])+"; }\n"),
             "rewrite":"# native rewrite\n",
             "main":"http { include vhosts; }\n",
             "php":"location ~ \\.php { fastcgi_pass php85; }\n",
@@ -81,11 +82,13 @@ class NativeWooCachePreflightTests(unittest.TestCase):
         self.policy.write_text("exact-policy-fixture")
         self.reference={"cache_directory":str(self.zone),
             "global_http_fragment":contents["global"],
-            "site_server_fragment":contents["extension"]}
+            "site_server_fragment":contents["extension"],
+            "proposal_sha256":digest(b"approved-proposal")}
         si=self.zone.stat()
         self.record={
             "schema":2,"site_id":10,"site_key":"woo.test","php_version":"85",
             "phase":"applied","op":TOKEN,"cache_generation":"b"*32,
+            "proposal_sha":self.reference["proposal_sha256"],
             "cache_identity":[si.st_dev,si.st_ino],
             "cache_directory":str(self.zone),
             "global_sha":digest(contents["global"].encode()),
@@ -105,7 +108,7 @@ class NativeWooCachePreflightTests(unittest.TestCase):
         self.gen=patch.object(qa.woo,"generate_reference",return_value=self.reference)
         self.check=patch.object(qa.subprocess,"run",return_value=subprocess.CompletedProcess(
             ["nginx","-t"],0,"",""))
-        self.gen.start();self.check.start()
+        self.generator=self.gen.start();self.check.start()
         self.addCleanup(self.gen.stop);self.addCleanup(self.check.stop)
 
     def save_record(self):
@@ -118,6 +121,138 @@ class NativeWooCachePreflightTests(unittest.TestCase):
 
     def test_exact_applied_native_sources_accept(self):
         self.assertEqual(len(self.snapshot()),10)
+
+    def make_wordpress_handler(self):
+        """Fixture matches a separately approved wpfastcgi PHP85 generation."""
+        self.record["native_handler"] = "wpfastcgi"
+        self.files["vhost"].write_text(
+            self.files["vhost"].read_text().replace(
+                "enable-php-85.conf", "enable-php-85-wpfastcgi.conf"))
+        wp_path = self.nginx / "enable-php-85-wpfastcgi.conf"
+        wp_path.write_text(
+            WP_NATIVE_CANONICAL.replace("NATIVE_PHP", "85"))
+        self.files["wp_php"] = wp_path
+        self.record["php_sha"] = digest(
+            wp_path.read_bytes() + b"\0" + self.files["fastcgi"].read_bytes() + b"\0")
+        self.record["vhost_sha"] = digest(
+            self.files["vhost"].read_bytes() + b"\0" +
+            self.files["rewrite"].read_bytes())
+        self.save_record()
+
+    def use_real_generator(self, *, native_handler="stock"):
+        """Source-bound fixture; the real policy provides every expected hash."""
+        plan = generate_reference(
+            10, "85", cache_root=str(self.zone.parent),
+            cache_generation="b"*32, native_handler=native_handler)
+        self.files["global"].write_text(plan["global_http_fragment"])
+        self.files["extension"].write_text(plan["site_server_fragment"])
+        self.reference = plan
+        self.generator.side_effect = lambda site_id, version, **kw: generate_reference(
+            site_id, version, cache_root=str(self.zone.parent), **kw)
+        self.record.update(
+            cache_directory=plan["cache_directory"],
+            global_sha=digest(self.files["global"].read_bytes()),
+            extension_sha=digest(self.files["extension"].read_bytes()),
+            proposal_sha=plan["proposal_sha256"])
+        self.save_record()
+
+    def test_real_reference_binding_for_native_wpfastcgi(self):
+        self.make_wordpress_handler()
+        self.use_real_generator(native_handler="wpfastcgi")
+        self.assertEqual(len(self.snapshot()),9)
+        # A changed journal generation cannot borrow another approved policy.
+        self.record["cache_generation"] = "c"*32
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError,"Saved Cache policy"):
+            self.snapshot()
+
+    def test_real_reference_binding_for_stock_and_hsts(self):
+        self.use_real_generator()
+        self.assertEqual(len(self.snapshot()),10)
+        self.record["inherited_hsts"] = (
+            'add_header Strict-Transport-Security "max-age=63072000; preload";')
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError,"Saved Cache policy"):
+            self.snapshot()
+
+    def test_native_wpfastcgi_applied_generation_matches_pinned_sources(self):
+        self.make_wordpress_handler()
+        self.files["pathinfo"].unlink()  # WP handler does not include pathinfo.
+        snapshot = self.snapshot()
+        self.assertEqual(len(snapshot), 9)
+        self.assertIn(str(self.files["wp_php"]), snapshot)
+        self.assertNotIn(str(self.files["php"]), snapshot)
+        self.assertNotIn(str(self.files["pathinfo"]), snapshot)
+        self.generator.assert_called_with(
+            10, "85", cache_generation="b"*32,
+            native_handler="wpfastcgi", inherited_hsts=None)
+
+    def test_missing_or_malformed_new_generation_requires_fresh_apply(self):
+        self.make_wordpress_handler()
+        for value in (None, "invalid", "b"*31, "B"*32):
+            with self.subTest(value=value):
+                self.record["cache_generation"] = value
+                self.save_record()
+                with self.assertRaisesRegex(RuntimeError, "exact approved Applied"):
+                    self.snapshot()
+
+    def test_native_wpfastcgi_with_optional_rewrite_absent(self):
+        self.make_wordpress_handler()
+        source = self.files["vhost"].read_text()
+        source = source.replace(" include "+str(self.files["rewrite"])+";", "")
+        self.files["vhost"].write_text(source)
+        self.files["rewrite"].unlink()
+        self.record["vhost_sha"] = digest(self.files["vhost"].read_bytes()+b"\0")
+        self.save_record()
+        snapshot = self.snapshot()
+        self.assertNotIn(str(self.files["rewrite"]), snapshot)
+
+    def test_wpfastcgi_source_mismatch_and_unapproved_handler_refused(self):
+        self.make_wordpress_handler()
+        self.files["wp_php"].write_text(
+            self.files["wp_php"].read_text()+"\n# drift\n")
+        with self.assertRaisesRegex(RuntimeError,"source differs"):
+            self.snapshot()
+        self.make_wordpress_handler()  # restores exact approved snippet
+        self.record["native_handler"] = "stock"
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError, "handler or extension source"):
+            self.snapshot()
+        self.record["native_handler"] = "unsupported"
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError, "Unrecognized native Cache PHP handler"):
+            self.snapshot()
+
+    def test_wpfastcgi_recovery_and_policy_mismatch_refused(self):
+        self.make_wordpress_handler()
+        self.record["proposal_sha"] = "f"*64
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError, "Saved Cache policy"):
+            self.snapshot()
+        self.record["proposal_sha"] = self.reference["proposal_sha256"]
+        self.record["inherited_hsts"] = 'add_header Strict-Transport-Security "max-age=1";'
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError, "invalid inherited HSTS"):
+            self.snapshot()
+        self.record.pop("inherited_hsts")
+        self.record["phase"] = "restored"
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError, "exact approved Applied"):
+            self.snapshot()
+
+    def test_mixed_or_commented_vhost_handler_cannot_justify_accounts(self):
+        self.make_wordpress_handler()
+        self.files["vhost"].write_text(
+            self.files["vhost"].read_text().replace(
+                "include enable-php-85-wpfastcgi.conf;",
+                "# include enable-php-85-wpfastcgi.conf;\n"
+                "include enable-php-85.conf;"))
+        self.record["vhost_sha"] = digest(
+            self.files["vhost"].read_bytes()+b"\0"+
+            self.files["rewrite"].read_bytes())
+        self.save_record()
+        with self.assertRaisesRegex(RuntimeError, "handler or extension source"):
+            self.snapshot()
 
     def test_wrong_recovery_is_rejected(self):
         self.args.expected_recovery_id="c"*32
@@ -142,7 +277,7 @@ class NativeWooCachePreflightTests(unittest.TestCase):
         path=self.files["vhost"]
         path.write_text(path.read_text().replace(
             "include enable-php-85.conf;","include enable-php-85-wpfastcgi.conf;"))
-        with self.assertRaisesRegex(RuntimeError,"supported stock PHP"):
+        with self.assertRaisesRegex(RuntimeError,"handler or extension source"):
             self.snapshot()
 
     def test_policy_hash_mismatch_is_rejected(self):
