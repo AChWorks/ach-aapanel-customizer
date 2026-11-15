@@ -588,7 +588,7 @@ concurrent writes, bind-mount/symlink isolation, real HTTP purge, or native
 Customizer integration. `Purge All` stays OFF. Full reproducible report:
 [`docs/evidence/aaPanel-8.0.7-2026-11-13-nginx-helper-scope-hook-qa.json`](evidence/aaPanel-8.0.7-2026-11-13-nginx-helper-scope-hook-qa.json).
 
-### Restored Cache identity/handler source transition (v0.1.46 candidate, Issues #2/#21)
+### Restored Cache identity/handler source transition (v0.1.46 integrated development source, Issues #2/#21)
 
 A native aaPanel website ID can retain an exact **Restored** Cache journal while
 its configured primary site key or PHP handler changes. Prior code rejected

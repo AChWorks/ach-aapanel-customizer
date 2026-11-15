@@ -2,7 +2,7 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Latest Owner-integrated development source: v0.1.45 UNRELEASED ([independently reviewed PR #73](https://github.com/AChWorks/ach-aapanel-customizer/pull/73), [main@48b1716](https://github.com/AChWorks/ach-aapanel-customizer/commit/48b171665a2b20fc84b537069f5175ae8c0eed7a)). No public Release or Production deployment.**
+**Latest Owner-integrated development source: v0.1.46 UNRELEASED ([independently reviewed PR #75](https://github.com/AChWorks/ach-aapanel-customizer/pull/75), [main@12e4a96](https://github.com/AChWorks/ach-aapanel-customizer/commit/12e4a96da518a131a47fc4f0231ccc2e41078f60)). No public Release or Production deployment.**
 v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
 exact-URL Clear, including current-generation single-object removal, unchanged
 peer/other URL, recheck and consented Restore
@@ -19,7 +19,7 @@ and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 Use the live PR, Actions and Issue evidence for exact candidate and acceptance
 status; new integration, Release and Production require their own gates.
 
-### v0.1.46 development candidate (UNMERGED): historical restored Cache re-Apply (Issues #2/#21)
+### v0.1.46 merged: historical restored Cache re-Apply (Issues #2/#21)
 
 The source-only package now permits an **explicitly reapproved new Cache generation**
 when an older, fully **Restored** schema-2 recovery journal belongs to the same
