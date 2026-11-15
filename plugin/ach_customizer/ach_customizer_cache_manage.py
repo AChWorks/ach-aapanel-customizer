@@ -1081,18 +1081,25 @@ def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT
 def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_ROOT):
     """Allow another explicit Apply only with an exact, restored prior policy.
 
-    Reuse the existing private site directory with the unchanged generator.
-    Never silently adopt a directory or archived fragment from a different
-    site or a different policy. Prior journals are archived, not discarded.
+    Reuse the pinned site directory with a fresh generation. A fully restored
+    schema-2 journal may precede an aaPanel site-key change or a supported
+    stock-to-wpfastcgi source migration: its exact old fragments and physical
+    identity must still match. No active/prepared recovery may be adopted.
+    Prior journals are archived, not discarded.
     """
     prior_reference = generate_reference(
         site['id'], old['php_version'],
         cache_generation=old['cache_generation'],
         inherited_hsts=old.get('inherited_hsts'),
         native_handler=old.get('native_handler', 'stock'))
-    if (old['phase'] != 'restored' or old['site_key'] != site['name'] or
+    prior_handler = old.get('native_handler', 'stock')
+    current_handler = reference.get('native_handler', 'stock')
+    changed_identity = old['site_key'] != site['name'] or prior_handler != current_handler
+    if (old['phase'] != 'restored' or
             old['php_version'] != reference['php_version'] or
-            old.get('native_handler', 'stock') != reference.get('native_handler', 'stock') or
+            (prior_handler != current_handler and
+             (prior_handler, current_handler) != ('stock', 'wpfastcgi')) or
+            (changed_identity and (old['schema'] != 2 or old['cache_identity'] is None)) or
             old['cache_generation'] == reference['cache_generation'] or
             old['proposal_sha'] != prior_reference['proposal_sha256']):
         raise CacheManageError('recovery',
@@ -1125,6 +1132,7 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
         # validate path ownership rather than silently adopting a missing tree.
         raise CacheManageError('ownership',
             'Prior managed Cache directory is missing, not safe to reuse')
+    return changed_identity
 
 
 def _archive_restored_record(statefd, record):
@@ -1158,8 +1166,9 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
         native,reference,sources=_compatibility(
             site,public,vhost_root=vhost_root,nginx_root=nginx_root,
             cache_generation=cache_generation)
+        restored_transition = False
         if old is not None:
-            _restored_generation_can_reapply(
+            restored_transition = _restored_generation_can_reapply(
                 site,old,reference,vhost_root=vhost_root)
         globfd,extensionfd,glob,extension=_cache_files(
             statefd,site,vhost_root=vhost_root)
@@ -1194,7 +1203,15 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
                         'privacy and Purge All remain unverified.'
                         if sources['native_handler'] == 'wpfastcgi' else
                         'No cache writes, reload, or purge in this read-only preview. '
-                        'Native WordPress/WooCommerce/Nginx Helper acceptance remains independent.')}
+                        'Native WordPress/WooCommerce/Nginx Helper acceptance remains independent.') +
+                ((' Historical restored recovery %s belongs to site key %s (%s handler); '
+                  'current site uses %s (%s handler). Exact retained fragments and '
+                  'saved physical Cache identity matched, but application continuity '
+                  'is NOT established. Approving Apply archives that recovery and '
+                  'uses a new Cache generation without deleting older objects.' %
+                  (old['op'], old['site_key'], old.get('native_handler', 'stock'),
+                   site['name'], sources['native_handler']))
+                 if restored_transition else '')}
     finally:
         os.close(statefd)
 

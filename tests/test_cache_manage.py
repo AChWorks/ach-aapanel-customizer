@@ -503,6 +503,159 @@ class CacheManageTests(unittest.TestCase):
             self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
                 recovery_id=second['recovery_id'],**self.kwargs())['state'],'Restored')
 
+    def test_restored_renamed_site_requires_fresh_approval_and_archives_old_journal(self):
+        first=self.apply()
+        cache.manage_cache('restore',self.site,approved=True,
+                           recovery_id=first['recovery_id'],**self.kwargs())
+        journal=self.state/cache._names(7)[2]
+        old=json.loads(journal.read_text())
+        old['site_key']='prior-qa.test'
+        journal.write_text(json.dumps(old))
+        saved=journal.read_bytes()
+        commands=list(self.commands)
+        plan=self.preview()
+        self.assertEqual(plan['state'],'Ready for Review')
+        self.assertFalse(plan['runtime_verified'])
+        self.assertIn('Historical restored recovery',plan['note'])
+        self.assertIn('prior-qa.test',plan['note'])
+        self.assertIn('application continuity is NOT established',plan['note'])
+        self.assertEqual(journal.read_bytes(),saved)
+        self.assertEqual(self.commands,commands)
+        with self.assertRaisesRegex(cache.CacheManageError,'approval'):
+            cache.manage_cache('apply',self.site,public=object(),
+                expected_source=plan['source_sha256'],
+                expected_proposal=plan['proposal_sha256'],
+                cache_generation=plan['cache_generation'],
+                approved=False,**self.kwargs())
+        self.assertEqual(journal.read_bytes(),saved)
+        second=cache.manage_cache('apply',self.site,public=object(),
+            expected_source=plan['source_sha256'],
+            expected_proposal=plan['proposal_sha256'],
+            cache_generation=plan['cache_generation'],
+            approved=True,**self.kwargs())
+        self.assertEqual(second['state'],'Applied')
+        self.assertEqual(cache.manage_cache('recheck',self.site,
+                                            **self.kwargs())['state'],'Applied')
+        active=json.loads(journal.read_text())
+        self.assertEqual(active['site_key'],'qa.test')
+        self.assertNotEqual(active['cache_generation'],old['cache_generation'])
+        self.assertNotEqual(active['op'],old['op'])
+        archived=self.state/(cache._names(7)[2]+'.'+old['op']+'.restored')
+        self.assertEqual(json.loads(archived.read_text()),old)
+        self.assertTrue((self.ext/(cache._names(7)[1]+'.'+old['op']+'.retained')).is_file())
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=second['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_restored_stock_site_renamed_to_wpfastcgi_is_a_new_approved_generation(self):
+        first=self.apply()
+        cache.manage_cache('restore',self.site,approved=True,
+                           recovery_id=first['recovery_id'],**self.kwargs())
+        original=json.loads((self.state/cache._names(7)[2]).read_text())
+        self.assertNotIn('native_handler',original)
+        renamed='renamed-woo.test'
+        new_ext=self.ext.parent/renamed
+        self.ext.rename(new_ext)
+        prior_vhost=self.vhost/'qa.test.conf'
+        new_vhost=self.vhost/(renamed+'.conf')
+        new_vhost.write_text(prior_vhost.read_text().replace('qa.test',renamed).replace(
+            'enable-php-85.conf','enable-php-85-wpfastcgi.conf'))
+        prior_vhost.unlink()
+        self.site['name']=renamed
+        self.site['bound_domains']=[{'name':renamed,'port':80}]
+        self.ext=new_ext
+        (self.nginx/'enable-php-85-wpfastcgi.conf').write_text(
+            cache.WP_NATIVE_CANONICAL.replace('NATIVE_PHP','85'))
+        self.sources=cache._site_sources(
+            self.site,'85',native_handler='wpfastcgi',
+            vhost_root=str(self.vhost),nginx_root=str(self.nginx))
+        self.assertEqual(self.sources['native_handler'],'wpfastcgi')
+        current_native=dict(self.native,zone_state='Direct Zone',
+                            cache_zone='WORDPRESS',purge_directive_seen=True)
+        def compatible(site,public,**kw):
+            reference=cache.generate_reference(
+                7,'85',cache_generation=kw.get('cache_generation'),
+                native_handler='wpfastcgi')
+            return current_native,reference,self.sources
+        with patch.object(cache,'_compatibility',side_effect=compatible):
+            plan=self.preview()
+            self.assertEqual(plan['state'],'Ready for Review')
+            self.assertEqual(plan['native_handler'],'wpfastcgi')
+            self.assertIn('qa.test',plan['note'])
+            self.assertIn('renamed-woo.test',plan['note'])
+            self.assertIn('stock handler',plan['note'])
+            self.assertIn('wpfastcgi handler',plan['note'])
+            second=cache.manage_cache('apply',self.site,public=object(),
+                expected_source=plan['source_sha256'],
+                expected_proposal=plan['proposal_sha256'],
+                cache_generation=plan['cache_generation'],approved=True,
+                **self.kwargs())
+        self.assertEqual(second['state'],'Applied')
+        self.assertNotEqual(original['cache_generation'],plan['cache_generation'])
+        self.assertEqual(cache.manage_cache('recheck',self.site,
+                                           **self.kwargs())['state'],'Applied')
+        current=json.loads((self.state/cache._names(7)[2]).read_text())
+        self.assertEqual(current['site_key'],renamed)
+        self.assertEqual(current['native_handler'],'wpfastcgi')
+        self.assertEqual(json.loads((self.state/(
+            cache._names(7)[2]+'.'+original['op']+'.restored')).read_text()),original)
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=second['recovery_id'],**self.kwargs())['state'],'Restored')
+
+    def test_changed_restored_identity_fails_without_pinned_bytes_or_inode(self):
+        first=self.apply()
+        cache.manage_cache('restore',self.site,approved=True,
+                           recovery_id=first['recovery_id'],**self.kwargs())
+        journal=self.state/cache._names(7)[2]
+        original=json.loads(journal.read_text())
+        changed=dict(original,site_key='old-site.test')
+        journal.write_text(json.dumps(changed))
+        snippet=self.ext/(cache._names(7)[1]+'.'+first['recovery_id']+'.retained')
+        saved_snippet=snippet.read_bytes()
+        attempts=[
+            ('schema1',dict(changed,schema=1)),
+            ('null inode',dict(changed,cache_identity=None)),
+            ('unrestored',dict(changed,phase='applied')),
+        ]
+        for label,record in attempts:
+            with self.subTest(label=label):
+                if record['schema']==1:
+                    record.pop('cache_identity')
+                journal.write_text(json.dumps(record))
+                with self.assertRaises(cache.CacheManageError):
+                    self.preview()
+                self.assertEqual(json.loads(journal.read_text()),record)
+        journal.write_text(json.dumps(changed))
+        snippet.write_bytes(saved_snippet+b'# external drift')
+        with self.assertRaisesRegex(cache.CacheManageError,'byte-identical'):
+            self.preview()
+        self.assertEqual(snippet.read_bytes(),saved_snippet+b'# external drift')
+        snippet.write_bytes(saved_snippet)
+        active=self.ext/cache._names(7)[1]
+        active.write_bytes(saved_snippet)
+        active.chmod(0o600)
+        try:
+            with self.assertRaisesRegex(cache.CacheManageError,'byte-identical'):
+                self.preview()
+        finally:
+            active.unlink()
+        with patch.object(cache,'_path_owned',return_value=(19,24)):
+            with self.assertRaisesRegex(cache.CacheManageError,'physical identity'):
+                self.preview()
+        self.assertEqual(json.loads(journal.read_text()),changed)
+        self.assertEqual(self.preview()['state'],'Ready for Review')
+
+    def test_applied_recovery_is_never_rebound_after_site_key_change(self):
+        first=self.apply()
+        journal=self.state/cache._names(7)[2]
+        before=journal.read_bytes()
+        self.site['name']='new-site.test'
+        with self.assertRaisesRegex(cache.CacheManageError,'Recheck/Restore'):
+            self.preview()
+        observed=cache.manage_cache('recheck',self.site,**self.kwargs())
+        self.assertEqual(observed['state'],'Needs Review')
+        self.assertEqual(observed['recovery_id'],first['recovery_id'])
+        self.assertEqual(journal.read_bytes(),before)
+
     def test_recheck_detects_each_native_source_drift_without_writing(self):
         applied=self.apply()
         global_path=self.vhost/cache._names(7)[0]

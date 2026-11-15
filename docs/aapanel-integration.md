@@ -588,6 +588,37 @@ concurrent writes, bind-mount/symlink isolation, real HTTP purge, or native
 Customizer integration. `Purge All` stays OFF. Full reproducible report:
 [`docs/evidence/aaPanel-8.0.7-2026-11-13-nginx-helper-scope-hook-qa.json`](evidence/aaPanel-8.0.7-2026-11-13-nginx-helper-scope-hook-qa.json).
 
+### Restored Cache identity/handler source transition (v0.1.46 candidate, Issues #2/#21)
+
+A native aaPanel website ID can retain an exact **Restored** Cache journal while
+its configured primary site key or PHP handler changes. Prior code rejected
+all such histories even when its last owned fragment bytes and site-owned
+Cache inode were unchanged. The candidate supports only a pinned schema-2
+restored journal, unchanged PHP version, and a current fully supported native
+handler, allowing stock → wpfastcgi but not arbitrary handler transitions.
+Existing exact SHA-256 of the **old** proposal, the two retained fragments
+under the **current** site Extension directory, and the physical Cache
+device/inode must still match. Standard native site/peer audit, VHost identity,
+source hash, PHP routing and explicit current operator approval still govern
+a new Apply. A fresh generation is mandatory to prevent stale old cache
+objects serving under the new approved site/handler; the earlier journal is
+durably archived and its retained objects are not deleted.
+
+The read-only Preview calls attention to the former recovery ID/site key/
+handler and makes clear that it does not establish continuity of the
+application or authority to migrate an active recovery. Previously applied
+and prepared records still require their own matched Recheck/Restore. The
+native aaPanel 8.0.7 isolated guest's Site #10 had a correctly Restored stock
+journal under its prior site key and retained fragments under its current
+Extension path; the candidate source's file/inode verification and full
+source-audit Preview passed **without** journal, VHost, managed Cache, live
+plugin or Nginx mutation. Installed plugin v0.1.44 and Site #17's live
+applied journal remain unchanged. A real new Apply, real WooCommerce private
+session and cart acceptance, Nginx Helper unlink_files, site-owned Purge All
+and browser-native administration must be separately demonstrated before
+claiming them supported. The read-only preview is not a Release or Production
+authorization.
+
 ### Guarded site-owned native FastCGI Cache lifecycle candidate (0.1.30, Issue #2)
 
 The 0.1.29 `preview_cache_safety` route remains **reference-only**. The separate 0.1.30 `preview_cache_activation` route uses a primary-admin aaPanel POST with the native website ID, key, root, status and bound-domain snapshot. It requires aaPanel 8.0.7, Nginx, a verified site-matching generated VHost, a single stock `enable-php-81.conf` or `enable-php-85.conf` include, safe precedence of the native per-site extension glob **before** PHP, a direct known HTTP-scope VHost include glob, no site cache source already in force, and complete two-pass peer source attribution. The result contains a reviewable site-specific zone/path and source/proposal SHA256 and a fresh 128-bit **cache generation** included in the Nginx Cache Key. Each new approval binds that generation to exact source bytes; the backend rejects reuse across the active journal and every intact archived restored journal, so reactivating after a Restore cannot HIT stale objects left by an older generation. The original per-site physical Cache directory device/inode is persisted alongside the recovery identity; read-only Recheck requires current VHost/rewrite, main Nginx and stock PHP/parameter source hashes, physical ownership and identity, managed snippets, and the loopback PHP marker before returning Applied. Drift returns Needs Review with the original recovery ID and a diagnostic, without touching files or reloading Nginx. This is **not** a loaded-worker/visitor-session safety finding.
