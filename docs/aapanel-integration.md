@@ -642,6 +642,19 @@ commented-out or competing PHP include, missing/modified source, unsupported
 handler, stale proposal, invalid generation, changed site identity or
 `restored`/`prepared` journal refuses testing before WordPress user writes.
 
+**Physical and pre-account gate:** Before returning a successful snapshot,
+the runner now calls the *same* native backend no-follow `_path_owned` and
+read-only `_scan_site_cache_files(..., remove=False)` checks used by guarded
+Cache Clear. A stable `(device, inode)` alone is insufficient when the tree's
+owner/mode, ancestors, mount configuration, or contained Nginx object layout
+has drifted. After any TLS preflight, it repeats the snapshot **before**
+allocating the test directory or creating the first customer; a difference
+fails without changing any WordPress user. Pre/post equality is still checked
+after cleanup. These checks improve the test-admission gate but do **not**
+prove arbitrary unregistered external mount aliases, live WooCommerce customer
+isolation or site-owned Purge All. The manager-side full registered-peer
+source/physical graph remains the authority for actual Cache mutation.
+
 To run the **real** A/B privacy acceptance, first install/verify the exact
 authorized development ZIP on a separately approved nonproduction aaPanel
 guest. The operator must then explicitly perform a **new Cache Apply and

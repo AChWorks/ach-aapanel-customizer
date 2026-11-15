@@ -60,10 +60,13 @@ The **nonproduction-only** real-customer QA runner
 [`scripts/qa_woocommerce_native_cache_runtime.py`](scripts/qa_woocommerce_native_cache_runtime.py)
 now reads the **current Applied schema-2 journal** to select the exact previously
 approved `stock` or `wpfastcgi` PHP handler. Its pre-account checks verify
-the saved generation/proposal, site Cache directory identity, active native
-handler/include ordering, actual required PHP parameter sources, optional
-native rewrite content, managed fragments and Nginx syntax. Changed or
-Restored/unapproved sources reject **before** customer creation. The runner
+the saved generation/proposal, site Cache directory identity, native
+Cache-manager ownership and read-only file-layout rules (including no-follow
+ancestors, permissions and mount checks), active native handler/include ordering,
+actual required PHP parameter sources, optional native rewrite content,
+managed fragments and Nginx syntax. It repeats the complete source/ownership
+snapshot immediately before account creation, after any HTTPS preflight.
+Changed or Restored/unapproved sources reject **before** customer creation. The runner
 still creates only two uniquely tagged QA customers, requires actual
 logged-in account/cart/checkout/Store API isolation and verifies exact
 cleanup/recovery; it never performs Cache Apply, Nginx reload or Restore.
