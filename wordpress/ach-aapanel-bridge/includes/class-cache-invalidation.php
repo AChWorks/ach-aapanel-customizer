@@ -36,6 +36,10 @@ final class CacheInvalidation
             // then invalidate only after the deletion actually completes.
             \add_action('before_delete_post', [__CLASS__, 'capturePostDeletion'], 10, 2);
             \add_action('after_delete_post', [__CLASS__, 'afterPostDeleted'], 10, 2);
+            // A term-only assignment need not save the post itself. Capture
+            // BOTH previous and new term-taxonomy identities after WordPress
+            // commits the relationship change; never purge an unrelated post.
+            \add_action('set_object_terms', [__CLASS__, 'afterPostTermsSet'], 20, 6);
         }
     }
 
@@ -241,6 +245,124 @@ final class CacheInvalidation
     }
 
     /**
+     * Canonical first-page taxonomy archives only. The native Nginx policy
+     * bypasses queries and encoded/noncanonical request URIs; the existing
+     * generation-bound selector remains the only authority to purge a file.
+     */
+    private static function termArchiveUrls(array $terms, string $taxonomy): array
+    {
+        if (!\is_taxonomy_viewable($taxonomy)) {
+            return [];
+        }
+        $urls = [];
+        $seenTerms = [];
+        foreach ($terms as $term) {
+            if (!is_object($term) || !isset($term->term_id)
+                || (int)$term->term_id < 1) {
+                continue;
+            }
+            $ids = [(int)$term->term_id];
+            if (\is_taxonomy_hierarchical($taxonomy)) {
+                $parents = \get_ancestors((int)$term->term_id, $taxonomy, 'taxonomy');
+                if (is_array($parents)) {
+                    $ids = array_merge($ids, $parents);
+                }
+            }
+            foreach ($ids as $termId) {
+                if (!is_int($termId) && !is_string($termId)) {
+                    continue;
+                }
+                $termId = (int)$termId;
+                if ($termId < 1 || isset($seenTerms[$termId])) {
+                    continue;
+                }
+                $seenTerms[$termId] = true;
+                $resolved = $termId === (int)$term->term_id
+                    ? $term : \get_term($termId, $taxonomy);
+                if (!is_object($resolved) || \is_wp_error($resolved)) {
+                    continue;
+                }
+                $url = \get_term_link($resolved, $taxonomy);
+                if (is_string($url)) {
+                    $urls[] = $url;
+                }
+            }
+        }
+        return $urls;
+    }
+
+    /** Current public first-page archives of all viewable post taxonomies. */
+    private static function postArchiveUrls(object $post): array
+    {
+        $urls = [];
+        $taxonomies = \get_object_taxonomies($post->post_type);
+        if (!is_array($taxonomies)) {
+            return [];
+        }
+        foreach ($taxonomies as $taxonomy) {
+            if (!is_string($taxonomy) || !\is_taxonomy_viewable($taxonomy)) {
+                continue;
+            }
+            $terms = \get_the_terms($post, $taxonomy);
+            if (is_array($terms)) {
+                $urls = array_merge($urls, self::termArchiveUrls($terms, $taxonomy));
+            }
+        }
+        return $urls;
+    }
+
+    /**
+     * Term assignments can change without wp_after_insert_post. The hook
+     * receives old/new TERM-TAXONOMY IDs, not interchangeable term IDs.
+     * WordPress has already written the relationship when this runs.
+     */
+    public static function afterPostTermsSet(
+        $objectId, $terms, $termTaxonomyIds, $taxonomy, $append, $oldTermTaxonomyIds
+    ): void {
+        if (!is_int($objectId) || $objectId < 1
+            || !is_string($taxonomy) || !is_array($termTaxonomyIds)
+            || !is_array($oldTermTaxonomyIds)) {
+            return;
+        }
+        $post = \get_post($objectId);
+        if (!is_object($post) || !isset($post->ID, $post->post_type, $post->post_status)
+            || (int)$post->ID !== $objectId || $post->post_status !== 'publish'
+            || !is_string($post->post_type)
+            || !\is_post_type_viewable($post->post_type)
+            || !in_array($taxonomy, \get_object_taxonomies($post->post_type), true)
+            || !\is_taxonomy_viewable($taxonomy)) {
+            return;
+        }
+        $current = [];
+        $previous = [];
+        foreach ($termTaxonomyIds as $id) {
+            if ((is_int($id) || is_string($id)) && (int)$id > 0) {
+                $current[(int)$id] = (int)$id;
+            }
+        }
+        foreach ($oldTermTaxonomyIds as $id) {
+            if ((is_int($id) || is_string($id)) && (int)$id > 0) {
+                $previous[(int)$id] = (int)$id;
+            }
+        }
+        // WordPress can re-save an unchanged relationship during ordinary
+        // post edits. Avoid a duplicate taxonomy purge in that no-op case.
+        if (!array_diff_key($current, $previous)
+            && !array_diff_key($previous, $current)) {
+            return;
+        }
+        $ttIds = array_values($current + $previous);
+        $affectedTerms = \get_terms([
+            'taxonomy' => $taxonomy,
+            'term_taxonomy_id' => $ttIds,
+            'hide_empty' => false,
+        ]);
+        if (is_array($affectedTerms)) {
+            self::purgePublicUrls(self::termArchiveUrls($affectedTerms, $taxonomy));
+        }
+    }
+
+    /**
      * WordPress wp_after_insert_post provides ID, WP_Post, update, old post.
      * A transition out of publish still invalidates the old public permalink.
      */
@@ -263,7 +385,7 @@ final class CacheInvalidation
             && ($postBefore->post_status ?? null) === 'publish') {
             $urls[] = \get_permalink($postBefore);
         }
-        self::purgePublicUrls($urls);
+        self::purgePublicUrls(array_merge($urls, self::postArchiveUrls($post)));
     }
 
     /** Capture while WordPress still has the original published permalink. */
@@ -277,9 +399,10 @@ final class CacheInvalidation
             || !\is_post_type_viewable($post->post_type)) {
             return;
         }
-        self::$pendingDeleteUrls[$postId] = [
-            \home_url('/'), \get_permalink($post),
-        ];
+        self::$pendingDeleteUrls[$postId] = array_merge(
+            [\home_url('/'), \get_permalink($post)],
+            self::postArchiveUrls($post)
+        );
     }
 
     /** Aborted deletions never purge; finished deletes reuse the saved URL. */
