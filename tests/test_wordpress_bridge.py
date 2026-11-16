@@ -217,6 +217,172 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             "add_action('wp_after_insert_post', [__CLASS__, 'afterPostSaved'], 50, 4)",
             (PLUGIN / 'includes/class-cache-invalidation.php').read_text())
 
+    def test_post_save_guards_status_and_invalidates_both_slug_versions(self):
+        source = f"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        $GLOBALS['slugs'] = [];
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function home_url($path) {{ return 'https://qa.example/'; }}
+        function get_permalink($post) {{
+            $GLOBALS['slugs'][] = $post->post_name;
+            return 'https://qa.example/' . $post->post_name . '/';
+        }}
+        $cls = \\AChWorks\\AaPanelBridge\\CacheInvalidation::class;
+        $new = (object)['ID'=>7,'post_type'=>'post',
+            'post_status'=>'publish','post_name'=>'new'];
+        $old = (object)['ID'=>7,'post_type'=>'post',
+            'post_status'=>'publish','post_name'=>'old'];
+        $cls::afterPostSaved(7, $new, true, $old);
+        $first = $GLOBALS['slugs'];
+        $GLOBALS['slugs'] = [];
+        $draft = (object)['ID'=>7,'post_type'=>'post',
+            'post_status'=>'draft','post_name'=>'new'];
+        $cls::afterPostSaved(7, $draft, true, $old);
+        $second = $GLOBALS['slugs'];
+        $GLOBALS['slugs'] = [];
+        $cls::afterPostSaved(8, $new, true, $old);
+        $cls::afterPostSaved(7, $draft, true, null);
+        echo json_encode([$first, $second, $GLOBALS['slugs']],
+            JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         [["new", "old"], ["new", "old"], []])
+
+    def test_permanent_delete_captures_published_url_then_discards_pending(self):
+        # A permanent delete has separate before_delete_post and
+        # after_delete_post hooks. No vendor purge occurs until the latter.
+        source = f"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function home_url($path) {{ return 'https://qa.example/'; }}
+        function get_permalink($post) {{
+            return 'https://qa.example/' . $post->post_name . '/';
+        }}
+        $cls = \\AChWorks\\AaPanelBridge\\CacheInvalidation::class;
+        $public = (object)['ID'=>41,'post_type'=>'post',
+            'post_status'=>'publish','post_name'=>'deleted-slug'];
+        $draft = (object)['ID'=>42,'post_type'=>'post',
+            'post_status'=>'draft','post_name'=>'draft'];
+        $wrong = (object)['ID'=>43,'post_type'=>'post',
+            'post_status'=>'publish','post_name'=>'not-43'];
+        $cls::capturePostDeletion(41, $public);
+        $cls::capturePostDeletion(42, $draft);
+        $cls::capturePostDeletion(44, $wrong);
+        $property = new ReflectionProperty($cls, 'pendingDeleteUrls');
+        $before = $property->getValue();
+        // The public callback has no active Nginx Helper or manifest in this
+        // fixture, but a successful delete still releases its pending state.
+        $cls::afterPostDeleted(41, $public);
+        $after = $property->getValue();
+        echo json_encode([$before, $after], JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before, after = json.loads(result.stdout)
+        self.assertEqual(before, {"41": [
+            "https://qa.example/", "https://qa.example/deleted-slug/"]})
+        self.assertEqual(after, [])
+        source_code = (PLUGIN / 'includes/class-cache-invalidation.php').read_text()
+        self.assertIn(
+            "add_action('before_delete_post', [__CLASS__, 'capturePostDeletion'], 10, 2)",
+            source_code)
+        self.assertIn(
+            "add_action('after_delete_post', [__CLASS__, 'afterPostDeleted'], 10, 2)",
+            source_code)
+
+    def test_shared_save_delete_dispatch_uses_only_verified_generation_files(self):
+        # Execute the same private dispatch used by live WordPress hooks with
+        # an Nginx-shaped on-disk fixture and a faithful vendor-purger stub.
+        from hashlib import md5
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-dispatch-") as work:
+            base = Path(work) / "site-9"
+            peer = Path(work) / "site-10"
+            base.mkdir(mode=0o700)
+            peer.mkdir(mode=0o700)
+            generation = "a" * 32
+            site_key = "qa.example"
+            stored = []
+
+            def cache_object(scheme, path, *, key_override=None, gen=generation,
+                             root=base):
+                key = scheme + "GET" + site_key + path + "|" + gen
+                digest = md5(key.encode("ascii")).hexdigest()
+                folder = root / digest[-1] / digest[-3:-1]
+                folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+                folder.parent.chmod(0o700)
+                folder.chmod(0o700)
+                entry = folder / digest
+                entry.write_bytes(
+                    b"NGINX-HEADER\nKEY: " +
+                    (key_override or key).encode("ascii") + b"\nbody"
+                )
+                entry.chmod(0o600)
+                return entry
+
+            for scheme, path in [
+                ("http", "/"), ("https", "/"), ("https", "/article/"),
+                ("http", "/old/"),
+            ]:
+                stored.append(cache_object(scheme, path))
+            # A matching hash without an exact saved KEY must not purge.
+            bad = cache_object("https", "/old/", key_override="wrong-key")
+            stale = cache_object("http", "/article/", gen="b" * 32)
+            peer_file = cache_object("http", "/", root=peer)
+            info = base.stat()
+            manifest = {
+                "site_id": 9,
+                "site_key": site_key,
+                "cache_directory": str(base),
+                "cache_identity": [info.st_dev, info.st_ino],
+                "cache_generation": generation,
+            }
+            urls = [
+                "https://qa.example/", "https://qa.example/article/",
+                "https://qa.example/article/", "http://qa.example/old/",
+                "https://qa.example/old/", "https://another.example/",
+                "https://qa.example/article/?private=1",
+                "https://qa.example/%61rticle/",
+                "https://qa.example/../old/", "http://qa.example:8080/",
+            ]
+            source = f"""
+            define('ABSPATH', '/fixture/');
+            class FastCGI_Purger {{
+                public array $calls = [];
+                public function purge_url($url, $recursive) {{
+                    $this->calls[] = [$url, $recursive];
+                }}
+            }}
+            require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+            function wp_parse_url($url) {{ return parse_url($url); }}
+            $manifest = json_decode({json.dumps(json.dumps(manifest))}, true);
+            $urls = json_decode({json.dumps(json.dumps(urls))}, true);
+            $purger = new FastCGI_Purger();
+            $selector = static function (string $url) use ($manifest): string {{
+                return \\AChWorks\\AaPanelBridge\\CacheInvalidation::selectVerifiedFile(
+                    $manifest, $url, '/nonexistent/denied');
+            }};
+            $dispatch = new ReflectionMethod(
+                \\AChWorks\\AaPanelBridge\\CacheInvalidation::class, 'dispatchPublicUrls');
+            $dispatch->invoke(null, $urls, $manifest, $purger, $selector);
+            echo json_encode($purger->calls, JSON_THROW_ON_ERROR);
+            """
+            result = php_run(source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = json.loads(result.stdout)
+            self.assertEqual(calls, [
+                ["http://qa.example/", False],
+                ["https://qa.example/", False],
+                ["https://qa.example/article/", False],
+                ["http://qa.example/old/", False],
+            ])
+            for file in [*stored, stale, bad, peer_file]:
+                self.assertTrue(file.exists(), "Vendor stub must not delete fixtures")
+
     def test_missing_helper_stays_unverified_without_settings(self):
         source = f"""
         define('ABSPATH', '/test/');
@@ -237,7 +403,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
     def test_header_slug_version_and_external_update_uri(self):
         entry = ENTRY.read_text(encoding="utf-8")
         self.assertIn("Plugin Name: ACh aaPanel Bridge", entry)
-        self.assertIn("Version: 0.1.4", entry)
+        self.assertIn("Version: 0.1.5", entry)
         self.assertIn("Text Domain: ach-aapanel-bridge", entry)
         self.assertIn("Update URI: https://github.com/AChWorks/", entry)
         self.assertNotIn("Requires Plugins:", entry)
@@ -251,7 +417,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
             first, second = build(a), build(b)
             self.assertEqual(a.read_bytes(), b.read_bytes())
             self.assertEqual(first["sha256"], second["sha256"])
-            self.assertEqual(first["version"], "0.1.4")
+            self.assertEqual(first["version"], "0.1.5")
             with ZipFile(a) as package:
                 names = package.namelist()
                 self.assertEqual(len(names), 5)

@@ -3,7 +3,7 @@
  * Plugin Name: ACh aaPanel Bridge
  * Plugin URI: https://github.com/AChWorks/ach-aapanel-customizer/tree/main/wordpress/ach-aapanel-bridge
  * Description: Optional WordPress companion and diagnostics for ACh aaPanel Customizer.
- * Version: 0.1.4
+ * Version: 0.1.5
  * Author: AChWorks
  * Author URI: https://ach.li/
  * Text Domain: ach-aapanel-bridge
