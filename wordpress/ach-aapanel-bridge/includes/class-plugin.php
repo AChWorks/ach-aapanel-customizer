@@ -2,9 +2,8 @@
 /**
  * WordPress administrator view for the optional ACh aaPanel Bridge.
  *
- * Version 0.1.0 does not mutate cache, Nginx, WordPress options, or cron.
- * A later native-to-WordPress integration must be independently approved and
- * verified before any invalidation hook can become effective.
+ * A verified native-owned manifest may opt into Nginx Helper per-URL remapping.
+ * The plugin itself never creates manifests or invokes purge operations.
  */
 namespace AChWorks\AaPanelBridge;
 
@@ -15,6 +14,7 @@ final class Plugin
     public static function boot(): void
     {
         \add_action('admin_menu', [__CLASS__, 'registerAdminPage']);
+        CacheInvalidation::boot();
     }
 
     public static function registerAdminPage(): void
@@ -59,9 +59,16 @@ final class Plugin
         ) . '</p>';
         echo '<h2>' . \esc_html__('Connection', 'ach-aapanel-bridge') . '</h2>';
         echo '<p>' . \esc_html__(
-            'Not connected. This version provides diagnostics only; it does not enable automatic invalidation, Purge All, or remote management.',
+            'The Bridge never enables Nginx Helper purging or Purge All. The URL-file filter requires a verified native-managed site manifest and an active unlink_files Helper. Other Nginx workers are not certified.',
             'ach-aapanel-bridge'
         ) . '</p>';
+        $connection = CacheInvalidation::inspect();
+        echo '<h2>' . \esc_html__('Site cache URL mapping', 'ach-aapanel-bridge') . '</h2>';
+        self::tableRow(__('Manifest', 'ach-aapanel-bridge'), $connection['manifest_verified'] ? 'Native manifest verified' : 'Not connected');
+        self::tableRow(__('URL-file mapping', 'ach-aapanel-bridge'), $connection['url_filter_ready'] ? 'Provisioned (worker state unverified)' : 'Unavailable');
+        self::tableRow(__('Site Cache filesystem access', 'ach-aapanel-bridge'),
+            $connection['cache_access_verified'] ? 'Readable and writable by this PHP process' : 'Not verified / blocked');
+        self::tableRow(__('Readiness', 'ach-aapanel-bridge'), $connection['reason']);
         echo '<h2>' . \esc_html__('Nginx Helper observations', 'ach-aapanel-bridge') . '</h2>';
         echo '<table class="widefat striped" style="max-width:900px"><tbody>';
         self::tableRow(

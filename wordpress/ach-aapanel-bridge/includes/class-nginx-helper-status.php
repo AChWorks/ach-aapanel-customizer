@@ -33,6 +33,19 @@ final class NginxHelperStatus
         } elseif (function_exists('is_plugin_active')) {
             $active = \is_plugin_active('nginx-helper/nginx-helper.php')
                 ? 'active' : 'unknown';
+        } elseif (function_exists('get_option')) {
+            // is_plugin_active() is not normally loaded on public requests.
+            $plugins = \get_option('active_plugins', []);
+            $network = function_exists('get_site_option')
+                ? \get_site_option('active_sitewide_plugins', []) : [];
+            if ((is_array($plugins) &&
+                    in_array('nginx-helper/nginx-helper.php', $plugins, true)) ||
+                (is_array($network) &&
+                    array_key_exists('nginx-helper/nginx-helper.php', $network))) {
+                $active = 'active';
+            } else {
+                $active = 'inactive';
+            }
         }
 
         $mode = null;

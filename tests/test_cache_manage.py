@@ -351,6 +351,65 @@ class CacheManageTests(unittest.TestCase):
             cache_generation=kw.get('generation',plan['cache_generation']),
             approved=kw.get('approved',True),**self.kwargs())
 
+    def test_bridge_actions_require_applied_wordpress_recovery_and_fresh_source(self):
+        from ach_customizer_cache_bridge import BridgeError
+        with patch('ach_customizer_cache_bridge.enable') as enable, \
+             patch('ach_customizer_cache_bridge.disable') as disable, \
+             patch('ach_customizer_cache_bridge.inspect', return_value='Provisioned') as inspect, \
+             patch.object(cache, '_cache_observation', return_value={
+                 'state':'Applied','runtime_verified':True}), \
+             patch.object(cache, '_verify_cache_peer_isolation', return_value=((19,23),)):
+            with self.assertRaisesRegex(cache.CacheManageError,'Explicit'):
+                cache.manage_cache('bridge_enable', self.site, public=object(),
+                    approved=False, **self.kwargs())
+            self.assertFalse(enable.called)
+            result = self.apply()
+            with self.assertRaisesRegex(cache.CacheManageError,'WordPress Cache'):
+                cache.manage_cache('bridge_enable', self.site, public=object(),
+                    approved=True,recovery_id=result['recovery_id'], **self.kwargs())
+            self.assertFalse(enable.called)
+            fd=cache._open_state_dir(str(self.state))
+            try:
+                record=cache._record_read(fd,7)
+                record['native_handler']='wpfastcgi'
+                cache._record_save(fd,record)
+            finally:
+                os.close(fd)
+            with self.assertRaisesRegex(cache.CacheManageError,'matching recovery'):
+                cache.manage_cache('bridge_enable', self.site, public=object(),
+                    approved=True,recovery_id='a'*32, **self.kwargs())
+            with patch.object(cache,'inspect_site_fastcgi_cache',return_value={
+                'state':'Source Observed','zone_state':'Direct Zone',
+                'cache_zone':'ACHFC_7','cache_directory':record['cache_directory'],
+                'unresolved_other_sites':1, 'other_sites_same_directory':[],
+                'other_sites_same_zone':[],'physical_peer_cache_paths':[]}):
+                with self.assertRaisesRegex(cache.CacheManageError,'isolation'):
+                    cache.manage_cache('bridge_enable', self.site, public=object(),
+                        approved=True,recovery_id=result['recovery_id'],**self.kwargs())
+            self.assertFalse(enable.called)
+            enable.return_value=True
+            accepted=cache.manage_cache('bridge_enable', self.site, public=object(),
+                approved=True,recovery_id=result['recovery_id'],**self.kwargs())
+            self.assertEqual(accepted['state'],'Provisioned')
+            self.assertTrue(accepted['changed'])
+            self.assertFalse(accepted['runtime_verified'])
+            self.assertFalse(accepted['purge_supported'])
+            self.assertEqual(enable.call_count,1)
+            self.assertEqual(enable.call_args.args[0],self.site)
+            self.assertEqual(enable.call_args.args[2]['op'],result['recovery_id'])
+            ins=cache.manage_cache('bridge_inspect', self.site, public=object(),
+                approved=False, **self.kwargs())
+            self.assertEqual(ins['state'],'Provisioned')
+            self.assertTrue(ins['read_only'])
+            inspect.assert_called_once()
+            self.assertFalse(disable.called)
+            disable.return_value=True
+            done=cache.manage_cache('bridge_disable',self.site,public=object(),
+                approved=True,**self.kwargs())
+            self.assertEqual(done['state'],'Not Provisioned')
+            self.assertTrue(done['changed'])
+            disable.assert_called_once()
+
     def test_read_only_preview_and_exact_approval(self):
         result=self.preview()
         self.assertEqual(result['state'],'Ready for Review')

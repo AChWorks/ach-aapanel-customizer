@@ -67,6 +67,9 @@ function loadUi() {
     '#ach-cache-clear-reviewed', '#ach-cache-clear-files',
     '#ach-cache-url-path', '#ach-cache-url-why',
     '#ach-cache-url-reviewed', '#ach-cache-clear-url',
+    '#ach-bridge-inspect', '#ach-bridge-result', '#ach-bridge-why',
+    '#ach-bridge-enable-reviewed', '#ach-bridge-enable',
+    '#ach-bridge-disable-reviewed', '#ach-bridge-disable',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
@@ -118,7 +121,11 @@ function loadUi() {
     '#ach-status-sites-more', '#ach-status-sites-retry', '#ach-status-sites-state',
     '#ach-activity-level', '#ach-activity-module', '#ach-activity-refresh',
     '#ach-activity-result', '#ach-activity-rows', '#ach-activity-loading'
-  ]) elements.set(name, fakeNode('div'));
+  ]) {
+    const node = fakeNode('div', {id:name.slice(1)});
+    node.id = name.slice(1);
+    elements.set(name, node);
+  }
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
     ['#ach-status-scope','global'], ['#ach-status-site-id',''], ['#ach-status-delivery','extension'],
@@ -7729,4 +7736,60 @@ test('WooCommerce route results invalidate on native site change while pending',
   request.respond(wooCacheProbe());
   assert.doesNotMatch(ui.state().wooCacheProbeResult,/Observed BYPASS/);
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
+});
+
+test('WordPress Bridge native actions require fresh Applied Recheck and distinct consent', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const start=ui.requests.length;
+  ui.statusClick('#ach-bridge-enable');
+  assert.equal(ui.requests.length,start,'No bridge enable without Applied Recheck');
+  ui.statusSetChecked('#ach-bridge-enable-reviewed',true);
+  ui.statusClick('#ach-bridge-enable');
+  assert.equal(ui.requests.length,start);
+  const check=ui.statusClick('#ach-cache-activation-recheck');
+  check.respond({status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),
+    read_only:true,runtime_verified:true,purge_supported:false});
+  ui.statusSetChecked('#ach-bridge-enable-reviewed',true);
+  const enable=ui.statusClick('#ach-bridge-enable');
+  assert.match(enable.options.url,/s=manage_cache_policy$/);
+  assert.equal(enable.options.type,'POST');
+  assert.equal(enable.options.data.cache_action,'bridge_enable');
+  assert.equal(enable.options.data.recovery_id,'f'.repeat(32));
+  assert.equal(enable.options.data.approved,'true');
+  assert.equal(enable.options.data.expected_site_key,'site.test');
+  assert.equal(enable.options.data.site_id,'7');
+  enable.respond({status:true,schema:1,state:'Provisioned',site_id:7,site_key:'site.test',
+    recovery_id:'f'.repeat(32),read_only:false,runtime_verified:false,
+    purge_supported:false,changed:true,note:'Native file provisioned'});
+  const inspect=ui.statusClick('#ach-bridge-inspect');
+  assert.equal(inspect.options.data.cache_action,'bridge_inspect');
+  assert.equal(inspect.options.data.approved,'false');
+  inspect.respond({status:true,schema:1,state:'Provisioned',read_only:true,
+    site_id:7,site_key:'site.test',runtime_verified:false,purge_supported:false,
+    recovery_id:'f'.repeat(32),note:'Needs live Helper check'});
+  assert.match(ui.state().cacheActivationResult,/Recheck Cache/);
+});
+
+test('WordPress Bridge Disable is authorized separately and stale replies cannot cross sites', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  const start=ui.requests.length;
+  ui.statusClick('#ach-bridge-disable');
+  assert.equal(ui.requests.length,start);
+  ui.statusSetChecked('#ach-bridge-disable-reviewed',true);
+  const disable=ui.statusClick('#ach-bridge-disable');
+  assert.equal(disable.options.data.cache_action,'bridge_disable');
+  assert.equal(disable.options.data.approved,'true');
+  disable.respond({status:true,schema:1,state:'Not Provisioned',changed:true,
+    site_id:7,site_key:'site.test',read_only:false,runtime_verified:false,
+    purge_supported:false,note:'Native manifest removed'});
+  const inspect=ui.statusClick('#ach-bridge-inspect');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  inspect.respond({status:true,schema:1,state:'Provisioned',site_id:7,
+    site_key:'site.test',read_only:true,runtime_verified:false,purge_supported:false,
+    note:'stale-other-site-data'});
+  assert.doesNotMatch(ui.state().cacheActivationResult,/stale-other-site-data/);
+  assert.equal(ui.statusClick('#ach-bridge-inspect')?.options?.data?.cache_action,
+    'bridge_inspect');
 });

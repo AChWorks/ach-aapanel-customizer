@@ -1466,13 +1466,14 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                  expected_proposal=None, recovery_id=None, approved=False,
                  data_dir=DATA_DIR, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
                  runner=None, probe=None, cache_generation=None, cache_url_path=None):
-    """Serialized guarded per-site cache Apply/Recheck/Restore/clear_files/clear_url.
+    """Serialized guarded per-site cache and optional WordPress Bridge operations.
 
     Neither successful Nginx -t nor reload signaling by itself proves the
     target worker. A lost/ambiguous reload retains the journal and both source
     fragments for explicit reconciliation, never an automatic blind retry.
     """
-    if action not in ('apply', 'restore', 'recheck', 'clear_files', 'clear_url'):
+    if action not in ('apply', 'restore', 'recheck', 'clear_files', 'clear_url',
+                       'bridge_enable', 'bridge_disable', 'bridge_inspect'):
         raise CacheManageError('input', 'Unsupported Cache management operation')
     if (type(site.get('id')) is not int or
             not isinstance(site.get('name'), str) or
@@ -1483,9 +1484,9 @@ def manage_cache(action, site, public=None, *, expected_source=None,
         try:
             # An Unmanaged Recheck must not create Monitor's shared lock file.
             # A managed operation already created that file under the writer lock.
-            lockfd = _exclusive_lock(statefd, create=(action != 'recheck'))
+            lockfd = _exclusive_lock(statefd, create=(action not in ('recheck', 'bridge_inspect')))
         except FileNotFoundError:
-            if action != 'recheck':
+            if action not in ('recheck', 'bridge_inspect'):
                 raise
             record = _record_read(statefd, site['id'])
             if record is not None:
@@ -1498,6 +1499,89 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     'runtime_verified': False, 'purge_supported': False}
         try:
             record = _record_read(statefd, site['id'])
+            if action in ('bridge_enable', 'bridge_disable', 'bridge_inspect'):
+                from ach_customizer_cache_bridge import (
+                    BridgeError, enable as enable_bridge, disable as disable_bridge,
+                    inspect as inspect_bridge,
+                )
+                if public is None:
+                    raise CacheManageError('compatibility', 'Native site inventory required')
+                if action == 'bridge_inspect':
+                    try:
+                        status = inspect_bridge(site, public, record)
+                    except (BridgeError, OSError) as exc:
+                        status = 'Needs Review: ' + str(exc)
+                    return {'schema':1, 'state':status, 'read_only':True,
+                            'site_id':site['id'], 'site_key':site['name'],
+                            'recovery_id':record['op'] if record else None,
+                            'runtime_verified':False, 'purge_supported':False,
+                            'note':'WordPress-side registration, Nginx Helper options '
+                                   'and live Nginx workers are not proven by this file check.'}
+                if approved is not True:
+                    raise CacheManageError('authorization',
+                                           'Explicit WordPress Bridge approval required')
+                if action == 'bridge_disable':
+                    try:
+                        changed = disable_bridge(site, public)
+                    except (BridgeError, OSError) as exc:
+                        raise CacheManageError('recovery',
+                                               'Unable to disable site Bridge: ' + str(exc)) from exc
+                    return {'schema':1, 'state':'Not Provisioned', 'changed':changed,
+                            'site_id':site['id'], 'site_key':site['name'],
+                            'read_only':False, 'runtime_verified':False,
+                            'purge_supported':False,
+                            'note':'Native site manifest removed; Nginx Helper options '
+                                   'and any shared Purge All settings are unchanged.'}
+                if (record is None or record['site_key'] != site['name']
+                        or record['schema'] != 2 or record['phase'] != 'applied'
+                        or record.get('native_handler') != 'wpfastcgi'
+                        or recovery_id != record['op']):
+                    raise CacheManageError('recovery',
+                        'Verified Applied native WordPress Cache and matching recovery ID required')
+                observed = _cache_observation(
+                    site, record, public, vhost_root=vhost_root,
+                    nginx_root=nginx_root, data_dir=data_dir, probe=probe)
+                if observed.get('state') != 'Applied' or not observed.get('runtime_verified'):
+                    raise CacheManageError('recovery',
+                                           'Cache is not currently verified Applied')
+                native = inspect_site_fastcgi_cache(
+                    public, site['id'], site['name'], vhost_root=vhost_root,
+                    nginx_root=nginx_root,
+                    rewrite_root=str(Path(vhost_root).parent / 'rewrite'),
+                    include_physical_peers=True)
+                if (native.get('state') != 'Source Observed'
+                        or native.get('zone_state') != 'Direct Zone'
+                        or native.get('cache_zone') != 'ACHFC_' + str(site['id'])
+                        or native.get('cache_directory') != record['cache_directory']
+                        or native.get('unresolved_other_sites') != 0
+                        or native.get('other_sites_same_directory')
+                        or native.get('other_sites_same_zone')):
+                    raise CacheManageError('compatibility',
+                                           'Current site Cache isolation is unverified')
+                peer_paths = native.get('physical_peer_cache_paths')
+                identities = _verify_cache_peer_isolation(
+                    record['cache_directory'], record['cache_identity'], peer_paths)
+                try:
+                    changed = enable_bridge(site, public, record)
+                    if (_verify_cache_peer_isolation(
+                            record['cache_directory'], record['cache_identity'],
+                            peer_paths) != identities or
+                        _cache_observation(site, record, public, vhost_root=vhost_root,
+                            nginx_root=nginx_root, data_dir=data_dir,
+                            probe=probe).get('state') != 'Applied'):
+                        raise CacheManageError('uncertain',
+                            'Bridge provisioned while Cache sources changed; Disable and Recheck')
+                except (BridgeError, OSError) as exc:
+                    raise CacheManageError('compatibility',
+                        'WordPress Bridge provisioning refused: ' + str(exc)) from exc
+                return {'schema':1, 'state':'Provisioned', 'changed':changed,
+                        'site_id':site['id'], 'site_key':site['name'],
+                        'recovery_id':record['op'], 'read_only':False,
+                        'runtime_verified':False, 'purge_supported':False,
+                        'note':'A native-owned site manifest is present; WordPress '
+                               'Bridge activation, Nginx Helper unlink_files, real '
+                               'worker state and vendor Purge All are NOT certified.'}
+
             if action == 'recheck':
                 if record is None:
                     return {'schema': 1, 'state': 'Unmanaged', 'read_only': True,
@@ -1608,6 +1692,20 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                                 'recheck application behavior independently.'}
 
             if action == 'apply':
+                from ach_customizer_cache_bridge import (
+                    BridgeError, inspect as inspect_bridge,
+                )
+                try:
+                    bridge_state = (inspect_bridge(site, public, record)
+                                    if record is not None and
+                                    record.get('native_handler') == 'wpfastcgi'
+                                    else 'Not Provisioned')
+                except (BridgeError, OSError) as exc:
+                    raise CacheManageError('recovery',
+                        'Review stale WordPress Bridge state before Cache Apply: ' + str(exc)) from exc
+                if bridge_state != 'Not Provisioned':
+                    raise CacheManageError('recovery',
+                        'Disable previous WordPress Bridge mapping before a new Cache generation')
                 if record is not None and record['phase'] != 'restored':
                     raise CacheManageError('recovery', 'Existing Cache journal must be reconciled')
                 previous = record
@@ -1768,6 +1866,20 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                         'recovery_scope': 'prepublication',
                         'note': 'Prepared Cache never activated; journal finalized without Nginx reload.'}
             _same_cache_identity(site['id'], record)
+            # Revoke the opt-in WordPress URL mapper BEFORE this generation
+            # ceases to be active. A failed Restore keeps its recovery journal
+            # and source intact; Bridge can be explicitly re-enabled after
+            # current Applied Recheck, never silently retained across Restore.
+            from ach_customizer_cache_bridge import (
+                BridgeError, disable as disable_bridge,
+            )
+            try:
+                disable_bridge(site, public)
+            except (BridgeError, OSError) as exc:
+                raise CacheManageError('recovery',
+                    'Cannot retire the WordPress Bridge manifest; '
+                    'disable it before Cache Restore: ' + str(exc),
+                    recovery_id=record['op']) from exc
             global_bytes, ext_bytes = _expected_files(record)
             gfd, efd, _, _ = _cache_files(statefd, site, vhost_root=vhost_root)
             try:
