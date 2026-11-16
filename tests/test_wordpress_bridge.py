@@ -346,6 +346,15 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
         $GLOBALS['lookups'] = [];
         $GLOBALS['term_links'] = [];
+        $GLOBALS['post_home_lookups'] = [];
+        function home_url($path) {{
+            $GLOBALS['post_home_lookups'][] = ['home', $path];
+            return 'https://qa.example/';
+        }}
+        function get_permalink($post) {{
+            $GLOBALS['post_home_lookups'][] = ['post', $post->ID];
+            return 'https://qa.example/story/';
+        }}
         function get_post($id) {{
             return $id === 7 ? (object)[
                 'ID'=>7,'post_type'=>'post','post_status'=>'publish'] : null;
@@ -372,12 +381,12 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         $cls::afterPostTermsSet(7, [], [25, 26], 'category', false, [26, 25]);
         $cls::afterPostTermsSet(7, [], [25], 'private', false, [24]);
         $cls::afterPostTermsSet(8, [], [27], 'category', false, [24]);
-        echo json_encode([$GLOBALS['lookups'], $GLOBALS['term_links']],
-            JSON_THROW_ON_ERROR);
+        echo json_encode([$GLOBALS['lookups'], $GLOBALS['term_links'],
+            $GLOBALS['post_home_lookups']], JSON_THROW_ON_ERROR);
         """
         result = php_run(source)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        lookups, links = json.loads(result.stdout)
+        lookups, links, post_home = json.loads(result.stdout)
         self.assertEqual(len(lookups), 1)
         self.assertEqual(lookups[0], {
             'taxonomy': 'category',
@@ -385,6 +394,9 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             'hide_empty': False,
         })
         self.assertEqual(links, ['tt-25', 'tt-26', 'tt-24'])
+        # Exactly one public post/homepage lookup for the real changed
+        # relationship, not unchanged, private or another post's IDs.
+        self.assertEqual(post_home, [['home', '/'], ['post', 7]])
         self.assertIn(
             "add_action('set_object_terms', [__CLASS__, 'afterPostTermsSet'], 20, 6)",
             (PLUGIN / 'includes/class-cache-invalidation.php').read_text())
@@ -652,7 +664,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
     def test_header_slug_version_and_external_update_uri(self):
         entry = ENTRY.read_text(encoding="utf-8")
         self.assertIn("Plugin Name: ACh aaPanel Bridge", entry)
-        self.assertIn("Version: 0.1.7", entry)
+        self.assertIn("Version: 0.1.8", entry)
         self.assertIn("Text Domain: ach-aapanel-bridge", entry)
         self.assertIn("Update URI: https://github.com/AChWorks/", entry)
         self.assertNotIn("Requires Plugins:", entry)
@@ -666,7 +678,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
             first, second = build(a), build(b)
             self.assertEqual(a.read_bytes(), b.read_bytes())
             self.assertEqual(first["sha256"], second["sha256"])
-            self.assertEqual(first["version"], "0.1.7")
+            self.assertEqual(first["version"], "0.1.8")
             with ZipFile(a) as package:
                 names = package.namelist()
                 self.assertEqual(len(names), 5)

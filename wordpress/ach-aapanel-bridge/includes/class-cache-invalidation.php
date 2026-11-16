@@ -315,6 +315,8 @@ final class CacheInvalidation
      * Term assignments can change without wp_after_insert_post. The hook
      * receives old/new TERM-TAXONOMY IDs, not interchangeable term IDs.
      * WordPress has already written the relationship when this runs.
+     * Public post/homepage markup may display the old term metadata without
+     * a post save, so those objects require the same generation-bound purge.
      */
     public static function afterPostTermsSet(
         $objectId, $terms, $termTaxonomyIds, $taxonomy, $append, $oldTermTaxonomyIds
@@ -357,9 +359,11 @@ final class CacheInvalidation
             'term_taxonomy_id' => $ttIds,
             'hide_empty' => false,
         ]);
+        $urls = [\home_url('/'), \get_permalink($post)];
         if (is_array($affectedTerms)) {
-            self::purgePublicUrls(self::termArchiveUrls($affectedTerms, $taxonomy));
+            $urls = array_merge($urls, self::termArchiveUrls($affectedTerms, $taxonomy));
         }
+        self::purgePublicUrls($urls);
     }
 
     /**
