@@ -16,6 +16,7 @@ SLUG = "ach-aapanel-bridge"
 FILES = (
     ENTRY,
     "includes/class-nginx-helper-status.php",
+    "includes/class-cache-invalidation.php",
     "includes/class-plugin.php",
     "README.md",
 )
