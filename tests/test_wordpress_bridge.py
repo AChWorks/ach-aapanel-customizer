@@ -295,50 +295,52 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             source_code)
 
     def test_shared_save_delete_dispatch_uses_only_verified_generation_files(self):
-        # Execute the same private dispatch used by live WordPress hooks with
-        # an Nginx-shaped on-disk fixture and a faithful vendor-purger stub.
+        # Execute the same private dispatch used by WordPress save/deletion.
+        # The vendor-purger stub calls the real scoped file selector while
+        # dispatch runs; it must select one exact method-specific file.
         from hashlib import md5
 
         with tempfile.TemporaryDirectory(prefix="ach-bridge-dispatch-") as work:
-            base = Path(work) / "site-9"
-            peer = Path(work) / "site-10"
+            base, peer = Path(work) / "site-9", Path(work) / "site-10"
             base.mkdir(mode=0o700)
             peer.mkdir(mode=0o700)
-            generation = "a" * 32
-            site_key = "qa.example"
-            stored = []
+            generation, site_key = "a" * 32, "qa.example"
 
-            def cache_object(scheme, path, *, key_override=None, gen=generation,
-                             root=base):
-                key = scheme + "GET" + site_key + path + "|" + gen
+            def cache_object(scheme, path, *, method="GET", root=base,
+                             gen=generation, key_override=None):
+                key = scheme + method + site_key + path + "|" + gen
                 digest = md5(key.encode("ascii")).hexdigest()
                 folder = root / digest[-1] / digest[-3:-1]
                 folder.mkdir(parents=True, exist_ok=True, mode=0o700)
                 folder.parent.chmod(0o700)
                 folder.chmod(0o700)
                 entry = folder / digest
-                entry.write_bytes(
-                    b"NGINX-HEADER\nKEY: " +
-                    (key_override or key).encode("ascii") + b"\nbody"
-                )
+                entry.write_bytes(b"NGINX-HEADER\nKEY: " +
+                                  (key_override or key).encode("ascii") + b"\nbody")
                 entry.chmod(0o600)
                 return entry
 
-            for scheme, path in [
-                ("http", "/"), ("https", "/"), ("https", "/article/"),
-                ("http", "/old/"),
+            present = {}
+            for scheme, method, path in [
+                ("http", "GET", "/"), ("http", "HEAD", "/"),
+                ("https", "GET", "/"), ("https", "HEAD", "/"),
+                ("https", "GET", "/article/"), ("https", "HEAD", "/article/"),
+                ("http", "GET", "/old/"), ("http", "HEAD", "/old/"),
             ]:
-                stored.append(cache_object(scheme, path))
-            # A matching hash without an exact saved KEY must not purge.
-            bad = cache_object("https", "/old/", key_override="wrong-key")
-            stale = cache_object("http", "/article/", gen="b" * 32)
-            peer_file = cache_object("http", "/", root=peer)
-            info = base.stat()
+                present[(scheme, method, path)] = cache_object(
+                    scheme, path, method=method)
+
+            # Old-generation objects, the physical peer and a wrong KEY
+            # must not enter the vendor. A valid same-site decoy checks that
+            # temporary HEAD selection cannot affect a different vendor URL.
+            bad = cache_object("https", "/old/", method="HEAD", key_override="wrong-key")
+            stale = cache_object("http", "/article/", method="HEAD", gen="b" * 32)
+            peer_file = cache_object("http", "/", method="HEAD", root=peer)
+            decoy = cache_object("https", "/decoy/", method="HEAD")
+            st = base.stat()
             manifest = {
-                "site_id": 9,
-                "site_key": site_key,
-                "cache_directory": str(base),
-                "cache_identity": [info.st_dev, info.st_ino],
+                "site_id": 9, "site_key": site_key, "cache_directory": str(base),
+                "cache_identity": [st.st_dev, st.st_ino],
                 "cache_generation": generation,
             }
             urls = [
@@ -349,12 +351,19 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
                 "https://qa.example/%61rticle/",
                 "https://qa.example/../old/", "http://qa.example:8080/",
             ]
-            source = f"""
+            source = rf"""
             define('ABSPATH', '/fixture/');
             class FastCGI_Purger {{
                 public array $calls = [];
-                public function purge_url($url, $recursive) {{
-                    $this->calls[] = [$url, $recursive];
+                public function purge_url($url, $feed) {{
+                    $selector = new ReflectionMethod(
+                        \AChWorks\AaPanelBridge\CacheInvalidation::class,
+                        'selectFileForManifest');
+                    $selected = $selector->invoke(null, $GLOBALS['manifest'],
+                        $url, '/nonexistent/denied');
+                    $other = $selector->invoke(null, $GLOBALS['manifest'],
+                        'https://qa.example/decoy/', '/nonexistent/denied');
+                    $this->calls[] = [$url, $feed, $selected, $other];
                 }}
             }}
             require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
@@ -362,26 +371,118 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             $manifest = json_decode({json.dumps(json.dumps(manifest))}, true);
             $urls = json_decode({json.dumps(json.dumps(urls))}, true);
             $purger = new FastCGI_Purger();
-            $selector = static function (string $url) use ($manifest): string {{
-                return \\AChWorks\\AaPanelBridge\\CacheInvalidation::selectVerifiedFile(
-                    $manifest, $url, '/nonexistent/denied');
+            $selector = static function (string $url, string $method) use ($manifest): string {{
+                return \AChWorks\AaPanelBridge\CacheInvalidation::selectVerifiedFile(
+                    $manifest, $url, '/nonexistent/denied', $method);
             }};
             $dispatch = new ReflectionMethod(
-                \\AChWorks\\AaPanelBridge\\CacheInvalidation::class, 'dispatchPublicUrls');
+                \AChWorks\AaPanelBridge\CacheInvalidation::class, 'dispatchPublicUrls');
             $dispatch->invoke(null, $urls, $manifest, $purger, $selector);
-            echo json_encode($purger->calls, JSON_THROW_ON_ERROR);
+            $scope = new ReflectionMethod(
+                \AChWorks\AaPanelBridge\CacheInvalidation::class, 'selectFileForManifest');
+            $ordinaryVendor = $scope->invoke(null, $manifest,
+                'https://qa.example/decoy/', '/nonexistent/denied');
+            echo json_encode([$purger->calls, $ordinaryVendor], JSON_THROW_ON_ERROR);
             """
             result = php_run(source)
             self.assertEqual(result.returncode, 0, result.stderr)
-            calls = json.loads(result.stdout)
-            self.assertEqual(calls, [
-                ["http://qa.example/", False],
-                ["https://qa.example/", False],
-                ["https://qa.example/article/", False],
-                ["http://qa.example/old/", False],
+            calls, ordinary = json.loads(result.stdout)
+            expected = [
+                [f"{scheme}://qa.example{path}", False,
+                 str(present[(scheme, method, path)]), "/nonexistent/denied"]
+                for scheme, method, path in [
+                    ("http", "GET", "/"), ("http", "HEAD", "/"),
+                    ("https", "GET", "/"), ("https", "HEAD", "/"),
+                    ("https", "GET", "/article/"), ("https", "HEAD", "/article/"),
+                    ("http", "GET", "/old/"), ("http", "HEAD", "/old/"),
+                ]
+            ]
+            self.assertEqual(calls, expected)
+            # With no active Bridge dispatch, vendor behavior stays GET.
+            self.assertEqual(ordinary, "/nonexistent/denied")
+            for file in [*present.values(), stale, bad, peer_file, decoy]:
+                self.assertTrue(file.exists(), "Stub must not unlink fixtures")
+
+    def test_head_mapping_has_distinct_key_and_rejects_invalid_method(self):
+        from hashlib import md5
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-head-") as work:
+            root = Path(work) / "site-9"
+            root.mkdir(mode=0o700)
+            st = root.stat()
+            manifest = {
+                "site_key": "qa.example", "cache_directory": str(root),
+                "cache_identity": [st.st_dev, st.st_ino],
+                "cache_generation": "f" * 32,
+            }
+            paths = {}
+            for method in ("GET", "HEAD"):
+                key = f"https{method}qa.example/article/|{'f' * 32}"
+                hash_ = md5(key.encode()).hexdigest()
+                folder = root / hash_[-1] / hash_[-3:-1]
+                folder.mkdir(parents=True, mode=0o700)
+                folder.parent.chmod(0o700)
+                file = folder / hash_
+                file.write_bytes(b"NGINX-HEADER\nKEY: " + key.encode() + b"\nbody")
+                file.chmod(0o600)
+                paths[method] = str(file)
+            source = rf"""
+            define('ABSPATH', '/fixture/');
+            require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+            function wp_parse_url($url) {{ return parse_url($url); }}
+            $m = json_decode({json.dumps(json.dumps(manifest))}, true);
+            $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+            $u = 'https://qa.example/article/';
+            echo json_encode([
+                $cls::selectVerifiedFile($m, $u, '/denied'),
+                $cls::selectVerifiedFile($m, $u, '/denied', 'HEAD'),
+                $cls::selectVerifiedFile($m, $u, '/denied', 'POST'),
+                $cls::selectVerifiedFile($m, $u, '/denied', 'head'),
+                $cls::selectVerifiedFile($m, $u.'?q=1', '/denied', 'HEAD'),
+                $cls::selectVerifiedFile($m, 'https://other.example/article/', '/denied', 'HEAD')
+            ], JSON_THROW_ON_ERROR);
+            """
+            result = php_run(source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), [
+                paths["GET"], paths["HEAD"], "/denied", "/denied",
+                "/denied", "/denied",
             ])
-            for file in [*stored, stale, bad, peer_file]:
-                self.assertTrue(file.exists(), "Vendor stub must not delete fixtures")
+
+    def test_dispatch_restores_vendor_context_on_exception(self):
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-unwind-") as work:
+            root = Path(work) / "site-9"
+            root.mkdir(mode=0o700)
+            entry = root / "head-test"
+            entry.write_bytes(b"fixture")
+            source = rf"""
+            define('ABSPATH', '/fixture/');
+            class FastCGI_Purger {{
+                public function purge_url($url, $feed) {{
+                    throw new RuntimeException('vendor failure');
+                }}
+            }}
+            require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+            function wp_parse_url($url) {{ return parse_url($url); }}
+            $m = ['site_key'=>'qa.example', 'cache_directory'=>{json.dumps(str(root))}];
+            $selector = static fn($url, $method): string =>
+                $method === 'HEAD' ? {json.dumps(str(entry))} : '';
+            $dispatch = new ReflectionMethod(
+                \AChWorks\AaPanelBridge\CacheInvalidation::class, 'dispatchPublicUrls');
+            $caught = false;
+            try {{
+                $dispatch->invoke(null, ['https://qa.example/article/'],
+                    $m, new FastCGI_Purger(), $selector);
+            }} catch (RuntimeException $e) {{
+                $caught = $e->getMessage() === 'vendor failure';
+            }}
+            $state = new ReflectionProperty(
+                \AChWorks\AaPanelBridge\CacheInvalidation::class, 'activeUrlPurge');
+            echo json_encode([$caught, $state->getValue()], JSON_THROW_ON_ERROR);
+            """
+            result = php_run(source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), [True, None])
 
     def test_missing_helper_stays_unverified_without_settings(self):
         source = f"""
@@ -403,7 +504,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
     def test_header_slug_version_and_external_update_uri(self):
         entry = ENTRY.read_text(encoding="utf-8")
         self.assertIn("Plugin Name: ACh aaPanel Bridge", entry)
-        self.assertIn("Version: 0.1.5", entry)
+        self.assertIn("Version: 0.1.6", entry)
         self.assertIn("Text Domain: ach-aapanel-bridge", entry)
         self.assertIn("Update URI: https://github.com/AChWorks/", entry)
         self.assertNotIn("Requires Plugins:", entry)
@@ -417,7 +518,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
             first, second = build(a), build(b)
             self.assertEqual(a.read_bytes(), b.read_bytes())
             self.assertEqual(first["sha256"], second["sha256"])
-            self.assertEqual(first["version"], "0.1.5")
+            self.assertEqual(first["version"], "0.1.6")
             with ZipFile(a) as package:
                 names = package.namelist()
                 self.assertEqual(len(names), 5)

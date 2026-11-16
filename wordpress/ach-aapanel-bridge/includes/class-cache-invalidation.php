@@ -15,6 +15,9 @@ final class CacheInvalidation
     /** URLs captured while a published post still exists; release only after deletion succeeds. */
     private static array $pendingDeleteUrls = [];
 
+    /** Per-dispatch vendor file-filter target; absent for ordinary Nginx Helper calls. */
+    private static ?array $activeUrlPurge = null;
+
     private const DIR = 'ach-customizer-bridge';
     private const MANIFEST = 'cache.php';
     private const PREFIX = "<?php defined('ABSPATH') || exit; __halt_compiler(); ?>\n";
@@ -174,13 +177,14 @@ final class CacheInvalidation
         }
         self::dispatchPublicUrls(
             $urls, $manifest, $nginx_purger,
-            static fn(string $url): string => self::selectFile('', $url)
+            static fn(string $url, string $method): string =>
+                self::selectVerifiedFile($manifest, $url, '', $method)
         );
     }
 
     /**
      * Shared save/delete dispatch: only the registered primary Host,
-     * query-free public GET objects already present in the saved generation.
+     * query-free public GET/HEAD objects already present in the saved generation.
      * The selector always owns the filesystem identity checks; this private
      * seam also permits deterministic tests of the real vendor dispatch.
      */
@@ -205,19 +209,32 @@ final class CacheInvalidation
             if (!is_string($path)) {
                 continue;
             }
-            // The native policy serves both HTTP and HTTPS without forcing
-            // redirects. Never cross the saved site's physical boundary.
+            // A real Nginx cache can store independent GET and HEAD keys.
+            // Use the existing vendor per-URL unlink path for each verified
+            // object; never direct-unlink it or allow a different vendor URL
+            // to inherit the temporary HEAD selector.
             foreach (['http', 'https'] as $scheme) {
                 $candidateUrl = $scheme . '://' . $manifest['site_key'] . $path;
-                if (isset($seen[$candidateUrl])) {
-                    continue;
-                }
-                $seen[$candidateUrl] = true;
-                $file = $selectFile($candidateUrl);
-                if (is_string($file)
-                    && str_starts_with($file, $manifest['cache_directory'] . '/')
-                    && is_file($file)) {
-                    $purger->purge_url($candidateUrl, false);
+                foreach (['GET', 'HEAD'] as $method) {
+                    $identity = $method . ' ' . $candidateUrl;
+                    if (isset($seen[$identity])) {
+                        continue;
+                    }
+                    $seen[$identity] = true;
+                    $file = $selectFile($candidateUrl, $method);
+                    if (!is_string($file)
+                        || !str_starts_with($file, $manifest['cache_directory'] . '/')
+                        || !is_file($file)) {
+                        continue;
+                    }
+                    $previous = self::$activeUrlPurge;
+                    self::$activeUrlPurge = ['url' => $candidateUrl, 'method' => $method];
+                    try {
+                        // false disables feed-URL purging, not recursive Purge All.
+                        $purger->purge_url($candidateUrl, false);
+                    } finally {
+                        self::$activeUrlPurge = $previous;
+                    }
                 }
             }
         }
@@ -297,15 +314,36 @@ final class CacheInvalidation
             $status['effective_cache_path'] !== $manifest['cache_directory']) {
             return $denied;
         }
-        return self::selectVerifiedFile($manifest, $url, $denied);
+        return self::selectFileForManifest($manifest, $url, $denied);
+    }
+
+    /**
+     * The Nginx Helper vendor filter supplies only a URL, not a request method.
+     * An ordinary vendor call maps GET, exactly as before. Only this class's
+     * synchronous, verified dispatch can select HEAD for that same URL.
+     */
+    private static function selectFileForManifest(
+        array $manifest, string $url, string $denied
+    ): string {
+        $target = self::$activeUrlPurge;
+        if ($target !== null && $target['url'] !== $url) {
+            return $denied;
+        }
+        return self::selectVerifiedFile(
+            $manifest, $url, $denied, $target['method'] ?? 'GET'
+        );
     }
 
     /**
      * Pure scope boundary, also exercised with disposable non-root fixtures.
      * Validating a pathname is NOT a security proof against privileged races.
      */
-    public static function selectVerifiedFile(array $manifest, string $url, string $denied): string
-    {
+    public static function selectVerifiedFile(
+        array $manifest, string $url, string $denied, string $method = 'GET'
+    ): string {
+        if (!in_array($method, ['GET', 'HEAD'], true)) {
+            return $denied;
+        }
         $parts = \wp_parse_url($url);
         if (!is_array($parts) ||
             !isset($parts['scheme'], $parts['host']) ||
@@ -330,7 +368,7 @@ final class CacheInvalidation
             || [$root['dev'], $root['ino']] !== $manifest['cache_identity']) {
             return $denied;
         }
-        $key = $parts['scheme'] . 'GET' . $manifest['site_key'] . $path .
+        $key = $parts['scheme'] . $method . $manifest['site_key'] . $path .
             '|' . $manifest['cache_generation'];
         $hash = md5($key); // Nginx disk-format key, NOT a security primitive.
         $first = $base . '/' . substr($hash, -1);
