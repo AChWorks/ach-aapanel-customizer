@@ -2,26 +2,17 @@
 
 A native, modular **aaPanel customization plugin** for keeping operator-approved changes to aaPanel, its modules/plugins, websites, and managed services visible, durable, and recoverable.
 
-**Latest integrated native development source: v0.1.46 UNRELEASED ([merged independently reviewed PR #78](https://github.com/AChWorks/ach-aapanel-customizer/pull/78), [main@dfec394](https://github.com/AChWorks/ach-aapanel-customizer/commit/dfec39485b5c5321b390df68e3b0f73eab06fd6a)). No public Release or Production deployment.**
-v0.1.42 passed real native aaPanel 8.0.7 primary-admin Applied-state
-exact-URL Clear, including current-generation single-object removal, unchanged
-peer/other URL, recheck and consented Restore
-([live QA evidence](https://github.com/AChWorks/ach-aapanel-customizer/pull/68#issuecomment-6870008305)).
-Native worker-version matching and earlier WooCommerce session, Cache, Status
-Pages and Nginx worker observations have bounded independent evidence; they do
-not prove all-worker or general production certification. Nginx Helper's
-generation-aware WordPress integration and safe live Purge All, native SSL
-installation UI, all-site regeneration and broader fault/lifecycle cases
-remain tracked under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2),
-[#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10),
-[#17](https://github.com/AChWorks/ach-aapanel-customizer/issues/17)
-and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
-Use the live PR, Actions and Issue evidence for exact candidate and acceptance
-status; new integration, Release and Production require their own gates.
+**Current integrated development versions:** Native **v0.1.48** and optional WordPress Bridge **v0.1.4**, merged in independently reviewed [PR #82](https://github.com/AChWorks/ach-aapanel-customizer/pull/82) on [main](https://github.com/AChWorks/ach-aapanel-customizer/commit/735c1ad6869a346cb231ae6339da87c0b6394184). [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) contain versioned **pre-release** ZIPs; these do **not** mean production deployment or certification of every Nginx worker.
 
-### Optional WordPress companion: ACh aaPanel Bridge v0.1.0 (unreleased)
+Earlier v0.1.42 exact-URL Clear and WooCommerce session/Cache/Status Pages checks have bounded [Issue #21 QA evidence](https://github.com/AChWorks/ach-aapanel-customizer/issues/21). The generation-aware WordPress integration has its own [Issue #2 acceptance record](https://github.com/AChWorks/ach-aapanel-customizer/issues/2#issuecomment-6910506460) and is limited to current-generation, site-owned public GET objects. Safe scoped Purge All, broader HEAD/alias/archive coverage, native SSL installation and regeneration/lifecycle scenarios remain open in [#2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10), [#17](https://github.com/AChWorks/ach-aapanel-customizer/issues/17), and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 
-The optional WordPress-side plugin is developed under [`wordpress/ach-aapanel-bridge/`](wordpress/ach-aapanel-bridge/README.md), **in this same repository but with its own version and independent ZIP**. It can be installed and disabled through WordPress independently of the native aaPanel plugin. The first candidate offers **read-only Nginx Helper diagnostics** under WordPress Tools; it does **not** yet install hooks, change WordPress options, touch Nginx/Cache or claim automatic invalidation or safe Purge All. The secure, generation-aware integration remains a separate Issue #2 acceptance task. Build the separate WordPress ZIP using `python3 -B scripts/build_wordpress_bridge.py`; its `Update URI` avoids WordPress.org same-slug replacement but does not provide automatic updates. No WordPress installation or public Release was performed.
+### Optional WordPress companion: ACh aaPanel Bridge v0.1.4
+
+The WordPress plugin is maintained in [`wordpress/ach-aapanel-bridge/`](wordpress/ach-aapanel-bridge/README.md), with its **own version and ZIP**. Its WordPress Tools page inspects the current Nginx Helper integration. The native plugin may optionally provision a root-owned manifest only after a fresh verified Applied Cache Recheck and explicit administrator approval. WordPress Bridge then maps validated, current-generation GET entries for the selected site to Nginx Helper's supported `unlink_files` per-URL path and reconciles public post/homepage updates; it does **not** install/configure Nginx Helper, alter WordPress options, enable global Purge All or auto-install itself. The operator must configure a **site-specific** Nginx Helper cache path and site-specific PHP-FPM `open_basedir` access without widening shared cache access. No Production install is implied. The independent `Update URI` prevents WordPress.org slug collisions but does not provide automatic updates.
+
+### v0.1.48 merged: opt-in generation-aware URL invalidation (Issue #2)
+
+The [exact-reviewed source](https://github.com/AChWorks/ach-aapanel-customizer/pull/82) passed 788 Python, 322 JavaScript, 35 Chromium layout tests and [exact-head CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/43825854052). Live nonproduction WordPress/Gutenberg QA produced HTTP and HTTPS `MISS → HIT` with updated content while the peer site's Cache stayed `HIT`; all test-specific WordPress configuration and plugins were subsequently restored. Native v0.1.48 remains on the isolated QA guest for follow-up read-only inspection. Review found no blocker; the suggested additional deterministic `afterPostSaved` behavioral tests remain optional future coverage.
 
 **Later live QA supersedes the old read-only v0.1.46 snapshot below:** the exact merged native ZIP was installed and fully checked, real two-customer WooCommerce HTTP/HTTPS cache isolation passed, and the selected QA site was subsequently Restored. See the [final Issue #21 acceptance receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6900380336).
 

@@ -1,6 +1,6 @@
 # ACh aaPanel Customizer — Project Specification
 
-- **Status:** Canonical product intent — staged unreleased native development
+- **Status:** Canonical product intent — staged development with reviewed pre-release packages; Production deployment remains separately gated
 - **Repository:** `AChWorks/ach-aapanel-customizer`
 - **Owner:** AChWorks
 - **Product:** ACh aaPanel Customizer
@@ -16,9 +16,9 @@ The product manages *operator-approved desired behavior* rather than blindly ove
 
 ### Optional WordPress companion
 
-The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Future coordinated releases may attach both artifacts only after their respective review and release approvals.
+The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Coordinated pre-releases can attach both artifacts after their respective review and release authorization; installation and Production deployment remain separate actions.
 
-The name intentionally covers more than caching. Add only evidenced, explicitly supported WordPress-side integrations to this small companion. The initial v0.1.0 source was read-only diagnostics. The subsequent v0.1.4 candidate adds an **opt-in, root-owned, native-managed exact-URL generation filter** for Nginx Helper `unlink_files`, but does not activate the vendor plugin/options, enable `Purge All`, or certify effective Nginx worker state. Native v0.1.48 remains unreleased pending source and installed acceptance. The currently tested protocol covers only verified current-generation site-owned GET URL files and a bounded WordPress post-save path. Other URL/HEAD/archive invalidation and safe physically scoped Purge All remain separate acceptance work in Issue #2; no shared `WORDPRESS` Purge All, vendor-core modifications, unstated remote service, or automatic Production installation is authorized by the companion's existence.
+The name intentionally covers more than caching. Add only evidenced, explicitly supported WordPress-side integrations to this small companion. The initial v0.1.0 source was read-only diagnostics. The independently reviewed v0.1.4 companion adds an **opt-in, root-owned, native-managed exact-URL generation filter** for Nginx Helper `unlink_files`, but does not activate the vendor plugin/options, enable `Purge All`, or certify effective Nginx worker state. Native v0.1.48 and WordPress Bridge v0.1.4 were merged under reviewed PR #82; the optional integration has bounded nonproduction acceptance recorded in Issues #2 and #21, and pre-release distribution does not establish Production readiness. The currently tested protocol covers only verified current-generation site-owned GET URL files and a bounded WordPress post-save path. Other URL/HEAD/archive invalidation and safe physically scoped Purge All remain separate acceptance work in Issue #2; no shared `WORDPRESS` Purge All, vendor-core modifications, unstated remote service, or automatic Production installation is authorized by the companion's existence.
 
 ## 2. Problem and desired outcomes
 
@@ -72,7 +72,7 @@ The plugin must expose a built-in Activity/Diagnostics view backed by bounded pe
 
 **PHP compatibility:** Inspect/manage installed PHP 8.1 and newer versions, but distinguish *detected*, *file-only preview*, *native Apply eligible* and *recoverably tested*. The current guarded 8.5 shared-[www] adapter is not authorization to write another version by string substitution. Each other version and pool shape must pass native aaPanel PHP discovery, mapping, syntax/reload, shared-service attribution, after-state, website and rollback/fault tests before Apply eligibility. Unsupported configurations fail closed. PHP 8.1+ remains an acceptance target, not a claim of tested compatibility.
 
-These are durable product requirements; verified implementation and release readiness must be recorded against the exact candidate and non-production environment, independently reviewed and separately approved by the Owner. Production changes, publication and automatic enforcement remain unapproved.
+These are durable product requirements; verified implementation and release readiness must be recorded against the exact candidate and non-production environment, independently reviewed and separately approved by the Owner. Production changes and automatic enforcement remain separately gated; an approved pre-release publication is not an installation or rollout.
 
 ## 4. Product boundary and modular evolution
 
