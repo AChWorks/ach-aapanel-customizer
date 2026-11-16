@@ -12,6 +12,9 @@ defined('ABSPATH') || exit;
 
 final class CacheInvalidation
 {
+    /** URLs captured while a published post still exists; release only after deletion succeeds. */
+    private static array $pendingDeleteUrls = [];
+
     private const DIR = 'ach-customizer-bridge';
     private const MANIFEST = 'cache.php';
     private const PREFIX = "<?php defined('ABSPATH') || exit; __halt_compiler(); ?>\n";
@@ -25,6 +28,11 @@ final class CacheInvalidation
             // homepage response stale. Reconcile only currently cached public
             // post and homepage keys after WordPress finishes persistence.
             \add_action('wp_after_insert_post', [__CLASS__, 'afterPostSaved'], 50, 4);
+            // WordPress has no wp_after_insert_post event for a permanent
+            // deletion. Capture the old permalink before database removal,
+            // then invalidate only after the deletion actually completes.
+            \add_action('before_delete_post', [__CLASS__, 'capturePostDeletion'], 10, 2);
+            \add_action('after_delete_post', [__CLASS__, 'afterPostDeleted'], 10, 2);
         }
     }
 
@@ -148,41 +156,37 @@ final class CacheInvalidation
     }
 
     /**
-     * A bounded post-save reconciliation for block/classic/REST updates.
-     * Uses the vendor's per-URL unlink_files method; never calls Purge All.
-     * The on-disk manifest and configured physical cache ownership are
-     * revalidated before dispatching EACH eligible URL.
+     * Reconcile a bounded list of public URLs, never the vendor's Purge All.
+     * The live vendor callback independently revalidates the current manifest
+     * and Helper configuration for every URL.
      */
-    public static function afterPostSaved($postId, $post, $update, $postBefore): void
+    private static function purgePublicUrls(array $urls): void
     {
         global $nginx_purger;
-        // WordPress wp_after_insert_post first passes the numeric post ID,
-        // then the WP_Post object (WP 5.6+). Never confuse the two.
-        if (!is_int($postId) || !is_object($post) ||
-            !isset($post->ID) || (int)$post->ID !== $postId ||
-            !isset($post->post_type, $post->post_status)
-            || !is_string($post->post_type)
-            || !\is_post_type_viewable($post->post_type)
-            || !in_array('publish', [
-                $post->post_status,
-                is_object($postBefore) ? ($postBefore->post_status ?? null) : null,
-            ], true)
-            || !class_exists('FastCGI_Purger', false)
+        if (!class_exists('FastCGI_Purger', false)
             || !($nginx_purger instanceof \FastCGI_Purger)
             || self::inspect()['url_filter_ready'] !== true) {
             return;
         }
-
         $manifest = self::manifest();
         if ($manifest === null) {
             return;
         }
-        $urls = [\home_url('/'), \get_permalink($post)];
-        if (is_object($postBefore) &&
-            ($postBefore->post_status ?? null) === 'publish') {
-            // Preserve invalidation of the former URL after slug/status edits.
-            $urls[] = \get_permalink($postBefore);
-        }
+        self::dispatchPublicUrls(
+            $urls, $manifest, $nginx_purger,
+            static fn(string $url): string => self::selectFile('', $url)
+        );
+    }
+
+    /**
+     * Shared save/delete dispatch: only the registered primary Host,
+     * query-free public GET objects already present in the saved generation.
+     * The selector always owns the filesystem identity checks; this private
+     * seam also permits deterministic tests of the real vendor dispatch.
+     */
+    private static function dispatchPublicUrls(
+        array $urls, array $manifest, \FastCGI_Purger $purger, callable $selectFile
+    ): void {
         $seen = [];
         foreach ($urls as $url) {
             if (!is_string($url)) {
@@ -202,20 +206,78 @@ final class CacheInvalidation
                 continue;
             }
             // The native policy serves both HTTP and HTTPS without forcing
-            // redirects. Invalidate both scheme variants, never foreign Hosts.
+            // redirects. Never cross the saved site's physical boundary.
             foreach (['http', 'https'] as $scheme) {
                 $candidateUrl = $scheme . '://' . $manifest['site_key'] . $path;
                 if (isset($seen[$candidateUrl])) {
                     continue;
                 }
                 $seen[$candidateUrl] = true;
-                $file = self::selectFile('', $candidateUrl);
-                if (str_starts_with($file, $manifest['cache_directory'] . '/')
+                $file = $selectFile($candidateUrl);
+                if (is_string($file)
+                    && str_starts_with($file, $manifest['cache_directory'] . '/')
                     && is_file($file)) {
-                    $nginx_purger->purge_url($candidateUrl, false);
+                    $purger->purge_url($candidateUrl, false);
                 }
             }
         }
+    }
+
+    /**
+     * WordPress wp_after_insert_post provides ID, WP_Post, update, old post.
+     * A transition out of publish still invalidates the old public permalink.
+     */
+    public static function afterPostSaved($postId, $post, $update, $postBefore): void
+    {
+        if (!is_int($postId) || !is_object($post)
+            || !isset($post->ID, $post->post_type, $post->post_status)
+            || (int)$post->ID !== $postId
+            || !is_string($post->post_type)
+            || !\is_post_type_viewable($post->post_type)
+            || !in_array('publish', [
+                $post->post_status,
+                is_object($postBefore) ? ($postBefore->post_status ?? null) : null,
+            ], true)) {
+            return;
+        }
+
+        $urls = [\home_url('/'), \get_permalink($post)];
+        if (is_object($postBefore)
+            && ($postBefore->post_status ?? null) === 'publish') {
+            $urls[] = \get_permalink($postBefore);
+        }
+        self::purgePublicUrls($urls);
+    }
+
+    /** Capture while WordPress still has the original published permalink. */
+    public static function capturePostDeletion($postId, $post): void
+    {
+        if (!is_int($postId) || !is_object($post)
+            || !isset($post->ID, $post->post_type, $post->post_status)
+            || (int)$post->ID !== $postId
+            || !is_string($post->post_type)
+            || $post->post_status !== 'publish'
+            || !\is_post_type_viewable($post->post_type)) {
+            return;
+        }
+        self::$pendingDeleteUrls[$postId] = [
+            \home_url('/'), \get_permalink($post),
+        ];
+    }
+
+    /** Aborted deletions never purge; finished deletes reuse the saved URL. */
+    public static function afterPostDeleted($postId, $post): void
+    {
+        if (!is_int($postId)) {
+            return;
+        }
+        $urls = self::$pendingDeleteUrls[$postId] ?? null;
+        unset(self::$pendingDeleteUrls[$postId]);
+        if ($urls === null || !is_object($post)
+            || !isset($post->ID) || (int)$post->ID !== $postId) {
+            return;
+        }
+        self::purgePublicUrls($urls);
     }
 
     /** The vendor callback must never see a guessed path for an invalid URL. */
