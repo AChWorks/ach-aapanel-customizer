@@ -223,6 +223,7 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
         $GLOBALS['slugs'] = [];
         function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return []; }}
         function home_url($path) {{ return 'https://qa.example/'; }}
         function get_permalink($post) {{
             $GLOBALS['slugs'][] = $post->post_name;
@@ -258,6 +259,7 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         define('ABSPATH', '/fixture/');
         require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
         function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return []; }}
         function home_url($path) {{ return 'https://qa.example/'; }}
         function get_permalink($post) {{
             return 'https://qa.example/' . $post->post_name . '/';
@@ -294,6 +296,141 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             "add_action('after_delete_post', [__CLASS__, 'afterPostDeleted'], 10, 2)",
             source_code)
 
+    def test_public_term_archives_include_parent_and_exclude_private_taxonomies(self):
+        source = rf"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        function get_object_taxonomies($type) {{
+            return $type === 'post' ? ['category', 'post_tag', 'secret'] : [];
+        }}
+        function is_taxonomy_viewable($taxonomy) {{ return $taxonomy !== 'secret'; }}
+        function is_taxonomy_hierarchical($taxonomy) {{ return $taxonomy === 'category'; }}
+        function get_the_terms($post, $taxonomy) {{
+            if ($taxonomy === 'category') {{
+                return [(object)['term_id'=>12,'slug'=>'child'],
+                        (object)['term_id'=>12,'slug'=>'child']];
+            }}
+            if ($taxonomy === 'post_tag') {{
+                return [(object)['term_id'=>30,'slug'=>'topic']];
+            }}
+            throw new Exception('Private taxonomy must never be inspected');
+        }}
+        function get_ancestors($termId, $taxonomy, $type) {{
+            return $taxonomy === 'category' && $termId === 12 ? [9] : [];
+        }}
+        function get_term($id, $taxonomy) {{
+            return $id === 9 ? (object)['term_id'=>9,'slug'=>'parent'] : false;
+        }}
+        function is_wp_error($value) {{ return false; }}
+        function get_term_link($term, $taxonomy) {{
+            return 'https://qa.example/' . $taxonomy . '/' . $term->slug . '/';
+        }}
+        $ref = new ReflectionMethod(
+            \AChWorks\AaPanelBridge\CacheInvalidation::class, 'postArchiveUrls');
+        $post = (object)['ID'=>7,'post_type'=>'post','post_status'=>'publish'];
+        echo json_encode($ref->invoke(null, $post), JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(json.loads(result.stdout), [
+            'https://qa.example/category/child/',
+            'https://qa.example/category/parent/',
+            'https://qa.example/post_tag/topic/',
+        ])
+
+    def test_term_relationship_change_queries_old_and_new_taxonomy_ids(self):
+        # A term-only change can occur without wp_after_insert_post. Keep the
+        # real term_taxonomy_id identity (not term_id) when resolving old/new.
+        source = rf"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        $GLOBALS['lookups'] = [];
+        $GLOBALS['term_links'] = [];
+        function get_post($id) {{
+            return $id === 7 ? (object)[
+                'ID'=>7,'post_type'=>'post','post_status'=>'publish'] : null;
+        }}
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return ['category']; }}
+        function is_taxonomy_viewable($tax) {{ return $tax === 'category'; }}
+        function is_taxonomy_hierarchical($tax) {{ return false; }}
+        function get_terms($args) {{
+            $GLOBALS['lookups'][] = $args;
+            $output = [];
+            foreach ($args['term_taxonomy_id'] as $tt) {{
+                $output[] = (object)['term_id'=>$tt + 1000,'slug'=>'tt-' . $tt];
+            }}
+            return $output;
+        }}
+        function is_wp_error($value) {{ return false; }}
+        function get_term_link($term, $taxonomy) {{
+            $GLOBALS['term_links'][] = $term->slug;
+            return 'https://qa.example/category/' . $term->slug . '/';
+        }}
+        $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+        $cls::afterPostTermsSet(7, ['new'], [25, 26], 'category', false, [24, 25]);
+        $cls::afterPostTermsSet(7, [], [25, 26], 'category', false, [26, 25]);
+        $cls::afterPostTermsSet(7, [], [25], 'private', false, [24]);
+        $cls::afterPostTermsSet(8, [], [27], 'category', false, [24]);
+        echo json_encode([$GLOBALS['lookups'], $GLOBALS['term_links']],
+            JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        lookups, links = json.loads(result.stdout)
+        self.assertEqual(len(lookups), 1)
+        self.assertEqual(lookups[0], {
+            'taxonomy': 'category',
+            'term_taxonomy_id': [25, 26, 24],
+            'hide_empty': False,
+        })
+        self.assertEqual(links, ['tt-25', 'tt-26', 'tt-24'])
+        self.assertIn(
+            "add_action('set_object_terms', [__CLASS__, 'afterPostTermsSet'], 20, 6)",
+            (PLUGIN / 'includes/class-cache-invalidation.php').read_text())
+
+    def test_post_save_and_deletion_capture_archive_urls(self):
+        source = rf"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return ['category']; }}
+        function is_taxonomy_viewable($taxonomy) {{ return true; }}
+        function is_taxonomy_hierarchical($taxonomy) {{ return false; }}
+        function get_the_terms($post, $taxonomy) {{
+            return [(object)['term_id'=>17,'slug'=>'news']];
+        }}
+        function is_wp_error($value) {{ return false; }}
+        function get_term_link($term, $taxonomy) {{
+            return 'https://qa.example/category/' . $term->slug . '/';
+        }}
+        function home_url($path) {{ return 'https://qa.example/'; }}
+        function get_permalink($post) {{
+            return 'https://qa.example/' . $post->post_name . '/';
+        }}
+        $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+        $post = (object)['ID'=>31,'post_type'=>'post',
+            'post_status'=>'publish','post_name'=>'news-item'];
+        $cls::capturePostDeletion(31, $post);
+        $prop = new ReflectionProperty($cls, 'pendingDeleteUrls');
+        $stored = $prop->getValue();
+        $cls::afterPostDeleted(31, $post);
+        $cleared = $prop->getValue();
+        $ref = new ReflectionMethod($cls, 'postArchiveUrls');
+        echo json_encode([$stored, $cleared, $ref->invoke(null, $post)],
+            JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        stored, cleared, archive = json.loads(result.stdout)
+        self.assertEqual(stored, {'31': [
+            'https://qa.example/',
+            'https://qa.example/news-item/',
+            'https://qa.example/category/news/',
+        ]})
+        self.assertEqual(cleared, [])
+        self.assertEqual(archive, ['https://qa.example/category/news/'])
+
     def test_shared_save_delete_dispatch_uses_only_verified_generation_files(self):
         # Execute the same private dispatch used by WordPress save/deletion.
         # The vendor-purger stub calls the real scoped file selector while
@@ -326,6 +463,10 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
                 ("https", "GET", "/"), ("https", "HEAD", "/"),
                 ("https", "GET", "/article/"), ("https", "HEAD", "/article/"),
                 ("http", "GET", "/old/"), ("http", "HEAD", "/old/"),
+                ("http", "GET", "/category/old/"),
+                ("http", "HEAD", "/category/old/"),
+                ("https", "GET", "/category/new/"),
+                ("https", "HEAD", "/category/new/"),
             ]:
                 present[(scheme, method, path)] = cache_object(
                     scheme, path, method=method)
@@ -346,7 +487,10 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             urls = [
                 "https://qa.example/", "https://qa.example/article/",
                 "https://qa.example/article/", "http://qa.example/old/",
-                "https://qa.example/old/", "https://another.example/",
+                "https://qa.example/old/",
+                "https://qa.example/category/new/",
+                "http://qa.example/category/old/",
+                "https://another.example/",
                 "https://qa.example/article/?private=1",
                 "https://qa.example/%61rticle/",
                 "https://qa.example/../old/", "http://qa.example:8080/",
@@ -395,6 +539,10 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
                     ("https", "GET", "/"), ("https", "HEAD", "/"),
                     ("https", "GET", "/article/"), ("https", "HEAD", "/article/"),
                     ("http", "GET", "/old/"), ("http", "HEAD", "/old/"),
+                    ("https", "GET", "/category/new/"),
+                    ("https", "HEAD", "/category/new/"),
+                    ("http", "GET", "/category/old/"),
+                    ("http", "HEAD", "/category/old/"),
                 ]
             ]
             self.assertEqual(calls, expected)
@@ -504,7 +652,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
     def test_header_slug_version_and_external_update_uri(self):
         entry = ENTRY.read_text(encoding="utf-8")
         self.assertIn("Plugin Name: ACh aaPanel Bridge", entry)
-        self.assertIn("Version: 0.1.6", entry)
+        self.assertIn("Version: 0.1.7", entry)
         self.assertIn("Text Domain: ach-aapanel-bridge", entry)
         self.assertIn("Update URI: https://github.com/AChWorks/", entry)
         self.assertNotIn("Requires Plugins:", entry)
@@ -518,7 +666,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
             first, second = build(a), build(b)
             self.assertEqual(a.read_bytes(), b.read_bytes())
             self.assertEqual(first["sha256"], second["sha256"])
-            self.assertEqual(first["version"], "0.1.6")
+            self.assertEqual(first["version"], "0.1.7")
             with ZipFile(a) as package:
                 names = package.namelist()
                 self.assertEqual(len(names), 5)
