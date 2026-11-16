@@ -483,7 +483,7 @@
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
       <h4>FastCGI Cache</h4>
-      <p class="ach-note">Understand whether this website appears to use FastCGI Cache, where cached files may be stored, and what requires review before changing it. This is not a WordPress session safety certification, and Purge All is not available.</p>
+      <p class="ach-note">Inspect FastCGI Cache sources and ownership before changing them. Native selected-site file clear is available only after a verified Applied Recheck and separate approval. Nginx Helper Purge All is a separate vendor operation; this plugin neither intercepts it nor certifies it as site-safe.</p>
       <details class="ach-help"><summary>Cache workflow and recovery</summary><p>Select a website, inspect its sources, preview a site-owned policy, then Recheck. Apply requires a separate approval; keep the recovery ID and use Restore when needed.</p></details>
       <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines native VHost/PHP snippets and aaPanel's known top-level 0.fastcgi_cache.conf include for cache-zone paths, shared-directory Purge All risk, bypass/write guards, host-key tokens and ignored response headers. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
       <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
@@ -514,10 +514,10 @@
         <p id="ach-cache-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore is unavailable until Recheck Cache / recovery confirms a saved, site-owned recovery. No verified recovery means no Restore.</p>
         <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" disabled /> I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
-        <p class="ach-note"><strong>Selected-site Cache file clear (manual):</strong> only verified Nginx Cache files inside the selected site's own physical directory. Requires a fresh <em>Applied</em> Recheck and separate approval; does not touch shared WORDPRESS cache, call Nginx Helper, reload Nginx, or enable Purge All. New requests may immediately repopulate the cache.</p>
+        <p class="ach-note"><strong>Native full-site Cache file clear (manual):</strong> removes all verified Cache files in the selected site's owned physical directory, including older generations and cached aliases in that same directory. Requires a fresh <em>Applied</em> Recheck, separate approval, and renewed physical peer-isolation checks. It leaves other sites, shared WORDPRESS cache, the Nginx configuration, and Nginx Helper unchanged. New requests may immediately refill the cache. This is <strong>not</strong> Nginx Helper Purge All.</p>
         <p id="ach-cache-clear-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm the selected site's Cache is Applied before file clear.</p>
         <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" disabled /> I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</label>
-        <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" disabled>Clear selected-site Cache files</button></div>
+        <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" disabled>Clear all selected-site Cache files</button></div>
         <p class="ach-note"><strong>Clear one cached URL (manual):</strong> restrict removal to this site's primary Host and exact current-generation GET/HEAD Cache files for one canonical URL path. Only paths with no query, encoding, or fragment are supported by this Cache policy. Covers HTTP and HTTPS keys; other site aliases are separate. Requires a fresh Applied Recheck and independent approval. This is not an Nginx Helper hook.</p>
         <label for="ach-cache-url-path">Cached URL path (for example, /news/ or /)</label>
         <input id="ach-cache-url-path" type="text" maxlength="1024" value="/" spellcheck="false" autocomplete="off" aria-describedby="ach-cache-url-why" />
@@ -525,11 +525,11 @@
         <label><input id="ach-cache-url-reviewed" type="checkbox" aria-describedby="ach-cache-url-why" disabled /> I approve removing only this site's exact URL Cache entries, leaving other paths and sites unchanged.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-clear-url" class="btn btn-warning" disabled>Clear selected URL Cache</button></div>
         <details class="ach-help"><summary>Optional WordPress Bridge URL mapping (no Purge All)</summary>
-          <p>Only a freshly Rechecked Applied native WordPress Cache may provision a root-owned site manifest for the independently installed ACh aaPanel Bridge. The WordPress plugin and Nginx Helper must be activated separately; <code>unlink_files</code> selects only an exact owned, generation-matched GET object. No shared legacy cache clear, vendor Purge All, Nginx reload, WordPress option change, or automatic installation occurs here. Restore revokes the manifest before retiring the Nginx generation.</p>
+          <p>Only a freshly Rechecked Applied native WordPress Cache may provision a root-owned site manifest for the independently installed ACh aaPanel Bridge. The WordPress plugin and Nginx Helper must be activated separately; the verified Bridge maps exact, generation-matched public GET/HEAD URL objects for its own post/homepage dispatch through the Helper's per-URL filter. It does not intercept the vendor's independent recursive Purge All, change the Helper's configured cache path, clear a shared root, reload Nginx, or install plugins automatically. Restore revokes the manifest before retiring the Nginx generation.</p>
           <div class="ach-controls"><button type="button" id="ach-bridge-inspect" disabled>Inspect Bridge manifest</button></div>
           <p id="ach-bridge-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a website; inspect does not prove Helper activation or live Nginx workers.</p>
           <p id="ach-bridge-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: fresh Applied Cache Recheck and matching WordPress site required before provisioning.</p>
-          <label><input type="checkbox" id="ach-bridge-enable-reviewed" disabled /> I approve creating this site's native-owned WordPress Bridge mapping; Nginx Helper Purge All remains unsafe/unavailable.</label>
+          <label><input type="checkbox" id="ach-bridge-enable-reviewed" disabled /> I approve creating this site's native-owned WordPress Bridge mapping; this does not enable, block or certify Nginx Helper Purge All.</label>
           <div class="ach-controls"><button type="button" id="ach-bridge-enable" class="btn btn-warning" disabled>Provision URL mapping</button></div>
           <label><input type="checkbox" id="ach-bridge-disable-reviewed" disabled /> I approve removing only this site's managed Bridge manifest.</label>
           <div class="ach-controls"><button type="button" id="ach-bridge-disable" class="btn btn-danger" disabled>Disable Bridge mapping</button></div>
@@ -776,7 +776,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.48'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.49'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2208,7 +2208,7 @@
         risks.push('Private WordPress and WooCommerce routes still require live verification.');
       inspectionSummary('cache', risks.length ?
         'Review required: ' + risks.join(' ') +
-        ' No Purge All is available.' :
+        ' Nginx Helper Purge All is independent and not authorized by this audit.' :
         'Cache file observations recorded. No private-session or safe-purge guarantee.',
         risks.length || r.state === 'Partial' ? 'review' : 'neutral');
       root.find('#ach-cache-result').text(
@@ -2643,7 +2643,10 @@
             (cacheRecoveryIdentity ? '\nRecovery ID: '+cacheRecoveryIdentity : '')+
             blockedRecovery+blockedPhase+
             '\nRuntime marker verified: '+r.runtime_verified+
-            '\nSite-scoped Purge All: unavailable until native compatibility acceptance.'+
+            (cacheClearIdentity ?
+              '\nNative all-site file clear: eligible for separate approval; peer isolation is reverified before removal.' :
+              '\nNative all-site file clear: locked until a fresh verified Applied Recheck.')+
+            '\nNginx Helper Purge All: independent vendor action, NOT intercepted or certified by Customizer.'+
             '\n'+(r.note || 'Source and worker observations do not certify WooCommerce safety.')+
             blockedNextStep);
         }
@@ -2727,10 +2730,10 @@
       cacheActivationBusy = false;
       var ok = id === hostsSiteId() && validCacheClearReply(r,id,recovery);
       cacheActivationNotice(ok ?
-        'Selected-site Cache file clear completed.'+
+        'Native selected-site full-tree Cache file clear completed.'+
         '\nVerified files removed: '+r.cache_files_removed+
         '\nRecovery ID: '+recovery+' (still Applied; Recheck required for another action).'+
-        '\nNo Nginx reload, shared cache or Nginx Helper purge; traffic may refill this site.' :
+        '\nAll verified file generations in this site directory were eligible; no Nginx reload, shared cache or Nginx Helper purge. Traffic may refill this site.' :
         'Site Cache file clear NOT CONFIRMED. Do not repeat before fresh Recheck. '+
         (cacheBackendFailure(failure,'cache_manage') ||
           'Inspect Activity and saved Cache recovery.'));
