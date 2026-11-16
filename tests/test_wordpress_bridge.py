@@ -395,7 +395,7 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
 
         // Genuine append: pre-insert -> commit -> post-insert.
         $cls::captureTermAddition(7, 11, 'category');
-        $oldAppend = $adds->getValue()[7]['category']['url'];
+        $oldAppend = $adds->getValue()[7]['category'][0]['url'];
         $GLOBALS['relations'] = [10, 11];
         $GLOBALS['category'] = 'appended';
         $cls::afterTermAddition(7, 11, 'category');
@@ -412,7 +412,7 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         $cls::afterTermAddition(7, 12, 'category');
         $duringReplace = $GLOBALS['home_calls'];
         $cls::captureTermRemoval(7, [10], 'category');
-        $oldRemove = $dels->getValue()[7]['category']['url'];
+        $oldRemove = $dels->getValue()[7]['category'][0]['url'];
         $GLOBALS['relations'] = [11, 12];
         $GLOBALS['category'] = 'replacement';
         $cls::afterTermRemoval(7, [10], 'category');
@@ -456,6 +456,209 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
                 entry,
             )
         self.assertNotIn("add_action('set_object_terms'", entry)
+
+    def test_nested_relationship_pairs_keep_outer_snapshots_and_all_archives(self):
+        # wp_set_object_terms and wp_remove_object_terms can reenter through
+        # third-party callbacks on their pre-mutation actions. Both post-hooks
+        # must reconcile their OWN pre-mutation frames in reverse call order.
+        source = rf"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        $GLOBALS['rels'] = [30];
+        $GLOBALS['links'] = [];
+        $GLOBALS['archives'] = [];
+        $GLOBALS['purges'] = 0;
+        function get_post($id) {{
+            return $id === 7 ? (object)[
+                'ID'=>7, 'post_type'=>'post','post_status'=>'publish'] : null;
+        }}
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return ['category']; }}
+        function is_taxonomy_viewable($tax) {{ return $tax === 'category'; }}
+        function is_taxonomy_hierarchical($tax) {{ return false; }}
+        function wp_get_object_terms($id, $taxonomy, $args) {{
+            return $GLOBALS['rels'];
+        }}
+        function get_permalink($post) {{
+            $chosen = min($GLOBALS['rels']);
+            $url = 'https://qa.example/' . $chosen . '/story/';
+            $GLOBALS['links'][] = $url;
+            return $url;
+        }}
+        function home_url($path) {{
+            $GLOBALS['purges']++;
+            return 'https://qa.example/';
+        }}
+        function get_terms($args) {{
+            $ids = $args['term_taxonomy_id'];
+            $GLOBALS['archives'][] = $ids;
+            return array_map(static fn($tt) =>
+                (object)['term_id'=>$tt,'slug'=>'tt-' . $tt], $ids);
+        }}
+        function get_term_link($term, $tax) {{
+            return 'https://qa.example/category/' . $term->slug . '/';
+        }}
+        function is_wp_error($value) {{ return false; }}
+        function wp_cache_delete($id, $group) {{}}
+        function wp_cache_set_terms_last_changed() {{}}
+
+        $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+        $adds = new ReflectionProperty($cls, 'pendingTermAdds');
+        $dels = new ReflectionProperty($cls, 'pendingTermRemovals');
+
+        // Outer B pre-insert, then inner C pre-insert+commit+post, then
+        // outer B commits. B becomes the canonical category (20 < 30).
+        $cls::captureTermAddition(7, 20, 'category');
+        $cls::captureTermAddition(7, 40, 'category');
+        $GLOBALS['rels'] = [30, 40];
+        $cls::afterTermAddition(7, 40, 'category');
+        $GLOBALS['rels'] = [30, 40, 20];
+        $cls::afterTermAddition(7, 20, 'category');
+        $added = [$GLOBALS['purges'], $GLOBALS['archives'],
+            $GLOBALS['links'], $adds->getValue(), $dels->getValue()];
+
+        // Reset only observational counters, NOT pending Bridge state.
+        $GLOBALS['rels'] = [10, 20, 30];
+        $GLOBALS['links'] = [];
+        $GLOBALS['archives'] = [];
+        $GLOBALS['purges'] = 0;
+
+        // Outer deletion removes 10, inner deletion removes 20, then
+        // the original outer deletion commits. Final canonical category 30.
+        $cls::captureTermRemoval(7, [10], 'category');
+        $cls::captureTermRemoval(7, [20], 'category');
+        $GLOBALS['rels'] = [10, 30];
+        $cls::afterTermRemoval(7, [20], 'category');
+        $GLOBALS['rels'] = [30];
+        $cls::afterTermRemoval(7, [10], 'category');
+        $removed = [$GLOBALS['purges'], $GLOBALS['archives'],
+            $GLOBALS['links'], $adds->getValue(), $dels->getValue()];
+
+        echo json_encode([$added, $removed], JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        added, removed = json.loads(result.stdout)
+        self.assertEqual(added[0], 2, "both nested/outer adds committed")
+        self.assertEqual(added[1], [[30, 40], [30, 40, 20]],
+                         "must include newly affected B archive")
+        self.assertIn('https://qa.example/20/story/', added[2],
+                      "outer post-insert must inspect new canonical permalink")
+        self.assertEqual(added[3:], [[], []], "no leaked addition frame")
+        self.assertEqual(removed[0], 2, "both deletions committed")
+        self.assertEqual(removed[1], [[10, 20, 30], [10, 20, 30]],
+                         "must include all affected nested old/new archives")
+        self.assertIn('https://qa.example/30/story/', removed[2],
+                      "outer post-delete must inspect final permalink")
+        self.assertEqual(removed[3:], [[], []], "no leaked removal frame")
+
+    def test_nested_ineligible_failed_sql_and_unrelated_keys_do_not_collide(self):
+        # Same-key null frames (post temporarily nonpublic), SQL no-ops,
+        # another post and a second taxonomy must not consume the outer
+        # valid frame or dispatch unrelated URLs.
+        source = rf"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        $GLOBALS['sets'] = [
+            '7:category'=>[30], '7:post_tag'=>[100],
+            '8:category'=>[80]
+        ];
+        $GLOBALS['post7status'] = 'publish';
+        $GLOBALS['home_calls'] = 0;
+        $GLOBALS['post_urls'] = [];
+        function get_post($id) {{
+            if (!in_array($id,[7,8],true)) return null;
+            return (object)[
+                'ID'=>$id, 'post_type'=>'post',
+                'post_status'=>$id===7
+                    ? $GLOBALS['post7status'] : 'publish'
+            ];
+        }}
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return ['category','post_tag']; }}
+        function is_taxonomy_viewable($tax) {{
+            return in_array($tax, ['category','post_tag'], true);
+        }}
+        function wp_get_object_terms($id,$tax,$args) {{
+            return $GLOBALS['sets'][$id.':'.$tax] ?? [];
+        }}
+        function get_permalink($post) {{
+            $ids = $GLOBALS['sets'][$post->ID.':category'] ?? [];
+            $url = 'https://qa.example/' . $post->ID . '-' . min($ids) . '/story/';
+            $GLOBALS['post_urls'][] = $url;
+            return $url;
+        }}
+        function home_url($path) {{
+            ++$GLOBALS['home_calls'];
+            return 'https://qa.example/';
+        }}
+        function get_terms($args) {{ return []; }}
+        function wp_cache_delete($id,$key) {{}}
+        function wp_cache_set_terms_last_changed() {{}}
+        $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+        $adds = new ReflectionProperty($cls,'pendingTermAdds');
+        $dels = new ReflectionProperty($cls,'pendingTermRemovals');
+
+        // Outer valid post7/category pre-add frame.
+        $cls::captureTermAddition(7, 20, 'category');
+
+        // Temporarily nonpublic nested post7/category frame must still
+        // balance its post-event, without consuming outer valid frame.
+        $GLOBALS['post7status']='draft';
+        $cls::captureTermAddition(7, 21, 'category');
+        $cls::afterTermAddition(7, 21, 'category');
+        $GLOBALS['post7status']='publish';
+        $afterNull = $adds->getValue();
+
+        // Unrelated post 8/category nested between outer pre/post.
+        $cls::captureTermAddition(8, 81, 'category');
+        $GLOBALS['sets']['8:category']=[80,81];
+        $cls::afterTermAddition(8, 81, 'category');
+        $afterPost8 = [$GLOBALS['home_calls'], $adds->getValue()];
+
+        // Unrelated taxonomy on the original post.
+        $cls::captureTermAddition(7, 101, 'post_tag');
+        $GLOBALS['sets']['7:post_tag']=[100,101];
+        $cls::afterTermAddition(7, 101, 'post_tag');
+        $afterTag = [$GLOBALS['home_calls'], $adds->getValue()];
+
+        // Now outer post7/category insertion finally commits.
+        $GLOBALS['sets']['7:category']=[30,20];
+        $cls::afterTermAddition(7, 20, 'category');
+        $afterOuter = [$GLOBALS['home_calls'], $adds->getValue()];
+
+        // A nested SQL INSERT can fail while core still emits its
+        // post-insert hook. Its unchanged before/after is a no-op and
+        // does not consume the enclosing successful pre-insert frame.
+        $cls::captureTermAddition(7, 22, 'category');
+        $cls::captureTermAddition(7, 23, 'category');
+        $cls::afterTermAddition(7, 23, 'category');
+        $afterFailedInner = [$GLOBALS['home_calls'], $adds->getValue()];
+        $GLOBALS['sets']['7:category']=[30,20,22];
+        $cls::afterTermAddition(7, 22, 'category');
+        $afterSuccess = [
+            $GLOBALS['home_calls'], $adds->getValue(), $dels->getValue()
+        ];
+        echo json_encode([
+            $afterNull, $afterPost8, $afterTag, $afterOuter,
+            $afterFailedInner, $afterSuccess, $GLOBALS['post_urls']
+        ], JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        (after_null, post8, tag, outer, failed_inner,
+         success, urls) = json.loads(result.stdout)
+        self.assertEqual(len(after_null['7']['category']), 1)
+        self.assertEqual(post8[0], 1)
+        self.assertEqual(len(post8[1]['7']['category']), 1)
+        self.assertEqual(tag[0], 2)
+        self.assertEqual(len(tag[1]['7']['category']), 1)
+        self.assertEqual(outer, [3, []])
+        self.assertEqual(failed_inner[0], 3)
+        self.assertEqual(len(failed_inner[1]['7']['category']), 1)
+        self.assertEqual(success, [4, [], []])
+        self.assertIn('https://qa.example/7-20/story/', urls)
+        self.assertIn('https://qa.example/8-80/story/', urls)
 
     def test_partial_success_wordpress_error_then_removal_and_noop_are_isolated(self):
         # Actual WordPress sequence: one successful INSERT fires pre/post add;
@@ -526,7 +729,7 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         // Subsequent unrelated append C in SAME PHP request must capture
         // actual /middle/story/ rather than old /old/story/.
         $cls::captureTermAddition(11, 22, 'category');
-        $newUrl = $adds->getValue()[11]['category']['url'];
+        $newUrl = $adds->getValue()[11]['category'][0]['url'];
         $GLOBALS['relations'] = [21, 22];
         $GLOBALS['category'] = 'new';
         $cls::afterTermAddition(11, 22, 'category');
@@ -548,13 +751,14 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         $afterDeleteOnly = [$GLOBALS['home_calls'], $adds->getValue(),
             $dels->getValue()];
 
-        // A pre-delete interrupted before its post event is overwritten by
-        // the next pre-delete; it never suppresses an independent operation.
+        // Same-object nested removals preserve each independent snapshot.
+        // Neither simulated SQL DELETE changes the current relationships.
         $cls::captureTermRemoval(11, [22], 'category');
         $GLOBALS['category'] = 'independent';
         $cls::captureTermRemoval(11, [99], 'category');
-        $newDelUrl = $dels->getValue()[11]['category']['url'];
+        $newDelUrl = $dels->getValue()[11]['category'][1]['url'];
         $cls::afterTermRemoval(11, [99], 'category');
+        $cls::afterTermRemoval(11, [22], 'category');
         $last = [$GLOBALS['home_calls'], $adds->getValue(), $dels->getValue()];
 
         echo json_encode([$afterError, $afterRemoval, $appendNoop, $newUrl,
@@ -628,6 +832,8 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         $cls::captureTermRemoval(8, [10], 'category');
         $cls::afterTermAddition(7, 10, 'category');
         $cls::afterTermRemoval(7, [10], 'category');
+        $cls::afterTermAddition(8, 10, 'category');
+        $cls::afterTermRemoval(8, [10], 'category');
         echo json_encode([
             (new ReflectionProperty($cls,'pendingTermAdds'))->getValue(),
             (new ReflectionProperty($cls,'pendingTermRemovals'))->getValue(),

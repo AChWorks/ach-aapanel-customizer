@@ -15,10 +15,10 @@ final class CacheInvalidation
     /** URLs captured while a published post still exists; release only after deletion succeeds. */
     private static array $pendingDeleteUrls = [];
 
-    /** Pre-insertion snapshots consumed by each matching post-insert event. */
+    /** LIFO pre-insert frames, per post/taxonomy, safe under recursive WP hooks. */
     private static array $pendingTermAdds = [];
 
-    /** Short-lived pre-delete snapshots consumed by deleted_term_relationships. */
+    /** LIFO pre-delete frames, independent of insertion frames. */
     private static array $pendingTermRemovals = [];
 
     /** Per-dispatch vendor file-filter target; absent for ordinary Nginx Helper calls. */
@@ -385,27 +385,49 @@ final class CacheInvalidation
     }
 
     /**
-     * Observe each addition before mutation. WordPress may leave earlier
-     * additions committed and abort the rest of wp_set_object_terms(), so a
-     * later independent operation must never reuse an earlier snapshot.
+     * WordPress fires pre/post relationship hooks in nested call order.
+     * A frame belongs to one pair, not to the whole wp_set_object_terms call.
+     * Record a null frame when the post is ineligible or cannot be inspected:
+     * even then, a nested callback must not consume an outer valid snapshot.
      */
-    public static function captureTermAddition($objectId, $termTaxonomyId, $taxonomy): void
+    private static function captureTermFrame(array &$frames, $objectId, $taxonomy): void
     {
-        if (is_int($objectId) && $objectId > 0 && is_string($taxonomy)) {
-            unset(self::$pendingTermAdds[$objectId][$taxonomy]);
-        }
-        $post = self::publicTaxonomyPost($objectId, $taxonomy);
-        if ($post === null) {
+        if (!is_int($objectId) || $objectId < 1 || !is_string($taxonomy)) {
             return;
         }
-        $before = self::relationshipIds($objectId, $taxonomy);
-        $url = \get_permalink($post);
-        if ($before !== null && is_string($url) && $url !== '') {
-            self::$pendingTermAdds[$objectId][$taxonomy] = [
-                'url' => $url,
-                'before' => $before,
-            ];
+        $snapshot = null;
+        $post = self::publicTaxonomyPost($objectId, $taxonomy);
+        if ($post !== null) {
+            $before = self::relationshipIds($objectId, $taxonomy);
+            $url = \get_permalink($post);
+            if ($before !== null && is_string($url) && $url !== '') {
+                $snapshot = ['url' => $url, 'before' => $before];
+            }
         }
+        $frames[$objectId][$taxonomy][] = $snapshot;
+    }
+
+    /** Remove exactly the innermost matching pre-hook frame, even if null. */
+    private static function consumeTermFrame(array &$frames, $objectId, $taxonomy): ?array
+    {
+        if (!is_int($objectId) || $objectId < 1 || !is_string($taxonomy)
+            || empty($frames[$objectId][$taxonomy])) {
+            return null;
+        }
+        $snapshot = array_pop($frames[$objectId][$taxonomy]);
+        if (!$frames[$objectId][$taxonomy]) {
+            unset($frames[$objectId][$taxonomy]);
+        }
+        if (empty($frames[$objectId])) {
+            unset($frames[$objectId]);
+        }
+        return $snapshot;
+    }
+
+    /** A later WP_Error cannot strand a snapshot after the successful insert. */
+    public static function captureTermAddition($objectId, $termTaxonomyId, $taxonomy): void
+    {
+        self::captureTermFrame(self::$pendingTermAdds, $objectId, $taxonomy);
     }
 
     /**
@@ -415,14 +437,7 @@ final class CacheInvalidation
      */
     public static function afterTermAddition($objectId, $termTaxonomyId, $taxonomy): void
     {
-        $pending = null;
-        if (is_int($objectId) && $objectId > 0 && is_string($taxonomy)) {
-            $pending = self::$pendingTermAdds[$objectId][$taxonomy] ?? null;
-            unset(self::$pendingTermAdds[$objectId][$taxonomy]);
-            if (empty(self::$pendingTermAdds[$objectId])) {
-                unset(self::$pendingTermAdds[$objectId]);
-            }
-        }
+        $pending = self::consumeTermFrame(self::$pendingTermAdds, $objectId, $taxonomy);
         if ($pending === null) {
             return;
         }
@@ -451,31 +466,13 @@ final class CacheInvalidation
      */
     public static function captureTermRemoval($objectId, $termTaxonomyIds, $taxonomy): void
     {
-        $post = self::publicTaxonomyPost($objectId, $taxonomy);
-        if ($post === null) {
-            return;
-        }
-        $before = self::relationshipIds($objectId, $taxonomy);
-        $url = \get_permalink($post);
-        if ($before !== null && is_string($url) && $url !== '') {
-            self::$pendingTermRemovals[$objectId][$taxonomy] = [
-                'url' => $url,
-                'before' => $before,
-            ];
-        }
+        self::captureTermFrame(self::$pendingTermRemovals, $objectId, $taxonomy);
     }
 
     /** Consume the delete snapshot at the matching post-delete event. */
     public static function afterTermRemoval($objectId, $termTaxonomyIds, $taxonomy): void
     {
-        $pending = null;
-        if (is_int($objectId) && $objectId > 0 && is_string($taxonomy)) {
-            $pending = self::$pendingTermRemovals[$objectId][$taxonomy] ?? null;
-            unset(self::$pendingTermRemovals[$objectId][$taxonomy]);
-            if (empty(self::$pendingTermRemovals[$objectId])) {
-                unset(self::$pendingTermRemovals[$objectId]);
-            }
-        }
+        $pending = self::consumeTermFrame(self::$pendingTermRemovals, $objectId, $taxonomy);
         if ($pending === null) {
             return;
         }
