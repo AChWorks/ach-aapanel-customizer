@@ -2164,6 +2164,9 @@ test('Manual site Cache file clear requires fresh Applied Recheck and separate a
     read_only:true,runtime_verified:true,purge_supported:false});
   assert.equal(ui.state().cacheClearConsentDisabled,false);
   assert.equal(ui.state().cacheClearDisabled,true);
+  assert.match(ui.state().cacheActivationResult,/Native all-site file clear: eligible for separate approval/);
+  assert.match(ui.state().cacheActivationResult,/peer isolation is reverified before removal/);
+  assert.match(ui.state().cacheActivationResult,/Nginx Helper Purge All: independent vendor action, NOT intercepted/);
   ui.statusSetChecked('#ach-cache-clear-reviewed',true);
   assert.equal(ui.state().cacheClearDisabled,false);
   const clear=ui.statusClick('#ach-cache-clear-files');
@@ -2180,8 +2183,10 @@ test('Manual site Cache file clear requires fresh Applied Recheck and separate a
   assert.equal(ui.requests.length,during,'no concurrent or automatic retry');
   clear.respond({status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
     journal_phase:'applied',recovery_id:'f'.repeat(32),
-    runtime_verified:true,purge_supported:false,cache_files_removed:3,changed:true});
-  assert.match(ui.state().cacheActivationResult,/Verified files removed: 3/);
+    runtime_verified:true,purge_supported:false,cache_files_removed:9,changed:true});
+  assert.match(ui.state().cacheActivationResult,/Native selected-site full-tree Cache file clear completed/);
+  assert.match(ui.state().cacheActivationResult,/Verified files removed: 9/);
+  assert.match(ui.state().cacheActivationResult,/All verified file generations in this site directory/);
   assert.match(ui.state().cacheActivationResult,/shared cache or Nginx Helper purge/);
   assert.equal(ui.state().cacheClearDisabled,true);
   assert.equal(ui.state().cacheClearConsentDisabled,true);
@@ -2278,6 +2283,8 @@ test('Cache clear is blocked by non-Applied states and invalidated by selection'
       runtime_verified:state === 'Restored',purge_supported:false};
     if (state === 'Unmanaged') {r.recovery_id=null;delete r.journal_phase;}
     ui.statusClick('#ach-cache-activation-recheck').respond(r);
+    assert.match(ui.state().cacheActivationResult,/Native all-site file clear: locked until a fresh verified Applied Recheck/);
+    assert.match(ui.state().cacheActivationResult,/Nginx Helper Purge All: independent vendor action/);
     ui.statusSetChecked('#ach-cache-clear-reviewed',true);
     assert.equal(ui.state().cacheClearDisabled,true,state);
     assert.equal(ui.state().cacheClearConsentDisabled,true,state);
@@ -7392,6 +7399,11 @@ test('Navigation splits real site, routing and cache controls without duplicatin
   assert.match(cache,/id="ach-cache-plan-button"/);
   assert.match(cache,/id="ach-cache-activation-apply"/);
   assert.match(cache,/id="ach-cache-activation-restore"/);
+  assert.match(cache,/Native full-site Cache file clear/);
+  assert.match(cache,/older generations and cached aliases in that same directory/);
+  assert.match(cache,/Clear all selected-site Cache files/);
+  assert.match(cache,/does not enable, block or certify Nginx Helper Purge All/);
+  assert.match(cache,/public GET\/HEAD URL objects/);
   for (const name of ['hosts','vhost','nginx-candidate','cache','php-runtime']) {
     assert.equal(html.split('id="ach-' + name + '-summary"').length,2,'One human summary '+name);
     assert.match(html,new RegExp('<details class="ach-technical-report">[\\s\\S]*?id="ach-'+name+'-result"'));
@@ -7412,7 +7424,7 @@ test('Routing and Cache open with the same selected website and no duplicate inv
   assert.equal(ui.state().websiteContextHidden,false);
   ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection());
   assert.match(ui.state().vhostSummary,/matches aaPanel site records/);
-  assert.match(ui.state().cacheSummary,/No Purge All is available/);
+  assert.match(ui.state().cacheSummary,/Nginx Helper Purge All is independent and not authorized by this audit/);
   ui.openTab('overview');
   assert.equal(ui.state().websiteContextHidden,true);
   const loadedCount=ui.requests.length; // Overview may load its own state once.
@@ -7421,7 +7433,7 @@ test('Routing and Cache open with the same selected website and no duplicate inv
   assert.equal(ui.state().cacheInspectDisabled,false);
   ui.statusSetValue('#ach-hosts-site-id','8','input change');
   assert.match(ui.state().cacheSummary,/Site selection changed/);
-  assert.doesNotMatch(ui.state().cacheSummary,/matches|No Purge All is available/);
+  assert.doesNotMatch(ui.state().cacheSummary,/matches|Nginx Helper Purge All is independent and not authorized by this audit/);
 });
 
 test('Plain-language Cache findings distinguish risk from a verified safety claim', () => {
@@ -7436,7 +7448,7 @@ test('Plain-language Cache findings distinguish risk from a verified safety clai
   assert.match(ui.state().cacheSummary,/plugin-header v2.4.1/);
   assert.match(ui.state().cacheSummary,/private WordPress and WooCommerce routes/i);
   assert.equal(ui.state().cacheSummaryTone,'review');
-  assert.match(ui.state().cacheSummary,/No Purge All is available/);
+  assert.match(ui.state().cacheSummary,/Nginx Helper Purge All is independent and not authorized by this audit/);
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
   assert.match(ui.state().cacheResult,/Shared Registered Directory/);
   const invalid=cacheInspection({nginx_helper:nginxHelperAudit({purge_safe_verified:true})});
