@@ -21,7 +21,7 @@ const {chromium} = require('playwright');
     for(const [width,height] of [[1280,720],[1366,768],[1920,1080],[720,650],[375,650]]) {
       await page.setViewportSize({width,height});
       await page.setContent(html, {waitUntil:'domcontentloaded'});
-      for(const name of ['overview','websites','status','php','activity']) {
+      for(const name of ['overview','websites','routing','cache','php','status','activity']) {
         await page.evaluate((name)=>{
           // Mirror the shipped tab handler's aria-selected/tabindex/hidden
           // transition. Geometry from an impossible active-tab state is not
@@ -33,6 +33,8 @@ const {chromium} = require('playwright');
           });
           document.querySelectorAll('[data-view]').forEach(
             view=>view.hidden=view.getAttribute('data-view')!==name);
+          document.getElementById('ach-website-context').hidden =
+            !['websites','routing','cache'].includes(name);
         },name);
         // Wait for the intentional 120ms sidebar color transition before
         // comparing computed fills across the newly selected tab.
@@ -52,6 +54,42 @@ const {chromium} = require('playwright');
             contentBottom:Math.round(mb.bottom),
             controlsHiddenBehindBody:body.scrollHeight>innerHeight+1};
         });
+        // The shared stack contract must separate each independent top-level
+        // panel, both for a normal matched worker and a visible mismatch alert.
+        // A missing root gap must fail in all seven views, including at 375px.
+        const rhythm=await page.evaluate(name => {
+          const main=document.getElementById('ach-content');
+          const notice=document.getElementById('ach-worker-version-status');
+          function distances() {
+            const visible=[...main.children].filter(el=>el.getClientRects().length &&
+              getComputedStyle(el).display!=='none');
+            return visible.slice(1).map((el,i)=>{
+              const prev=visible[i].getBoundingClientRect(), curr=el.getBoundingClientRect();
+              return Math.round(curr.top-prev.bottom);
+            });
+          }
+          notice.dataset.state='review'; notice.hidden=false;
+          const warning=distances();
+          notice.dataset.state='matched'; notice.hidden=name!=='overview';
+          const routine=distances();
+          const style=getComputedStyle(notice);
+          const view=document.querySelector('.ach-view:not([hidden])');
+          const blocks=[...view.children].filter(el=>el.getClientRects().length &&
+            getComputedStyle(el).display!=='none' &&
+            getComputedStyle(el).position!=='absolute');
+          const sectionGaps=blocks.slice(1).map((el,i)=>Math.round(
+            el.getBoundingClientRect().top-blocks[i].getBoundingClientRect().bottom));
+          return {warning,routine,sectionGaps,matchedBorder:style.borderTopWidth,
+            matchedBackground:style.backgroundColor};
+        },name);
+        if(rhythm.warning.length<1 || rhythm.warning.some(gap=>gap<10) ||
+           rhythm.routine.some(gap=>gap<10) ||
+           rhythm.sectionGaps.some(gap=>gap<11 || gap>13) ||
+           rhythm.matchedBorder!=='0px' ||
+           rhythm.matchedBackground!=='rgba(0, 0, 0, 0)') {
+          throw Error('Independent panel spacing/version hierarchy failed '+
+            JSON.stringify({width,height,name,...rhythm}));
+        }
         // The desktop active row must merge with the white content surface
         // without a visible right-side stroke; narrow layouts instead use
         // the existing horizontal bottom-border navigation treatment.
@@ -285,10 +323,13 @@ const {chromium} = require('playwright');
     await page.setContent(html, {waitUntil:'domcontentloaded'});
     await page.evaluate(() => {
       document.querySelectorAll('[data-view]').forEach(view => {
-        view.hidden = view.getAttribute('data-view') !== 'php';
+        view.hidden = view.getAttribute('data-view') !== 'status';
       });
+      // Enable the existing action in this static layout-only document so
+      // its real normal/hover contrast can be measured (no backend exists).
+      document.getElementById('ach-status-save').disabled=false;
     });
-    const primary = page.locator('#ach-php-form button.btn-success');
+    const primary = page.locator('#ach-status-save');
     const getPrimary = () => primary.evaluate(element => {
       const css = getComputedStyle(element);
       return {background:css.backgroundColor, foreground:css.color, disabled:element.disabled};
