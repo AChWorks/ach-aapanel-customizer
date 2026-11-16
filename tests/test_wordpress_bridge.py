@@ -338,22 +338,21 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             'https://qa.example/post_tag/topic/',
         ])
 
-    def test_term_relationship_change_queries_old_and_new_taxonomy_ids(self):
-        # A term-only change can occur without wp_after_insert_post. Keep the
-        # real term_taxonomy_id identity (not term_id) when resolving old/new.
+    def test_term_hooks_handle_append_noop_append_add_and_replacement(self):
+        # Core wp_add_object_terms() delegates with append=true; its
+        # old_tt_ids hook argument is always [], even for existing terms.
+        # Only real pre-add events can start an assignment snapshot.
         source = rf"""
         define('ABSPATH', '/fixture/');
         require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
-        $GLOBALS['lookups'] = [];
-        $GLOBALS['term_links'] = [];
-        $GLOBALS['post_home_lookups'] = [];
-        function home_url($path) {{
-            $GLOBALS['post_home_lookups'][] = ['home', $path];
-            return 'https://qa.example/';
-        }}
-        function get_permalink($post) {{
-            $GLOBALS['post_home_lookups'][] = ['post', $post->ID];
-            return 'https://qa.example/story/';
+        $GLOBALS['relations'] = [10];
+        $GLOBALS['category'] = 'old';
+        $GLOBALS['home_calls'] = 0;
+        $GLOBALS['archive_queries'] = [];
+        $GLOBALS['post_urls'] = [];
+        function wp_get_object_terms($id, $taxonomy, $args) {{
+            if ($args['fields'] !== 'tt_ids') throw new Exception('Wrong fields');
+            return $GLOBALS['relations'];
         }}
         function get_post($id) {{
             return $id === 7 ? (object)[
@@ -363,134 +362,249 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         function get_object_taxonomies($type) {{ return ['category']; }}
         function is_taxonomy_viewable($tax) {{ return $tax === 'category'; }}
         function is_taxonomy_hierarchical($tax) {{ return false; }}
-        function get_terms($args) {{
-            $GLOBALS['lookups'][] = $args;
-            $output = [];
-            foreach ($args['term_taxonomy_id'] as $tt) {{
-                $output[] = (object)['term_id'=>$tt + 1000,'slug'=>'tt-' . $tt];
-            }}
-            return $output;
+        function get_permalink($post) {{
+            $url = 'https://qa.example/' . $GLOBALS['category'] . '/story/';
+            $GLOBALS['post_urls'][] = $url;
+            return $url;
         }}
-        function is_wp_error($value) {{ return false; }}
-        function get_term_link($term, $taxonomy) {{
-            $GLOBALS['term_links'][] = $term->slug;
+        function home_url($path) {{
+            $GLOBALS['home_calls']++;
+            return 'https://qa.example/';
+        }}
+        function get_terms($args) {{
+            $GLOBALS['archive_queries'][] = $args;
+            return array_map(static fn($tt) => (object)[
+                'term_id'=>$tt,'slug'=>'tt-' . $tt
+            ], $args['term_taxonomy_id']);
+        }}
+        function get_term_link($term, $tax) {{
             return 'https://qa.example/category/' . $term->slug . '/';
         }}
+        function is_wp_error($x) {{ return false; }}
         $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
-        $cls::afterPostTermsSet(7, ['new'], [25, 26], 'category', false, [24, 25]);
-        $cls::afterPostTermsSet(7, [], [25, 26], 'category', false, [26, 25]);
-        $cls::afterPostTermsSet(7, [], [25], 'private', false, [24]);
-        $cls::afterPostTermsSet(8, [], [27], 'category', false, [24]);
-        echo json_encode([$GLOBALS['lookups'], $GLOBALS['term_links'],
-            $GLOBALS['post_home_lookups']], JSON_THROW_ON_ERROR);
+        $adds = new ReflectionProperty($cls, 'pendingTermPermalinks');
+        $dels = new ReflectionProperty($cls, 'pendingTermRemovals');
+
+        // wp_add_object_terms($post, [existingA]) -> append=true;
+        // WordPress fires set_object_terms without add_term_relationship.
+        $cls::afterPostTermsSet(7, [10], [10], 'category', true, []);
+        $appendNoop = [$GLOBALS['home_calls'], $GLOBALS['archive_queries']];
+
+        // Genuine append must fire pre-add, with an actual old relationship.
+        $cls::captureTermPermalink(7, 11, 'category');
+        $savedAppend = $adds->getValue();
+        $GLOBALS['relations'] = [10, 11];
+        $GLOBALS['category'] = 'appended';
+        $cls::afterPostTermsSet(7, [11], [11], 'category', true, []);
+        $afterAppend = [
+            $GLOBALS['home_calls'], $GLOBALS['archive_queries'],
+            $adds->getValue()
+        ];
+
+        // Identical append=false replacement has no pre-add/delete events.
+        $cls::afterPostTermsSet(7, [10, 11], [10, 11],
+            'category', false, [11, 10]);
+        $unchangedReplace = $GLOBALS['home_calls'];
+
+        // Real replacement: first add new, then delete obsolete term.
+        $cls::captureTermPermalink(7, 12, 'category');
+        $savedReplace = $adds->getValue();
+        $GLOBALS['relations'] = [10, 11, 12];
+        $cls::captureTermRemoval(7, [10], 'category');
+        $GLOBALS['relations'] = [11, 12];
+        $GLOBALS['category'] = 'replacement';
+        $cls::afterTermRemoval(7, [10], 'category');
+        $duringReplace = [
+            $GLOBALS['home_calls'], $adds->getValue(), $dels->getValue()
+        ];
+        $cls::afterPostTermsSet(7, [11, 12], [11, 12],
+            'category', false, [10, 11]);
+        $afterReplace = [
+            $GLOBALS['home_calls'], $GLOBALS['archive_queries'],
+            $adds->getValue(), $dels->getValue()
+        ];
+        $cls::afterPostTermsSet(8, [12], [12], 'category', true, []);
+        echo json_encode([
+            $appendNoop, $savedAppend, $afterAppend, $unchangedReplace,
+            $savedReplace, $duringReplace, $afterReplace
+        ], JSON_THROW_ON_ERROR);
         """
         result = php_run(source)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        lookups, links, post_home = json.loads(result.stdout)
-        self.assertEqual(len(lookups), 1)
-        self.assertEqual(lookups[0], {
-            'taxonomy': 'category',
-            'term_taxonomy_id': [25, 26, 24],
-            'hide_empty': False,
-        })
-        self.assertEqual(links, ['tt-25', 'tt-26', 'tt-24'])
-        # Exactly one public post/homepage lookup for the real changed
-        # relationship, not unchanged, private or another post's IDs.
-        self.assertEqual(post_home, [['home', '/'], ['post', 7]])
-        self.assertIn(
-            "add_action('set_object_terms', [__CLASS__, 'afterPostTermsSet'], 20, 6)",
-            (PLUGIN / 'includes/class-cache-invalidation.php').read_text())
+        (noop, saved_append, appended, unchanged,
+         saved_replace, in_replace, replaced) = json.loads(result.stdout)
+        self.assertEqual(noop, [0, []])
+        self.assertEqual(saved_append, {'7': {'category': {
+            'url': 'https://qa.example/old/story/', 'before': {'10': 10}
+        }}})
+        self.assertEqual(appended[0], 1)
+        self.assertEqual(appended[1][0]['term_taxonomy_id'], [10, 11])
+        self.assertEqual(appended[2], [])
+        self.assertEqual(unchanged, 1)
+        self.assertEqual(saved_replace, {'7': {'category': {
+            'url': 'https://qa.example/appended/story/', 'before': {
+                "10": 10, "11": 11
+            }
+        }}})  # JSON key shape normalized below
+        self.assertEqual(in_replace[0], 1, "mid-replacement must not purge")
+        self.assertEqual(in_replace[2], [], "delete state consumed")
+        self.assertEqual(replaced[0], 2)
+        self.assertEqual(replaced[1][1]['term_taxonomy_id'], [10, 11, 12])
+        self.assertEqual(replaced[2:], [[], []])
+        entry = (PLUGIN / 'includes/class-cache-invalidation.php').read_text()
+        for hook, method, args in (
+            ('add_term_relationship', 'captureTermPermalink', 3),
+            ('set_object_terms', 'afterPostTermsSet', 6),
+            ('delete_term_relationships', 'captureTermRemoval', 3),
+            ('deleted_term_relationships', 'afterTermRemoval', 3),
+        ):
+            self.assertIn(
+                f"add_action('{hook}', [__CLASS__, '{method}'], "
+                f"{20 if hook.startswith('deleted') or hook == 'set_object_terms' else 10}, {args})",
+                entry,
+            )
 
-    def test_term_relationship_hooks_capture_and_consume_previous_category_permalink(self):
-        # WordPress inserts new term relationships before deleting the old ones.
-        # The first PRE-mutation hook must capture the old canonical URL once.
-        # The final set_object_terms event runs after the category URL changes.
+    def test_standalone_term_removal_cannot_contaminate_later_assignment(self):
+        # wp_remove_object_terms() fires delete_term_relationships and
+        # deleted_term_relationships but never set_object_terms.
         source = rf"""
         define('ABSPATH', '/fixture/');
         require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        $GLOBALS['relations'] = [20, 21];
         $GLOBALS['category'] = 'old';
-        $GLOBALS['permalink_lookups'] = [];
+        $GLOBALS['home_calls'] = 0;
+        $GLOBALS['archive_ids'] = [];
         function get_post($id) {{
             return $id === 11 ? (object)[
-                'ID'=>11, 'post_type'=>'post', 'post_status'=>'publish'] : null;
+                'ID'=>11,'post_type'=>'post','post_status'=>'publish'] : null;
         }}
         function is_post_type_viewable($type) {{ return $type === 'post'; }}
         function get_object_taxonomies($type) {{ return ['category']; }}
         function is_taxonomy_viewable($tax) {{ return $tax === 'category'; }}
         function is_taxonomy_hierarchical($tax) {{ return false; }}
+        function wp_get_object_terms($id, $tax, $args) {{ return $GLOBALS['relations']; }}
         function get_permalink($post) {{
-            $GLOBALS['permalink_lookups'][] = $GLOBALS['category'];
             return 'https://qa.example/' . $GLOBALS['category'] . '/story/';
         }}
-        function home_url($path) {{ return 'https://qa.example/'; }}
-        function get_terms($args) {{ return [
-            (object)['term_id'=>5,'slug'=>'old'],
-            (object)['term_id'=>6,'slug'=>'new']
-        ]; }}
-        function get_term_link($term, $taxonomy) {{
+        function home_url($path) {{
+            $GLOBALS['home_calls']++;
+            return 'https://qa.example/';
+        }}
+        function get_terms($args) {{
+            $GLOBALS['archive_ids'][] = $args['term_taxonomy_id'];
+            return array_map(static fn($tt) => (object)[
+                'term_id'=>$tt,'slug'=>'tt-'.$tt
+            ], $args['term_taxonomy_id']);
+        }}
+        function get_term_link($term, $tax) {{
             return 'https://qa.example/category/' . $term->slug . '/';
         }}
-        function is_wp_error($value) {{ return false; }}
+        function is_wp_error($v) {{ return false; }}
         $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
-        $state = new ReflectionProperty($cls, 'pendingTermPermalinks');
-        $compose = new ReflectionMethod($cls, 'changedTermUrls');
-        $post = get_post(11);
+        $addState = new ReflectionProperty($cls, 'pendingTermPermalinks');
+        $delState = new ReflectionProperty($cls, 'pendingTermRemovals');
 
-        // New term first, old term removal second. Never overwrite first URL.
-        $cls::captureTermPermalink(11, 6, 'category');
-        $cls::captureTermPermalink(11, [5], 'category');
-        $cls::captureTermPermalink(11, 8, 'private');
-        $cls::captureTermPermalink(12, 8, 'category');
-        $saved = $state->getValue();
+        // Standalone removal of term 20, NO set_object_terms.
+        $cls::captureTermRemoval(11, [20], 'category');
+        $saved = $delState->getValue();
+        $GLOBALS['relations'] = [21];
+        $GLOBALS['category'] = 'middle';
+        $cls::afterTermRemoval(11, [20], 'category');
+        $afterDirect = [
+            $GLOBALS['home_calls'], $GLOBALS['archive_ids'],
+            $addState->getValue(), $delState->getValue()
+        ];
+
+        // A later independent assignment in SAME request must capture
+        // /middle/story/ (not stale /old/story/).
+        $cls::captureTermPermalink(11, 22, 'category');
+        $newSaved = $addState->getValue();
+        $GLOBALS['relations'] = [21, 22];
         $GLOBALS['category'] = 'new';
-        $urls = $compose->invoke(null, $post, 'category', get_terms([]),
-            $saved[11]['category']);
-        $cls::afterPostTermsSet(11, [6], [6], 'category', false, [5]);
-        $released = $state->getValue();
+        $cls::afterPostTermsSet(11, [22], [22], 'category', true, []);
+        $afterNew = [
+            $GLOBALS['home_calls'], $GLOBALS['archive_ids'],
+            $addState->getValue()
+        ];
 
-        // Same term set must release the pending URL and avoid post/home lookup.
-        $cls::captureTermPermalink(11, 6, 'category');
-        $beforeNoop = count($GLOBALS['permalink_lookups']);
-        $cls::afterPostTermsSet(11, [6], [6], 'category', false, [6]);
-        $afterNoop = count($GLOBALS['permalink_lookups']);
-        $releasedNoop = $state->getValue();
+        // Core emits delete hooks even when the requested association is
+        // already absent; comparing actual relations avoids false purges.
+        $cls::captureTermRemoval(11, [20], 'category');
+        $cls::afterTermRemoval(11, [20], 'category');
+        $absentRemoval = [$GLOBALS['home_calls'], $delState->getValue()];
 
-        // Pure removals use the pre-delete hook, even without an addition.
-        $cls::captureTermPermalink(11, [6], 'category');
-        $removeSaved = $state->getValue();
-        $GLOBALS['category'] = 'fallback';
-        $cls::afterPostTermsSet(11, [], [], 'category', false, [6]);
-        $final = $state->getValue();
+        // Delete-only wp_set_object_terms([]) includes delete pair THEN set.
+        $cls::captureTermRemoval(11, [21], 'category');
+        $GLOBALS['relations'] = [22];
+        $GLOBALS['category'] = 'after-delete';
+        $cls::afterTermRemoval(11, [21], 'category');
+        $cls::afterPostTermsSet(11, [], [], 'category', false, [21, 22]);
+        $deleteOnly = [
+            $GLOBALS['home_calls'], $GLOBALS['archive_ids'],
+            $addState->getValue(), $delState->getValue()
+        ];
 
-        echo json_encode([$saved, $urls, $released, $releasedNoop,
-            $beforeNoop, $afterNoop, $removeSaved, $final],
-            JSON_THROW_ON_ERROR);
+        // An interrupted pre-delete has no post callback. The next
+        // pre-delete must replace (not reuse) its unconsumed snapshot.
+        $cls::captureTermRemoval(11, [22], 'category');
+        $unmatched = $delState->getValue();
+        $GLOBALS['category'] = 'other';
+        $cls::captureTermRemoval(11, [99], 'category');
+        $overwritten = $delState->getValue();
+        $cls::afterTermRemoval(11, [99], 'category');
+        $afterNoChange = [$GLOBALS['home_calls'], $delState->getValue()];
+
+        echo json_encode([
+            $saved, $afterDirect, $newSaved, $afterNew, $absentRemoval,
+            $deleteOnly, $unmatched, $overwritten, $afterNoChange
+        ], JSON_THROW_ON_ERROR);
         """
         result = php_run(source)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        (saved, urls, released, released_noop, before_noop,
-         after_noop, remove_saved, final) = json.loads(result.stdout)
-        self.assertEqual(saved, {'11': {'category': 'https://qa.example/old/story/'}})
-        self.assertEqual(urls, [
-            'https://qa.example/',
-            'https://qa.example/old/story/',
-            'https://qa.example/new/story/',
-            'https://qa.example/category/old/',
-            'https://qa.example/category/new/',
+        (saved, after_direct, new_saved, after_new, absent, delete_only,
+         unmatched, overwritten, no_change) = json.loads(result.stdout)
+        self.assertEqual(saved['11']['category']['url'],
+                         'https://qa.example/old/story/')
+        self.assertEqual(after_direct, [1, [[20, 21]], [], []])
+        self.assertEqual(new_saved['11']['category']['url'],
+                         'https://qa.example/middle/story/')
+        self.assertEqual(after_new, [2, [[20, 21], [21, 22]], []])
+        self.assertEqual(absent, [2, []])
+        self.assertEqual(delete_only, [
+            3, [[20, 21], [21, 22], [21, 22]], [], []
         ])
-        self.assertEqual(released, [])
-        self.assertEqual(released_noop, [])
-        self.assertEqual(before_noop, after_noop)
-        self.assertEqual(remove_saved, {'11': {
-            'category': 'https://qa.example/new/story/'}})
-        self.assertEqual(final, [])
-        entry = (PLUGIN / 'includes/class-cache-invalidation.php').read_text()
-        self.assertIn(
-            "add_action('add_term_relationship', [__CLASS__, 'captureTermPermalink'], 10, 3)",
-            entry)
-        self.assertIn(
-            "add_action('delete_term_relationships', [__CLASS__, 'captureTermPermalink'], 10, 3)",
-            entry)
+        self.assertEqual(unmatched['11']['category']['url'],
+                         'https://qa.example/after-delete/story/')
+        self.assertEqual(overwritten['11']['category']['url'],
+                         'https://qa.example/other/story/')
+        self.assertEqual(no_change, [3, []])
+
+    def test_term_capture_excludes_nonpublic_and_unrelated_posts(self):
+        source = rf"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        function get_post($id) {{
+            return $id === 7 ? (object)[
+                'ID'=>7,'post_type'=>'post','post_status'=>'draft'] : null;
+        }}
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return ['category']; }}
+        function is_taxonomy_viewable($tax) {{ return $tax === 'category'; }}
+        $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+        $cls::captureTermPermalink(7, 10, 'category');
+        $cls::captureTermRemoval(7, [10], 'category');
+        $cls::captureTermPermalink(8, 10, 'category');
+        $cls::captureTermRemoval(8, [10], 'category');
+        $cls::afterPostTermsSet(7, [10], [10], 'category', false, []);
+        $cls::afterTermRemoval(7, [10], 'category');
+        echo json_encode([
+            (new ReflectionProperty($cls,'pendingTermPermalinks'))->getValue(),
+            (new ReflectionProperty($cls,'pendingTermRemovals'))->getValue(),
+        ], JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(json.loads(result.stdout), [[], []])
 
     def test_post_save_and_deletion_capture_archive_urls(self):
         source = rf"""

@@ -15,8 +15,11 @@ final class CacheInvalidation
     /** URLs captured while a published post still exists; release only after deletion succeeds. */
     private static array $pendingDeleteUrls = [];
 
-    /** Previous public permalink captured before a term relationship changes, per request. */
+    /** Original permalink and related terms for an in-flight WordPress assignment. */
     private static array $pendingTermPermalinks = [];
+
+    /** Short-lived pre-delete snapshots consumed by deleted_term_relationships. */
+    private static array $pendingTermRemovals = [];
 
     /** Per-dispatch vendor file-filter target; absent for ordinary Nginx Helper calls. */
     private static ?array $activeUrlPurge = null;
@@ -39,14 +42,14 @@ final class CacheInvalidation
             // then invalidate only after the deletion actually completes.
             \add_action('before_delete_post', [__CLASS__, 'capturePostDeletion'], 10, 2);
             \add_action('after_delete_post', [__CLASS__, 'afterPostDeleted'], 10, 2);
-            // WordPress sets terms before notifying set_object_terms. Capture
-            // the actual old public permalink at the earliest pre-mutation
-            // relationship hook (addition happens before deletion on replace).
+            // Pre-add captures the original URL/relationships for a whole
+            // set_object_terms assignment. Its final hook reconciles real adds.
             \add_action('add_term_relationship', [__CLASS__, 'captureTermPermalink'], 10, 3);
-            \add_action('delete_term_relationships', [__CLASS__, 'captureTermPermalink'], 10, 3);
-            // Reconcile old/new post URLs and taxonomy archives only when the
-            // completed relationship sets genuinely differ.
             \add_action('set_object_terms', [__CLASS__, 'afterPostTermsSet'], 20, 6);
+            // wp_remove_object_terms can also run independently; it has its
+            // own post-delete event, not set_object_terms. Consume there.
+            \add_action('delete_term_relationships', [__CLASS__, 'captureTermRemoval'], 10, 3);
+            \add_action('deleted_term_relationships', [__CLASS__, 'afterTermRemoval'], 20, 3);
         }
     }
 
@@ -337,19 +340,116 @@ final class CacheInvalidation
     }
 
     /**
-     * First pre-add/delete callback observes the canonical permalink while
-     * the previous category relationships still exist. No URL reconstruction
-     * or persistent storage: the matching set_object_terms consumes the value.
+     * True relationship identities, including append mode (where WordPress
+     * deliberately supplies an empty old_tt_ids array even for existing terms).
+     * Read only this post's currently associated taxonomy IDs from WordPress.
+     *
+     * @return array<int,int>|null
      */
-    public static function captureTermPermalink($objectId, $termTaxonomyIds, $taxonomy): void
+    private static function relationshipIds(int $objectId, string $taxonomy): ?array
+    {
+        $ids = \wp_get_object_terms($objectId, $taxonomy, [
+            'fields' => 'tt_ids',
+            'orderby' => 'none',
+            'update_term_meta_cache' => false,
+        ]);
+        if (!is_array($ids)) {
+            return null;
+        }
+        $resolved = [];
+        foreach ($ids as $id) {
+            if ((is_int($id) || is_string($id)) && (int)$id > 0) {
+                $resolved[(int)$id] = (int)$id;
+            }
+        }
+        return $resolved;
+    }
+
+    /** Purge only if the actual persisted relationships changed. */
+    private static function reconcileTermChange(
+        object $post, string $taxonomy, array $before, array $after, string $oldUrl
+    ): void {
+        if (!array_diff_key($before, $after)
+            && !array_diff_key($after, $before)) {
+            return;
+        }
+        $affectedTerms = \get_terms([
+            'taxonomy' => $taxonomy,
+            'term_taxonomy_id' => array_values($before + $after),
+            'hide_empty' => false,
+        ]);
+        self::purgePublicUrls(self::changedTermUrls(
+            $post, $taxonomy, $affectedTerms, $oldUrl
+        ));
+    }
+
+    /**
+     * The first real addition in wp_set_object_terms() observes the original
+     * URL and complete term relationship set before insertion. Multiple adds,
+     * then deletions, belong to that same assignment and preserve this snapshot.
+     */
+    public static function captureTermPermalink($objectId, $termTaxonomyId, $taxonomy): void
     {
         $post = self::publicTaxonomyPost($objectId, $taxonomy);
         if ($post === null || isset(self::$pendingTermPermalinks[$objectId][$taxonomy])) {
             return;
         }
+        $before = self::relationshipIds($objectId, $taxonomy);
         $url = \get_permalink($post);
-        if (is_string($url) && $url !== '') {
-            self::$pendingTermPermalinks[$objectId][$taxonomy] = $url;
+        if ($before !== null && is_string($url) && $url !== '') {
+            self::$pendingTermPermalinks[$objectId][$taxonomy] = [
+                'url' => $url,
+                'before' => $before,
+            ];
+        }
+    }
+
+    /**
+     * A standalone wp_remove_object_terms() never emits set_object_terms.
+     * Capture only for this pre-delete/post-delete pair; never leave its URL
+     * pending for an unrelated later assignment in the same PHP request.
+     */
+    public static function captureTermRemoval($objectId, $termTaxonomyIds, $taxonomy): void
+    {
+        $post = self::publicTaxonomyPost($objectId, $taxonomy);
+        if ($post === null) {
+            return;
+        }
+        $before = self::relationshipIds($objectId, $taxonomy);
+        $url = \get_permalink($post);
+        if ($before !== null && is_string($url) && $url !== '') {
+            self::$pendingTermRemovals[$objectId][$taxonomy] = [
+                'url' => $url,
+                'before' => $before,
+            ];
+        }
+    }
+
+    /** Consume the delete snapshot at the matching post-delete event. */
+    public static function afterTermRemoval($objectId, $termTaxonomyIds, $taxonomy): void
+    {
+        $pending = null;
+        if (is_int($objectId) && $objectId > 0 && is_string($taxonomy)) {
+            $pending = self::$pendingTermRemovals[$objectId][$taxonomy] ?? null;
+            unset(self::$pendingTermRemovals[$objectId][$taxonomy]);
+            if (empty(self::$pendingTermRemovals[$objectId])) {
+                unset(self::$pendingTermRemovals[$objectId]);
+            }
+        }
+        if ($pending === null) {
+            return;
+        }
+        // A replacement with an earlier addition is reconciled once at the
+        // final set_object_terms event, using the original pre-add permalink.
+        if (isset(self::$pendingTermPermalinks[$objectId][$taxonomy])) {
+            return;
+        }
+        $post = self::publicTaxonomyPost($objectId, $taxonomy);
+        $after = self::relationshipIds($objectId, $taxonomy);
+        if ($post !== null && $after !== null) {
+            self::reconcileTermChange(
+                $post, $taxonomy, $pending['before'], $after, $pending['url']
+            );
         }
     }
 
@@ -364,56 +464,32 @@ final class CacheInvalidation
     }
 
     /**
-     * Term assignments can change without wp_after_insert_post. The hook
-     * receives old/new TERM-TAXONOMY IDs, not interchangeable term IDs.
-     * WordPress has already written the relationship when this runs. Consume
-     * the pre-mutation permalink before checking no-op and public eligibility.
+     * WordPress emits set_object_terms after a completed set/append operation,
+     * including append no-ops. Only a pre-add event represents a genuine
+     * addition here: deletion-only changes are handled at post-delete.
      */
     public static function afterPostTermsSet(
         $objectId, $terms, $termTaxonomyIds, $taxonomy, $append, $oldTermTaxonomyIds
     ): void {
-        $previousUrl = null;
+        $pending = null;
         if (is_int($objectId) && $objectId > 0 && is_string($taxonomy)) {
-            $previousUrl = self::$pendingTermPermalinks[$objectId][$taxonomy] ?? null;
+            $pending = self::$pendingTermPermalinks[$objectId][$taxonomy] ?? null;
             unset(self::$pendingTermPermalinks[$objectId][$taxonomy]);
             if (empty(self::$pendingTermPermalinks[$objectId])) {
                 unset(self::$pendingTermPermalinks[$objectId]);
             }
         }
-        if (!is_array($termTaxonomyIds) || !is_array($oldTermTaxonomyIds)) {
+        if ($pending === null || !is_array($termTaxonomyIds)
+            || !is_array($oldTermTaxonomyIds)) {
             return;
         }
         $post = self::publicTaxonomyPost($objectId, $taxonomy);
-        if ($post === null) {
-            return;
+        $after = self::relationshipIds($objectId, $taxonomy);
+        if ($post !== null && $after !== null) {
+            self::reconcileTermChange(
+                $post, $taxonomy, $pending['before'], $after, $pending['url']
+            );
         }
-        $current = [];
-        $previous = [];
-        foreach ($termTaxonomyIds as $id) {
-            if ((is_int($id) || is_string($id)) && (int)$id > 0) {
-                $current[(int)$id] = (int)$id;
-            }
-        }
-        foreach ($oldTermTaxonomyIds as $id) {
-            if ((is_int($id) || is_string($id)) && (int)$id > 0) {
-                $previous[(int)$id] = (int)$id;
-            }
-        }
-        // WordPress can re-save an unchanged relationship during ordinary
-        // post edits. Avoid a duplicate taxonomy purge in that no-op case.
-        if (!array_diff_key($current, $previous)
-            && !array_diff_key($previous, $current)) {
-            return;
-        }
-        $ttIds = array_values($current + $previous);
-        $affectedTerms = \get_terms([
-            'taxonomy' => $taxonomy,
-            'term_taxonomy_id' => $ttIds,
-            'hide_empty' => false,
-        ]);
-        self::purgePublicUrls(self::changedTermUrls(
-            $post, $taxonomy, $affectedTerms, $previousUrl
-        ));
     }
 
     /**
