@@ -401,6 +401,97 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             "add_action('set_object_terms', [__CLASS__, 'afterPostTermsSet'], 20, 6)",
             (PLUGIN / 'includes/class-cache-invalidation.php').read_text())
 
+    def test_term_relationship_hooks_capture_and_consume_previous_category_permalink(self):
+        # WordPress inserts new term relationships before deleting the old ones.
+        # The first PRE-mutation hook must capture the old canonical URL once.
+        # The final set_object_terms event runs after the category URL changes.
+        source = rf"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        $GLOBALS['category'] = 'old';
+        $GLOBALS['permalink_lookups'] = [];
+        function get_post($id) {{
+            return $id === 11 ? (object)[
+                'ID'=>11, 'post_type'=>'post', 'post_status'=>'publish'] : null;
+        }}
+        function is_post_type_viewable($type) {{ return $type === 'post'; }}
+        function get_object_taxonomies($type) {{ return ['category']; }}
+        function is_taxonomy_viewable($tax) {{ return $tax === 'category'; }}
+        function is_taxonomy_hierarchical($tax) {{ return false; }}
+        function get_permalink($post) {{
+            $GLOBALS['permalink_lookups'][] = $GLOBALS['category'];
+            return 'https://qa.example/' . $GLOBALS['category'] . '/story/';
+        }}
+        function home_url($path) {{ return 'https://qa.example/'; }}
+        function get_terms($args) {{ return [
+            (object)['term_id'=>5,'slug'=>'old'],
+            (object)['term_id'=>6,'slug'=>'new']
+        ]; }}
+        function get_term_link($term, $taxonomy) {{
+            return 'https://qa.example/category/' . $term->slug . '/';
+        }}
+        function is_wp_error($value) {{ return false; }}
+        $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+        $state = new ReflectionProperty($cls, 'pendingTermPermalinks');
+        $compose = new ReflectionMethod($cls, 'changedTermUrls');
+        $post = get_post(11);
+
+        // New term first, old term removal second. Never overwrite first URL.
+        $cls::captureTermPermalink(11, 6, 'category');
+        $cls::captureTermPermalink(11, [5], 'category');
+        $cls::captureTermPermalink(11, 8, 'private');
+        $cls::captureTermPermalink(12, 8, 'category');
+        $saved = $state->getValue();
+        $GLOBALS['category'] = 'new';
+        $urls = $compose->invoke(null, $post, 'category', get_terms([]),
+            $saved[11]['category']);
+        $cls::afterPostTermsSet(11, [6], [6], 'category', false, [5]);
+        $released = $state->getValue();
+
+        // Same term set must release the pending URL and avoid post/home lookup.
+        $cls::captureTermPermalink(11, 6, 'category');
+        $beforeNoop = count($GLOBALS['permalink_lookups']);
+        $cls::afterPostTermsSet(11, [6], [6], 'category', false, [6]);
+        $afterNoop = count($GLOBALS['permalink_lookups']);
+        $releasedNoop = $state->getValue();
+
+        // Pure removals use the pre-delete hook, even without an addition.
+        $cls::captureTermPermalink(11, [6], 'category');
+        $removeSaved = $state->getValue();
+        $GLOBALS['category'] = 'fallback';
+        $cls::afterPostTermsSet(11, [], [], 'category', false, [6]);
+        $final = $state->getValue();
+
+        echo json_encode([$saved, $urls, $released, $releasedNoop,
+            $beforeNoop, $afterNoop, $removeSaved, $final],
+            JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        (saved, urls, released, released_noop, before_noop,
+         after_noop, remove_saved, final) = json.loads(result.stdout)
+        self.assertEqual(saved, {'11': {'category': 'https://qa.example/old/story/'}})
+        self.assertEqual(urls, [
+            'https://qa.example/',
+            'https://qa.example/old/story/',
+            'https://qa.example/new/story/',
+            'https://qa.example/category/old/',
+            'https://qa.example/category/new/',
+        ])
+        self.assertEqual(released, [])
+        self.assertEqual(released_noop, [])
+        self.assertEqual(before_noop, after_noop)
+        self.assertEqual(remove_saved, {'11': {
+            'category': 'https://qa.example/new/story/'}})
+        self.assertEqual(final, [])
+        entry = (PLUGIN / 'includes/class-cache-invalidation.php').read_text()
+        self.assertIn(
+            "add_action('add_term_relationship', [__CLASS__, 'captureTermPermalink'], 10, 3)",
+            entry)
+        self.assertIn(
+            "add_action('delete_term_relationships', [__CLASS__, 'captureTermPermalink'], 10, 3)",
+            entry)
+
     def test_post_save_and_deletion_capture_archive_urls(self):
         source = rf"""
         define('ABSPATH', '/fixture/');
@@ -562,6 +653,98 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             self.assertEqual(ordinary, "/nonexistent/denied")
             for file in [*present.values(), stale, bad, peer_file, decoy]:
                 self.assertTrue(file.exists(), "Stub must not unlink fixtures")
+
+    def test_category_permalink_old_and_new_use_existing_scoped_dispatch(self):
+        # Both distinct canonical post paths MUST pass through the same exact
+        # GET/HEAD, HTTP/HTTPS generation and site-isolation checks.
+        from hashlib import md5
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-category-") as work:
+            base, peer = Path(work) / "site-9", Path(work) / "site-17"
+            base.mkdir(mode=0o700)
+            peer.mkdir(mode=0o700)
+            site_key, generation = "qa.example", "a" * 32
+
+            def cache_object(scheme, method, path, *, directory=base,
+                             gen=generation, header_key=None):
+                key = f"{scheme}{method}{site_key}{path}|{gen}"
+                digest = md5(key.encode()).hexdigest()
+                folder = directory / digest[-1] / digest[-3:-1]
+                folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+                folder.parent.chmod(0o700)
+                folder.chmod(0o700)
+                item = folder / digest
+                item.write_bytes(b"NGINX\nKEY: " +
+                                 (header_key or key).encode() + b"\nbody")
+                item.chmod(0o600)
+                return item
+
+            objects = {}
+            for path in ("/old/story/", "/new/story/"):
+                for scheme in ("http", "https"):
+                    for method in ("GET", "HEAD"):
+                        objects[(scheme, method, path)] = cache_object(
+                            scheme, method, path)
+
+            wrong_gen = cache_object("http", "HEAD", "/old/story/",
+                                     gen="b" * 32)
+            wrong_key = cache_object("https", "GET", "/decoy/",
+                                     header_key="not-the-real-cache-key")
+            peer_object = cache_object("https", "HEAD", "/old/story/",
+                                       directory=peer)
+            st = base.stat()
+            manifest = {"site_key": site_key, "cache_directory": str(base),
+                        "cache_identity": [st.st_dev, st.st_ino],
+                        "cache_generation": generation}
+            source = rf"""
+            define('ABSPATH', '/fixture/');
+            class FastCGI_Purger {{
+                public array $calls = [];
+                public function purge_url($url, $feed) {{
+                    $map = new ReflectionMethod(
+                        \AChWorks\AaPanelBridge\CacheInvalidation::class,
+                        'selectFileForManifest');
+                    $selected = $map->invoke(null, $GLOBALS['manifest'],
+                        $url, '/denied');
+                    $this->calls[] = [$url, $feed, $selected];
+                }}
+            }}
+            require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+            function wp_parse_url($url) {{ return parse_url($url); }}
+            function home_url($path) {{ return 'https://qa.example/'; }}
+            function get_permalink($post) {{ return 'https://qa.example/new/story/'; }}
+            function is_taxonomy_viewable($tax) {{ return $tax === 'category'; }}
+            $manifest = json_decode({json.dumps(json.dumps(manifest))}, true);
+            $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+            $urlsMethod = new ReflectionMethod($cls, 'changedTermUrls');
+            $urls = $urlsMethod->invoke(null,
+                (object)['ID'=>11], 'category', [],
+                'https://qa.example/old/story/');
+            $purger = new FastCGI_Purger();
+            $selector = static fn($url, $method): string =>
+                $cls::selectVerifiedFile($manifest, $url, '/denied', $method);
+            $dispatch = new ReflectionMethod($cls, 'dispatchPublicUrls');
+            $dispatch->invoke(null, $urls, $manifest, $purger, $selector);
+            echo json_encode([$urls, $purger->calls], JSON_THROW_ON_ERROR);
+            """
+            result = php_run(source)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            urls, calls = json.loads(result.stdout)
+            self.assertEqual(urls, [
+                "https://qa.example/",
+                "https://qa.example/old/story/",
+                "https://qa.example/new/story/",
+            ])
+            expected = [
+                [f"{scheme}://{site_key}{path}", False,
+                 str(objects[(scheme, method, path)])]
+                for path in ("/old/story/", "/new/story/")
+                for scheme in ("http", "https")
+                for method in ("GET", "HEAD")
+            ]
+            self.assertEqual(calls, expected)
+            for item in [*objects.values(), wrong_gen, wrong_key, peer_object]:
+                self.assertTrue(item.is_file())
 
     def test_head_mapping_has_distinct_key_and_rejects_invalid_method(self):
         from hashlib import md5

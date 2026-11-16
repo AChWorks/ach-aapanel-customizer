@@ -15,6 +15,9 @@ final class CacheInvalidation
     /** URLs captured while a published post still exists; release only after deletion succeeds. */
     private static array $pendingDeleteUrls = [];
 
+    /** Previous public permalink captured before a term relationship changes, per request. */
+    private static array $pendingTermPermalinks = [];
+
     /** Per-dispatch vendor file-filter target; absent for ordinary Nginx Helper calls. */
     private static ?array $activeUrlPurge = null;
 
@@ -36,9 +39,13 @@ final class CacheInvalidation
             // then invalidate only after the deletion actually completes.
             \add_action('before_delete_post', [__CLASS__, 'capturePostDeletion'], 10, 2);
             \add_action('after_delete_post', [__CLASS__, 'afterPostDeleted'], 10, 2);
-            // A term-only assignment need not save the post itself. Capture
-            // BOTH previous and new term-taxonomy identities after WordPress
-            // commits the relationship change; never purge an unrelated post.
+            // WordPress sets terms before notifying set_object_terms. Capture
+            // the actual old public permalink at the earliest pre-mutation
+            // relationship hook (addition happens before deletion on replace).
+            \add_action('add_term_relationship', [__CLASS__, 'captureTermPermalink'], 10, 3);
+            \add_action('delete_term_relationships', [__CLASS__, 'captureTermPermalink'], 10, 3);
+            // Reconcile old/new post URLs and taxonomy archives only when the
+            // completed relationship sets genuinely differ.
             \add_action('set_object_terms', [__CLASS__, 'afterPostTermsSet'], 20, 6);
         }
     }
@@ -311,20 +318,11 @@ final class CacheInvalidation
         return $urls;
     }
 
-    /**
-     * Term assignments can change without wp_after_insert_post. The hook
-     * receives old/new TERM-TAXONOMY IDs, not interchangeable term IDs.
-     * WordPress has already written the relationship when this runs.
-     * Public post/homepage markup may display the old term metadata without
-     * a post save, so those objects require the same generation-bound purge.
-     */
-    public static function afterPostTermsSet(
-        $objectId, $terms, $termTaxonomyIds, $taxonomy, $append, $oldTermTaxonomyIds
-    ): void {
-        if (!is_int($objectId) || $objectId < 1
-            || !is_string($taxonomy) || !is_array($termTaxonomyIds)
-            || !is_array($oldTermTaxonomyIds)) {
-            return;
+    /** Only published, publicly viewable posts and their public taxonomies qualify. */
+    private static function publicTaxonomyPost($objectId, $taxonomy): ?object
+    {
+        if (!is_int($objectId) || $objectId < 1 || !is_string($taxonomy)) {
+            return null;
         }
         $post = \get_post($objectId);
         if (!is_object($post) || !isset($post->ID, $post->post_type, $post->post_status)
@@ -333,6 +331,60 @@ final class CacheInvalidation
             || !\is_post_type_viewable($post->post_type)
             || !in_array($taxonomy, \get_object_taxonomies($post->post_type), true)
             || !\is_taxonomy_viewable($taxonomy)) {
+            return null;
+        }
+        return $post;
+    }
+
+    /**
+     * First pre-add/delete callback observes the canonical permalink while
+     * the previous category relationships still exist. No URL reconstruction
+     * or persistent storage: the matching set_object_terms consumes the value.
+     */
+    public static function captureTermPermalink($objectId, $termTaxonomyIds, $taxonomy): void
+    {
+        $post = self::publicTaxonomyPost($objectId, $taxonomy);
+        if ($post === null || isset(self::$pendingTermPermalinks[$objectId][$taxonomy])) {
+            return;
+        }
+        $url = \get_permalink($post);
+        if (is_string($url) && $url !== '') {
+            self::$pendingTermPermalinks[$objectId][$taxonomy] = $url;
+        }
+    }
+
+    /** Compose old/current public URLs for the existing exact-file dispatcher. */
+    private static function changedTermUrls(
+        object $post, string $taxonomy, $affectedTerms, ?string $previousUrl
+    ): array {
+        $urls = [\home_url('/'), $previousUrl, \get_permalink($post)];
+        return is_array($affectedTerms)
+            ? array_merge($urls, self::termArchiveUrls($affectedTerms, $taxonomy))
+            : $urls;
+    }
+
+    /**
+     * Term assignments can change without wp_after_insert_post. The hook
+     * receives old/new TERM-TAXONOMY IDs, not interchangeable term IDs.
+     * WordPress has already written the relationship when this runs. Consume
+     * the pre-mutation permalink before checking no-op and public eligibility.
+     */
+    public static function afterPostTermsSet(
+        $objectId, $terms, $termTaxonomyIds, $taxonomy, $append, $oldTermTaxonomyIds
+    ): void {
+        $previousUrl = null;
+        if (is_int($objectId) && $objectId > 0 && is_string($taxonomy)) {
+            $previousUrl = self::$pendingTermPermalinks[$objectId][$taxonomy] ?? null;
+            unset(self::$pendingTermPermalinks[$objectId][$taxonomy]);
+            if (empty(self::$pendingTermPermalinks[$objectId])) {
+                unset(self::$pendingTermPermalinks[$objectId]);
+            }
+        }
+        if (!is_array($termTaxonomyIds) || !is_array($oldTermTaxonomyIds)) {
+            return;
+        }
+        $post = self::publicTaxonomyPost($objectId, $taxonomy);
+        if ($post === null) {
             return;
         }
         $current = [];
@@ -359,11 +411,9 @@ final class CacheInvalidation
             'term_taxonomy_id' => $ttIds,
             'hide_empty' => false,
         ]);
-        $urls = [\home_url('/'), \get_permalink($post)];
-        if (is_array($affectedTerms)) {
-            $urls = array_merge($urls, self::termArchiveUrls($affectedTerms, $taxonomy));
-        }
-        self::purgePublicUrls($urls);
+        self::purgePublicUrls(self::changedTermUrls(
+            $post, $taxonomy, $affectedTerms, $previousUrl
+        ));
     }
 
     /**
