@@ -467,6 +467,33 @@
         <p id="ach-hosts-result" class="ach-status-metadata" role="status">Select a website from the inventory for read-only inspection.</p>
       </details>
       <hr />
+      <div class="ach-note" aria-label="Selected website onboarding and recovery">
+        <strong>Site onboarding, drift &amp; guided recovery (read-only)</strong>
+        <p>Select a discovered native website. This combines its last reviewed site baseline,
+        current generated VHost, saved shared PHP policy and site-owned Cache recovery.
+        A change in aaPanel can invalidate earlier evidence: this report never approves
+        or performs Apply/Restore and cannot certify live Nginx/PHP workers or Status Pages recovery.
+        Run it again after aaPanel adds/edits a site or regenerates a VHost.</p>
+        <div class="ach-controls">
+          <button id="ach-reconcile-button" type="button" disabled>Review selected site &amp; recovery</button>
+        </div>
+        <p id="ach-reconcile-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Select a website to inspect saved intent and current sources.</p>
+        <details class="ach-technical-report"><summary>Site change and recovery evidence</summary>
+          <p id="ach-reconcile-result" class="ach-status-metadata" role="status">No current reconciliation evidence. Website baselines are managed from Website list.</p>
+        </details>
+        <p class="ach-note"><strong>Next steps:</strong> Check website changes in Website list; use
+          the selected-site FastCGI Cache Recheck / new Preview, or select the
+          PHP-FPM shared service and Recheck saved policy, or inspect the applicable
+          Status Pages template and saved recovery independently. Each
+          supported Apply/Restore still requires its own fresh approval.</p>
+        <div class="ach-controls">
+          <button id="ach-reconcile-to-websites" type="button">Website changes</button>
+          <button id="ach-reconcile-to-cache" type="button">Cache Recheck / Restore</button>
+          <button id="ach-reconcile-to-php" type="button">PHP-FPM policy</button>
+          <button id="ach-reconcile-to-status" type="button">Status Pages recovery</button>
+        </div>
+      </div>
+      <hr />
       <p class="ach-note"><strong>Generated Nginx VHost comparison (read-only):</strong> Compare the selected aaPanel site's bound hostnames and document root with the generated VHost file. This cannot prove active Nginx routing, TLS, WordPress Toolkit policy or effective runtime.</p>
       <div class="ach-controls"><button id="ach-vhost-inspect-button" type="button" disabled>Compare selected website VHost</button></div>
       <p id="ach-vhost-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Compare the selected site with its generated Nginx file.</p>
@@ -776,7 +803,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.49'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.50'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -900,6 +927,10 @@
     root.find('#ach-' + kind + '-rows').prop('hidden', busy);
   }
   function resetSiteChanges(note) {
+    ++reconcileTicket;
+    reconcileBusy = false;
+    root.find('#ach-reconcile-result').text("Website baseline comparison or save changed; recheck this site's combined evidence.");
+    inspectionSummary('reconcile', 'Previous combined report is no longer current.');
     siteChangesTicket++;
     siteChangesBusy = false;
     siteChangesSnapshot = null;
@@ -1646,12 +1677,18 @@
   }
   var vhostBusy = false, vhostTicket = 0;
   var nginxCandidateBusy = false, nginxCandidateTicket = 0;
+  var reconcileBusy = false, reconcileTicket = 0;
   function vhostLock() {
     var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
     root.find('#ach-vhost-inspect-button').prop('disabled', vhostBusy || unready);
     root.find('#ach-nginx-candidate-button').prop('disabled', nginxCandidateBusy || unready);
+    root.find('#ach-reconcile-button').prop('disabled', reconcileBusy || unready);
   }
   function invalidateVhostInspection(note) {
+    ++reconcileTicket;
+    reconcileBusy = false;
+    root.find('#ach-reconcile-result').text('Website selection or inventory changed; review again.');
+    inspectionSummary('reconcile', 'No current combined evidence. Review the selected website again.');
     ++vhostTicket;
     vhostBusy = false;
     ++nginxCandidateTicket;
@@ -1834,6 +1871,124 @@
           '\nFile SHA-256: ' + r.hosts_sha256 + '\n' + r.note);
       }
       hostsLock(false);
+    });
+  });
+  function validReconciliation(r, id) {
+    var site = hostsPageSites.get(id);
+    if (!site || !r || r.status !== true || r.schema !== 1 ||
+        r.site_id !== Number(id) || r.site_key !== site.name ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.auto_reconcile !== false || r.apply_supported !== false ||
+        r.restore_supported !== false ||
+        !['Observed','Changes Observed','Needs Review'].includes(r.state) ||
+        !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
+        typeof r.note !== 'string' || r.note.length > 1600 ||
+        r.status_recovery_state !== 'Not Inspected') return false;
+    var b = r.baseline, c = r.cache_source, php = r.php_policy, recovery = r.cache_recovery;
+    if (!b || !c || !php || !recovery ||
+        !['Baseline Missing','Added','Changed','Removed','Unchanged'].includes(b.state) ||
+        !Number.isSafeInteger(b.revision) || b.revision < 0 ||
+        !/^[0-9a-f]{64}$/.test(String(b.source_sha256 || '')) ||
+        !Array.isArray(b.fields) || b.fields.length > 4 ||
+        !b.fields.every(k => ['name','document_root','panel_status','bound_domains'].includes(k)) ||
+        !['Source Observed','Partial','Needs Review'].includes(c.state) ||
+        typeof c.reason !== 'string' || c.reason.length > 400 ||
+        !Array.isArray(c.findings) || c.findings.length > 40 ||
+        !Array.isArray(c.other_sites_same_zone) ||
+        !Array.isArray(c.other_sites_same_directory) ||
+        !['Not Inspected','Not Applicable','Monitor Disabled','No Policy',
+          'File Match','File Drift','Needs Review'].includes(php.state) ||
+        php.read_only !== true || php.runtime_verified !== false ||
+        !['Unmanaged','Applied','Restored','Needs Review','Recovery Required'].includes(recovery.state) ||
+        typeof recovery.note !== 'string' || recovery.note.length > 800 ||
+        recovery.runtime_verified !== true && recovery.runtime_verified !== false ||
+        !(recovery.recovery_id === null ||
+          typeof recovery.recovery_id === 'string' &&
+          /^[0-9a-f]{32}$/.test(recovery.recovery_id))) return false;
+    if (!validVhostInspection(Object.assign({status:true}, r.vhost || {}), id))
+      return false;
+    // Never accept a backend report that could be confused with action
+    // authorization. A changed source is still rechecked in each module.
+    return !(r.state === 'Observed' && (r.vhost.state !== 'File Match' ||
+      php.state === 'File Drift' || recovery.state === 'Needs Review'));
+  }
+  root.find('#ach-reconcile-button').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || reconcileBusy || siteBusy || hostsBusy ||
+        websitePolicyState !== 'stable') return;
+    var ticket = ++reconcileTicket;
+    reconcileBusy = true;
+    inspectionSummary('reconcile', 'Reading saved intent, generated source and recovery…');
+    root.find('#ach-reconcile-result').text('Inspecting this native site; no policy action is being performed.');
+    vhostLock();
+    request('inspect_site_reconciliation', cacheNativeArgs(id), function (r, failure) {
+      if (ticket !== reconcileTicket) return;
+      reconcileBusy = false;
+      vhostLock();
+      if (id !== hostsSiteId()) return;
+      if (!validReconciliation(r, id)) {
+        inspectionSummary('reconcile',
+          'Combined inspection unavailable or incompatible. Review current site evidence again.', 'review');
+        root.find('#ach-reconcile-result').text(
+          statusBackendFailure('inspect', failure,
+            'Combined report could not be verified. No operation was authorized; check Activity and retry.'));
+        return;
+      }
+      var b = r.baseline, c = r.cache_source, f = r.php_policy, cr = r.cache_recovery;
+      var before = b.before ? siteChangesDetails(b.before) : 'None';
+      var after = b.after ? siteChangesDetails(b.after) : 'None';
+      var peers = f.shared_impact && Array.isArray(f.shared_impact.matched_sites) ?
+        f.shared_impact.matched_sites.map(function (x) {
+          return '#' + x.id + ' ' + x.site_key;
+        }).join(', ') : 'Not attributed';
+      var desired = f.desired && typeof f.desired === 'object' ?
+        Object.keys(f.desired).sort().map(function (key) {
+          return key + '=' + f.desired[key];
+        }).join(', ') : 'Not saved / not inspected';
+      var resultText =
+        'Selected: ' + r.site_key + ' (#' + r.site_id + ')' +
+        '\nSite-record baseline: ' + b.state + ' (revision ' + b.revision + ')' +
+        '\nChanged fields: ' + (b.fields.join(', ') || 'None reported') +
+        '\nBefore: ' + before + '\nAfter: ' + after +
+        '\nGenerated VHost: ' + r.vhost.state +
+        (r.vhost.reason ? ' — ' + r.vhost.reason : '') +
+        '\nSource SHA256: ' + (r.vhost.vhost_sha256 || 'Not verified') +
+        '\nNative/VHost findings: ' + (r.vhost.findings.join(', ') || 'None') +
+        '\nCache source: ' + c.state + '; PHP file assignment: ' +
+          (c.php_version || 'Not established') +
+        '\nCache source findings: ' + (c.findings.join(', ') || 'None') +
+        '\nCache source reason: ' + (c.reason || 'None') +
+        '\nRegistered shared Cache zone peers: ' +
+          (c.other_sites_same_zone.map(function (x) { return '#' + x.id + ' ' + x.site_key; }).join(', ') || 'None observed') +
+        '\nRegistered shared Cache directory peers: ' +
+          (c.other_sites_same_directory.map(function (x) { return '#' + x.id + ' ' + x.site_key; }).join(', ') || 'None observed') +
+        '\nSaved shared PHP policy: ' + f.state + '; desired: ' + desired +
+        '\nPHP policy reason: ' + (f.reason || 'None') +
+        '\nShared source-attributed PHP sites: ' + peers +
+        '\nCache recovery: ' + cr.state +
+        (cr.recovery_id ? '\nSaved Cache Recovery ID: ' + cr.recovery_id : '') +
+        (cr.journal_phase ? '\nJournal phase: ' + cr.journal_phase : '') +
+        '\nCache recovery detail: ' + (cr.note || 'None') +
+        '\nStatus Pages recovery: inspect the site/template in Status Pages separately.' +
+        '\n\nNext: If newly added/changed, review the Website list baseline first. ' +
+        'For VHost source conflicts, inspect Routing/Nginx; for a Cache recovery ' +
+        'issue, open FastCGI Cache and fresh Recheck. PHP desired drift must be ' +
+        'rechecked in PHP-FPM before independently approved Apply/Restore. ' +
+        'No combined report grants permission for host changes.\n' + r.note;
+      root.find('#ach-reconcile-result').text(resultText);
+      inspectionSummary('reconcile',
+        r.state === 'Needs Review' ?
+          'Needs Review: source, ownership or saved policy evidence requires manual reconciliation.' :
+        r.state === 'Changes Observed' ?
+          'Site changes observed: inspect the differences, then use the appropriate module for any approved action.' :
+          'Current site records and inspected sources are observationally consistent; live runtime is not certified.',
+        r.state === 'Observed' ? 'observed' : 'review');
+    });
+  });
+  [['websites','websites'], ['cache','cache'], ['php','php'],
+   ['status','status']].forEach(function (pair) {
+    root.find('#ach-reconcile-to-' + pair[0]).on('click', function () {
+      root.find('#ach-tab-' + pair[1])[0].click();
     });
   });
   function validVhostInspection(r, id) {

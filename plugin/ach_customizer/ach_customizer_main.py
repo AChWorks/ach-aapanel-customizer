@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.49'
+WORKER_SOURCE_VERSION = '0.1.50'
 
 _STATE_DIR = DATA_DIR
 
@@ -312,6 +312,35 @@ class ach_customizer_main:
                 return self._fail("website_baseline_save", str(exc), request_id,
                                   diagnostic_error=exc)
             return self._fail("website_baseline_save", exc, request_id)
+
+    def inspect_site_reconciliation(self, args):
+        """Primary-admin, selected-site onboarding and drift/recovery summary.
+
+        Observational composition only; all manual module Apply/Restore
+        endpoints independently enforce their own fresh source/approval gates.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_site_reconcile import inspect_selected_site
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Site reconciliation helper is outdated after plugin update; "
+                    "inspect installed files and resident panel worker before retrying"
+                ) from exc
+            public, before, current_site = self._selected_native_website(args)
+            result = inspect_selected_site(
+                public, before, current_site=current_site, directory=_STATE_DIR)
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "inspect_site_reconciliation", target=str(before["id"]),
+                level="WARNING" if result["state"] == "Needs Review" else "INFO")
+        except PermissionError as exc:
+            return self._fail("website_reconciliation_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("website_reconciliation_read", exc, request_id)
 
     def get_php_versions(self, args):
         """Primary-admin-only, read-only installed PHP file discovery."""

@@ -81,3 +81,38 @@ Browser negative attempt is unverified, while local negative-response tests
 passed. A later controlled mismatch/reload reproduction remains a separate
 native QA objective, not a retrospective claim of success or an unapproved
 mandatory integration gate for the narrow read-only v0.1.41 diagnostic.
+
+## Selected-site reconciliation after native lifecycle events (0.1.50 candidate)
+
+Site baseline records, saved shared PHP policies, current Cache/Status Pages
+recovery journals, and actual host Nginx/PHP configuration are **distinct
+authorities**. They survive or change independently during an aaPanel install,
+plugin import/restart, site addition, native VHost regeneration, Monitor
+disable, uninstall and reinstall. The 0.1.50 selected-site report does not
+modify or migrate any of those stores and is not an automatic repair process.
+
+On an authorized test host, record the existing plugin ZIP SHA256, installed
+member hashes, primary administrator role, current native site key/ID and
+bindings, saved baseline revision, relevant shared PHP service, journal
+Recovery ID, Nginx syntax, and healthy peer sites **before** lifecycle testing.
+After a replacement, reopen/refresh the panel and confirm the resident
+Python entrypoint version. Use Website list Compare, Routing & Nginx Review
+selected site & recovery, and the relevant module's **fresh independent**
+Recheck. Never use an old combined report as a write precondition.
+
+When the selected native site identity, baseline revision, PHP source or
+generated VHost changes while a review is running, its report is invalid;
+refresh native inventory and rerun. If a guarded Cache/Status operation has
+a retained recovery journal but source ownership is unknown, **do not**
+replace the journal, remove the generated file manually, or blindly retry.
+Preserve an Operation ID and investigate exact current source/peer impact
+with a separately approved module Restore only after its original adapter
+proves eligibility. Site deletion or a native ID reused for a different
+site also requires manual orphan/identity recovery; the combined report
+does not perform that destructive step.
+
+An update/disable/uninstall/reinstall acceptance is complete only when
+operator configuration and recovery records remain readable, native files
+and peer site behavior are accounted for, and uncertain steps are explicitly
+reported rather than counted as successful. A successful ZIP import, green
+CI or matching entrypoint version alone does not establish those outcomes.

@@ -17,6 +17,70 @@ Keep every UI rule scoped to #ach-customizer so the host aaPanel/Layui interface
 
 The rendered layout regression is exercised in tests/manual/layout_browser.cjs; shipped UI behavior is exercised in tests/test_inventory_ui.cjs. Source-only tests do **not** replace installed aaPanel acceptance.
 
+## Selected-site onboarding and guided recovery (unreleased 0.1.50)
+
+This bounded addition integrates existing **manually approved** capabilities; it
+does not provide universal reconciliation, a scheduled scanner, source-changing
+VHost repair, or a new bypass around the existing Cache/Status/PHP guards.
+
+1. In aaPanel **Website → Add site**, create a site or edit an existing site
+   **only on an approved test/operational target**. Reopen Customizer and use
+   **Website list → Refresh websites**. Choose its native site key/ID from the
+   shared Website selector; never type a path, domain or Recovery ID as a
+   substitute for selected native identity.
+2. In **Website list → Compare website records**, inspect Added, Changed
+   or Baseline Missing. Save a new baseline **only after reviewing the actual
+   before/after native site identities, roots, site status and domain bindings**.
+   Saving a baseline records observed native database state, **not** policy
+   enforcement, VHost bytes, PHP settings, successful Cache activation, or
+   operator approval to change Nginx.
+3. In **Routing & Nginx → Review selected site & recovery**, read the current
+   baseline delta, generated VHost vs native domains/root, per-site Cache source
+   diagnostics, shared PHP-FPM desired-versus-file observation (when verifiable),
+   peer site attribution and the independent Cache recovery journal state.
+   This is a point-in-time combination, not a transaction or live-worker proof.
+   If sources are ambiguous, a managed generation is lost, PHP policy drifts,
+   or aaPanel regenerates the VHost, the report shows **Needs Review** or
+   rejects stale evidence. Retain the Activity Operation ID.
+4. Before a change, run **Routing & Nginx → Compare VHost** and prospective
+   **Nginx candidate / local HTTP** if needed. A generated file File Match
+   does **not** prove the loaded Nginx worker, DNS/TLS, or that a modified
+   VHost will survive future native regeneration.
+5. Use the report's plain next-step navigation. For a supported Cache
+   operation, go to **FastCGI Cache → Inspect → Check site-specific Cache
+   Apply readiness → explicit reviewed consent → Apply → fresh Recheck**.
+   If aaPanel later regenerates a site file or changes PHP/extension ownership,
+   **Recheck**, inspect the saved Recovery ID and current source, then use
+   **separately approved Restore** only where the original Cache adapter
+   verifies ownership. Needs Review is NOT Restore permission; reconcile
+   external edits and recheck before any subsequent write.
+6. For a shared PHP-FPM desired-policy drift, select the actual affected
+   version in **PHP-FPM → Recheck saved policy**, inspect all file-linked
+   peer sites and use existing guarded **Load → Preview → Prepare → approve →
+   Apply / recovery**. A selected website's PHP policy observation **never**
+   implies that the PHP service or all peers should be changed.
+7. **Status Pages** has independently saved template/site identities and
+   Recovery IDs; select the exact template and site there and Recheck before
+   considering its separate approved Apply/Restore. The combined report
+   explicitly says **Status Pages recovery: Not Inspected** and cannot
+   confer blanket recovery rights.
+8. After native **Update / Disable / Uninstall / Reinstall** check the
+   resident worker version, saved baseline, PHP policy and current
+   Cache/Status recovery journals. None is cleared or automatically replayed
+   by this read-only report; keep host changes and unrelated sites intact.
+   Follow [upgrade/recovery](aapanel-upgrade-recovery.md) for uncertain worker
+   imports or failed reinstalls.
+
+**Boundaries:** selected native websites/initial site inventory follow the
+existing 100-site baseline bound, tested aaPanel 8.0.7 Nginx file shapes,
+PHP 8.1/8.5 guarded shared-service write adapters and existing narrow
+Cache/Status Page adapters. Any unsupported Nginx/PHP/plugin topology,
+ambiguous source ownership, cross-site cache sharing or unverified runtime
+requires supervised manual review; this report offers no new write adapter.
+There is no auto-enforce, periodic job, native aaPanel code edit, vendor Purge
+All, extension insertion, PHP file patch, service reload, or Production
+deployment in the feature itself.
+
 ## Primary source evidence
 
 1. Official [aaPanel third-party plugin documentation v1.1](https://www.aapanel.com/pkg/aaPanel_Linux_Panel_Plug-in_development_documentation_v1.1.pdf), pages 1-2: `plugin/<name>/<name>_main.py`, `index.html`, `info.json`, `icon.png`, `install.sh`; class matches `<name>_main`; conventional POST invocation uses `/plugin?action=a&name=<name>&s=<method>`.
