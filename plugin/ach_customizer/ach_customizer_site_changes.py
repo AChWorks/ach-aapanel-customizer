@@ -338,3 +338,108 @@ def save_reviewed_baseline(panel_public, *, directory, expected_revision,
             os.close(lock_fd)
     finally:
         os.close(directory_fd)
+
+
+def save_reviewed_selected_site_baseline(
+        panel_public, *, directory, selected_site, current_site,
+        expected_revision, expected_monitor_revision,
+        expected_source_sha256, reviewed):
+    """Commit ONE reviewed native site record without accepting unrelated drift.
+
+    The exact native site snapshot is first validated by the endpoint's
+    primary-admin POST selector. A full native source digest/Monitor revision
+    is rechecked under the existing persistent state lock. Historical peers,
+    including deleted/renamed peer identities, stay byte-equivalent records.
+    This is not a host configuration write or a global baseline acceptance.
+    """
+    if reviewed != "true" and reviewed is not True:
+        raise SiteChangesError("Explicit selected-site review confirmation is required")
+    if (type(expected_revision) is not int and
+            (not isinstance(expected_revision, str) or
+             not re.fullmatch(r"0|[1-9][0-9]{0,9}", expected_revision))):
+        raise SiteChangesError("Invalid expected site baseline revision")
+    revision = int(expected_revision)
+    if not 0 <= revision < MAX_REVISION:
+        raise SiteChangesError("Expected site baseline revision is out of range")
+    if (type(expected_monitor_revision) is not int and
+            (not isinstance(expected_monitor_revision, str) or
+             not re.fullmatch(r"0|[1-9][0-9]{0,9}", expected_monitor_revision))):
+        raise SiteChangesError("Invalid expected Monitor revision")
+    monitor_revision = int(expected_monitor_revision)
+    if not 0 <= monitor_revision <= MAX_REVISION:
+        raise SiteChangesError("Expected Monitor revision is out of range")
+    if (not isinstance(expected_source_sha256, str) or
+            not SHA_PATTERN.fullmatch(expected_source_sha256)):
+        raise SiteChangesError("Invalid expected site source fingerprint")
+    if not isinstance(selected_site, dict) or type(selected_site.get("id")) is not int:
+        raise SiteChangesError("Select a verified native website before saving")
+    expected_site = _normalize({
+        "id": selected_site["id"], "name": selected_site.get("name"),
+        "document_root": selected_site.get("path"),
+        "panel_status": str(selected_site.get("status")),
+        "bound_domains": selected_site.get("bound_domains"),
+    })
+    if current_site() != selected_site:
+        raise SiteChangesError("Selected site identity changed; refresh and Compare again")
+
+    # Do not accept a current record solely because an attacker supplied its
+    # site ID: it must match the server-selected native site/root/domain tuple.
+    sites, source_digest = _scan(panel_public)
+    if source_digest != expected_source_sha256:
+        raise SiteChangesError("Native sites changed since comparison; Compare again")
+    observed = next((s for s in sites if s["id"] == expected_site["id"]), None)
+    if observed != expected_site:
+        raise SiteChangesError("Selected site changed during native review; refresh inventory")
+
+    directory_fd = _open_state_dir(directory)
+    try:
+        lock_fd = _exclusive_lock(directory_fd)
+        try:
+            policy = _read_at(directory_fd)
+            _require_site_monitor(policy)
+            if policy["revision"] != monitor_revision:
+                raise SiteChangesError("Website Monitor revision changed; Compare again")
+            current = _load(directory_fd)
+            if current["revision"] != revision:
+                raise SiteChangesError("Site baseline revision changed; Compare again")
+            second, second_digest = _scan(panel_public)
+            if second != sites or second_digest != source_digest:
+                raise SiteChangesError("Native sites changed during baseline recording; Compare again")
+            if current_site() != selected_site:
+                raise SiteChangesError("Selected site changed during baseline recording")
+            final_policy = _read_at(directory_fd)
+            _require_site_monitor(final_policy)
+            if final_policy["revision"] != monitor_revision:
+                raise SiteChangesError("Website Monitor revision changed; Compare again")
+
+            # Replace only the exact selected identity. Keep missing/removed
+            # peers as historical records until explicitly reviewed globally.
+            merged = sorted(
+                [s for s in current["sites"] if s["id"] != expected_site["id"]]
+                + [expected_site], key=lambda item: item["id"])
+            _validated_sites(merged)
+            new_digest = _digest(merged)
+            if merged == current["sites"]:
+                return {
+                    "schema": SCHEMA, "state": "Selected Site Baseline Unchanged",
+                    "site_id": expected_site["id"], "site_key": expected_site["name"],
+                    "baseline_revision": revision, "source_sha256": source_digest,
+                    "baseline_sha256": current["source_sha256"], "changed": False,
+                    "scope": "selected_site_only", "runtime_verified": False,
+                }
+            updated = {
+                "schema": SCHEMA, "revision": revision + 1,
+                "source_sha256": new_digest, "sites": merged,
+            }
+            _write(directory_fd, updated)
+            return {
+                "schema": SCHEMA, "state": "Selected Site Baseline Saved",
+                "site_id": expected_site["id"], "site_key": expected_site["name"],
+                "baseline_revision": revision + 1, "source_sha256": source_digest,
+                "baseline_sha256": new_digest, "changed": True,
+                "scope": "selected_site_only", "runtime_verified": False,
+            }
+        finally:
+            os.close(lock_fd)
+    finally:
+        os.close(directory_fd)

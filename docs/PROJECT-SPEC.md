@@ -281,3 +281,35 @@ Applicable AChWorks cross-project contracts (consult current versions when imple
 - [Validation and Evidence](https://github.com/AChWorks/koinon/blob/main/docs/contracts/validation-evidence.md)
 - [External Effect Safety](https://github.com/AChWorks/koinon/blob/main/docs/contracts/external-effect-safety.md)
 - [Build vs Buy / Reuse](https://github.com/AChWorks/koinon/blob/main/docs/principles/build-vs-buy.md)
+
+
+## Unreleased Native 0.1.51: bounded selected-site reconciliation
+
+A single primary-administrator website onboarding operator flow connects
+existing native site/Host/VHost discovery, separately approved PHP-FPM
+desired-policy review, site-owned FastCGI Cache recovery, and Status Page
+module navigation. The report is read-only, rejects stale source/selection
+evidence, shows bounded peer impact and explicitly does **not** represent
+automatic remediation, loaded worker proof or authorization to Apply/Restore.
+
+The reviewed native baseline now has two separately authorized scopes:
+**selected site only** (accept just one verified Added/Changed/Initial site,
+preserving every other historical site record and unaccepted difference)
+and **all websites** (previous full-snapshot acceptance; clearly labeled
+for all-site consent, including removals). Selected-site acceptance uses the
+same baseline persistence layout and atomic locked revision CAS, not a new
+per-site configuration store, so old installed state stays readable.
+For deletion/orphan cases, no automatic baseline erasure or host-state
+cleanup is authorized. Neither scope changes aaPanel site configuration.
+
+The feature keeps all existing PHP/Cache/Status adapters and their own
+fresh preview, consent, preflight, ownership and recovery gates. No scope
+expansion to unsupported PHP adapter layouts, vendor Purge All, universal
+auto-enforce, shared cache roots, unknown-host HTTPS/443 or a native UI
+redesign is authorized by this package. See Issue #1 contract and Issue #21
+installed QA evidence for test boundaries. This is an unreleased source
+candidate, not a claim of production or universal compatibility. The
+[installed functional QA evidence](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md)
+records source/installed version boundaries, selected-site acceptance,
+VHost regeneration, guarded Cache recovery, resident worker reload and
+peer sentinels; it does not replace exact-HEAD CI or independent review.

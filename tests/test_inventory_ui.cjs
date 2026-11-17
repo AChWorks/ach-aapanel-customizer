@@ -52,9 +52,11 @@ function loadUi() {
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-site-changes-compare', '#ach-site-changes-approve', '#ach-site-changes-why',
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-summary', '#ach-site-changes-rows',
+    '#ach-site-changes-selected-evidence', '#ach-site-changes-selected-reviewed',
+    '#ach-site-changes-selected-why', '#ach-site-changes-save-selected',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
-    '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
+    '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-reconcile-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-cache-private-probe-button', '#ach-cache-private-probe-result',
     '#ach-cache-woo-probe-button', '#ach-cache-woo-probe-result',
@@ -71,6 +73,9 @@ function loadUi() {
     '#ach-bridge-enable-reviewed', '#ach-bridge-enable',
     '#ach-bridge-disable-reviewed', '#ach-bridge-disable',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
+    '#ach-reconcile-button', '#ach-reconcile-result',
+    '#ach-reconcile-to-websites', '#ach-reconcile-to-cache',
+    '#ach-reconcile-to-php', '#ach-reconcile-to-status',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
@@ -340,6 +345,9 @@ function loadUi() {
       cacheSummaryTone: elements.get('#ach-cache-summary').attributes['data-tone'],
       hostsSummary: elements.get('#ach-hosts-summary').textContent,
       vhostSummary: elements.get('#ach-vhost-summary').textContent,
+      reconcileSummary: elements.get('#ach-reconcile-summary').textContent,
+      reconcileResult: elements.get('#ach-reconcile-result').textContent,
+      reconcileDisabled: elements.get('#ach-reconcile-button').props.disabled,
       nginxSummary: elements.get('#ach-nginx-candidate-summary').textContent,
       phpRuntimeSummary: elements.get('#ach-php-runtime-summary').textContent,
       phpRuntimeSummaryTone: elements.get('#ach-php-runtime-summary').attributes['data-tone'],
@@ -386,6 +394,9 @@ function loadUi() {
       siteStatus: elements.get('#ach-sites-status').textContent,
       siteChangesStatus: elements.get('#ach-site-changes-status').textContent,
       siteChangesSaveDisabled: elements.get('#ach-site-changes-save').props.disabled,
+      selectedBaselineSaveDisabled: elements.get('#ach-site-changes-save-selected').props.disabled,
+      selectedBaselineReviewedDisabled: elements.get('#ach-site-changes-selected-reviewed').props.disabled,
+      selectedBaselineEvidence: elements.get('#ach-site-changes-selected-evidence').textContent,
       siteChangesApproveDisabled: elements.get('#ach-site-changes-approve').props.disabled,
       siteChangesRows: elements.get('#ach-site-changes-rows').children.map(tr =>
         tr.children.map(td => td.textContent)),
@@ -587,6 +598,14 @@ function loadUi() {
       trigger(elements.get('#ach-site-changes-approve'), 'change');
     },
     siteChangesSave: () => { trigger(elements.get('#ach-site-changes-save'), 'click'); return requests.at(-1); },
+    siteChangesSelectedApprove: checked => {
+      elements.get('#ach-site-changes-selected-reviewed').props.checked=checked;
+      trigger(elements.get('#ach-site-changes-selected-reviewed'),'change');
+    },
+    siteChangesSelectedSave: () => {
+      trigger(elements.get('#ach-site-changes-save-selected'),'click');
+      return requests.at(-1);
+    },
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -1666,6 +1685,135 @@ const nginxCandidate = (overrides={}) => ({
     http_status:200,site_identity_verified:false},
   reason:'',note:'Next-load source only; localhost HEAD does not identify selected site.',
   ...overrides
+});
+
+
+const reconciliation = (overrides={}) => {
+  const {status, ...vhost} = vhostInspection();
+  return {
+    status:true, schema:1, site_id:7, site_key:'site.test',
+    state:'Observed', read_only:true, runtime_verified:false,
+    auto_reconcile:false, apply_supported:false, restore_supported:false,
+    monitor_revision:2, status_recovery_state:'Not Inspected',
+    baseline:{
+      state:'Unchanged',revision:4,source_sha256:'a'.repeat(64),
+      fields:[],before:null,after:null
+    },
+    vhost, cache_source:{
+      state:'Source Observed',source_sha256:'b'.repeat(64),
+      php_version:'85',zone_state:'Direct Zone',findings:[],
+      other_sites_same_zone:[],other_sites_same_directory:[],reason:''
+    },
+    php_policy:{
+      version:'85',scope:'shared_service',state:'No Policy',
+      policy_revision:0,desired:null,changes:[],shared_impact:null,
+      runtime_verified:false,read_only:true,reason:''
+    },
+    cache_recovery:{
+      state:'Unmanaged',recovery_id:null,journal_phase:null,
+      runtime_verified:false,note:'No Cache journal.'
+    },
+    note:'Point-in-time source comparison; separately approve every write.',
+    ...overrides
+  };
+};
+
+test('Site onboarding combines native baseline, current source and safe recovery without granting writes', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.openTab('routing');
+  assert.equal(ui.state().reconcileDisabled,false);
+  const req=ui.statusClick('#ach-reconcile-button');
+  assert.match(req.options.url,/s=inspect_site_reconciliation$/);
+  assert.equal(req.options.type,'POST');
+  assert.deepEqual(Object.keys(req.options.data).sort(),[
+    'expected_site_key','expected_site_snapshot','site_id']);
+  assert.deepEqual(JSON.parse(req.options.data.expected_site_snapshot),[
+    7,'site.test','/www/site.test','1',[['site.test',80]]]);
+  assert.equal(ui.state().reconcileDisabled,true);
+  req.respond(reconciliation());
+  assert.equal(ui.state().reconcileDisabled,false);
+  assert.match(ui.state().reconcileResult,/Site-record baseline: Unchanged/);
+  assert.match(ui.state().reconcileResult,/Generated VHost: File Match/);
+  assert.match(ui.state().reconcileResult,/Saved shared PHP policy: No Policy/);
+  assert.match(ui.state().reconcileResult,/Cache recovery: Unmanaged/);
+  assert.match(ui.state().reconcileSummary,/live runtime is not certified/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.requests.filter(r=>/s=(manage_cache_policy|fpm_apply|status_manage)$/.test(r.options.url)).length,0);
+  ui.statusClick('#ach-reconcile-to-cache');
+  assert.equal(ui.selectedTab(),'cache');
+  ui.statusClick('#ach-reconcile-to-websites');
+  assert.equal(ui.selectedTab(),'websites');
+  ui.statusClick('#ach-reconcile-to-php');
+  assert.equal(ui.selectedTab(),'php');
+  ui.statusClick('#ach-reconcile-to-status');
+  assert.equal(ui.selectedTab(),'status');
+});
+
+test('Regeneration and saved recovery conflicts show Needs Review, never actionable Restore', () => {
+  const ui=loadUi();selectHostsSite(ui);ui.openTab('routing');
+  const original = reconciliation();
+  const report = reconciliation({
+    state:'Needs Review',
+    baseline:{...original.baseline,state:'Changed',fields:['bound_domains'],
+      before:{id:7,name:'site.test',document_root:'/www/site.test',
+        panel_status:'1',bound_domains:[['site.test',80]]},
+      after:{id:7,name:'site.test',document_root:'/www/site.test',
+        panel_status:'1',bound_domains:[['site.test',80],['alias.test',80]]}
+    },
+    vhost:{...original.vhost,state:'File Drift',
+      findings:['BOUND_HOST_MISSING_IN_VHOST'],vhost_sha256:'e'.repeat(64),
+      native_names:['site.test','alias.test']},
+    php_policy:{...original.php_policy,state:'File Drift',
+      desired:{'pm.max_children':50},reason:'PHP worker file reset',
+      shared_impact:{state:'File Match',matched_sites:[
+        {id:7,site_key:'site.test'},{id:8,site_key:'peer.test'}]}},
+    cache_recovery:{state:'Needs Review',recovery_id:'c'.repeat(32),
+      journal_phase:'applied',runtime_verified:false,
+      note:'VHost regenerated and managed extension is missing.'}
+  });
+  // Native VHost self-consistency must still hold. A claim unsupported by
+  // literal host sets is rejected, even in a degraded Needs Review summary.
+  report.vhost.native_names=['site.test','alias.test'];
+  ui.statusClick('#ach-reconcile-button').respond(report);
+  assert.match(ui.state().reconcileSummary,/Needs Review/);
+  assert.match(ui.state().reconcileResult,/Generated VHost: File Drift/);
+  assert.match(ui.state().reconcileResult,/Changed fields: bound_domains/);
+  assert.match(ui.state().reconcileResult,/PHP worker file reset/);
+  assert.match(ui.state().reconcileResult,/peer.test/);
+  assert.match(ui.state().reconcileResult,/Saved Cache Recovery ID:/);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+});
+
+test('Incompatible and stale selected-site reconciliation reports never resurrect authority', () => {
+  const ui=loadUi();selectHostsSite(ui);ui.openTab('routing');
+  for (const change of [
+    {apply_supported:true},{runtime_verified:true},{auto_reconcile:true},
+    {restore_supported:true},{site_id:8},
+    {vhost:{...reconciliation().vhost,state:'File Match',findings:['BOUND_HOST_MISSING_IN_VHOST']}},
+    {cache_recovery:{state:'Applied',recovery_id:'not-id',runtime_verified:true,note:'fake'}}
+  ]) {
+    ui.statusClick('#ach-reconcile-button').respond(reconciliation(change));
+    assert.match(ui.state().reconcileSummary,/unavailable or incompatible/);
+    assert.doesNotMatch(ui.state().reconcileResult,/Saved Cache Recovery ID:/);
+    assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  }
+  const pending = ui.statusClick('#ach-reconcile-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(reconciliation({cache_recovery:{
+    state:'Needs Review',recovery_id:'f'.repeat(32),
+    runtime_verified:false,note:'stale recovery'}}));
+  assert.match(ui.state().reconcileResult,/selection or inventory changed/);
+  assert.doesNotMatch(ui.state().reconcileResult,/stale recovery/);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-reconcile-button').respond(reconciliation());
+  assert.match(ui.state().reconcileResult,/Site-record baseline/);
+  const refresh=ui.refreshSites();
+  assert.equal(ui.state().reconcileDisabled,true);
+  assert.doesNotMatch(ui.state().reconcileResult,/Source SHA256:/);
+  refresh.respond(hostsInventory());
+  assert.equal(ui.state().reconcileDisabled,true);
 });
 
 test('Selected native Nginx candidate check separates prospective config and HTTP status', () => {
@@ -6445,6 +6593,176 @@ const siteChangesPayload = (overrides = {}) => {
     response.initial_sites=[];
   return response;
 };
+
+
+test('Selected website acceptance preserves unrelated pending baselines', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const first = {
+    id:7, name:'site.test', document_root:'/www/site.test',
+    panel_status:'1',bound_domains:[['site.test',80]]
+  };
+  const other = {
+    id:8, name:'other.test',document_root:'/www/other.test',
+    panel_status:'1',bound_domains:[['other.test',80]]
+  };
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:2,changes:[
+      {id:7,kind:'Added',fields:[],before:null,after:first},
+      {id:8,kind:'Added',fields:[],before:null,after:other},
+    ]
+  }));
+  assert.match(ui.state().selectedBaselineEvidence,/Selected #7 \(Added\)/);
+  assert.match(ui.state().selectedBaselineEvidence,/Other site records will not be accepted/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.equal(ui.state().selectedBaselineReviewedDisabled,false);
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+  const accepted=ui.siteChangesSelectedSave();
+  assert.match(accepted.options.url,/s=save_selected_site_baseline$/);
+  assert.equal(accepted.options.type,'POST');
+  assert.deepEqual(JSON.parse(accepted.options.data.expected_site_snapshot),
+    [7,'site.test','/www/site.test','1',[['site.test',80]]]);
+  assert.equal(accepted.options.data.expected_monitor_revision,0);
+  assert.equal(accepted.options.data.expected_revision,1);
+  assert.equal(accepted.options.data.expected_source_sha256,'a'.repeat(64));
+  assert.equal(accepted.options.data.reviewed,'true');
+  assert.deepEqual(Object.keys(accepted.options.data).sort(),[
+    'expected_monitor_revision','expected_revision','expected_site_key',
+    'expected_site_snapshot','expected_source_sha256','reviewed','site_id']);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  accepted.respond({
+    status:true,schema:1,scope:'selected_site_only',
+    state:'Selected Site Baseline Saved',site_id:7,site_key:'site.test',
+    changed:true,baseline_revision:2,source_sha256:'a'.repeat(64),
+    baseline_sha256:'c'.repeat(64),runtime_verified:false
+  });
+  assert.match(ui.state().siteChangesStatus,/Selected Site Baseline Saved/);
+  assert.match(ui.state().siteChangesStatus,/Other pending website differences were left unchanged/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.equal(ui.requests.filter(r=>/s=save_site_baseline$/.test(r.options.url)).length,0);
+  assert.match(ui.siteChangesCompare().options.url,/s=compare_site_changes$/);
+});
+
+test('Scoped baseline approval cannot transfer to a different site or stale source', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const first = {
+    id:7,name:'site.test',document_root:'/www/site.test',
+    panel_status:'1',bound_domains:[['site.test',80]]
+  };
+  const other = {
+    id:8,name:'other.test',document_root:'/www/other.test',
+    panel_status:'1',bound_domains:[['other.test',80]]
+  };
+  const payload=siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:2,changes:[
+      {id:7,kind:'Added',fields:[],before:null,after:first},
+      {id:8,kind:'Added',fields:[],before:null,after:other}
+    ]
+  });
+  ui.siteChangesCompare().respond(payload);
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.match(ui.state().selectedBaselineEvidence,/Selected #8 \(Added\)/);
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  const count=ui.requests.length;
+  ui.siteChangesSelectedSave();
+  assert.equal(ui.requests.length,count);
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    ...payload,
+    changes:[
+      {id:7,kind:'Added',fields:[],before:null,
+       after:{...first,document_root:'/tmp/forged-root'}},
+      {id:8,kind:'Added',fields:[],before:null,after:other}
+    ]
+  }));
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.match(ui.state().selectedBaselineEvidence,/No eligible/);
+  ui.refreshSites();
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+});
+
+test('Selected-site typed CAS errors show the cause and require a fresh comparison and approval', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const site={
+    id:7,name:'site.test',document_root:'/www/site.test',
+    panel_status:'1',bound_domains:[['site.test',80]]
+  };
+  const payload=siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:1,changes:[{id:7,kind:'Added',fields:[],before:null,after:site}]
+  });
+  ui.siteChangesCompare().respond(payload);
+  ui.siteChangesSelectedApprove(true);
+  const save=ui.siteChangesSelectedSave();
+  save.respond({
+    status:false,stage:'website_selected_baseline_save',
+    msg:'Site baseline revision changed; Compare again',
+    operation_id:'d'.repeat(32)
+  });
+  assert.match(ui.state().siteChangesStatus,/Site baseline revision changed; Compare again/);
+  assert.match(ui.state().siteChangesStatus,/d{32}/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  const afterFailure=ui.requests.length;
+  ui.siteChangesSelectedApprove(true);
+  ui.siteChangesSelectedSave();
+  assert.equal(ui.requests.length,afterFailure,'No retry using stale review token');
+  ui.siteChangesCompare().respond({...payload,baseline_revision:2});
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true,
+    'Fresh compare still requires new explicit operator review');
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+});
+
+test('Typed reconciliation source drift is visible and cannot authorize writes', () => {
+  const ui=loadUi();selectHostsSite(ui);ui.openTab('routing');
+  const inspect=ui.statusClick('#ach-reconcile-button');
+  inspect.respond({
+    status:false,stage:'website_reconciliation_read',
+    msg:'Generated VHost changed during review; inspect again',
+    operation_id:'e'.repeat(32)
+  });
+  assert.match(ui.state().reconcileResult,/Generated VHost changed during review; inspect again/);
+  assert.match(ui.state().reconcileResult,/e{32}/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.state().reconcileDisabled,false);
+  assert.equal(ui.requests.filter(r=>/s=(manage_cache_policy|fpm_apply|status_manage)$/.test(r.options.url)).length,0);
+  ui.statusClick('#ach-reconcile-button').respond(reconciliation());
+  assert.match(ui.state().reconcileResult,/Site-record baseline: Unchanged/);
+});
+
+test('Scoped baseline uncertain backend outcome requires re-Compare, never retry', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:2,changes:[
+      {id:7,kind:'Added',fields:[],before:null,after:{
+        id:7,name:'site.test',document_root:'/www/site.test',
+        panel_status:'1',bound_domains:[['site.test',80]]
+      }}
+    ]
+  }));
+  ui.siteChangesSelectedApprove(true);
+  const save=ui.siteChangesSelectedSave();
+  save.respond({status:true,schema:1,scope:'selected_site_only',
+    state:'Selected Site Baseline Saved',site_id:8,site_key:'site.test',
+    changed:true,baseline_revision:2,source_sha256:'a'.repeat(64),
+    baseline_sha256:'c'.repeat(64),runtime_verified:false});
+  assert.match(ui.state().siteChangesStatus,/unconfirmed/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  const count=ui.requests.length;
+  ui.siteChangesSelectedSave();
+  assert.equal(ui.requests.length,count);
+});
 
 test('Site lifecycle comparison requires reviewed baseline and refuses blind retry', () => {
   const ui=loadUi();
