@@ -34,7 +34,9 @@ silently replacing third-party files. Monitoring is the default; destructive
 or shared-service changes require a separate, current, explicit approval.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
-is a separate WordPress plugin. Its default state is disconnected. Once the
+is a separate WordPress plugin whose ZIP includes a standard
+[WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt), not the
+repository-only Markdown guide. Its default state is disconnected. Once the
 operator has verified native site-owned Cache and expressly provisioned a
 generation-bound manifest, it can assist Nginx Helper's **per-URL GET/HEAD**
 invalidation for supported public posts, homepage and first-page taxonomy
@@ -110,7 +112,7 @@ Owner-authorized integration and publication.
 | What is the product, scope and lasting contract? | [Project specification](docs/PROJECT-SPEC.md) |
 | How do actual aaPanel adapters work and what are their limits? | [Native integration guide](docs/aapanel-integration.md) |
 | How is an uncertain upgrade/reload/recovery handled? | [Upgrade/recovery runbook](docs/aapanel-upgrade-recovery.md) |
-| How does the optional WordPress plugin work? | [Bridge guide](wordpress/ach-aapanel-bridge/README.md) |
+| How does the optional WordPress plugin work? | [Bridge package `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt) for the installed plugin; [repository-only advanced guide](wordpress/ach-aapanel-bridge/README.md) for operators/developers |
 | What is published now? | [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) and the source version manifests |
 | What is unfinished? | [#2 customization / PHP / Cache](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), [#10 Status Pages](https://github.com/AChWorks/ach-aapanel-customizer/issues/10), [#21 native QA](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) |
 | Which exact code, review and tests passed? | [Pull requests](https://github.com/AChWorks/ach-aapanel-customizer/pulls), [CI](https://github.com/AChWorks/ach-aapanel-customizer/actions), [QA receipts in #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) and retained [`docs/evidence/`](docs/evidence/) |

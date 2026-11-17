@@ -17,6 +17,12 @@ The product manages *operator-approved desired behavior* rather than blindly ove
 ### Optional WordPress companion
 
 The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Coordinated pre-releases can attach both artifacts after their respective review and release authorization; installation and Production deployment remain separate actions.
+The WordPress installable ZIP must include a platform-standard
+`readme.txt` (with its `Stable tag` matching the main PHP entrypoint
+version). The longer repository-only Markdown guide must not replace
+`readme.txt` inside the distributed ZIP. These packaging conventions
+do not authorize a WordPress.org Plugin Directory listing or decide
+the project's software license.
 
 The companion is **opt-in**, disconnected by default and never required
 for native aaPanel functions. Its currently implemented capability is

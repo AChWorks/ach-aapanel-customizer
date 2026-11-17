@@ -18,7 +18,7 @@ FILES = (
     "includes/class-nginx-helper-status.php",
     "includes/class-cache-invalidation.php",
     "includes/class-plugin.php",
-    "README.md",
+    "readme.txt",
 )
 
 # ZIP member timestamps depend on source bytes, not wall-clock time.
@@ -53,6 +53,16 @@ def build(output: str | Path) -> dict[str, str]:
     version = _header(header, "Version")
     if not re.fullmatch(r"(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){2}", version):
         raise ValueError("Unexpected independent WordPress plugin version")
+
+    readme_path = PLUGIN / "readme.txt"
+    if readme_path.is_symlink() or not readme_path.is_file():
+        raise ValueError("WordPress standard readme.txt missing or redirected")
+    readme = readme_path.read_text(encoding="utf-8")
+    if not readme.startswith("=== ACh aaPanel Bridge ===\n"):
+        raise ValueError("Unexpected WordPress readme.txt plugin identity")
+    stable_tags = re.findall(r"(?m)^Stable tag:[ \t]*([^\r\n]+)$", readme)
+    if len(stable_tags) != 1 or stable_tags[0].strip() != version:
+        raise ValueError("WordPress readme.txt Stable tag does not match PHP plugin Version")
     destination = Path(output).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(destination, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:

@@ -212,7 +212,9 @@ actual resulting Cache behavior and separate external request effects.
 ## Optional WordPress Bridge: operator prerequisites
 
 [WordPress Bridge](../wordpress/ach-aapanel-bridge/README.md) is an
-**independent**, manually installed WordPress plugin. Without an explicit
+**independent**, manually installed WordPress plugin. Its ZIP includes a
+[WordPress-format `readme.txt`](../wordpress/ach-aapanel-bridge/readme.txt),
+while the linked Markdown guide is repository-only. Without an explicit
 native-generated site-owned manifest it reports diagnostics but does **not**
 alter Nginx Helper hooks or cache state.
 
