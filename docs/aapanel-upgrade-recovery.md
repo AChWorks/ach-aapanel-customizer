@@ -82,6 +82,27 @@ passed. A later controlled mismatch/reload reproduction remains a separate
 native QA objective, not a retrospective claim of success or an unapproved
 mandatory integration gate for the narrow read-only v0.1.41 diagnostic.
 
+### Confirmed stale Python helper after native ZIP upgrade (2026-11-17 QA)
+
+The isolated 0.1.50 to 0.1.51 vendor update succeeded and its 57/57
+installed member hashes matched the ZIP. The Overview entrypoint version
+also matched 0.1.51, **but the panel process still held an older imported
+site-baseline helper**. The first real selected-site baseline save therefore
+failed closed at stage website_selected_baseline_save with a Request ID and
+left the baseline unchanged. Fresh comparison alone would not repair the
+in-memory import.
+
+Only on the **authorized nonproduction guest**, a panel-only
+/etc/init.d/bt reload replaced that resident process. A fresh browser
+comparison and explicit selected-site consent then saved just the chosen
+site, preserving all nine peer baseline records. This shows why
+matching entrypoint metadata is **necessary but not sufficient** evidence
+for helper freshness; it does **not** authorize an automatic service reload
+or a Production restart. Verify installed hashes, error stage, current
+process, affected service/peer health and the rollback plan before an
+administrator approves the appropriate panel lifecycle action. See
+[exact installed QA](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md).
+
 ## Selected-site reconciliation after native lifecycle events (0.1.51 candidate)
 
 Site baseline records, saved shared PHP policies, current Cache/Status Pages

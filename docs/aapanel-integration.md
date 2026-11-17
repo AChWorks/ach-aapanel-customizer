@@ -92,6 +92,27 @@ There is no auto-enforce, periodic job, native aaPanel code edit, vendor Purge
 All, extension insertion, PHP file patch, service reload, or Production
 deployment in the feature itself.
 
+### Actual installed native QA (2026-11-17, candidate 0.1.51)
+
+The [exact installed QA receipt](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md) documents a reused isolated
+aaPanel 8.0.7 guest: the 57-file package with matching Dev/Test SHA256,
+authenticated native UI, site creation, baseline Added detection, Cache
+preflight/Apply/Restore and native aaPanel VHost regeneration with a
+properly blocked Needs Review path. A vendor update to 0.1.51 and
+controlled panel-worker reload then verified a single-site baseline
+acceptance: one test site accepted, all nine earlier saved baseline records
+preserved, 11 unrelated site deltas still pending. The final 0.1.51 browser
+report was Observed/File Match/Restored and the Monitor disabled/reenabled
+without erasing saved baseline or Cache journal.
+
+**Precise split:** the Cache Apply/Restore interaction was executed on the
+immediate preceding native 0.1.50 candidate; the final 0.1.51 package was
+reinstalled and exercised for selected baseline, read-only combined report,
+Monitor toggles and host sentinels. No Cache adapter changes were made
+between these versions. Full candidate-specific Uninstall/Reinstall and
+real multi-account acceptance were not performed; no Production installation
+or Release is implied.
+
 ## Primary source evidence
 
 1. Official [aaPanel third-party plugin documentation v1.1](https://www.aapanel.com/pkg/aaPanel_Linux_Panel_Plug-in_development_documentation_v1.1.pdf), pages 1-2: `plugin/<name>/<name>_main.py`, `index.html`, `info.json`, `icon.png`, `install.sh`; class matches `<name>_main`; conventional POST invocation uses `/plugin?action=a&name=<name>&s=<method>`.

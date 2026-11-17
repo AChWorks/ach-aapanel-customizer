@@ -308,4 +308,8 @@ expansion to unsupported PHP adapter layouts, vendor Purge All, universal
 auto-enforce, shared cache roots, unknown-host HTTPS/443 or a native UI
 redesign is authorized by this package. See Issue #1 contract and Issue #21
 installed QA evidence for test boundaries. This is an unreleased source
-candidate, not a claim of production or universal compatibility.
+candidate, not a claim of production or universal compatibility. The
+[installed functional QA evidence](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md)
+records source/installed version boundaries, selected-site acceptance,
+VHost regeneration, guarded Cache recovery, resident worker reload and
+peer sentinels; it does not replace exact-HEAD CI or independent review.
