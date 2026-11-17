@@ -3,7 +3,7 @@
 The optional **WordPress companion** for [ACh aaPanel Customizer](https://github.com/AChWorks/ach-aapanel-customizer).
 
 - WordPress plugin slug: `ach-aapanel-bridge`
-- Current development Pre-release: **0.1.8**, independently packaged with native 0.1.49 in [v0.1.49](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.49); merged from [PR #91](https://github.com/AChWorks/ach-aapanel-customizer/pull/91) on reviewed 0.1.7 [PR #90](https://github.com/AChWorks/ach-aapanel-customizer/pull/90). Publishing is **not** Production certification or deployment
+- Current development Pre-release: **0.1.8**, independently packaged with native 0.1.51 in [v0.1.51](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51); merged from [PR #91](https://github.com/AChWorks/ach-aapanel-customizer/pull/91) on reviewed 0.1.7 [PR #90](https://github.com/AChWorks/ach-aapanel-customizer/pull/90). Publishing is **not** Production certification or deployment
 - Source of truth: `wordpress/ach-aapanel-bridge/` in the **same repository** as the native aaPanel plugin
 - Distribution: independent WordPress ZIP; it is **not** included inside the aaPanel plugin ZIP
 
