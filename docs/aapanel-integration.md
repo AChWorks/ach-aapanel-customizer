@@ -3,9 +3,9 @@
 This is **technical integration guidance**, not a second product specification.
 The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the active research/acceptance owner is [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1).
 
-**Installable development preview:** [v0.1.49 Release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.49) provides separately packaged native 0.1.49 and optional Bridge 0.1.8 ZIPs plus SHA256 checksums. This guide describes bounded native integration and [controlled upgrade/recovery](aapanel-upgrade-recovery.md), not universal compatibility or authorization to install on Production.
+**Installable development preview:** [v0.1.51 Release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51) provides separately packaged native **0.1.51** and optional Bridge **0.1.8** ZIPs plus SHA256 checksums. This guide describes bounded native integration and [controlled upgrade/recovery](aapanel-upgrade-recovery.md), not universal compatibility or authorization to install on Production.
 
-## Native UI component contract (Issue #80; merged v0.1.47 lineage, retained in v0.1.49)
+## Native UI component contract (Issue #80; merged v0.1.47 lineage, retained in v0.1.51)
 
 Keep every UI rule scoped to #ach-customizer so the host aaPanel/Layui interface is unchanged.
 
@@ -17,7 +17,7 @@ Keep every UI rule scoped to #ach-customizer so the host aaPanel/Layui interface
 
 The rendered layout regression is exercised in tests/manual/layout_browser.cjs; shipped UI behavior is exercised in tests/test_inventory_ui.cjs. Source-only tests do **not** replace installed aaPanel acceptance.
 
-## Selected-site onboarding and guided recovery (unreleased 0.1.51)
+## Selected-site onboarding and guided recovery (0.1.51)
 
 This bounded addition integrates existing **manually approved** capabilities; it
 does not provide universal reconciliation, a scheduled scanner, source-changing
@@ -92,7 +92,7 @@ There is no auto-enforce, periodic job, native aaPanel code edit, vendor Purge
 All, extension insertion, PHP file patch, service reload, or Production
 deployment in the feature itself.
 
-### Actual installed native QA (2026-11-17, candidate 0.1.51)
+### Historical initial native QA (2026-11-17, pre-remediation 0.1.51)
 
 The [exact installed QA receipt](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md) documents a reused isolated
 aaPanel 8.0.7 guest: the 57-file package with matching Dev/Test SHA256,
@@ -112,6 +112,23 @@ Monitor toggles and host sentinels. No Cache adapter changes were made
 between these versions. Full candidate-specific Uninstall/Reinstall and
 real multi-account acceptance were not performed; no Production installation
 or Release is implied.
+
+**Later, exact corrected 0.1.51 QA (post-merge):** The final independently
+approved native ZIP (SHA256
+`6d4b98322f82527a6b92bd47b5c0f98b9ed6e5bb9857c5dad1a8025df86df385`)
+was subsequently imported through real aaPanel 8.0.7 and matched **57/57**
+installed files. The native Browser ran site #18 Cache Apply/Recheck, actual
+public HTTP MISS/HIT and synthetic Authorization/Cookie BYPASS, a deliberately
+introduced and then byte-for-byte removed VHost comment (Needs Review locked
+Restore/Clear), and fresh approved Restore with final Recheck Restored. The
+corrected stale-baseline error returned an actionable message and correlated
+`SiteChangesError` Activity without changing saved baseline/Monitor state.
+Nginx/PHP service and peer HTTP health remained good. [Exact final-package
+receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6936797785).
+This newer source-comment drift is **not** the earlier real aaPanel-generated
+VHost alias/regeneration test; full exact-package Uninstall/Reinstall and
+real WooCommerce customer-session acceptance are **not** proven by this slice.
+Publication of a development pre-release does not authorize Production.
 
 ## Primary source evidence
 

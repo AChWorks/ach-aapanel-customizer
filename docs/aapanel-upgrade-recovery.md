@@ -115,7 +115,7 @@ process, affected service/peer health and the rollback plan before an
 administrator approves the appropriate panel lifecycle action. See
 [exact installed QA](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md).
 
-## Selected-site reconciliation after native lifecycle events (0.1.51 candidate)
+## Selected-site reconciliation after native lifecycle events (0.1.51)
 
 Site baseline records, saved shared PHP policies, current Cache/Status Pages
 recovery journals, and actual host Nginx/PHP configuration are **distinct
