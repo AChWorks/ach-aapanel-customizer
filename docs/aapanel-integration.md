@@ -75,6 +75,25 @@ Do not enable Apply merely because a checkbox is ticked or the UI looks
 valid. Refreshing or changing a selected site, version, branding, policy,
 VHost or relevant source revokes stale selection/preview/approval evidence.
 
+## Native aaPanel request authorization and parameter namespace
+
+The verified aaPanel **8.0.7** native plugin dispatch uses the ordinary
+authenticated panel route (`/plugin?action=a&name=ach_customizer&s=<method>`),
+with the normal primary-administrator authorization and `x-http-token`.
+Never copy aaPanel's example dynamic-route `_check` implementation that
+returns unconditional success: dynamic routes need separate authorization,
+and this plugin's observed route/session behavior must not be generalized
+to untested aaPanel versions.
+
+aaPanel's input merger can allow POST fields to shadow query parameters
+used by its router. Treat `action`, `name` and `s` as **reserved** in all
+native plugin AJAX bodies: a submitted POST `action=save` can overwrite
+the router's required `action=a` and fail before Customizer dispatch.
+Use plugin-owned `branding_action` for Status Pages Save/Reset and
+`cache_action` for Cache Apply/Recheck/Restore/Clear. Preserve the
+same native session/CSRF and backend write/approval gates; renamed form
+fields are **not** an authorization workaround.
+
 ## Website onboarding, identity and review
 
 1. **Website list → Refresh websites** reads native site identities, roots,
@@ -101,13 +120,38 @@ VHost or relevant source revokes stale selection/preview/approval evidence.
 5. **Compare VHost** and the prospective **Nginx candidate / local HTTP**
    inspection inspect file/loopback behavior only. A generated VHost
    `File Match` is not a live-worker, external DNS, TLS, PHP-processing or
-   cache-privacy guarantee. Regeneration, missing extension or source drift
-   must not silently adopt changed files.
+   cache-privacy guarantee. The **explicit local HTTP GET** may trigger
+   application work/log entries; it is not an automatic health probe.
+   Regeneration, missing extension or source drift must not silently
+   adopt changed files.
 
 Site discovery is bounded by the current implementation's verified inventory
 shape; unsupported layouts show `Needs Review` rather than permission to
 repair. No scheduled per-site enforcement or automatic VHost reconciliation
 is implemented.
+
+## Selected-site origin-local Hosts inspection (read-only)
+
+Under **Routing & Nginx → Inspect local hosts file**, the primary
+administrator can inspect the selected, validated native site's exact
+bound names against the origin server's **`/etc/hosts`**. The backend
+re-resolves the site and its full domain/port bindings **before and
+after** the read. The browser supplies no file path or arbitrary domain
+to inspect; source access is descriptor-anchored, read-only, no-follow
+and identity-checked. Only matching native site names, address/line
+evidence and a source fingerprint are returned — not unrelated Hosts
+file contents. Wildcard bindings cannot be treated as exact aliases.
+
+Results distinguish `Local Loopback Entry`, `No Local Loopback Entry`,
+and `Needs Review` for partial wildcard inspection. A matching
+127.0.0.0/8, ::1 or mapped loopback entry establishes **only an
+origin-local file observation**, not a broken Gateway, DNS, resolver
+precedence, proxy route or external HTTPS request. This diagnostic
+does **not** modify `/etc/hosts`, call a resolver, offer automatic
+repair, change routing or prove the origin's effective NSS lookup.
+If a stale Python helper prevents inspection after an upgrade,
+use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
+not a blind server restart.
 
 ## PHP-FPM scope and guarded change
 
@@ -141,7 +185,10 @@ self-contained static HTML assets under
 The [manifest](../plugin/ach_customizer/status_pages/manifest.json) records
 their original asset hashes. Preview uses validated, escaped brand URL/text,
 palette and target/site scope; site-local home links must remain site-local
-regardless of configured brand URL.
+regardless of configured brand URL. Custom palettes check text, link,
+button, focus and border contrast (4.5:1 for readable text; 3:1 for
+meaningful boundaries) before rendering; unsupported combinations fail
+review. Default reference HTML remains byte-identical.
 
 | Delivery | Supported meaning and prerequisites |
 | --- | --- |
@@ -208,6 +255,18 @@ and source checks; it does not transfer old ownership blindly.
 One successful site-owned Clear is **not** permission to turn on vendor
 Purge All. Concurrent clients can refill objects after any Clear; verify
 actual resulting Cache behavior and separate external request effects.
+
+For native full-tree `clear_files`, the implementation first validates
+the complete selected site's cache hierarchy and peer identities. It
+accepts only the expected Nginx `levels=1:2` tree of site-owned
+regular objects (with the current required directory/file permissions),
+refusing foreign objects, symlinks, hardlinks, bind mounts or physically
+shared peer trees. A separate peer-identity check runs before and after
+unlinks. The site's cache directory and operation journal remain in place;
+a partially completed removal or changed topology is **uncertain**
+and requires a fresh Recheck before retry, not a reported successful
+complete purge. This is a guarded deletion of cache **files**, not a
+recursive vendor Purge All or a request to reload Nginx.
 
 ## Optional WordPress Bridge: operator prerequisites
 

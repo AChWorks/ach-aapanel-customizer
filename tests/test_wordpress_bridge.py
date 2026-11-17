@@ -1249,6 +1249,33 @@ class WordPressBridgePackagingTests(unittest.TestCase):
                             builder.build(destination)
                     self.assertFalse(destination.exists())
 
+    def test_builder_refuses_overwriting_a_source_member(self):
+        from unittest.mock import patch
+        from scripts import build_wordpress_bridge as builder
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-source-") as work:
+            source = Path(work) / "plugin"
+            shutil.copytree(PLUGIN, source)
+            original = (source / "readme.txt").read_bytes()
+            with patch.object(builder, "PLUGIN", source):
+                with self.assertRaisesRegex(ValueError, "must not overwrite"):
+                    builder.build(source / "readme.txt")
+            self.assertEqual((source / "readme.txt").read_bytes(), original)
+
+    def test_builder_missing_member_does_not_leave_partial_zip(self):
+        from unittest.mock import patch
+        from scripts import build_wordpress_bridge as builder
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-missing-") as work:
+            source = Path(work) / "plugin"
+            shutil.copytree(PLUGIN, source)
+            (source / "includes/class-plugin.php").unlink()
+            output = Path(work) / "candidate.zip"
+            with patch.object(builder, "PLUGIN", source):
+                with self.assertRaisesRegex(ValueError, "Missing or unsafe"):
+                    builder.build(output)
+            self.assertFalse(output.exists())
+
     def test_deterministic_standalone_zip(self):
         from scripts.build_wordpress_bridge import build
 

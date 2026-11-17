@@ -51,7 +51,10 @@ python3 -B scripts/build_wordpress_bridge.py --output /tmp/ach-aapanel-bridge.zi
 The archive must contain one `ach-aapanel-bridge/` directory, the main
 PHP file, three PHP helpers and **`readme.txt`**; it must not ship
 `README.md`, build fixtures, cache artifacts or an updater. The builder
-refuses a missing/redirected readme and mismatched `Stable tag`.
+refuses a missing/redirected readme, mismatched `Stable tag` and any
+output path that would overwrite a source package member. Package members
+are read once before validation and archival, keeping the checked
+metadata identical to the shipped bytes.
 Check the independent header version and its release artifact checksum
 when reviewing an update. The external `Update URI` avoids accidental
 WordPress.org slug replacement; it does not implement automatic updates.

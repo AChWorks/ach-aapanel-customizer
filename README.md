@@ -21,7 +21,7 @@ compatibility certification. For source-tree version details, inspect
 | --- | --- |
 | **Overview / Monitor** | Enable/disable monitoring, observe packaged vs resident entrypoint versions, see availability and diagnostics. |
 | **Website list** | Refresh native website inventory, compare changes, and save either **one reviewed site's** baseline or a separately reviewed **all-sites** baseline. Saving a baseline does not reconfigure a website. |
-| **Routing & Nginx** | Read-only generated-VHost, selected-site source/desired-state and local HTTP evidence; combined site/recovery guidance. File Match is **not** live-worker or external TLS proof. |
+| **Routing & Nginx** | Inspect generated VHosts, selected-site `/etc/hosts`, local HTTP and recovery context. These are **read-only observations**, not loaded-worker, public DNS or external TLS proof. |
 | **PHP-FPM** | Discover installed PHP and site/socket relationships; compare version-scoped desired policies. Guarded shared-pool Apply/Restore is available only for **verified native PHP 8.1/8.5 shapes** with fresh authorization and recovery evidence. |
 | **Status Pages** | Offline EN/FA templates and branding; guarded per-site 404/502 and Nginx-generated 50x delivery, future-site defaults, stopped-site HTTP503 and global unknown-Host **HTTP/80** paths where compatible. Each has its **own** approval and Restore. |
 | **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. |
