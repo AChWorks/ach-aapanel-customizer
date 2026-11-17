@@ -18,7 +18,7 @@ FILES = (
     "includes/class-nginx-helper-status.php",
     "includes/class-cache-invalidation.php",
     "includes/class-plugin.php",
-    "README.md",
+    "readme.txt",
 )
 
 # ZIP member timestamps depend on source bytes, not wall-clock time.
@@ -41,10 +41,15 @@ def _header(source: str, field: str) -> str:
 
 
 def build(output: str | Path) -> dict[str, str]:
-    entry = PLUGIN / ENTRY
-    if entry.is_symlink() or not entry.is_file():
-        raise ValueError("WordPress plugin entrypoint missing or redirected")
-    header = entry.read_text(encoding="utf-8")
+    # Capture every member before validating and opening the output: the
+    # exact bytes checked below must be the bytes placed in the archive.
+    payloads = {}
+    for name in FILES:
+        source = PLUGIN / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f"Missing or unsafe WordPress companion source: {name}")
+        payloads[name] = source.read_bytes()
+    header = payloads[ENTRY].decode("utf-8")
     if (_header(header, "Plugin Name") != "ACh aaPanel Bridge" or
             _header(header, "Text Domain") != SLUG or
             _header(header, "Update URI") !=
@@ -53,14 +58,19 @@ def build(output: str | Path) -> dict[str, str]:
     version = _header(header, "Version")
     if not re.fullmatch(r"(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){2}", version):
         raise ValueError("Unexpected independent WordPress plugin version")
+
+    readme = payloads["readme.txt"].decode("utf-8")
+    if not readme.startswith("=== ACh aaPanel Bridge ===\n"):
+        raise ValueError("Unexpected WordPress readme.txt plugin identity")
+    stable_tags = re.findall(r"(?m)^Stable tag:[ \t]*([^\r\n]+)$", readme)
+    if len(stable_tags) != 1 or stable_tags[0].strip() != version:
+        raise ValueError("WordPress readme.txt Stable tag does not match PHP plugin Version")
     destination = Path(output).resolve()
+    if any(destination == (PLUGIN / name).resolve() for name in FILES):
+        raise ValueError("WordPress ZIP output must not overwrite a package source file")
     destination.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(destination, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
-        for name in FILES:
-            path = PLUGIN / name
-            if path.is_symlink() or not path.is_file():
-                raise ValueError(f"Missing or unsafe WordPress companion source: {name}")
-            payload = path.read_bytes()
+        for name, payload in payloads.items():
             metadata = ZipInfo(f"{SLUG}/{name}", _timestamp(payload))
             metadata.compress_type = ZIP_DEFLATED
             metadata.external_attr = 0o100644 << 16

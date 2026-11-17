@@ -1198,11 +1198,83 @@ class WordPressBridgePackagingTests(unittest.TestCase):
     def test_header_slug_version_and_external_update_uri(self):
         entry = ENTRY.read_text(encoding="utf-8")
         self.assertIn("Plugin Name: ACh aaPanel Bridge", entry)
-        self.assertIn("Version: 0.1.8", entry)
+        import re
+        self.assertRegex(entry, r"(?m)^ \* Version: (?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}$")
         self.assertIn("Text Domain: ach-aapanel-bridge", entry)
         self.assertIn("Update URI: https://github.com/AChWorks/", entry)
         self.assertNotIn("Requires Plugins:", entry)
         self.assertNotIn("register_activation_hook", entry)
+
+    def test_standard_wordpress_readme_matches_plugin_version(self):
+        import re
+        readme = (PLUGIN / "readme.txt").read_text(encoding="utf-8")
+        entry = ENTRY.read_text(encoding="utf-8")
+        version = re.search(r"(?m)^ \* Version: ([0-9]+(?:\.[0-9]+){2})$", entry)
+        self.assertIsNotNone(version)
+        self.assertTrue(readme.startswith("=== ACh aaPanel Bridge ===\n"))
+        self.assertIn(f"Stable tag: {version.group(1)}", readme)
+        self.assertRegex(readme, r"(?m)^Tested up to: [0-9]+\.[0-9]+(?:\.[0-9]+)?$")
+        self.assertLessEqual(len(readme.splitlines()[5]), 150)
+        for section in ("Description", "Installation", "Frequently Asked Questions", "Changelog"):
+            with self.subTest(section=section):
+                self.assertIn(f"== {section} ==", readme)
+        self.assertIn("Nginx Helper", readme)
+        self.assertIn("Purge All", readme)
+        self.assertIn("Not connected", readme)
+        self.assertIn("Cache Restore", readme)
+
+    def test_invalid_or_duplicate_readme_tag_rejected_before_packaging(self):
+        import re
+        from unittest.mock import patch
+        from scripts import build_wordpress_bridge as builder
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-readme-") as work:
+            source = Path(work) / "plugin"
+            shutil.copytree(PLUGIN, source)
+            readme_file = source / "readme.txt"
+            original = readme_file.read_text(encoding="utf-8")
+            stable = re.search(r"(?m)^Stable tag: ([0-9.]+)$", original)
+            self.assertIsNotNone(stable)
+            correct = f"Stable tag: {stable.group(1)}"
+            candidates = {
+                "mismatch": original.replace(correct, "Stable tag: 0.0.0", 1),
+                "duplicate": original.replace(correct, f"{correct}\n{correct}", 1),
+            }
+            for label, content in candidates.items():
+                with self.subTest(label=label):
+                    readme_file.write_text(content, encoding="utf-8")
+                    destination = Path(work) / f"{label}.zip"
+                    with patch.object(builder, "PLUGIN", source):
+                        with self.assertRaisesRegex(ValueError, "Stable tag"):
+                            builder.build(destination)
+                    self.assertFalse(destination.exists())
+
+    def test_builder_refuses_overwriting_a_source_member(self):
+        from unittest.mock import patch
+        from scripts import build_wordpress_bridge as builder
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-source-") as work:
+            source = Path(work) / "plugin"
+            shutil.copytree(PLUGIN, source)
+            original = (source / "readme.txt").read_bytes()
+            with patch.object(builder, "PLUGIN", source):
+                with self.assertRaisesRegex(ValueError, "must not overwrite"):
+                    builder.build(source / "readme.txt")
+            self.assertEqual((source / "readme.txt").read_bytes(), original)
+
+    def test_builder_missing_member_does_not_leave_partial_zip(self):
+        from unittest.mock import patch
+        from scripts import build_wordpress_bridge as builder
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-missing-") as work:
+            source = Path(work) / "plugin"
+            shutil.copytree(PLUGIN, source)
+            (source / "includes/class-plugin.php").unlink()
+            output = Path(work) / "candidate.zip"
+            with patch.object(builder, "PLUGIN", source):
+                with self.assertRaisesRegex(ValueError, "Missing or unsafe"):
+                    builder.build(output)
+            self.assertFalse(output.exists())
 
     def test_deterministic_standalone_zip(self):
         from scripts.build_wordpress_bridge import build
@@ -1212,12 +1284,21 @@ class WordPressBridgePackagingTests(unittest.TestCase):
             first, second = build(a), build(b)
             self.assertEqual(a.read_bytes(), b.read_bytes())
             self.assertEqual(first["sha256"], second["sha256"])
-            self.assertEqual(first["version"], "0.1.8")
+            import re
+            source_version = re.search(r"(?m)^ \* Version: ([0-9.]+)$", ENTRY.read_text())
+            self.assertIsNotNone(source_version)
+            self.assertEqual(first["version"], source_version.group(1))
             with ZipFile(a) as package:
                 names = package.namelist()
                 self.assertEqual(len(names), 5)
                 self.assertTrue(all(p.startswith("ach-aapanel-bridge/") for p in names))
                 self.assertIn("ach-aapanel-bridge/ach-aapanel-bridge.php", names)
+                self.assertIn("ach-aapanel-bridge/readme.txt", names)
+                self.assertNotIn("ach-aapanel-bridge/README.md", names)
+                self.assertEqual(
+                    package.read("ach-aapanel-bridge/readme.txt"),
+                    (PLUGIN / "readme.txt").read_bytes(),
+                )
                 self.assertFalse(any("/.." in p or "__pycache__" in p for p in names))
 
 
