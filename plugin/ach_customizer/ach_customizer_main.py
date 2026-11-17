@@ -53,7 +53,7 @@ class ach_customizer_main:
 
     @staticmethod
     def _activity_result(response, module, action, *, target="", error=None,
-                         level="INFO", allow_error_detail=True):
+                         level="INFO", allow_error_detail=True, trusted_detail=None):
         """Best-effort plugin diagnostics, independent of operation success."""
         correlation = response.get("request_id", response.get("operation_id"))
         try:
@@ -63,7 +63,11 @@ class ach_customizer_main:
             controlled = (PermissionError, StateError, StatusPageError,
                           MonitorInputError, FpmApplyError, HostsInspectionError,
                           ActivityError)
-            detail = str(error) if allow_error_detail and isinstance(error, controlled) else ""
+            detail = (
+                str(error) if allow_error_detail and isinstance(error, controlled)
+                else trusted_detail if allow_error_detail and isinstance(trusted_detail, str)
+                else ""
+            )
             impact = response.get("shared_impact")
             needs_review = (not failed and
                             (response.get("state") == "Needs Review" or
@@ -110,8 +114,8 @@ class ach_customizer_main:
         controlled = (PermissionError, StateError, StatusPageError,
                       MonitorInputError, FpmApplyError, HostsInspectionError,
                       ActivityError)
-        if isinstance(error, controlled) or (
-                isinstance(error, str) and diagnostic_error is not None):
+        typed_domain_detail = isinstance(error, str) and diagnostic_error is not None
+        if isinstance(error, controlled) or typed_domain_detail:
             message = str(error)[:300]
         else:
             message = "Unexpected plugin error; inspect Activity using Operation ID"
@@ -132,7 +136,11 @@ class ach_customizer_main:
                   "websites" if stage.startswith(("website_", "hosts_", "cache_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
-            response, module, stage, error=diagnostic_error or error)
+            response, module, stage,
+            error=diagnostic_error if diagnostic_error is not None else error,
+            # This text was explicitly reviewed at the typed endpoint boundary;
+            # keep its original exception class and the actionable Activity cause.
+            trusted_detail=message if typed_domain_detail else None)
 
     def get_activity(self, args):
         """Native full-primary-admin-only diagnostics. No arbitrary paths."""
@@ -316,11 +324,14 @@ class ach_customizer_main:
     def save_selected_site_baseline(self, args):
         """Review and record only the selected native site's observed DB state."""
         request_id = uuid4().hex
+        site_error_type = None
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
             try:
-                from ach_customizer_site_changes import save_reviewed_selected_site_baseline
+                from ach_customizer_site_changes import (
+                    save_reviewed_selected_site_baseline, SiteChangesError)
+                site_error_type = SiteChangesError
             except ImportError as exc:
                 raise MonitorInputError(
                     "Site baseline helper is outdated after plugin update; "
@@ -345,6 +356,9 @@ class ach_customizer_main:
             return self._fail("website_selected_baseline_authorization",
                               exc, request_id)
         except Exception as exc:
+            if site_error_type is not None and isinstance(exc, site_error_type):
+                return self._fail("website_selected_baseline_save", str(exc), request_id,
+                                  diagnostic_error=exc)
             return self._fail("website_selected_baseline_save", exc, request_id)
 
     def inspect_site_reconciliation(self, args):
@@ -354,11 +368,15 @@ class ach_customizer_main:
         endpoints independently enforce their own fresh source/approval gates.
         """
         request_id = uuid4().hex
+        reconciliation_errors = ()
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
             try:
-                from ach_customizer_site_reconcile import inspect_selected_site
+                from ach_customizer_site_reconcile import (
+                    inspect_selected_site, ReconciliationError)
+                from ach_customizer_site_changes import SiteChangesError
+                reconciliation_errors = (ReconciliationError, SiteChangesError)
             except ImportError as exc:
                 raise MonitorInputError(
                     "Site reconciliation helper is outdated after plugin update; "
@@ -374,6 +392,9 @@ class ach_customizer_main:
         except PermissionError as exc:
             return self._fail("website_reconciliation_authorization", exc, request_id)
         except Exception as exc:
+            if reconciliation_errors and isinstance(exc, reconciliation_errors):
+                return self._fail("website_reconciliation_read", str(exc), request_id,
+                                  diagnostic_error=exc)
             return self._fail("website_reconciliation_read", exc, request_id)
 
     def get_php_versions(self, args):

@@ -6690,6 +6690,56 @@ test('Scoped baseline approval cannot transfer to a different site or stale sour
   assert.equal(ui.state().selectedBaselineSaveDisabled,true);
 });
 
+test('Selected-site typed CAS errors show the cause and require a fresh comparison and approval', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const site={
+    id:7,name:'site.test',document_root:'/www/site.test',
+    panel_status:'1',bound_domains:[['site.test',80]]
+  };
+  const payload=siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:1,changes:[{id:7,kind:'Added',fields:[],before:null,after:site}]
+  });
+  ui.siteChangesCompare().respond(payload);
+  ui.siteChangesSelectedApprove(true);
+  const save=ui.siteChangesSelectedSave();
+  save.respond({
+    status:false,stage:'website_selected_baseline_save',
+    msg:'Site baseline revision changed; Compare again',
+    operation_id:'d'.repeat(32)
+  });
+  assert.match(ui.state().siteChangesStatus,/Site baseline revision changed; Compare again/);
+  assert.match(ui.state().siteChangesStatus,/d{32}/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  const afterFailure=ui.requests.length;
+  ui.siteChangesSelectedApprove(true);
+  ui.siteChangesSelectedSave();
+  assert.equal(ui.requests.length,afterFailure,'No retry using stale review token');
+  ui.siteChangesCompare().respond({...payload,baseline_revision:2});
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true,
+    'Fresh compare still requires new explicit operator review');
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+});
+
+test('Typed reconciliation source drift is visible and cannot authorize writes', () => {
+  const ui=loadUi();selectHostsSite(ui);ui.openTab('routing');
+  const inspect=ui.statusClick('#ach-reconcile-button');
+  inspect.respond({
+    status:false,stage:'website_reconciliation_read',
+    msg:'Generated VHost changed during review; inspect again',
+    operation_id:'e'.repeat(32)
+  });
+  assert.match(ui.state().reconcileResult,/Generated VHost changed during review; inspect again/);
+  assert.match(ui.state().reconcileResult,/e{32}/);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.state().reconcileDisabled,false);
+  assert.equal(ui.requests.filter(r=>/s=(manage_cache_policy|fpm_apply|status_manage)$/.test(r.options.url)).length,0);
+  ui.statusClick('#ach-reconcile-button').respond(reconciliation());
+  assert.match(ui.state().reconcileResult,/Site-record baseline: Unchanged/);
+});
+
 test('Scoped baseline uncertain backend outcome requires re-Compare, never retry', () => {
   const ui=loadUi();selectHostsSite(ui);
   ui.siteChangesCompare().respond(siteChangesPayload({

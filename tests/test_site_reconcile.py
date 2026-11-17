@@ -326,6 +326,185 @@ class ReconciliationEndpointTests(unittest.TestCase):
         self.assertEqual(kwargs["directory"], main._STATE_DIR)
         self.assertNotIn("approved", kwargs)
 
+    def assert_domain_failure(self, response, *, directory, stage, cause, error_class):
+        import re
+        from ach_customizer_activity import read_activity
+
+        self.assertFalse(response["status"], response)
+        self.assertEqual(response["stage"], stage)
+        self.assertIn(cause, response["msg"])
+        self.assertRegex(response["operation_id"], r"^[0-9a-f]{32}$")
+        self.assertTrue(response["activity_logged"], response)
+        events = read_activity(directory)
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event["operation_id"], response["operation_id"])
+        self.assertEqual(event["module"], "websites")
+        self.assertEqual(event["action"], stage)
+        self.assertEqual(event["stage"], stage)
+        self.assertEqual(event["level"], "ERROR")
+        self.assertEqual(event["outcome"], "failed")
+        self.assertEqual(event["error_class"], error_class)
+        self.assertIn(cause, event["detail"])
+        self.assertEqual(event["recovery_id"], "")
+
+    def test_scoped_save_real_domain_races_keep_reason_and_write_nothing(self):
+        from copy import deepcopy
+        from ach_customizer_site_changes import read_baseline
+        from ach_customizer_state import set_enabled
+
+        failures = (
+            ("baseline", "Site baseline revision changed; Compare again"),
+            ("monitor", "Website Monitor revision changed; Compare again"),
+            ("source", "Native sites changed since comparison; Compare again"),
+        )
+        for failure, cause in failures:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory(
+                    prefix="ach-endpoint-race-") as directory:
+                panel = Panel()
+                preview = compare(panel, directory=directory)
+                if failure == "baseline":
+                    save_reviewed_baseline(
+                        panel, directory=directory,
+                        expected_revision=preview["baseline_revision"],
+                        expected_monitor_revision=preview["monitor_revision"],
+                        expected_source_sha256=preview["source_sha256"],
+                        reviewed="true")
+                elif failure == "monitor":
+                    set_enabled("php_fpm_file_preview", False, directory=directory,
+                                expected_revision=preview["monitor_revision"])
+                else:
+                    # Drift on a different website must still block the full
+                    # source comparison; it cannot be accepted by this Save.
+                    panel.sites[1]["path"] = "/srv/peer-changed"
+                baseline_before = read_baseline(directory)
+                native_before = deepcopy((panel.sites, panel.domains))
+                with patch.object(main, "_STATE_DIR", directory), \
+                     patch.dict(sys.modules, {"flask": self.flask()}), \
+                     patch.object(self.main, "_selected_native_website",
+                                  return_value=(panel, self.site, lambda: self.site)):
+                    result = self.main.save_selected_site_baseline({
+                        **self.args,
+                        "expected_revision": preview["baseline_revision"],
+                        "expected_monitor_revision": preview["monitor_revision"],
+                        "expected_source_sha256": preview["source_sha256"],
+                        "reviewed": "true",
+                    })
+                self.assert_domain_failure(
+                    result, directory=directory,
+                    stage="website_selected_baseline_save",
+                    cause=cause, error_class="SiteChangesError")
+                self.assertEqual(read_baseline(directory), baseline_before)
+                self.assertEqual((panel.sites, panel.domains), native_before)
+
+    def test_late_vhost_and_php_revision_fail_at_real_reconciliation_boundary(self):
+        from copy import deepcopy
+        from ach_customizer_site_changes import read_baseline
+        for failure, cause in (
+                ("vhost", "Generated VHost changed during review; inspect again"),
+                ("policy", "Saved shared PHP policy changed during review")):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory(
+                    prefix="ach-endpoint-review-") as directory:
+                panel = Panel()
+                preview = compare(panel, directory=directory)
+                save_reviewed_baseline(
+                    panel, directory=directory,
+                    expected_revision=preview["baseline_revision"],
+                    expected_monitor_revision=preview["monitor_revision"],
+                    expected_source_sha256=preview["source_sha256"],
+                    reviewed="true")
+                baseline_before = read_baseline(directory)
+                native_before = deepcopy((panel.sites, panel.domains))
+                vhost = {"state": "File Match", "vhost_sha256": "a" * 64}
+                other_vhost = {**vhost, "vhost_sha256": "b" * 64}
+                source = {"state": "Source Observed", "php_version":
+                          "85" if failure == "policy" else None}
+                initial_policy = {"saved": False, "policy_revision": 2,
+                                  "desired": None}
+                changed_policy = {**initial_policy, "policy_revision": 3}
+                with patch.object(main, "_STATE_DIR", directory), \
+                     patch.dict(sys.modules, {"flask": self.flask()}), \
+                     patch.object(self.main, "_selected_native_website",
+                                  return_value=(panel, self.site, lambda: self.site)), \
+                     patch.object(reconcile, "inspect_vhost_drift",
+                                  side_effect=([vhost, other_vhost]
+                                               if failure == "vhost" else
+                                               [vhost, vhost])), \
+                     patch.object(reconcile, "inspect_site_fastcgi_cache",
+                                  return_value=source), \
+                     patch.object(reconcile, "manage_cache",
+                                  return_value={"state": "Unmanaged", "note": ""}), \
+                     patch.object(reconcile, "get_policy",
+                                  side_effect=([initial_policy, changed_policy]
+                                               if failure == "policy" else [])) as get_policy:
+                    result = self.main.inspect_site_reconciliation(self.args)
+                self.assert_domain_failure(
+                    result, directory=directory,
+                    stage="website_reconciliation_read",
+                    cause=cause, error_class="ReconciliationError")
+                self.assertEqual(read_baseline(directory), baseline_before)
+                self.assertEqual((panel.sites, panel.domains), native_before)
+                self.assertEqual(get_policy.call_count, 2 if failure == "policy" else 0)
+
+    def test_reconciliation_nested_site_compare_error_retains_safe_reason(self):
+        # The combined reader invokes site_changes.compare(), which has its
+        # own typed failures and must not lose those details at this endpoint.
+        from ach_customizer_site_changes import read_baseline, SiteChangesError
+        from copy import deepcopy
+
+        with tempfile.TemporaryDirectory(prefix="ach-reconcile-source-") as directory:
+            panel = Panel()
+            before = read_baseline(directory)
+            native_before = deepcopy((panel.sites, panel.domains))
+            with patch.object(main, "_STATE_DIR", directory), \
+                 patch.dict(sys.modules, {"flask": self.flask()}), \
+                 patch.object(self.main, "_selected_native_website",
+                              return_value=(panel, self.site, lambda: self.site)), \
+                 patch("ach_customizer_site_changes.get_site_page",
+                       side_effect=SiteChangesError(
+                           "Native site or binding records changed during inspection; compare again")):
+                result = self.main.inspect_site_reconciliation(self.args)
+            self.assert_domain_failure(
+                result, directory=directory,
+                stage="website_reconciliation_read",
+                cause="Native site or binding records changed during inspection; compare again",
+                error_class="SiteChangesError")
+            self.assertEqual(read_baseline(directory), before)
+            self.assertEqual((panel.sites, panel.domains), native_before)
+
+    def test_unexpected_save_and_read_errors_are_redacted_in_browser_and_activity(self):
+        from ach_customizer_activity import read_activity
+        import ach_customizer_site_changes as changes
+
+        for endpoint, source in (
+                ("save_selected_site_baseline", changes),
+                ("inspect_site_reconciliation", reconcile)):
+            for error_type in (OSError, ValueError, RuntimeError):
+                with self.subTest(endpoint=endpoint, error_type=error_type.__name__), \
+                     tempfile.TemporaryDirectory(prefix="ach-unexpected-") as directory:
+                    secret = "SYNTHETIC-CREDENTIAL-DO-NOT-DISCLOSE"
+                    target = ("save_reviewed_selected_site_baseline"
+                              if endpoint == "save_selected_site_baseline"
+                              else "inspect_selected_site")
+                    with patch.object(main, "_STATE_DIR", directory), \
+                         patch.dict(sys.modules, {"flask": self.flask()}), \
+                         patch.object(self.main, "_require_enabled"), \
+                         patch.object(self.main, "_selected_native_website",
+                                      return_value=(object(), self.site, lambda: self.site)), \
+                         patch.object(source, target, side_effect=error_type(secret)):
+                        result = getattr(self.main, endpoint)(self.args)
+                    self.assertFalse(result["status"], result)
+                    self.assertEqual(result["msg"],
+                                     "Unexpected plugin error; inspect Activity using Operation ID")
+                    self.assertNotIn(secret, str(result))
+                    events = read_activity(directory)
+                    self.assertEqual(len(events), 1)
+                    self.assertEqual(events[0]["error_class"], error_type.__name__)
+                    self.assertEqual(events[0]["detail"], "")
+                    self.assertNotIn(secret, str(events))
+                    self.assertEqual(events[0]["operation_id"], result["operation_id"])
+
+
 
 if __name__ == "__main__":
     unittest.main()
