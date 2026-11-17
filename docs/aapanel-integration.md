@@ -3,7 +3,7 @@
 This is **technical integration guidance**, not a second product specification.
 The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the active research/acceptance owner is [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1).
 
-## Native UI component contract (Issue #80; unreleased v0.1.47 candidate)
+## Native UI component contract (Issue #80; merged v0.1.47 lineage, retained in v0.1.49)
 
 Keep every UI rule scoped to #ach-customizer so the host aaPanel/Layui interface is unchanged.
 
