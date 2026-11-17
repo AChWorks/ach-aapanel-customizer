@@ -1,46 +1,116 @@
 # ACh aaPanel Bridge
 
-The optional **WordPress companion** for [ACh aaPanel Customizer](https://github.com/AChWorks/ach-aapanel-customizer).
+An **optional, independently versioned WordPress plugin** for
+[ACh aaPanel Customizer](../../README.md). It is **not** included in the
+native aaPanel ZIP and is not necessary for native website, PHP-FPM, Nginx
+or Status Pages features.
 
-- WordPress plugin slug: `ach-aapanel-bridge`
-- Current development Pre-release: **0.1.8**, independently packaged with native 0.1.51 in [v0.1.51](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51); merged from [PR #91](https://github.com/AChWorks/ach-aapanel-customizer/pull/91) on reviewed 0.1.7 [PR #90](https://github.com/AChWorks/ach-aapanel-customizer/pull/90). Publishing is **not** Production certification or deployment
-- Source of truth: `wordpress/ach-aapanel-bridge/` in the **same repository** as the native aaPanel plugin
-- Distribution: independent WordPress ZIP; it is **not** included inside the aaPanel plugin ZIP
+The independent source version is declared in
+[`ach-aapanel-bridge.php`](ach-aapanel-bridge.php). Published artifacts,
+checksums and the paired native pre-release are listed in
+[GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases)
+(the published development package at this checkpoint is **Bridge 0.1.8**
+alongside native **0.1.51**). A downloadable pre-release is **not**
+a stable compatibility or Production-deployment certification.
 
-## Current functionality (source and public preview ZIP 0.1.8)
+## Normal behavior
 
-When activated, the plugin adds **Tools → ACh aaPanel Bridge** for WordPress administrators with `manage_options`. It reports the standard Nginx Helper source/activation observation, in-memory purge method and automatic purge setting when available, and the declared cache path. Missing data is reported as unverified rather than guessed.
+Activating Bridge adds **Tools → ACh aaPanel Bridge** for WordPress
+administrators with `manage_options`. It reports Nginx Helper activation,
+purge mode, cache-path evidence and the current mapping/access state,
+with `Not connected` or `Unverified` instead of invented success.
 
-**Default remains disconnected.** Without a native-managed, root-owned manifest, the plugin does not add Cache hooks or modify Nginx Helper behavior. **Provision URL mapping** is a separate approved native action after a fresh Cache Apply → Recheck Applied and physical peer-isolation verification.
+**Disconnected is the default.** Without an explicitly provisioned,
+verified, root-owned **current-generation** manifest, Bridge makes no
+Nginx Helper Cache-hook changes. Installing Bridge does **not** install,
+activate or configure Nginx Helper, alter WordPress options or enable
+automatic purging.
 
-The vendor's unlink_files per-URL file filter maps canonical, query-free primary-Host URLs only to existing, verified Nginx GET objects in the current native generation. **Merged v0.1.6 additionally handles separately stored HEAD objects:** during Bridge's own wp_after_insert_post or successful after_delete_post dispatch, it selects the exact GET **and** HEAD keys for the affected public permalink/homepage, across HTTP and HTTPS, and calls Nginx Helper's ordinary per-URL purge_url for each present object. Each vendor callback rechecks the current manifest, Helper mode/path, Nginx KEY header, physical directory identity and regular-file ownership. The method-selection context is bound to the exact URL and reset even if the vendor throws; ordinary Nginx Helper invocations keep their original GET behavior. There is **no Bridge direct filesystem unlink**, recursive sweep or vendor-core edit. The vendor's purge_url($url, false) argument disables extra feed-URL purges, not recursion.
+When separately enabled under a supported site, it verifies the native
+manifest's site identity, primary Host, Cache-directory physical identity,
+generation and saved Recovery ID before helping Nginx Helper's ordinary
+`unlink_files` / `purge_url` per-URL operation. It selects only existing,
+verified **GET and HEAD** keys across HTTP/HTTPS for eligible canonical
+URLs. It never directly unlinks arbitrary Cache files, scans recursively,
+edits vendor code or adds a public purge endpoint.
 
-**Merged 0.1.7 — taxonomy archive invalidation:** For published, publicly viewable posts, the same existing per-URL GET/HEAD dispatch now also invalidates canonical first-page archives of currently associated **public taxonomies** after a WordPress post save, and captures those archives before a successful permanent deletion. The `set_object_terms` hook separately invalidates **both old and new term-taxonomy associations** after a published post's term-only update; hierarchical ancestor archives are included. It uses WordPress's actual `term_taxonomy_id` identities and native archive URL API, and the vendor callback still validates the primary Host, query-free canonical path, exact Nginx KEY, filesystem identity and current Cache generation before unlinking. No existing operator workflow or vendor settings are changed. **Limits:** paginated term archives, author/date archives, alternate Host aliases, encoded/noncanonical request URIs (intentionally Nginx-BYPASS), query-based WordPress permalinks and vendor Purge All are not covered or certified. A taxonomy URL may be selected only when it resolves to an actual eligible cached object; lack of a matching object is a no-op. Exact 0.1.7 installed WordPress 7.1.4 / Nginx Helper 2.4.1 [QA and rollback passed](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6926435950); this is not a published package or Production certification.
+Current public-content invalidation covers:
 
-**Merged 0.1.8 — term-only post/homepage consistency:** A published, publicly viewable post may display taxonomy labels and links in its own page or the homepage, even when `set_object_terms` changes the relationship without calling `wp_after_insert_post`. Bridge captures actual previous post permalinks and associated term relationships before each WordPress relationship mutation, and reconciles committed before/after state at the matching **post-insert or post-delete hook**. Snapshots use request-local, per-post/per-taxonomy **LIFO frames** for addition and deletion separately, so third-party callbacks that recursively change the same post/taxonomy cannot overwrite the outer operation; ineligible nested events also receive a balanced null frame instead of consuming an outer snapshot. This covers genuine append/replacement updates (including `/%category%/%postname%/`) without incorrectly purging for an unchanged `wp_add_object_terms()` call (`append=true`, whose WordPress `old_tt_ids` hook argument is always empty). In particular, WordPress can return `WP_Error` after committing an earlier term insertion, before its final `set_object_terms` event: Bridge does **not** depend on that final event, so partial committed additions are invalidated and the per-insert snapshot is consumed. On a successful insertion Bridge also refreshes WordPress's term cache before reading the current category-dependent permalink, because WordPress normally refreshes that cache at the end of the whole assignment. A separate pre-delete/post-delete pair handles both delete-only replacements and standalone `wp_remove_object_terms()` (which does not fire `set_object_terms`), and immediately consumes its snapshot. Mixed add/delete replacements may dispatch per committed change, always through the same bounded verified URL path. Successful changes request existing exact GET/HEAD, HTTP/HTTPS invalidation for previous and current post permalinks, homepage and affected old/new public taxonomy archives. Pre-mutation URLs remain only in request memory; no string replacement, persistent URL registry or privileged purge is introduced. Unchanged relationships, nonpublic types/taxonomies, unsupported URLs, missing Nginx Cache objects and unverified manifests retain their existing no-op/bypass behavior. This version has no additional vendor hook, privileged write, UI action, or recursive purge.
+- The post's public canonical URL and homepage after supported published-post
+  updates, including the **old and new** public URLs where categories change.
+- The original permalink after a **successful permanent delete**; an
+  aborted delete cannot trigger that deletion-only invalidation.
+- Canonical **first-page public taxonomy archives**, including affected
+  old/new terms and applicable hierarchical ancestor archives.
+- Real term-only changes outside `wp_after_insert_post`: balanced
+  request-local before/after snapshots handle standalone add/remove,
+  append/replacement, nested/reentrant callbacks and partially committed
+  WordPress `WP_Error` paths without losing the original change.
 
-Nginx Helper must be activated and separately configured for unlink_files, automatic purge and the same site-owned cache directory; WordPress PHP-FPM must have directory access. Bridge does not modify Helper options, wp-config.php, .user.ini or PHP services. A published, viewable post's original public permalink is captured at before_delete_post and reconciled only after the permanent deletion succeeds; aborted deletions do not trigger Bridge's new purge. Trash/status transitions remain on the post-save path. **Aliases, query-string permalinks, author/date/paginated archives, encoded original URIs, shared WORDPRESS roots and vendor purge_all() remain unsupported.**
+Each operation retains the vendor's per-URL verification and no-op behavior
+when a URL/object is absent, unchanged or ineligible. Internal GET/HEAD
+selection context is exception-safe and does not change unrelated ordinary
+vendor calls.
 
-The previous installed v0.1.5 successful-delete and abort-negative QA passed in isolated aaPanel 8.0.7 / WordPress 7.1.4 ([Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6914874554)). The **v0.1.6 GET/HEAD implementation passed real installed method-specific QA** ([Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6915689796)) and [independent review of exact PR #87](https://github.com/AChWorks/ach-aapanel-customizer/pull/87). The QA observed a peer site's independent expiry/refill; it **did not** prove the peer cache bytes stayed identical. This source integration is **not** a published release, Production installation or broad compatibility certification.
+**Not supported or certified:** alternative Host aliases, query-style
+permalinks, encoded/noncanonical original URIs, author/date/paginated
+archives, shared/ambiguous physical Cache roots, automatic website-wide
+purge, Nginx Helper's recursive `purge_all()` or universal WooCommerce
+payment/session behavior. Native full-tree `clear_files` is an independent,
+more strictly scoped Customizer operation and does **not** make vendor
+`Purge All` safe.
 
-Native Cache **Restore revokes the manifest before retiring that generation**. Manual Bridge Disable removes only the exact native-owned site manifest. A new generation requires fresh opt-in. Root-owned metadata and a positive PHP-FPM access observation prove limited site-file preconditions, **not effective Nginx worker state, all-site ownership, session/privacy, or safe vendor Purge All**; the standard Nginx Helper `purge_all()` bypasses this URL filter, so do not enable/advertise Purge All without separately verified physical site scope. This integration has no new public endpoint, socket, cron, remote service or privilege escalation. It does not automatically install/activate WordPress Bridge or switch Nginx Helper's `get_request` mode or legacy shared cache path.
+## Install and inspect
 
-Further alias/query/author-date/paginated-archive/WooCommerce and broader compatibility certification remains work under [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), requiring independent code review and real nonproduction acceptance before enablement. Other future WordPress integrations can be added as focused modules without renaming the plugin.
-
-## Development and manual installation
-
-Build the deterministic companion artifact from the repository root:
+Build a local **unpublished** artifact from the repository root:
 
 ```bash
 python3 -B scripts/build_wordpress_bridge.py --output /tmp/ach-aapanel-bridge.zip
 ```
 
-The archive contains one `ach-aapanel-bridge/` WordPress plugin directory. In a separately **authorized** target WordPress site, use **Plugins → Add New → Upload Plugin**, choose the ZIP, install/activate, then open **Tools → ACh aaPanel Bridge**. No special setup, Nginx Helper installation, or Customizer Cache Apply is required merely to view the diagnostics. Do not confuse installation with an operational cache integration.
+For normal use, prefer the [published ZIP and checksum](https://github.com/AChWorks/ach-aapanel-customizer/releases)
+on a specifically authorized target. In WordPress use **Plugins → Add New →
+Upload Plugin**, activate, then open **Tools → ACh aaPanel Bridge** to
+inspect diagnostics. The plugin's `Update URI` avoids WordPress.org slug
+collisions; it is **not** an automatic updater. ZIP updates are manual.
 
-The independent version in `ach-aapanel-bridge.php` is the canonical WordPress plugin version. The native aaPanel plugin has its own `info.json` version and separate ZIP. Coordinated GitHub pre-releases can attach both separately versioned artifacts after review and release authorization. The WordPress `Update URI` prevents accidental WordPress.org slug-based replacement; **it is not an automatic update service**. Until an authenticated updater is intentionally implemented, WordPress ZIP updates are manual.
+No Nginx Helper, manifest or Cache Apply is required **just to view**
+diagnostics. For actual URL invalidation:
 
-A downloadable pre-release does not imply a Production installation, compatibility certification for all Nginx Helper releases, a licensing grant, or ownership of third-party plugins.
+1. Complete native **FastCGI Cache → Apply → fresh Recheck Applied** for an
+   eligible **individually owned** WordPress site and confirm real physical
+   separation from every peer. Approve **Provision URL mapping** as a
+   distinct operation. This creates the root-owned site-specific
+   `wp-content/ach-customizer-bridge/cache.php` manifest.
+2. The **operator**, not Bridge, activates/configures compatible Nginx
+   Helper for automatic `unlink_files` per-URL invalidation and sets
+   `RT_WP_NGINX_HELPER_CACHE_PATH` to **that exact site-owned Cache tree**.
+   Never point it at a shared `WORDPRESS` root or enable vendor Purge All.
+3. The website's **PHP-FPM process** must have read/write access to the
+   same owned directory. If an aaPanel `.user.ini` `open_basedir`
+   restricts it, change only that website's allowed paths through an
+   independently approved site configuration step, retaining its existing
+   site/temp paths. Recheck under real PHP-FPM using Bridge's
+   **Site Cache filesystem access / URL-file mapping** diagnostics.
+   A root `php` CLI check is not equivalent.
+4. Exercise one approved canonical public URL and verify actual HTTP
+   Cache response, method-specific disk-key behavior and non-target
+   preservation. Do not infer all-worker or private-session safety from
+   a healthy manifest alone.
 
-### PHP-FPM filesystem prerequisite (site-scoped, operator configured)
+Native **Cache Restore revokes the manifest before retiring its generation**.
+**Disable URL mapping** removes only the exact native-owned manifest.
+Another Cache generation needs fresh operator opt-in. Restore any operator
+changes to Nginx Helper settings and website PHP filesystem access
+separately; Bridge does not do this for you.
 
-The WordPress PHP-FPM worker must have **read/write directory access to the exact site-owned cache directory** (not the shared cache). On aaPanel sites with per-website `.user.ini` `open_basedir`, add **only** the currently Applied site's owned directory (shown in native Cache Recheck) to that site's allowed paths; preserve existing document root and temporary-file paths. Confirm PHP-FPM has refreshed its `.user.ini` cache, then open **Tools → ACh aaPanel Bridge** to verify **Site Cache filesystem access** and `URL-file mapping`. Do not disable `open_basedir` globally or grant access to the shared `WORDPRESS` directory. This companion does not edit `.user.ini`, PHP-FPM services or WordPress configuration. Record and reverse this site-specific prerequisite when retiring the connection. A root PHP CLI test is insufficient because CLI does not have the website's effective PHP-FPM `open_basedir`.
+## Source, QA and open work
+
+The authoritative [native integration guide](../../docs/aapanel-integration.md#optional-wordpress-bridge-operator-prerequisites)
+documents its separate native Cache/manifest boundary.
+[Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
+owns unsupported URL/Cache features; [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
+owns real installed WordPress/Nginx Helper/browser/rollback evidence.
+The [v0.1.8 code review](https://github.com/AChWorks/ach-aapanel-customizer/pull/91)
+and its preceding WordPress QA receipts are preserved on GitHub. Neither
+those checks nor a released ZIP provide general production authorization.

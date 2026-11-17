@@ -5,7 +5,7 @@ procedure, Production authorization, or proof that Nginx/PHP workers reloaded.
 
 ## Why this matters
 
-During the independently recorded 0.1.40 native QA upgrade, the official
+During a documented nonproduction native ZIP upgrade, the official
 **App Store → Third-party Plug-ins → Import plugins** operation reported
 **Installation succeeded!** and all 55 installed source member hashes matched
 the exact ZIP. However, a subsequently invoked new Cache probe returned
@@ -83,45 +83,29 @@ the **specific environment** during an acceptable maintenance window:
    changes and investigate exact worker logs/import paths and original
    exception. Do not claim success merely because a panel process restarted.
 
-**Limits:** No automatic restart, new privileged endpoint, logout bypass,
-new Apply/Purge permissions, or public Release is part of the 0.1.41
-observation. One matching version is not a full module-integrity or live
-routing certification. Exact v0.1.41 positive native Browser acceptance
-confirmed the matching-version path. Real native stale-worker mismatch and
-subsequent authorized reload **did not reproduce** for that ZIP; the synthetic
-Browser negative attempt is unverified, while local negative-response tests
-passed. A later controlled mismatch/reload reproduction remains a separate
-native QA objective, not a retrospective claim of success or an unapproved
-mandatory integration gate for the narrow read-only v0.1.41 diagnostic.
+**Observed root cause — stale imported Python helpers:** One later
+aaPanel 8.0.7 QA upgrade had byte-identical installed source files **and**
+a matching Overview entrypoint version, but the resident worker still used
+an older site-baseline helper. A selected-site baseline save failed closed,
+leaving its persistent baseline unchanged. After an **explicitly approved
+panel-only reload**, a fresh browser comparison and consented save updated
+only the selected site's record while preserving its peers. This is an
+import-lifecycle observation, **not** a requirement to restart after every
+upgrade or evidence that restarting fixes arbitrary exceptions.
 
-### Confirmed stale Python helper after native ZIP upgrade (2026-11-17 QA)
+The original detailed evidence and recovery proof remain in
+[#21 native QA](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6935859654)
+and [the exact installed site-reconciliation record](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md).
+Neither a matching metadata version nor a successful reload alone certifies
+a current helper, worker runtime or safe new host mutation.
 
-The isolated 0.1.50 to 0.1.51 vendor update succeeded and its 57/57
-installed member hashes matched the ZIP. The Overview entrypoint version
-also matched 0.1.51, **but the panel process still held an older imported
-site-baseline helper**. The first real selected-site baseline save therefore
-failed closed at stage website_selected_baseline_save with a Request ID and
-left the baseline unchanged. Fresh comparison alone would not repair the
-in-memory import.
-
-Only on the **authorized nonproduction guest**, a panel-only
-/etc/init.d/bt reload replaced that resident process. A fresh browser
-comparison and explicit selected-site consent then saved just the chosen
-site, preserving all nine peer baseline records. This shows why
-matching entrypoint metadata is **necessary but not sufficient** evidence
-for helper freshness; it does **not** authorize an automatic service reload
-or a Production restart. Verify installed hashes, error stage, current
-process, affected service/peer health and the rollback plan before an
-administrator approves the appropriate panel lifecycle action. See
-[exact installed QA](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md).
-
-## Selected-site reconciliation after native lifecycle events (0.1.51)
+## Selected-site reconciliation after native lifecycle events
 
 Site baseline records, saved shared PHP policies, current Cache/Status Pages
 recovery journals, and actual host Nginx/PHP configuration are **distinct
 authorities**. They survive or change independently during an aaPanel install,
 plugin import/restart, site addition, native VHost regeneration, Monitor
-disable, uninstall and reinstall. The 0.1.51 selected-site report does not
+disable, uninstall and reinstall. The selected-site report does not
 modify or migrate any of those stores and is not an automatic repair process.
 
 For a new or modified website, accept only its reviewed native identity with

@@ -18,7 +18,19 @@ The product manages *operator-approved desired behavior* rather than blindly ove
 
 The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Coordinated pre-releases can attach both artifacts after their respective review and release authorization; installation and Production deployment remain separate actions.
 
-The name intentionally covers more than caching. Add only evidenced, explicitly supported WordPress-side integrations to this small companion. The initial v0.1.0 source was read-only diagnostics. The independently reviewed v0.1.4 companion adds an **opt-in, root-owned, native-managed exact-URL generation filter** for Nginx Helper `unlink_files`, but does not activate the vendor plugin/options, enable `Purge All`, or certify effective Nginx worker state. Native v0.1.48 and WordPress Bridge v0.1.4 were merged under reviewed PR #82; the optional integration has bounded nonproduction acceptance recorded in Issues #2 and #21, and pre-release distribution does not establish Production readiness. Reviewed v0.1.5 source ([PR #85](https://github.com/AChWorks/ach-aapanel-customizer/pull/85)) additionally captures the published permalink before permanent deletion and invalidates verified GET objects only after successful deletion; installed v0.1.5 successful/aborted deletion QA subsequently passed ([Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6914874554)). Reviewed and merged v0.1.6 source ([PR #87](https://github.com/AChWorks/ach-aapanel-customizer/pull/87)) expands the same bounded public post/homepage dispatch to independently verified GET **and HEAD** objects across HTTP/HTTPS; exact installed isolated QA passed ([Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6915689796)). This changes no Native code, vendor Purge All or Production permissions. Other URL alias/query/archive coverage and safe physically scoped Purge All remain separate acceptance work in Issue #2; no shared `WORDPRESS` Purge All, vendor-core modifications, unstated remote service, or automatic Production installation is authorized by the companion's existence.
+The companion is **opt-in**, disconnected by default and never required
+for native aaPanel functions. Its currently implemented capability is
+native-generation-bound, owner-verified per-URL invalidation via the
+WordPress Nginx Helper `unlink_files` integration for supported public
+post/homepage/taxonomy changes; it does not activate Nginx Helper, create
+shared Cache ownership, authorize vendor `Purge All` or prove the effective
+Nginx worker state. Keep the companion small and add only evidenced,
+reviewed WordPress-side integrations, without turning it into a replacement
+for the native plugin. The [companion guide](../wordpress/ach-aapanel-bridge/README.md)
+owns operating details, [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
+owns unmet functionality and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
+owns QA evidence. Exact shipping versions belong to GitHub Releases and
+the independent source manifests, not this product specification.
 
 ## 2. Problem and desired outcomes
 
@@ -38,7 +50,7 @@ Correctness, continuity, usability, and recoverability matter more than the quan
 
 ## 3. Users and product experience
 
-**Primary user:** aaPanel administrator operating one or multiple websites and server modules on a managed Linux host.
+**Primary user:** the full primary aaPanel administrator operating one or multiple websites and server modules on a managed Linux host. The accepted initial usage model is **one primary administrator**; secondary Admin/Operator accounts and paid multi-user provisioning are not requirements or release blockers, without weakening existing session/CSRF authorization.
 
 The plugin must behave as an ordinary **aaPanel-installed plugin**:
 
@@ -66,11 +78,11 @@ The primary workflows must be understandable without editing Nginx, PHP, or Word
 
 The native UI must follow the installed aaPanel visual and interaction conventions, particularly the Nginx plugin's left navigation and independently scrollable content. Operators must not need browser zoom-out to reach controls. The supported acceptance viewports include 1280x720, 1366x768 and 1920x1080 at 100% browser zoom, plus narrow and reduced-height cases. Preserve keyboard/focus semantics, explicit loading/empty/error/recovery states, scope awareness and clear separation of Monitor, Preview, guarded Manual Apply and unsupported capabilities.
 
-Provide site selectors from validated, paginated aaPanel inventory rather than requiring operators to type raw IDs in routine workflows. Website selection for Status Pages must remain available to a full primary aaPanel administrator even if the optional Website Monitor is disabled: its dedicated, bounded native listing is read-only, independently authorized, and the selected site identity is revalidated by every relevant backend action. The Monitor website inventory keeps its separate enabled/disabled policy. Stale or incompatible inventory replies must never authorize an action. The Status Pages module is initially a safe branding/offline preview and read-only site-file inspection; a production Apply/Restore adapter must be separately implemented and proven.
+Provide site selectors from validated, paginated aaPanel inventory rather than requiring operators to type raw IDs in routine workflows. Website selection for Status Pages must remain available to a full primary aaPanel administrator even if the optional Website Monitor is disabled: its dedicated, bounded native listing is read-only, independently authorized, and the selected site identity is revalidated by every relevant backend action. The Monitor website inventory keeps its separate enabled/disabled policy. Stale or incompatible inventory replies must never authorize an action. The Status Pages module retains safe offline branding/preview and read-only inspection; each implemented manual delivery/Restore adapter remains separately source-checked, authorized and proven within its supported scope, not assumed available for every target.
 
 The plugin must expose a built-in Activity/Diagnostics view backed by bounded persistent structured log records. Include UTC timestamp, severity, module/action, stage/outcome/error class, target/service identity, correlation ID and relevant recovery reference. Keep useful bounded troubleshooting context without recording session tokens, credentials, request payloads or arbitrary exception messages. Preserve successful operation outcomes if audit persistence fails; surface that failure separately. Diagnose real authorizations, failures and recoveries. Use aaPanel-compatible ownership/permissions, bounded retention and configurable verbosity.
 
-**PHP compatibility:** Inspect/manage installed PHP 8.1 and newer versions, but distinguish *detected*, *file-only preview*, *native Apply eligible* and *recoverably tested*. The current guarded 8.5 shared-[www] adapter is not authorization to write another version by string substitution. Each other version and pool shape must pass native aaPanel PHP discovery, mapping, syntax/reload, shared-service attribution, after-state, website and rollback/fault tests before Apply eligibility. Unsupported configurations fail closed. PHP 8.1+ remains an acceptance target, not a claim of tested compatibility.
+**PHP compatibility:** Inspect/manage installed PHP 8.1 and newer versions, but distinguish *detected*, *file-only preview*, *native Apply eligible* and *recoverably tested*. The currently verified 8.1/8.5 shared-[www] adapters are not authorization to write an untested version/pool by string substitution. Each other version and pool shape must pass native aaPanel PHP discovery, mapping, syntax/reload, shared-service attribution, after-state, website and rollback/fault tests before Apply eligibility. Unsupported configurations fail closed. PHP 8.1+ remains an acceptance target, not a claim of tested compatibility.
 
 These are durable product requirements; verified implementation and release readiness must be recorded against the exact candidate and non-production environment, independently reviewed and separately approved by the Owner. Production changes and automatic enforcement remain separately gated; an approved pre-release publication is not an installation or rollout.
 
@@ -116,6 +128,7 @@ For shared PHP-FPM, the operator's **desired** `[www]` settings are a service/ve
 - Prefer proven supported aaPanel extension/event mechanisms when available; a bounded periodic reconciliation mechanism is acceptable when native hooks are missing or unreliable.
 - Do not modify aaPanel core merely to add a hook, and do not claim protection against an unknown update before compatibility has been tested.
 - Preserve policies, operator preferences, and necessary recovery evidence independently from replaceable plugin code so an update/reinstall does not silently destroy them.
+- Keep the website **observation baseline** separate from runtime settings and native host files. A newly added/changed **selected-site-only** baseline acceptance must preserve all other pending site records; the **all-sites** baseline acceptance is a separate, explicitly reviewed operation that can also accept removals. Neither baseline action implies host Apply, or silently erases orphan/recovery state.
 - Distinguish a *new/unclassified target* from an existing target. Unknown targets begin in a non-destructive review state; unsupported platforms or configurations are reported accurately.
 - Reconciliation must remain bounded and resource-efficient; unexpected or high-volume target sets cannot cause uncontrolled scans or repeated reloads.
 
@@ -205,9 +218,9 @@ A lifecycle state shown in the UI must reflect the actual outcome, not merely th
 - Show compatibility and unsupported states without claiming success; do not hide errors or silently disable diagnostic logging.
 - Product UI should support usable responsive layouts and applicable accessibility conventions.
 
-## 10. Initial outcome and acceptance criteria
+## 10. Delivery and continuing acceptance criteria
 
-**First deliverable:** a validated native aaPanel plugin foundation with a working operator experience and a small useful vertical slice. Initial development prioritizes:
+**Initial milestone (already delivered as a bounded public development preview):** a validated native aaPanel plugin foundation with a working operator experience and a useful, recoverable vertical slice. Its continuing acceptance dimensions are:
 
 1. Plugin install/open, enable/disable, update/uninstall/reinstall contract and durable state ownership.
 2. Discovery and display of actual aaPanel websites and relevant shared resources (not a fixed domain list).
@@ -227,7 +240,7 @@ Acceptance requires practical test evidence, not just source files or a mock UI.
 - preservation of unrelated host configuration and functioning websites across all lifecycle tests;
 - clear diagnostic evidence and low bounded monitoring overhead.
 
-### Delivery phases (direction, not an implementation backlog)
+### Development sequence (durable guidance, not live work status)
 
 **Evidence first:** verify current native aaPanel plugin import/UI, lifecycle callbacks, generated-vhost extension mechanisms, website discovery APIs, update behavior, and supported test environment. Resolve compatibility and permission boundaries before accepting adapter implementation promises.
 
@@ -235,22 +248,30 @@ Acceptance requires practical test evidence, not just source files or a mock UI.
 
 **Broaden carefully:** add the other accepted initial adapter and robust lifecycle/testing. Additional WordPress, database, cron, security, or service modules are later work and require real needs.
 
-No production installation, public release, or general production auto-enforcement is included in repository initialization.
+Publication of a development pre-release does not authorize installation on Production, general production auto-enforcement or unverified platform compatibility. Release and rollout approvals are separate.
 
-## 11. Supported environment and open technical questions
+## 11. Supported environment and unresolved compatibility
 
-The initial integration target is a **real supported aaPanel installation on Linux**. Exact aaPanel versions, distribution/system-manager support, Nginx/Apache variants, runtime dependencies, plugin import/update behavior, and extension file durability are not yet declared supported. They must be verified and documented from current authoritative sources and practical tests before releasing the first package.
+The verified nonproduction **reference configuration** includes native
+aaPanel 8.0.7 with Nginx and tested PHP-FPM 8.1/8.5 adapters, as recorded
+in [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+This is not a universal support matrix. Actual installed site/PHP topology,
+versioned service controls, VHost includes, filesystem ownership and reload
+behavior determine whether a target-specific operation is eligible.
 
-Decisions intentionally left for validated architecture and implementation:
+Future aaPanel releases, Apache variants, other PHP pool layouts,
+alternative operating systems or web-server plugins require explicit
+capability detection and representative acceptance before enabling writes.
+Unrecognized shapes may still be **inspected read-only** and reported as
+`Needs Review`. A new website or aaPanel upgrade never silently inherits
+previous write eligibility. Live worker state, DNS/TLS behavior, shared
+cache ownership and vendor Purge All must be established independently of
+source-file and installed-package version checks.
 
-- exact aaPanel plugin packaging, hooks, service/API compatibility, and module/UI routing;
-- whether an external scheduled process is required or platform-native scheduling is sufficient;
-- which path/layout can survive aaPanel updates without creating a separate management panel;
-- exact format and versioning of policies, persistent state, and backups;
-- supported web-stack integrations and the safest first read/write adapter;
-- whether update and uninstall behavior requires a compatibility-specific installation adapter.
-
-These are not grounds to weaken the approved native-plugin product experience.
+Exact integration/operation details are maintained in
+[the native technical guide](aapanel-integration.md); accepted gaps and
+compatibility work belong to the owning GitHub Issues, not a fixed version
+allowlist or rolling checkpoint here.
 
 ## 12. Non-goals
 
@@ -281,35 +302,3 @@ Applicable AChWorks cross-project contracts (consult current versions when imple
 - [Validation and Evidence](https://github.com/AChWorks/koinon/blob/main/docs/contracts/validation-evidence.md)
 - [External Effect Safety](https://github.com/AChWorks/koinon/blob/main/docs/contracts/external-effect-safety.md)
 - [Build vs Buy / Reuse](https://github.com/AChWorks/koinon/blob/main/docs/principles/build-vs-buy.md)
-
-
-## Unreleased Native 0.1.51: bounded selected-site reconciliation
-
-A single primary-administrator website onboarding operator flow connects
-existing native site/Host/VHost discovery, separately approved PHP-FPM
-desired-policy review, site-owned FastCGI Cache recovery, and Status Page
-module navigation. The report is read-only, rejects stale source/selection
-evidence, shows bounded peer impact and explicitly does **not** represent
-automatic remediation, loaded worker proof or authorization to Apply/Restore.
-
-The reviewed native baseline now has two separately authorized scopes:
-**selected site only** (accept just one verified Added/Changed/Initial site,
-preserving every other historical site record and unaccepted difference)
-and **all websites** (previous full-snapshot acceptance; clearly labeled
-for all-site consent, including removals). Selected-site acceptance uses the
-same baseline persistence layout and atomic locked revision CAS, not a new
-per-site configuration store, so old installed state stays readable.
-For deletion/orphan cases, no automatic baseline erasure or host-state
-cleanup is authorized. Neither scope changes aaPanel site configuration.
-
-The feature keeps all existing PHP/Cache/Status adapters and their own
-fresh preview, consent, preflight, ownership and recovery gates. No scope
-expansion to unsupported PHP adapter layouts, vendor Purge All, universal
-auto-enforce, shared cache roots, unknown-host HTTPS/443 or a native UI
-redesign is authorized by this package. See Issue #1 contract and Issue #21
-installed QA evidence for test boundaries. This is an unreleased source
-candidate, not a claim of production or universal compatibility. The
-[installed functional QA evidence](evidence/aaPanel-8.0.7-2026-11-17-site-reconciliation-qa.md)
-records source/installed version boundaries, selected-site acceptance,
-VHost regeneration, guarded Cache recovery, resident worker reload and
-peer sentinels; it does not replace exact-HEAD CI or independent review.
