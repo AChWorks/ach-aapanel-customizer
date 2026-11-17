@@ -52,6 +52,8 @@ function loadUi() {
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-site-changes-compare', '#ach-site-changes-approve', '#ach-site-changes-why',
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-summary', '#ach-site-changes-rows',
+    '#ach-site-changes-selected-evidence', '#ach-site-changes-selected-reviewed',
+    '#ach-site-changes-selected-why', '#ach-site-changes-save-selected',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-reconcile-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
@@ -392,6 +394,9 @@ function loadUi() {
       siteStatus: elements.get('#ach-sites-status').textContent,
       siteChangesStatus: elements.get('#ach-site-changes-status').textContent,
       siteChangesSaveDisabled: elements.get('#ach-site-changes-save').props.disabled,
+      selectedBaselineSaveDisabled: elements.get('#ach-site-changes-save-selected').props.disabled,
+      selectedBaselineReviewedDisabled: elements.get('#ach-site-changes-selected-reviewed').props.disabled,
+      selectedBaselineEvidence: elements.get('#ach-site-changes-selected-evidence').textContent,
       siteChangesApproveDisabled: elements.get('#ach-site-changes-approve').props.disabled,
       siteChangesRows: elements.get('#ach-site-changes-rows').children.map(tr =>
         tr.children.map(td => td.textContent)),
@@ -593,6 +598,14 @@ function loadUi() {
       trigger(elements.get('#ach-site-changes-approve'), 'change');
     },
     siteChangesSave: () => { trigger(elements.get('#ach-site-changes-save'), 'click'); return requests.at(-1); },
+    siteChangesSelectedApprove: checked => {
+      elements.get('#ach-site-changes-selected-reviewed').props.checked=checked;
+      trigger(elements.get('#ach-site-changes-selected-reviewed'),'change');
+    },
+    siteChangesSelectedSave: () => {
+      trigger(elements.get('#ach-site-changes-save-selected'),'click');
+      return requests.at(-1);
+    },
     prepareFpm: () => fpmTrigger('#ach-fpm-prepare'),
     approveFpm: checked => fpmApproval('#ach-fpm-approval', checked),
     commitFpm: () => fpmTrigger('#ach-fpm-commit'),
@@ -6580,6 +6593,126 @@ const siteChangesPayload = (overrides = {}) => {
     response.initial_sites=[];
   return response;
 };
+
+
+test('Selected website acceptance preserves unrelated pending baselines', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const first = {
+    id:7, name:'site.test', document_root:'/www/site.test',
+    panel_status:'1',bound_domains:[['site.test',80]]
+  };
+  const other = {
+    id:8, name:'other.test',document_root:'/www/other.test',
+    panel_status:'1',bound_domains:[['other.test',80]]
+  };
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:2,changes:[
+      {id:7,kind:'Added',fields:[],before:null,after:first},
+      {id:8,kind:'Added',fields:[],before:null,after:other},
+    ]
+  }));
+  assert.match(ui.state().selectedBaselineEvidence,/Selected #7 \(Added\)/);
+  assert.match(ui.state().selectedBaselineEvidence,/Other site records will not be accepted/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.equal(ui.state().selectedBaselineReviewedDisabled,false);
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+  const accepted=ui.siteChangesSelectedSave();
+  assert.match(accepted.options.url,/s=save_selected_site_baseline$/);
+  assert.equal(accepted.options.type,'POST');
+  assert.deepEqual(JSON.parse(accepted.options.data.expected_site_snapshot),
+    [7,'site.test','/www/site.test','1',[['site.test',80]]]);
+  assert.equal(accepted.options.data.expected_monitor_revision,0);
+  assert.equal(accepted.options.data.expected_revision,1);
+  assert.equal(accepted.options.data.expected_source_sha256,'a'.repeat(64));
+  assert.equal(accepted.options.data.reviewed,'true');
+  assert.deepEqual(Object.keys(accepted.options.data).sort(),[
+    'expected_monitor_revision','expected_revision','expected_site_key',
+    'expected_site_snapshot','expected_source_sha256','reviewed','site_id']);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  accepted.respond({
+    status:true,schema:1,scope:'selected_site_only',
+    state:'Selected Site Baseline Saved',site_id:7,site_key:'site.test',
+    changed:true,baseline_revision:2,source_sha256:'a'.repeat(64),
+    baseline_sha256:'c'.repeat(64),runtime_verified:false
+  });
+  assert.match(ui.state().siteChangesStatus,/Selected Site Baseline Saved/);
+  assert.match(ui.state().siteChangesStatus,/Other pending website differences were left unchanged/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.equal(ui.requests.filter(r=>/s=save_site_baseline$/.test(r.options.url)).length,0);
+  assert.match(ui.siteChangesCompare().options.url,/s=compare_site_changes$/);
+});
+
+test('Scoped baseline approval cannot transfer to a different site or stale source', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const first = {
+    id:7,name:'site.test',document_root:'/www/site.test',
+    panel_status:'1',bound_domains:[['site.test',80]]
+  };
+  const other = {
+    id:8,name:'other.test',document_root:'/www/other.test',
+    panel_status:'1',bound_domains:[['other.test',80]]
+  };
+  const payload=siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:2,changes:[
+      {id:7,kind:'Added',fields:[],before:null,after:first},
+      {id:8,kind:'Added',fields:[],before:null,after:other}
+    ]
+  });
+  ui.siteChangesCompare().respond(payload);
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.match(ui.state().selectedBaselineEvidence,/Selected #8 \(Added\)/);
+  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  const count=ui.requests.length;
+  ui.siteChangesSelectedSave();
+  assert.equal(ui.requests.length,count);
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    ...payload,
+    changes:[
+      {id:7,kind:'Added',fields:[],before:null,
+       after:{...first,document_root:'/tmp/forged-root'}},
+      {id:8,kind:'Added',fields:[],before:null,after:other}
+    ]
+  }));
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.match(ui.state().selectedBaselineEvidence,/No eligible/);
+  ui.refreshSites();
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+});
+
+test('Scoped baseline uncertain backend outcome requires re-Compare, never retry', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    site_count:2,changes:[
+      {id:7,kind:'Added',fields:[],before:null,after:{
+        id:7,name:'site.test',document_root:'/www/site.test',
+        panel_status:'1',bound_domains:[['site.test',80]]
+      }}
+    ]
+  }));
+  ui.siteChangesSelectedApprove(true);
+  const save=ui.siteChangesSelectedSave();
+  save.respond({status:true,schema:1,scope:'selected_site_only',
+    state:'Selected Site Baseline Saved',site_id:8,site_key:'site.test',
+    changed:true,baseline_revision:2,source_sha256:'a'.repeat(64),
+    baseline_sha256:'c'.repeat(64),runtime_verified:false});
+  assert.match(ui.state().siteChangesStatus,/unconfirmed/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  const count=ui.requests.length;
+  ui.siteChangesSelectedSave();
+  assert.equal(ui.requests.length,count);
+});
 
 test('Site lifecycle comparison requires reviewed baseline and refuses blind retry', () => {
   const ui=loadUi();

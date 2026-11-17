@@ -250,6 +250,61 @@ class ReconciliationEndpointTests(unittest.TestCase):
                 monitor.assert_not_called()
                 inspect.assert_not_called()
 
+    def test_selected_baseline_action_requires_primary_admin_post(self):
+        import ach_customizer_site_changes as changes
+        for values in ({"uid": 2}, {"method": "GET"}, {"tmp": True}):
+            with self.subTest(values=values), \
+                 patch.dict(sys.modules, {"flask": self.flask(**values)}), \
+                 patch.object(self.main, "_selected_native_website") as selected, \
+                 patch.object(self.main, "_require_enabled") as monitor, \
+                 patch.object(changes, "save_reviewed_selected_site_baseline") as save:
+                r = self.main.save_selected_site_baseline(self.args)
+                self.assertFalse(r["status"], r)
+                self.assertEqual(r["stage"], "website_selected_baseline_authorization")
+                selected.assert_not_called()
+                monitor.assert_not_called()
+                save.assert_not_called()
+
+    def test_selected_baseline_action_uses_native_reader_not_client_path(self):
+        import ach_customizer_site_changes as changes
+        approved = {
+            "schema": 1, "scope": "selected_site_only",
+            "state": "Selected Site Baseline Saved",
+            "site_id": 3, "site_key": "static.example.test",
+            "baseline_revision": 2, "source_sha256": "a" * 64,
+            "baseline_sha256": "b" * 64, "changed": True,
+            "runtime_verified": False,
+        }
+        with patch.dict(sys.modules, {"flask": self.flask()}), \
+             patch.object(self.main, "_require_enabled") as monitor, \
+             patch.object(self.main, "_selected_native_website",
+                          return_value=(object(), self.site, lambda: self.site)), \
+             patch.object(changes, "save_reviewed_selected_site_baseline",
+                          return_value=approved) as save:
+            result = self.main.save_selected_site_baseline({
+                **self.args, "expected_revision": "1",
+                "expected_monitor_revision": "0",
+                "expected_source_sha256": "a" * 64,
+                "reviewed": "true", "apply": "true",
+                "path": "/etc/passwd", "site_key": "attacker.test",
+                "recovery_id": "f" * 32,
+            })
+        self.assertTrue(result["status"], result)
+        self.assertEqual(result["scope"], "selected_site_only")
+        self.assertEqual(result["baseline_sha256"], "b" * 64)
+        self.assertEqual(monitor.call_args.args, ("site_inventory",))
+        kwargs = save.call_args.kwargs
+        self.assertIs(kwargs["selected_site"], self.site)
+        self.assertEqual(kwargs["current_site"](), self.site)
+        self.assertEqual(kwargs["expected_revision"], "1")
+        self.assertEqual(kwargs["expected_monitor_revision"], "0")
+        self.assertEqual(kwargs["expected_source_sha256"], "a" * 64)
+        self.assertEqual(kwargs["reviewed"], "true")
+        self.assertNotIn("apply", kwargs)
+        self.assertNotIn("path", kwargs)
+        self.assertNotIn("recovery_id", kwargs)
+        self.assertEqual(kwargs["directory"], main._STATE_DIR)
+
     def test_endpoint_preserves_native_id_and_comparison_only_arguments(self):
         response = {"schema": 1, "site_id": 3, "site_key": "static.example.test",
                     "state": "Needs Review", "read_only": True, "apply_supported": False,

@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.50'
+WORKER_SOURCE_VERSION = '0.1.51'
 
 _STATE_DIR = DATA_DIR
 
@@ -312,6 +312,40 @@ class ach_customizer_main:
                 return self._fail("website_baseline_save", str(exc), request_id,
                                   diagnostic_error=exc)
             return self._fail("website_baseline_save", exc, request_id)
+
+    def save_selected_site_baseline(self, args):
+        """Review and record only the selected native site's observed DB state."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            try:
+                from ach_customizer_site_changes import save_reviewed_selected_site_baseline
+            except ImportError as exc:
+                raise MonitorInputError(
+                    "Site baseline helper is outdated after plugin update; "
+                    "reopen aaPanel after verifying resident Python worker"
+                ) from exc
+            public, selected, current_site = self._selected_native_website(args)
+            result = save_reviewed_selected_site_baseline(
+                public, directory=_STATE_DIR,
+                selected_site=selected, current_site=current_site,
+                expected_revision=self._argument(args, "expected_revision"),
+                expected_monitor_revision=self._argument(
+                    args, "expected_monitor_revision"),
+                expected_source_sha256=self._argument(
+                    args, "expected_source_sha256"),
+                reviewed=self._argument(args, "reviewed"),
+            )
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "save_selected_site_baseline",
+                target=str(selected["id"]))
+        except PermissionError as exc:
+            return self._fail("website_selected_baseline_authorization",
+                              exc, request_id)
+        except Exception as exc:
+            return self._fail("website_selected_baseline_save", exc, request_id)
 
     def inspect_site_reconciliation(self, args):
         """Primary-admin, selected-site onboarding and drift/recovery summary.

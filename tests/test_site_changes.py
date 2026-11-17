@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "plugin" / "ach_customizer"))
 from ach_customizer_site_changes import (
     BASELINE_FILE, SiteChangesError, compare, read_baseline, save_reviewed_baseline,
+    save_reviewed_selected_site_baseline,
 )
 
 
@@ -79,6 +80,115 @@ class SiteChangesTests(unittest.TestCase):
             expected_monitor_revision=preview["monitor_revision"],
             expected_source_sha256=preview["source_sha256"] if digest is None else digest,
             reviewed=reviewed)
+
+    def selected(self, preview, site_id=3, *, reviewed="true",
+                 expected_site=None, current_site=None):
+        native = next(x for x in self.panel.sites if x["id"] == site_id)
+        selected = {
+            "id": native["id"], "name": native["name"],
+            "path": native["path"], "status": native["status"],
+            "bound_domains": [
+                {"name": x["name"], "port": x["port"]}
+                for x in self.panel.domains if x["pid"] == site_id],
+        } if expected_site is None else expected_site
+        return save_reviewed_selected_site_baseline(
+            self.panel, directory=self.directory.name,
+            selected_site=selected, current_site=current_site or (lambda: selected),
+            expected_revision=preview["baseline_revision"],
+            expected_monitor_revision=preview["monitor_revision"],
+            expected_source_sha256=preview["source_sha256"],
+            reviewed=reviewed,
+        )
+
+    def test_scoped_first_baseline_preserves_other_sites_unaccepted(self):
+        initial = self.preview()
+        result = self.selected(initial)
+        self.assertEqual(result["scope"], "selected_site_only")
+        self.assertFalse(result["runtime_verified"])
+        self.assertEqual(result["state"], "Selected Site Baseline Saved")
+        self.assertEqual(result["baseline_revision"], 1)
+        baseline = read_baseline(self.directory.name)
+        self.assertEqual([x["id"] for x in baseline["sites"]], [3])
+        self.assertEqual(result["baseline_sha256"], baseline["source_sha256"])
+        self.assertNotEqual(result["baseline_sha256"], result["source_sha256"])
+        remaining = self.preview()
+        self.assertEqual([(c["id"], c["kind"]) for c in remaining["changes"]],
+                         [(6, "Added")])
+        self.assertEqual(self.selected(remaining)["state"],
+                         "Selected Site Baseline Unchanged")
+        self.assertEqual(read_baseline(self.directory.name)["revision"], 1)
+        self.assertEqual(self.selected(remaining, site_id=6)["state"],
+                         "Selected Site Baseline Saved")
+        self.assertEqual(self.preview()["state"], "No Changes")
+
+    def test_scoped_save_accepts_only_selected_delta_not_old_peer_drift(self):
+        self.save(self.preview())
+        original = read_baseline(self.directory.name)
+        self.panel.sites[1]["path"] = "/srv/peer-moved"
+        self.panel.domains[1]["name"] = "peer-renamed.example.test"
+        self.panel.sites.append({
+            "id": 18, "name": "new.example.test", "path": "/srv/new", "status": 1})
+        self.panel.domains.append({
+            "id": 18, "pid": 18, "name": "new.example.test", "port": 80})
+        self.assertEqual(self.selected(self.preview(), site_id=18)["state"],
+                         "Selected Site Baseline Saved")
+        retained = read_baseline(self.directory.name)
+        self.assertEqual(retained["sites"][:2], original["sites"])
+        self.assertEqual(retained["sites"][2]["id"], 18)
+        self.assertEqual([(c["id"], c["kind"], c["fields"])
+                          for c in self.preview()["changes"]],
+                         [(6, "Changed", ["document_root", "bound_domains"])])
+        self.assertEqual(self.selected(self.preview(), site_id=6)["state"],
+                         "Selected Site Baseline Saved")
+        self.assertEqual(self.preview()["state"], "No Changes")
+
+    def test_scoped_save_requires_confirmed_selected_identity_and_fresh_snapshot(self):
+        old = self.preview()
+        with self.assertRaisesRegex(SiteChangesError, "review confirmation"):
+            self.selected(old, reviewed=False)
+        expected = {
+            "id": 3, "name": "static.example.test", "path": "/srv/static",
+            "status": 1, "bound_domains": [
+                {"name": "static.example.test", "port": 80}],
+        }
+        with self.assertRaisesRegex(SiteChangesError, "identity changed"):
+            self.selected(old, expected_site=expected,
+                          current_site=lambda: {**expected, "name": "reused.test"})
+        bad = {**expected, "name": "forged.test"}
+        with self.assertRaisesRegex(SiteChangesError, "Selected site changed"):
+            self.selected(old, expected_site=bad)
+        self.assertFalse(Path(self.directory.name, BASELINE_FILE).exists())
+        self.panel.domains[0]["name"] = "drift-before-save.example.test"
+        with self.assertRaisesRegex(SiteChangesError, "changed since comparison"):
+            self.selected(old)
+        self.assertFalse(Path(self.directory.name, BASELINE_FILE).exists())
+        fresh = self.preview()
+        self.selected(fresh)
+        with self.assertRaisesRegex(SiteChangesError, "revision changed"):
+            self.selected(fresh)
+        self.assertEqual(read_baseline(self.directory.name)["revision"], 1)
+
+    def test_scoped_save_rejects_monitor_and_locked_native_source_races(self):
+        from ach_customizer_state import set_enabled
+        preview = self.preview()
+        set_enabled("php_fpm_file_preview", False, directory=self.directory.name,
+                    expected_revision=0)
+        with self.assertRaisesRegex(SiteChangesError, "Monitor revision changed"):
+            self.selected(preview)
+        self.assertFalse(Path(self.directory.name, BASELINE_FILE).exists())
+        self.panel = Panel()
+        self.panel.site_queries = 0
+        # Separate directory to restore the expected Monitor revision.
+        self.directory = tempfile.TemporaryDirectory(prefix="ach-scoped-race-")
+        self.addCleanup(self.directory.cleanup)
+        preview = self.preview()
+        def race(query):
+            if query == 5:
+                self.panel.sites[1]["path"] = "/srv/raced-peer"
+        self.panel.on_site_scan = race
+        with self.assertRaisesRegex(SiteChangesError, "changed during baseline recording"):
+            self.selected(preview)
+        self.assertFalse(Path(self.directory.name, BASELINE_FILE).exists())
 
     def test_explicit_baseline_new_renamed_removed_domain_and_noop(self):
         initial = self.preview()

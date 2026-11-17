@@ -17,7 +17,7 @@ Keep every UI rule scoped to #ach-customizer so the host aaPanel/Layui interface
 
 The rendered layout regression is exercised in tests/manual/layout_browser.cjs; shipped UI behavior is exercised in tests/test_inventory_ui.cjs. Source-only tests do **not** replace installed aaPanel acceptance.
 
-## Selected-site onboarding and guided recovery (unreleased 0.1.50)
+## Selected-site onboarding and guided recovery (unreleased 0.1.51)
 
 This bounded addition integrates existing **manually approved** capabilities; it
 does not provide universal reconciliation, a scheduled scanner, source-changing
@@ -29,11 +29,22 @@ VHost repair, or a new bypass around the existing Cache/Status/PHP guards.
    shared Website selector; never type a path, domain or Recovery ID as a
    substitute for selected native identity.
 2. In **Website list → Compare website records**, inspect Added, Changed
-   or Baseline Missing. Save a new baseline **only after reviewing the actual
-   before/after native site identities, roots, site status and domain bindings**.
-   Saving a baseline records observed native database state, **not** policy
-   enforcement, VHost bytes, PHP settings, successful Cache activation, or
-   operator approval to change Nginx.
+   or Baseline Missing. For **one newly created/modified website**, choose the
+   same current native website in the selector, inspect the
+   **Selected website only** previous/current identity, root, status and
+   bindings, tick its own review consent, and choose **Save only selected
+   website baseline**. This updates only the selected native site ID's
+   database record in the saved plugin-owned baseline; other unaccepted
+   site changes (including removed/renamed peers) remain as previously
+   recorded. This operation requires exact current site/source snapshots,
+   expected global baseline and Monitor revisions, full primary-admin POST,
+   and fresh server-side double scanning under the persistent state lock.
+   **Removed sites** cannot be silently accepted using the selected-site
+   action; use a separately fully reviewed **ALL websites** baseline action
+   when genuinely intending to accept every current record, including
+   removals. Saving a baseline records observed native database state,
+   **not** policy enforcement, VHost bytes, PHP settings, successful Cache
+   activation, or operator approval to change Nginx.
 3. In **Routing & Nginx → Review selected site & recovery**, read the current
    baseline delta, generated VHost vs native domains/root, per-site Cache source
    diagnostics, shared PHP-FPM desired-versus-file observation (when verifiable),

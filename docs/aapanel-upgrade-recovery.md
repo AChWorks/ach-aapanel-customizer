@@ -82,14 +82,22 @@ passed. A later controlled mismatch/reload reproduction remains a separate
 native QA objective, not a retrospective claim of success or an unapproved
 mandatory integration gate for the narrow read-only v0.1.41 diagnostic.
 
-## Selected-site reconciliation after native lifecycle events (0.1.50 candidate)
+## Selected-site reconciliation after native lifecycle events (0.1.51 candidate)
 
 Site baseline records, saved shared PHP policies, current Cache/Status Pages
 recovery journals, and actual host Nginx/PHP configuration are **distinct
 authorities**. They survive or change independently during an aaPanel install,
 plugin import/restart, site addition, native VHost regeneration, Monitor
-disable, uninstall and reinstall. The 0.1.50 selected-site report does not
+disable, uninstall and reinstall. The 0.1.51 selected-site report does not
 modify or migrate any of those stores and is not an automatic repair process.
+
+For a new or modified website, accept only its reviewed native identity with
+**Website list → Compare website records → Save only selected website baseline**.
+This preserves other sites' previous saved baseline records and pending
+changes. The older **Save baseline for ALL websites** deliberately replaces
+the complete snapshot; never use it merely to accept one new website. An
+uncertain scoped write must be reconciled with fresh Compare, not retried
+blindly. A removed site requires separate explicit all-site review.
 
 On an authorized test host, record the existing plugin ZIP SHA256, installed
 member hashes, primary administrator role, current native site key/ID and
