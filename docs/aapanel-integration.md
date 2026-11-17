@@ -3,6 +3,8 @@
 This is **technical integration guidance**, not a second product specification.
 The canonical requirements remain in [PROJECT-SPEC.md](PROJECT-SPEC.md), and the active research/acceptance owner is [Issue #1](https://github.com/AChWorks/ach-aapanel-customizer/issues/1).
 
+**Installable development preview:** [v0.1.49 Release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.49) provides separately packaged native 0.1.49 and optional Bridge 0.1.8 ZIPs plus SHA256 checksums. This guide describes bounded native integration and [controlled upgrade/recovery](aapanel-upgrade-recovery.md), not universal compatibility or authorization to install on Production.
+
 ## Native UI component contract (Issue #80; merged v0.1.47 lineage, retained in v0.1.49)
 
 Keep every UI rule scoped to #ach-customizer so the host aaPanel/Layui interface is unchanged.

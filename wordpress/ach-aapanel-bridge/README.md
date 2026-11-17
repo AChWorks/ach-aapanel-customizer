@@ -3,11 +3,11 @@
 The optional **WordPress companion** for [ACh aaPanel Customizer](https://github.com/AChWorks/ach-aapanel-customizer).
 
 - WordPress plugin slug: `ach-aapanel-bridge`
-- Independent companion source: **0.1.8 merged into main** ([PR #91](https://github.com/AChWorks/ach-aapanel-customizer/pull/91), building on reviewed 0.1.7 [PR #90](https://github.com/AChWorks/ach-aapanel-customizer/pull/90)); not yet publicly released or Production-certified. The published companion ZIP remains **0.1.4**
+- Current development Pre-release: **0.1.8**, independently packaged with native 0.1.49 in [v0.1.49](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.49); merged from [PR #91](https://github.com/AChWorks/ach-aapanel-customizer/pull/91) on reviewed 0.1.7 [PR #90](https://github.com/AChWorks/ach-aapanel-customizer/pull/90). Publishing is **not** Production certification or deployment
 - Source of truth: `wordpress/ach-aapanel-bridge/` in the **same repository** as the native aaPanel plugin
 - Distribution: independent WordPress ZIP; it is **not** included inside the aaPanel plugin ZIP
 
-## Current functionality (merged source 0.1.8; published ZIP 0.1.4)
+## Current functionality (source and public preview ZIP 0.1.8)
 
 When activated, the plugin adds **Tools → ACh aaPanel Bridge** for WordPress administrators with `manage_options`. It reports the standard Nginx Helper source/activation observation, in-memory purge method and automatic purge setting when available, and the declared cache path. Missing data is reported as unverified rather than guessed.
 
