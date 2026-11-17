@@ -50,20 +50,32 @@ all aaPanel versions or a blanket reason to restart after every install.
 ## Controlled recovery only with operator authorization
 
 If the installed files are confirmed, the new functionality is blocked by
-plausibly stale imports, and a restart is approved for the **specific
-environment** during an acceptable maintenance window:
+plausibly stale imports, and a panel-service reload or restart is approved for
+the **specific environment** during an acceptable maintenance window:
 
 1. Preserve the known-good ZIP, backup/recovery references and Activity
    evidence; ensure the panel login method remains available.
 2. Record current aaPanel, Nginx, PHP-FPM service state and `nginx -t` result.
-3. The authorized administrator may run the aaPanel panel-service command
-   `/etc/init.d/bt restart` **on that approved host only**. Do not wire this
-   command into ZIP installation, a probe endpoint, cron, or automatic
-   remediation.
+3. First inspect that aaPanel installation's **actual** `/etc/init.d/bt`
+   `reload` implementation. On the authorized aaPanel 8.0.7 QA guest for
+   candidate 0.1.51, a **panel-only** `/etc/init.d/bt reload` replaced the
+   resident `BT-Panel` process and refreshed its imported helper modules;
+   `BT-Task`, Nginx and PHP-FPM did not need to restart. Prefer this bounded
+   command **only when that host's script has been verified to provide the
+   same semantics** and a brief control-panel interruption is approved.
+   If `reload` is unavailable/does not actually reload imports, fall back
+   to an explicitly approved `/etc/init.d/bt restart` after assessing its
+   larger task/process impact. Neither command is a universal aaPanel
+   compatibility guarantee. Do not wire either into ZIP installation,
+   a probe endpoint, cron or automatic remediation.
 4. Reauthenticate through the normal native panel login. Reopen the plugin
    dialog, **Refresh state** and compare UI/entrypoint versions again.
-   Re-run **only the previously blocked read-only probe** and correlate its
-   result with its new Activity Operation ID.
+   First repeat a safe **read-only** inspection to verify the fresh helper
+   import and current source. If the prior blocked action was a write,
+   establish its earlier outcome from the saved state/journal before attempting
+   anything else; obtain a **new** source comparison and explicit approval
+   through the original module. Do not blindly resubmit the old request.
+   Preserve the Activity Request/Operation IDs before and after recovery.
 5. Recheck native plugin member hashes, Nginx syntax, PHP-FPM service health,
    and representative website HTTP/HTTPS status. Recheck any uncertain
    prior Apply/Restore through their original journal, without blind retry.
