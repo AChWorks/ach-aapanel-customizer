@@ -54,26 +54,36 @@ The product should produce these lasting outcomes:
 
 Correctness, continuity, usability, and recoverability matter more than the quantity of settings exposed.
 
-### Site-root and aaPanel layout portability
+### Native document-root compatibility and per-site security ownership
 
-Every selected website's **current native aaPanel record** is authoritative for
-its document root; "/www/wwwroot/<domain>" is not an invariant. Support several
-coexisting, panel-approved paths such as "/www/acdomains/<site>",
-"/www/other-sites/<site>" and other verified native layouts. The same rule
-applies to Website inventory, VHost drift, source inspections, Status Pages,
-site-owned cache, WordPress Bridge and any subsequent per-site protection.
-Never derive a writable path from the hostname or a global default setting.
-Re-read native ID, document root, current bindings and relevant generated
-source before guarded changes; a moved site invalidates old approval and
-requires Recheck. Only exact owned, canonical and appropriately scoped paths
-are eligible for writes. Symlinks, ambiguous paths, changed roots or unsupported
-native service/install layouts must fail closed **with an actionable reason**, not
-be rewritten into an assumed default. Dynamic site document roots are distinct
-from aaPanel's service-install roots (such as /www/server/panel or /www/server/php),
-which require separate compatibility adapters and native evidence if relocated.
-Actual per-module compatibility must be certified, not inferred from a
-successful read-only inventory or a default-root fixture. See Issue #21 for
-live custom-root and WordPress Toolkit acceptance evidence.
+No website operation may assume all native aaPanel sites live under
+`/www/wwwroot`. The currently registered aaPanel site ID/path, domain
+bindings and generated VHost root provide the baseline for any selected-site
+action. Coexisting native-supported roots (including `/www/acdomains` and
+`/www/other-sites`) must work without a separately configured base path.
+Re-read and recheck whenever native roots or included source files change.
+Unsupported, aliasing or symlinked source/ownership cannot authorize writes.
+The static installation prefixes for aaPanel, Nginx and PHP-FPM are **separate**
+adapter concerns and need independent compatibility proof if relocated.
+
+The same site-owned identity rule applies to Website inventory, VHost drift,
+Status Pages, site-owned cache and WordPress Bridge. A root move invalidates
+stale previews, cache manifests and recoveries; never silently replace it
+with a default path. Certify each module with representative real custom-root
+behavior rather than inferring compatibility from inventory alone.
+
+An opt-in site-specific Nginx sensitive-path policy should deny known
+sensitive dotfile, backup-directory and upload-PHP requests *before* PHP-FPM
+work. Prefer source-verified server-rewrite `if` + `return 403` rather than
+a regex-only `location` policy which `^~` Nginx prefixes could bypass.
+Do not break legitimate `.well-known` ACME/OAuth, public assets, peer sites,
+or broad file types by default. Every active security policy needs fresh
+source ownership, guarded apply/reload, live response proof, durable recovery,
+separate approval for Restore and drift awareness. Exact URL probes are
+not universal proof of full HTTP/2/3, CDN/HTTPS or all custom site aliases.
+Security policy starts disabled until primary-admin opt-in. A successfully
+applied per-request guard is different from automated recovery after aaPanel
+regeneration; the latter is still an independent required lifecycle outcome.
 
 ### Owner-confirmed operational acceptance priority (2026-11-18)
 

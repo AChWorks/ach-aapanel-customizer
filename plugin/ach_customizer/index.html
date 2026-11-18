@@ -527,6 +527,26 @@
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-nginx-candidate-result" class="ach-status-metadata" role="status">Select a website to inspect the next-load Nginx source and optional local HTTP/80 response.</p>
       </details>
+      <hr />
+      <div class="ach-note" aria-label="Native site sensitive-path protection">
+        <strong>Site-sensitive file protection — opt-in</strong>
+        <p>Use the verified aaPanel 8.0.7 Nginx site extension (not .htaccess) to stop nested .env/.htaccess, backup-directory downloads and PHP execution from upload/media/tmp paths before PHP-FPM. Native site root is detected automatically; no /www/wwwroot assumption. Ordinary .well-known/OAuth/ACME URLs remain eligible. This rule does not claim every upload layout or HTTPS reverse-proxy path is covered.</p>
+        <p>A supported source is required. Apply creates one recoverable site-owned include, syntax-tests and reloads shared Nginx, then checks real HTTP/80 guard paths over three consecutive rounds. Restore is a separately approved Nginx reload. Neither option is automatic; source changes or interrupted operations require Recheck.</p>
+        <div class="ach-controls">
+          <button id="ach-guard-preview" type="button" disabled>Check sensitive-path protection readiness</button>
+          <button id="ach-guard-recheck" type="button" disabled>Recheck protection / recovery</button>
+        </div>
+        <p id="ach-guard-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Choose a native website, then run readiness check.</p>
+        <details class="ach-technical-report"><summary>Exact Nginx policy and recovery evidence</summary>
+          <p id="ach-guard-result" class="ach-status-metadata" role="status">No native protection inspection yet.</p>
+        </details>
+        <p id="ach-guard-apply-why" class="ach-availability" data-state="blocked" role="status">Apply is locked until a fresh Unmanaged/Restored readiness check.</p>
+        <label><input id="ach-guard-apply-reviewed" type="checkbox" disabled /> I reviewed this site's root, Nginx source and the shared reload; apply the fixed pre-location sensitive-path policy to this site only.</label>
+        <div class="ach-controls"><button id="ach-guard-apply" type="button" class="btn btn-warning" disabled>Apply site-sensitive protection (reload Nginx)</button></div>
+        <p id="ach-guard-restore-why" class="ach-availability" data-state="blocked" role="status">Restore is locked until fresh Recheck finds a saved recovery.</p>
+        <label><input id="ach-guard-restore-reviewed" type="checkbox" disabled /> I reviewed the saved Recovery ID and approve retiring only this site's exact managed include, with shared Nginx reload.</label>
+        <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Restore previous site Nginx protection</button></div>
+      </div>
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
       <h4>FastCGI Cache</h4>
@@ -823,7 +843,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.52'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.53'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1012,10 +1032,10 @@
       method === 'manage_local_hosts' ||
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
-      method === 'status_manage' || method === 'status_defaults' ||
+      method === 'manage_nginx_protection' || method === 'status_manage' || method === 'status_defaults' ||
       method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
-      method === 'fpm_policy_save' || method === 'manage_cache_policy';
+      method === 'fpm_policy_save' || method === 'manage_cache_policy' || method === 'manage_nginx_protection';
   }
   function validInventoryPage(r, expectedPage) {
     if (!r || typeof r !== 'object' || Array.isArray(r) ||
@@ -1087,7 +1107,7 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy)$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
       msg(t.loading, false);
     }
     $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
@@ -1128,7 +1148,8 @@
         if (/^fpm_(apply|rollback)$/.test(method)) showFpmOperationResult(method, null, 'unconfirmed');
         if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
           msg(t.error + ': ' + status +
-            ((/^fpm_(apply|rollback)$/.test(method) || (method === 'status_manage' && data.site_action !== 'recheck' ||
+            ((/^fpm_(apply|rollback)$/.test(method) || (method === 'manage_nginx_protection' && !['preview','recheck'].includes(data.guard_action) ||
+               method === 'status_manage' && data.site_action !== 'recheck' ||
                method === 'status_defaults' && data.default_action !== 'recheck' ||
                method === 'status_unbound' && data.unbound_action !== 'recheck' ||
                method === 'status_stopped' && data.stopped_action !== 'recheck' ||
@@ -1812,6 +1833,7 @@
     root.find('#ach-vhost-inspect-button').prop('disabled', vhostBusy || unready);
     root.find('#ach-nginx-candidate-button').prop('disabled', nginxCandidateBusy || unready);
     root.find('#ach-reconcile-button').prop('disabled', reconcileBusy || unready);
+    guardLock();
   }
   function invalidateVhostInspection(note) {
     ++reconcileTicket;
@@ -1826,6 +1848,7 @@
     inspectionSummary('vhost', 'Site selection changed. Compare its generated Nginx file again.');
     root.find('#ach-nginx-candidate-result').text(
       'Website selection or inventory changed; recheck Nginx candidate and local HTTP.');
+    guardReset();
     inspectionSummary('nginx-candidate', 'Site selection changed. Recheck the Nginx source and local HTTP.');
     vhostLock();
   }
@@ -2433,6 +2456,143 @@
         '\n' + r.note);
     });
   });
+  var guardBusy = false, guardTicket = 0, guardReady = null, guardRecovery = null;
+  function guardReset() {
+    ++guardTicket;
+    guardBusy = false;
+    guardReady = null;
+    guardRecovery = null;
+    root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').prop('checked',false);
+    root.find('#ach-guard-result').text('Website selection or source changed; run a fresh protection check.');
+    inspectionSummary('guard', 'Select a website and inspect its current Nginx security source.');
+    guardLock();
+  }
+  function guardLock() {
+    var id = hostsSiteId();
+    var blocked = guardBusy || !id || hostsBusy || siteBusy ||
+      websitePolicyState !== 'stable';
+    root.find('#ach-guard-preview,#ach-guard-recheck').prop('disabled',blocked);
+    var applyAllowed = !blocked && !!guardReady && guardReady.siteId === id;
+    var restoreAllowed = !blocked && !!guardRecovery && guardRecovery.siteId === id;
+    root.find('#ach-guard-apply-reviewed').prop('disabled',!applyAllowed);
+    root.find('#ach-guard-apply').prop('disabled',!applyAllowed ||
+      root.find('#ach-guard-apply-reviewed').prop('checked') !== true);
+    root.find('#ach-guard-restore-reviewed').prop('disabled',!restoreAllowed);
+    root.find('#ach-guard-restore').prop('disabled',!restoreAllowed ||
+      root.find('#ach-guard-restore-reviewed').prop('checked') !== true);
+    explainGate('ach-guard-apply-why',applyAllowed?'ready':'blocked',
+      !applyAllowed ? 'Locked: select a native website and run a fresh Unmanaged/Restored readiness check.' :
+      'Source and fixed policy plan verified. Review the shared Nginx reload and approve this exact site.');
+    explainGate('ach-guard-restore-why',restoreAllowed?'ready':'blocked',
+      !restoreAllowed ? 'Locked: run a fresh Recheck of this site with an Applied or Recovery Required saved operation.' :
+      'Recovery ID found. Review the site and approve retiring its exact managed include.');
+  }
+  function validGuardReport(r,id,action) {
+    var native = hostsPageSites.get(id);
+    var hash = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+    var token = v => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v);
+    if (!native || !r || r.status !== true || r.schema !== 1 ||
+        r.mode !== 'native_site_sensitive_paths' || r.ruleset !== 'nested-sensitive-v2' ||
+        r.site_id !== Number(id) || r.site_key !== native.name ||
+        typeof r.site_root !== 'string' ||
+        r.site_root !== JSON.parse(native.snapshot)[2] ||
+        !['Unmanaged','Applied','Restored','Recovery Required','Needs Review','Suspended'].includes(r.state) ||
+        typeof r.reason !== 'string' || r.reason.length > 600 ||
+        r.automatic_enforcement !== false || !hash(r.proposal_sha256) ||
+        !(r.vhost_sha256 === null || hash(r.vhost_sha256)) ||
+        !(r.recovery_id === null || token(r.recovery_id)) ||
+        !(r.journal_phase === null || ['prepared','applied','restored'].includes(r.journal_phase)) ||
+        typeof r.runtime_verified !== 'boolean' || typeof r.changed !== 'boolean' ||
+        typeof r.read_only !== 'boolean') return false;
+    var write = action === 'apply' || action === 'restore';
+    if (r.read_only === write || r.changed !== write) return false;
+    if (write && (r.runtime_verified !== true || !token(r.recovery_id) ||
+                  r.state !== (action === 'apply' ? 'Applied' : 'Restored'))) return false;
+    // Every journal-bearing state must have a durable Recovery ID, including
+    // read-only Preview/Recheck. Never display positive protection without it.
+    if ((r.recovery_id === null) !== (r.journal_phase === null)) return false;
+    if (r.state === 'Applied' &&
+        (!r.runtime_verified || !token(r.recovery_id) ||
+         r.journal_phase !== 'applied' || !hash(r.vhost_sha256))) return false;
+    if (r.state === 'Restored' &&
+        (!r.runtime_verified || !token(r.recovery_id) ||
+         r.journal_phase !== 'restored' || !hash(r.vhost_sha256))) return false;
+    if (r.state === 'Recovery Required' &&
+        (!token(r.recovery_id) || r.journal_phase !== 'prepared' ||
+         !hash(r.vhost_sha256))) return false;
+    if (r.state === 'Unmanaged' &&
+        (r.recovery_id !== null || r.journal_phase !== null ||
+         !hash(r.vhost_sha256))) return false;
+    if (['Unmanaged','Recovery Required','Needs Review','Suspended'].includes(r.state) &&
+        r.runtime_verified) return false;
+    return true;
+  }
+  function guardRequest(action) {
+    var id = hostsSiteId();
+    if (!id || guardBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var isApply = action === 'apply', isRestore = action === 'restore';
+    var selected = isApply ? guardReady : isRestore ? guardRecovery : null;
+    if ((isApply || isRestore) && (!selected || selected.siteId !== id ||
+        root.find(isApply ? '#ach-guard-apply-reviewed' : '#ach-guard-restore-reviewed').prop('checked') !== true)) return;
+    var ticket = ++guardTicket;
+    guardBusy = true;
+    guardLock();
+    inspectionSummary('guard', 'Checking native Nginx policy and recovery…');
+    root.find('#ach-guard-result').text(action === 'apply' || action === 'restore' ?
+      'Guarded Nginx operation in progress. A timeout does not imply rollback; inspect recovery.' :
+      'Inspecting native site source and managed protection state…');
+    var payload = Object.assign({guard_action:action},cacheNativeArgs(id));
+    if (isApply) {
+      payload.approved = 'true';
+      payload.expected_vhost_sha256 = selected.vhost;
+      payload.expected_proposal_sha256 = selected.proposal;
+    }
+    if (isRestore) {
+      payload.approved = 'true';
+      payload.recovery_id = selected.recovery;
+    }
+    request('manage_nginx_protection',payload,function (r,failure) {
+      if (ticket !== guardTicket) return;
+      guardBusy = false;
+      guardReady = null;
+      guardRecovery = null;
+      root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').prop('checked',false);
+      guardLock();
+      if (id !== hostsSiteId()) return;
+      if (!r || !validGuardReport(r,id,action)) {
+        inspectionSummary('guard','Protection result was refused or could not be verified; Recheck before another action.','review');
+        root.find('#ach-guard-result').text(cacheBackendFailure(failure,'nginx_guard_manage') ||
+          'Unconfirmed native Nginx protection result; inspect saved recovery and Activity before retry.');
+        return;
+      }
+      if ((action === 'preview' && ['Unmanaged','Restored'].includes(r.state)) &&
+          r.vhost_sha256 && r.proposal_sha256) {
+        guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256};
+      }
+      if (action === 'recheck' && ['Applied','Recovery Required'].includes(r.state) &&
+          /^[0-9a-f]{32}$/.test(r.recovery_id || '')) {
+        guardRecovery = {siteId:id,recovery:r.recovery_id};
+      }
+      guardLock();
+      inspectionSummary('guard',r.state + ': ' + r.reason,
+        ['Applied','Restored','Unmanaged'].includes(r.state) ? 'observed' : 'review');
+      root.find('#ach-guard-result').text(
+        'Native site: ' + r.site_key + ' (#' + r.site_id + ')' +
+        '\nDocument root: ' + r.site_root + '\nProtection: ' + r.state +
+        '\nVHost SHA-256: ' + (r.vhost_sha256 || 'Unverified') +
+        '\nPolicy SHA-256: ' + r.proposal_sha256 +
+        '\nRecovery ID: ' + (r.recovery_id || 'None') +
+        '\nJournal phase: ' + (r.journal_phase || 'None') +
+        '\nLive HTTP/80 guard nonce verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
+        '\nAutomatic enforcement: No\n' + r.reason +
+        '\nAfter changes, run Recheck. HTTPS, WAF and custom application exceptions require independent QA.');
+    });
+  }
+  root.find('#ach-guard-preview').on('click',function () {guardRequest('preview');});
+  root.find('#ach-guard-recheck').on('click',function () {guardRequest('recheck');});
+  root.find('#ach-guard-apply').on('click',function () {guardRequest('apply');});
+  root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
+  root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').on('change',guardLock);
   function validNginxHelperAudit(h) {
     if (!h || h.schema !== 1 ||
         h.active_verified !== false || h.purge_method_verified !== false ||
