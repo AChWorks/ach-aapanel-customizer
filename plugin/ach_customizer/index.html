@@ -467,12 +467,24 @@
     <section class="ach-view" id="ach-panel-routing" aria-labelledby="ach-tab-routing" data-view="routing" role="tabpanel" hidden>
       <h4>Routing &amp; Nginx</h4>
       <p class="ach-note">Inspect local hosts and Nginx sources for the selected website. These checks do not change routing or prove active Nginx worker state. Expand Technical evidence when needed.</p>
-      <p class="ach-note"><strong>Local hosts override check (read-only):</strong> inspect exact site-bound names in origin-local /etc/hosts. Loopback does not prove DNS or Gateway failure; no correction is offered.</p>
+      <p class="ach-note"><strong>Local hosts override:</strong> inspect exact site-bound names in the origin server's /etc/hosts. An unwanted loopback alias can be removed only after a fresh file/site inspection and explicit approval, with a saved original for guarded Restore. This neither proves remote DNS/Gateway failure nor prevents WordPress Toolkit from recreating the entry.</p>
       <div class="ach-controls"><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts file</button></div>
       <p class="ach-note">Use the shared website selector above. For another page, choose Browse websites. This checks the server's local file, not public DNS or a remote host.</p>
       <p id="ach-hosts-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Select a website, then inspect its local hosts entries.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-hosts-result" class="ach-status-metadata" role="status">Select a website from the inventory for read-only inspection.</p>
+      </details>
+      <details class="ach-help" id="ach-hosts-remediation">
+        <summary>Remove an unwanted local hosts alias (manual / recoverable)</summary>
+        <p>Choose only an alias positively identified as unwanted for this website. A loopback entry may be intentional. The action removes that exact domain's loopback aliases from this origin server, preserving unrelated names; it does not change external DNS or fix why a provisioning tool inserted the entry. An operation requires a fresh SHA-256 and selected-site identity; unsupported or changed source refuses the write.</p>
+        <label for="ach-hosts-removal-domain">Loopback alias from latest inspection</label>
+        <select id="ach-hosts-removal-domain" disabled><option value="">Inspect a selected website first</option></select>
+        <p id="ach-hosts-removal-why" class="ach-availability" data-state="blocked" role="status">Not available: inspect the selected website and review an unwanted alias.</p>
+        <label><input type="checkbox" id="ach-hosts-removal-reviewed" disabled /> I verified this alias is unintended and approve a recoverable, origin-local /etc/hosts edit.</label>
+        <div class="ach-controls"><button id="ach-hosts-removal-button" type="button" class="btn btn-warning" disabled>Remove selected loopback alias</button></div>
+        <p id="ach-hosts-recovery-why" class="ach-availability" data-state="blocked" role="status">No verified hosts recovery is available for this selection.</p>
+        <label><input type="checkbox" id="ach-hosts-restore-reviewed" disabled /> I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</label>
+        <div class="ach-controls"><button id="ach-hosts-restore-button" type="button" class="btn btn-warning" disabled>Restore saved local hosts file</button></div>
       </details>
       <hr />
       <div class="ach-note" aria-label="Selected website onboarding and recovery">
@@ -811,7 +823,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.51'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.52'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -997,6 +1009,7 @@
   }
   function hasPotentialActivity(method) {
     return method === 'set_control' || method === 'inspect_local_hosts' ||
+      method === 'manage_local_hosts' ||
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'status_manage' || method === 'status_defaults' ||
@@ -1707,6 +1720,7 @@
     });
   });
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
+  var hostsVerified = null;
   var cacheBusy = false, cacheTicket = 0;
   var cacheProbeBusy = false, cacheProbeTicket = 0;
   var cachePlanBusy = false, cachePlanTicket = 0;
@@ -1872,13 +1886,40 @@
     return /^[1-9][0-9]{0,9}$/.test(raw) && Number(raw) <= 2147483647 &&
       hostsPageSites.has(raw) ? raw : null;
   }
+  function hostsManageReset() {
+    hostsVerified = null;
+    root.find('#ach-hosts-removal-domain').empty().append(
+      $('<option>').val('').text('Inspect a selected website first')).val('');
+    root.find('#ach-hosts-removal-reviewed, #ach-hosts-restore-reviewed').prop('checked',false);
+    root.find('#ach-hosts-removal-why').text('Not available: inspect the selected website and review an unwanted alias.');
+    root.find('#ach-hosts-recovery-why').text('No verified hosts recovery is available for this selection.');
+  }
   function hostsLock(busy) {
     hostsBusy = busy;
-    root.find('#ach-hosts-site-id').prop('disabled', busy || siteBusy || websitePolicyState !== 'stable' || !hostsPageSites.size);
-    root.find('#ach-hosts-inspect-button').prop('disabled', busy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId());
+    // Loading/inspection locks the chooser; lack of a selection only locks
+    // site-dependent actions. Otherwise the first site could never be chosen.
+    var inventoryLocked = busy || siteBusy || websitePolicyState !== 'stable';
+    var blocked = inventoryLocked || !hostsSiteId();
+    root.find('#ach-hosts-site-id').prop('disabled', inventoryLocked || !hostsPageSites.size);
+    root.find('#ach-hosts-inspect-button').prop('disabled', blocked);
+    var fresh = !blocked && hostsVerified && hostsVerified.siteId === hostsSiteId();
+    var canChoose = fresh && hostsVerified.domains.length &&
+      ['None','Not Applied'].includes(hostsVerified.recovery.state) ||
+      fresh && hostsVerified.recovery.state === 'Needs Review' &&
+      /^[0-9a-f]{32}$/.test(hostsVerified.recovery.recovery_id || '');
+    var removable = canChoose && hostsVerified.domains.includes(String(root.find('#ach-hosts-removal-domain').val() || ''));
+    var recoverable = fresh && ['Applied','Not Applied'].includes(hostsVerified.recovery.state);
+    root.find('#ach-hosts-removal-domain').prop('disabled', !canChoose);
+    root.find('#ach-hosts-removal-reviewed').prop('disabled', !removable);
+    root.find('#ach-hosts-removal-button').prop('disabled', !removable ||
+      !root.find('#ach-hosts-removal-reviewed').prop('checked'));
+    root.find('#ach-hosts-restore-reviewed').prop('disabled', !recoverable);
+    root.find('#ach-hosts-restore-button').prop('disabled', !recoverable ||
+      !root.find('#ach-hosts-restore-reviewed').prop('checked'));
     cacheLock();
   }
   function resetHostsSelection(message) {
+    hostsManageReset();
     ++hostsTicket; // Supersede an in-flight inspection on page/navigation changes.
     hostsBusy = false;
     hostsPageSites = new Map();
@@ -1890,6 +1931,7 @@
     hostsLock(false);
   }
   function updateHostsSiteChoices(sites) {
+    hostsManageReset();
     var select = root.find('#ach-hosts-site-id').empty().val('');
     $('<option>').val('').text(sites.length ? 'Select a website on this page' : 'No websites on this page').appendTo(select);
     hostsPageSites = new Map();
@@ -1942,6 +1984,7 @@
       (r.state !== 'Needs Review' || r.uninspected_wildcards.length > 0);
   }
   root.find('#ach-hosts-site-id').on('input change', function () {
+    hostsManageReset();
     ++hostsTicket;
     root.find('#ach-hosts-result').text('Site selection changed; recheck.');
     siteContextNotice(hostsSiteId() ? 'Selected: ' + hostsPageSites.get(hostsSiteId()).name +
@@ -1957,6 +2000,7 @@
     var id = hostsSiteId();
     if (!id || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var ticket = ++hostsTicket;
+    hostsManageReset();
     root.find('#ach-hosts-result').text('Inspecting origin-local file only...');
     inspectionSummary('hosts', 'Checking this server’s local hosts file…');
     hostsLock(true);
@@ -1979,6 +2023,27 @@
         var rows = r.entries.map(x =>
           'Line ' + x.line + ': ' + x.domain + ' -> ' + x.address +
           (x.loopback ? ' (loopback)' : ' (non-loopback)'));
+        var recovery = r.hosts_recovery;
+        if (recovery && ['None','Applied','Not Applied','Needs Review','restored'].includes(recovery.state) &&
+            (recovery.recovery_id === null || /^[0-9a-f]{32}$/.test(recovery.recovery_id)) &&
+            (recovery.domain === null || r.domains.includes(recovery.domain))) {
+          var removable = [...new Set(r.entries.filter(x => x.loopback &&
+            !['localhost','ip6-localhost','ip6-loopback'].includes(x.domain)).map(x => x.domain))];
+          hostsVerified = {siteId:id,sha:r.hosts_sha256,domains:removable,recovery:recovery};
+          var selector = root.find('#ach-hosts-removal-domain').empty();
+          $('<option>').val('').text('Choose a loopback alias').appendTo(selector);
+          removable.forEach(function (domain) {
+            $('<option>').val(domain).text(domain).appendTo(selector);
+          });
+          root.find('#ach-hosts-removal-why').text(removable.length && (['None','Not Applied'].includes(recovery.state) ||
+            recovery.state === 'Needs Review' && !!recovery.recovery_id) ?
+            'Select an unintended alias and approve Remove. If prior recovery is Needs Review, the old backup is retained but cannot be blindly restored.' :
+            'No eligible loopback alias or an existing recovery must be reconciled first.');
+          root.find('#ach-hosts-recovery-why').text(
+            'Saved hosts recovery: ' + recovery.state +
+            (recovery.recovery_id ? ' | ID: ' + recovery.recovery_id : '') +
+            '. Restore requires the exact post-Apply file without intervening edits.');
+        }
         root.find('#ach-hosts-result').text(
           'State: ' + r.state + ' — ' + r.reason +
           '\nSite: ' + r.site_key + ' (ID ' + r.site_id + ')' +
@@ -1990,6 +2055,60 @@
       hostsLock(false);
     });
   });
+  root.find('#ach-hosts-removal-domain, #ach-hosts-removal-reviewed, #ach-hosts-restore-reviewed').on('change', function () {
+    hostsLock(false);
+  });
+  function dispatchHostsManage(action) {
+    var id = hostsSiteId(), current = hostsVerified;
+    if (!id || hostsBusy || siteBusy || websitePolicyState !== 'stable' ||
+        !current || current.siteId !== id) return;
+    var removing = action === 'remove';
+    var domain = String(root.find('#ach-hosts-removal-domain').val() || '');
+    if (removing && (!current.domains.includes(domain) ||
+        !(['None','Not Applied'].includes(current.recovery.state) ||
+          current.recovery.state === 'Needs Review' && !!current.recovery.recovery_id) ||
+                     !root.find('#ach-hosts-removal-reviewed').prop('checked'))) return;
+    if (!removing && (!['Applied','Not Applied'].includes(current.recovery.state) ||
+        !/^[0-9a-f]{32}$/.test(current.recovery.recovery_id || '') ||
+        !root.find('#ach-hosts-restore-reviewed').prop('checked'))) return;
+    var ticket = ++hostsTicket;
+    hostsLock(true);
+    inspectionSummary('hosts', 'Submitting reviewed origin-local hosts operation...', 'review');
+    var data = {site_id:id,expected_site_key:hostsPageSites.get(id).name,
+      expected_site_snapshot:hostsPageSites.get(id).snapshot,
+      hosts_action:action,reviewed:'true'};
+    if (removing) {
+      data.domain=domain;
+      data.expected_hosts_sha256=current.sha;
+    } else data.recovery_id=current.recovery.recovery_id;
+    request('manage_local_hosts', data, function (r) {
+      if (ticket !== hostsTicket) return;
+      hostsManageReset();
+      var success = r && r.status === true && r.schema === 1 &&
+        r.site_id === Number(id) && r.site_key === hostsPageSites.get(id)?.name &&
+        typeof r.changed === 'boolean' && r.read_only === false &&
+        r.remote_dns_verified === false && r.gateway_verified === false &&
+        /^[0-9a-f]{64}$/.test(r.hosts_sha256 || '') &&
+        /^[0-9a-f]{32}$/.test(r.recovery_id || '') &&
+        r.state === (removing ? 'Alias Removed' : 'Restored');
+      var failure = r && r.status === false && typeof r.msg === 'string' ?
+        r.msg.slice(0, 300) : 'Request outcome unconfirmed';
+      var failedRecovery = r && /^[0-9a-f]{32}$/.test(r.recovery_id || '') ?
+        '\nRecovery ID: ' + r.recovery_id : '';
+      root.find('#ach-hosts-result').text(success ?
+        'Hosts operation: ' + r.state + ' | ' + r.domain +
+        '\nRecovery ID: ' + r.recovery_id + '\nReinspect before any further changes.' :
+        'Hosts operation refused or uncertain: ' + failure + failedRecovery +
+        '\nReinspect current file and Activity before any retry.');
+      inspectionSummary('hosts', success ?
+        'Origin-local hosts operation verified. Reinspect now; DNS/Gateway and repeat insertion remain unverified.' :
+        'Hosts result uncertain/refused. Recheck and inspect Activity before retrying.',
+        success ? 'observed' : 'review');
+      hostsLock(false);
+    });
+  }
+  root.find('#ach-hosts-removal-button').on('click', function () { dispatchHostsManage('remove'); });
+  root.find('#ach-hosts-restore-button').on('click', function () { dispatchHostsManage('restore'); });
   function validReconciliation(r, id) {
     var site = hostsPageSites.get(id);
     if (!site || !r || r.status !== true || r.schema !== 1 ||

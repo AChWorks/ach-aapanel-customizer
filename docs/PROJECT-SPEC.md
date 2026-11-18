@@ -54,6 +54,30 @@ The product should produce these lasting outcomes:
 
 Correctness, continuity, usability, and recoverability matter more than the quantity of settings exposed.
 
+### Owner-confirmed operational acceptance priority (2026-11-18)
+
+The existing Monitor/manual-preview foundation is **not** the operational
+completion criterion. Priority outcome is to make recurrent aaPanel/WordPress
+provisioning/configuration failures stop requiring repeated manual repair, and
+to enforce explicitly opted-in, site/service-scoped protections against
+known sensitive-file exposure and abusive traffic. In particular, preserve
+approved shared PHP-FPM settings automatically after compatible lifecycle
+changes (with verified, recoverable native event/reconciliation ownership),
+provide narrow reviewed correction of unwanted local hosts aliases plus a
+reproducible prevention path, implement verified Nginx-sensitive-path and
+pre-PHP anti-scan rules, and address actual HTTP/2/HTTP/3-aware site-log
+Fail2ban compatibility. Site-level `.well-known`/OAuth/hotlink exceptions
+and authorized WordPress HTTPS URL, debugging, Cron and XML-RPC corrections
+are also required operational outcomes, not simply a list of diagnostics.
+
+Keep installation itself observation-only; automatic remediation begins
+only after explicit primary-admin approval of the particular compatible
+site/service policy. Unknown vendor layouts, IP trust assumptions, external
+WordPress integrations and Production deployments require their respective
+review/approval and working rollback. Issue #2 holds the exact current
+acceptance matrix; #21 holds installed/negative/recovery verification.
+
+
 ## 3. Users and product experience
 
 **Primary user:** the full primary aaPanel administrator operating one or multiple websites and server modules on a managed Linux host. The accepted initial usage model is **one primary administrator**; secondary Admin/Operator accounts and paid multi-user provisioning are not requirements or release blockers, without weakening existing session/CSRF authorization.

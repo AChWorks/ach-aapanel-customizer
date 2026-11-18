@@ -55,6 +55,9 @@ function loadUi() {
     '#ach-site-changes-selected-evidence', '#ach-site-changes-selected-reviewed',
     '#ach-site-changes-selected-why', '#ach-site-changes-save-selected',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
+    '#ach-hosts-removal-domain', '#ach-hosts-removal-why', '#ach-hosts-removal-reviewed',
+    '#ach-hosts-removal-button', '#ach-hosts-recovery-why',
+    '#ach-hosts-restore-reviewed', '#ach-hosts-restore-button',
     '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-reconcile-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
@@ -336,6 +339,10 @@ function loadUi() {
     return {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
+      hostsRemovalDisabled: elements.get('#ach-hosts-removal-button').props.disabled,
+      hostsRemovalSelectDisabled: elements.get('#ach-hosts-removal-domain').props.disabled,
+      hostsRemovalChoices: elements.get('#ach-hosts-removal-domain').children.map(o => o.props.value),
+      hostsRestoreDisabled: elements.get('#ach-hosts-restore-button').props.disabled,
       cacheResult: elements.get('#ach-cache-result').textContent,
       privateCacheProbeResult: elements.get('#ach-cache-private-probe-result').textContent,
       privateCacheProbeDisabled: elements.get('#ach-cache-private-probe-button').props.disabled,
@@ -1609,6 +1616,7 @@ const hostsInspection = (overrides={}) => ({
   hosts_sha256:'a'.repeat(64),domains:['site.test'],
   uninspected_wildcards:[],
   entries:[{domain:'site.test',address:'127.0.0.2',line:3,loopback:true}],
+  hosts_recovery:{state:'None',recovery_id:null,domain:null},
   note:'Origin local only; Gateway unverified.',...overrides
 });
 
@@ -1623,6 +1631,38 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
   ui.respond(inventory);
   ui.statusSetValue('#ach-hosts-site-id',id,'input change');
 }
+
+test('Valid website inventory unlocks initial site selection without authorizing any write', () => {
+  const ui = loadUi();
+  // The fake DOM does not reflect markup's initial disabled attribute.
+  // Exercise the real script's loading lock before accepting an inventory.
+  ui.openSites();
+  assert.equal(ui.state().hostsSelectorDisabled, true, 'Loading locks chooser');
+  ui.respond(hostsInventory());
+  assert.equal(ui.state().hostsSelectorDisabled, false,
+    'A fresh valid inventory must allow the first site to be selected');
+  assert.equal(ui.state().hostsInspectDisabled, true, 'No site selected yet');
+  assert.equal(ui.state().hostsRemovalDisabled, true, 'No unreviewed removal');
+
+  ui.statusSetValue('#ach-hosts-site-id', '7', 'input change');
+  assert.equal(ui.state().hostsSelectorDisabled, false);
+  assert.equal(ui.state().hostsInspectDisabled, false, 'Known selected site enables read-only check');
+  assert.equal(ui.state().hostsRemovalDisabled, true);
+
+  ui.openTab('routing');
+  ui.statusClick('#ach-hosts-inspect-button');
+  const req = ui.requests.at(-1);
+  assert.match(req.options.url, /s=inspect_local_hosts$/);
+  assert.equal(ui.state().hostsSelectorDisabled, true, 'Inspection temporarily locks chooser');
+  req.respond(hostsInspection());
+  assert.equal(ui.state().hostsSelectorDisabled, false);
+  assert.equal(ui.state().hostsRemovalDisabled, true, 'Remediation still requires reviewed alias');
+
+  ui.statusSetValue('#ach-hosts-site-id', '', 'input change');
+  assert.equal(ui.state().hostsSelectorDisabled, false,
+    'Clearing selection must not permanently lock chooser');
+  assert.equal(ui.state().hostsInspectDisabled, true);
+});
 
 const nginxHelperAudit = (overrides={}) => ({
   schema:1,state:'Not Installed',version:null,active_verified:false,
@@ -3023,6 +3063,68 @@ test('Native-site local hosts inspection reports loopback without claiming Gatew
   assert.equal(ui.state().hostsInspectDisabled,false);
   ui.statusSetValue('#ach-hosts-site-id','8','input change');
   assert.match(ui.state().hostsResult,/Site selection changed/);
+});
+
+test('Hosts remediation requires a fresh inspected alias and distinct explicit consent', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  assert.equal(ui.state().hostsRemovalDisabled,true);
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection());
+  assert.equal(ui.state().hostsRemovalSelectDisabled,false);
+  assert.deepEqual(ui.state().hostsRemovalChoices,['','site.test']);
+  assert.equal(ui.state().hostsRemovalDisabled,true);
+  ui.statusSetValue('#ach-hosts-removal-domain','site.test','change');
+  assert.equal(ui.state().hostsRemovalDisabled,true,'Consent is not implicit');
+  ui.statusSetChecked('#ach-hosts-removal-reviewed',true,'input change');
+  assert.equal(ui.state().hostsRemovalDisabled,false);
+  const write=ui.statusClick('#ach-hosts-removal-button');
+  assert.match(write.options.url,/s=manage_local_hosts$/);
+  assert.equal(write.options.data.hosts_action,'remove');
+  assert.equal(write.options.data.domain,'site.test');
+  assert.equal(write.options.data.expected_hosts_sha256,'a'.repeat(64));
+  assert.equal(write.options.data.reviewed,'true');
+  assert.equal(ui.state().hostsRemovalDisabled,true);
+  write.respond({status:true,schema:1,state:'Alias Removed',read_only:false,
+    changed:true,site_id:7,site_key:'site.test',domain:'site.test',
+    recovery_id:'b'.repeat(32),hosts_sha256:'c'.repeat(64),
+    remote_dns_verified:false,gateway_verified:false});
+  assert.match(ui.state().hostsResult,/Alias Removed/);
+  assert.equal(ui.state().hostsRemovalDisabled,true,'Reinspection is mandatory');
+
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection({
+    state:'No Local Loopback Entry',entries:[],reason:'No loopback',
+    hosts_sha256:'c'.repeat(64),
+    hosts_recovery:{state:'Applied',recovery_id:'b'.repeat(32),domain:'site.test'}
+  }));
+  assert.equal(ui.state().hostsRestoreDisabled,true);
+  ui.statusSetChecked('#ach-hosts-restore-reviewed',true,'input change');
+  assert.equal(ui.state().hostsRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-hosts-restore-button');
+  assert.equal(restore.options.data.hosts_action,'restore');
+  assert.equal(restore.options.data.recovery_id,'b'.repeat(32));
+  restore.respond({status:true,schema:1,state:'Restored',read_only:false,
+    changed:true,site_id:7,site_key:'site.test',domain:'site.test',
+    recovery_id:'b'.repeat(32),hosts_sha256:'a'.repeat(64),
+    remote_dns_verified:false,gateway_verified:false});
+  assert.match(ui.state().hostsResult,/Restored/);
+  assert.equal(ui.state().hostsRestoreDisabled,true);
+});
+
+test('Hosts remediation is revoked on site change and cannot reuse stale inspector evidence', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection());
+  ui.statusSetValue('#ach-hosts-removal-domain','site.test','change');
+  ui.statusSetChecked('#ach-hosts-removal-reviewed',true,'input change');
+  const pending=ui.statusClick('#ach-hosts-removal-button');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond({status:true,schema:1,state:'Alias Removed',read_only:false,
+    changed:true,site_id:7,site_key:'site.test',domain:'site.test',
+    recovery_id:'b'.repeat(32),hosts_sha256:'c'.repeat(64),
+    remote_dns_verified:false,gateway_verified:false});
+  assert.match(ui.state().hostsResult,/Site selection changed/);
+  assert.equal(ui.state().hostsRemovalDisabled,true);
+  assert.equal(ui.state().hostsRestoreDisabled,true);
 });
 
 test('Invalid or cross-site hosts responses cannot masquerade as confirmed result', () => {

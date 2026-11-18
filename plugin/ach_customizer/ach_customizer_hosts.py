@@ -205,5 +205,6 @@ def inspect_local_hosts(domains, *, source_path=HOSTS_PATH):
         "note": ("Snapshot of /etc/hosts text on the aaPanel origin only. "
                  "This does not determine OS resolver precedence, public DNS, "
                  "proxy behavior, another host/Gateway's resolution or connectivity. "
-                 "Loopback aliases may be intentional. No correction is available."),
+                 "Loopback aliases may be intentional. Separate reviewed manual removal is "
+                 "available only with the current file and native website identity."),
     }
