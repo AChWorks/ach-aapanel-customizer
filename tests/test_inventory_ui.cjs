@@ -1634,7 +1634,8 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
 
 test('Valid website inventory unlocks initial site selection without authorizing any write', () => {
   const ui = loadUi();
-  assert.equal(ui.state().hostsSelectorDisabled, true, 'No inventory before load');
+  // The fake DOM does not reflect markup's initial disabled attribute.
+  // Exercise the real script's loading lock before accepting an inventory.
   ui.openSites();
   assert.equal(ui.state().hostsSelectorDisabled, true, 'Loading locks chooser');
   ui.respond(hostsInventory());
