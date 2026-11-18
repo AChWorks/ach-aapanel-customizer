@@ -456,7 +456,17 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 "vhost_sha": source_sha, "include_sha": _sha(include_bytes),
             }
             _save_journal(data_fd, created)
-            _publish_complete(extension_fd, filename, include_bytes, 0o600, op)
+            try:
+                _publish_complete(extension_fd, filename, include_bytes, 0o600, op)
+            except ExtensionError as exc:
+                # The shared publisher raises ExtensionError, not GuardError.
+                # Only this owned, post-journal publication boundary may
+                # promote the locally generated durable recovery identity.
+                raise GuardError(
+                    "uncertain", "Nginx security publication unconfirmed; "
+                    "Recheck saved Recovery ID before another action",
+                    recovery_id=op,
+                ) from exc
             # If syntax fails, retire the file before a reload; keep journal
             # and retained asset for explicit Recheck/Restore.
             try:

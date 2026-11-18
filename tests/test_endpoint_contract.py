@@ -267,7 +267,7 @@ class EntrypointTests(unittest.TestCase):
     def test_nginx_guard_failure_activity_uses_verified_target_and_typed_phase(self):
         from ach_customizer_activity import read_activity
         from ach_customizer_monitor import MonitorInputError
-        from ach_customizer_nginx_security import GuardError
+        from ach_customizer_nginx_security import GuardError, ExtensionError
 
         site = {"id": 9, "name": "paths85.aitest.gotohell.top",
                 "path": "/www/acdomains/paths85.aitest.gotohell.top",
@@ -340,6 +340,16 @@ class EntrypointTests(unittest.TestCase):
             assert_failure("preview",
                            GuardError("source", "Native selected VHost is absent"),
                            "9", "nginx_guard_source")
+            # Shared Nginx helpers raise their own ExtensionError class.
+            # These failures have typed stages but no owned recovery ID.
+            for stage in ("source", "ownership", "concurrency"):
+                assert_failure("preview",
+                               ExtensionError(stage, "Native source cannot be trusted"),
+                               "9", "nginx_guard_" + stage)
+            assert_failure("apply",
+                           ExtensionError("uncertain", "Raw helper exception",
+                                          recovery_id="f" * 32),
+                           "9", "nginx_guard_uncertain")
             for action in ("apply", "restore"):
                 response, activity = assert_failure(
                     action, GuardError("uncertain",
@@ -358,6 +368,119 @@ class EntrypointTests(unittest.TestCase):
             self.assertNotIn("PRIVATE", str(response))
             self.assertNotIn("PRIVATE", str(activity))
             self.assertEqual(activity["error_class"], "Unexpected")
+
+    def test_nginx_guard_real_publisher_failure_retains_endpoint_recovery(self):
+        # Exercise the actual shared publisher through the native endpoint,
+        # not merely a mocked GuardError injected at the endpoint boundary.
+        import json
+        import ach_customizer_nginx_security as manager
+        import ach_customizer_status_extension as publisher
+        from ach_customizer_activity import read_activity
+
+        with tempfile.TemporaryDirectory(prefix="ach-native-guard-endpoint-") as tmp:
+            root = Path(tmp)
+            vhosts = root / "nginx"
+            ext = vhosts / "extension" / "endpoint.invalid"
+            ext.mkdir(parents=True)
+            document_root = root / "websites" / "endpoint.invalid"
+            document_root.mkdir(parents=True)
+            site = {
+                "id": 9, "name": "endpoint.invalid",
+                "path": str(document_root), "status": "1",
+                "bound_domains": [{"name": "endpoint.invalid", "port": 80}],
+            }
+            (vhosts / "endpoint.invalid.conf").write_text(
+                "server {\nlisten 80;\nserver_name endpoint.invalid;\n"
+                "root " + str(document_root) + ";\n"
+                "error_page 404 /404.html;\nerror_page 502 /502.html;\n"
+                "include " + str(ext) + "/*.conf;\n"
+                "include enable-php-85.conf;\n}\n")
+            conf = root / "nginx.conf"
+            conf.write_text(
+                "events {worker_connections 100;}\n"
+                "http {include " + str(vhosts) + "/*.conf;}\n")
+
+            fake_public = types.ModuleType("public")
+            fake_public.get_webserver = lambda: "nginx"
+            fake_public.get_panel_version = lambda: "8.0.7"
+
+            class OneSite:
+                def where(self, *args):
+                    return self
+                def field(self, *args):
+                    return self
+                def limit(self, *args):
+                    return self
+                def select(self):
+                    return [{"id": 9, "path": str(document_root)}]
+
+            fake_public.M = lambda _: OneSite()
+            flask_stub = types.ModuleType("flask")
+            flask_stub.session = {"uid": 1, "login": True}
+            flask_stub.request = types.SimpleNamespace(method="POST")
+            flask_stub.has_request_context = lambda: True
+
+            original_manage = manager.manage_guard
+            original_rename = publisher._rename_noreplace
+
+            def adapted_manage(action, selected, **kwargs):
+                return original_manage(
+                    action, selected, **kwargs,
+                    vhost_root=str(vhosts), nginx_conf=str(conf),
+                    nginx="/test/nginx",
+                    runner=lambda *args, **kw: types.SimpleNamespace(
+                        returncode=0, stderr=b""),
+                    probe=lambda *args: (404, None))
+
+            def renamed_but_unconfirmed(fd, before, after):
+                original_rename(fd, before, after)
+                raise OSError(5, "simulated uncertain extension sync")
+
+            with patch.dict(sys.modules, {"public": fake_public, "flask": flask_stub}), patch.object(
+                    self.plugin, "_selected_native_website", return_value=(
+                        fake_public, site, lambda: site)), patch.object(
+                    manager, "manage_guard", side_effect=adapted_manage):
+                preview = self.plugin.manage_nginx_protection(
+                    {"guard_action": "preview"})
+                self.assertTrue(preview["status"], preview)
+                with patch.object(publisher, "_rename_noreplace",
+                                  side_effect=renamed_but_unconfirmed):
+                    response = self.plugin.manage_nginx_protection({
+                        "guard_action": "apply", "approved": "true",
+                        "expected_vhost_sha256": preview["vhost_sha256"],
+                        "expected_proposal_sha256": preview["proposal_sha256"],
+                    })
+
+                self.assertFalse(response["status"], response)
+                self.assertEqual(response["stage"], "nginx_guard_manage")
+                recovery = response.get("recovery_id")
+                self.assertRegex(recovery or "", r"^[0-9a-f]{32}$")
+                self.assertNotEqual(response["operation_id"], recovery)
+                self.assertEqual(response["request_id"], response["operation_id"])
+                activity = read_activity(self.state_dir.name, module="websites")[0]
+                self.assertEqual(activity["target"], "9")
+                self.assertEqual(activity["stage"], "nginx_guard_uncertain")
+                self.assertEqual(activity["error_class"], "GuardError")
+                self.assertEqual(activity["operation_id"], response["operation_id"])
+                self.assertEqual(activity["recovery_id"], recovery)
+
+                saved = json.loads(
+                    (Path(self.state_dir.name) / manager._journal(9)).read_text())
+                self.assertEqual(saved["phase"], "prepared")
+                self.assertEqual(saved["op"], recovery)
+                fragment = ext / manager._file(9)
+                self.assertEqual(fragment.read_bytes(), manager._include(recovery))
+                observed = self.plugin.manage_nginx_protection(
+                    {"guard_action": "recheck"})
+                self.assertTrue(observed["status"], observed)
+                self.assertEqual(observed["state"], "Recovery Required")
+                restored = self.plugin.manage_nginx_protection({
+                    "guard_action": "restore", "approved": "true",
+                    "recovery_id": recovery,
+                })
+                self.assertTrue(restored["status"], restored)
+                self.assertEqual(restored["state"], "Restored")
+                self.assertFalse(fragment.exists())
 
     def test_no_auth_bypassing_dynamic_check_or_mutation_entrypoint(self):
         self.assertNotIn('_check', vars(MODULE.ach_customizer_main))

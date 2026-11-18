@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 import sys
@@ -221,6 +222,39 @@ class NativeSecurityTests(unittest.TestCase):
             self.operate("preview")
         with self.assertRaises(guard.ExtensionError):
             self.operate("apply")
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+
+    def test_shared_publication_error_preserves_prepared_guard_recovery(self):
+        # The shared publisher raises ExtensionError (not GuardError). Simulate
+        # uncertain durability after the no-clobber rename has already landed.
+        import ach_customizer_status_extension as publisher
+        original_rename = publisher._rename_noreplace
+
+        def renamed_but_unconfirmed(fd, before, after):
+            original_rename(fd, before, after)
+            raise OSError(5, "simulated uncertain directory sync after rename")
+
+        with patch.object(publisher, "_rename_noreplace",
+                          side_effect=renamed_but_unconfirmed):
+            with self.assertRaises(guard.GuardError) as captured:
+                self.operate("apply")
+
+        failure = captured.exception
+        self.assertEqual(failure.stage, "uncertain")
+        self.assertRegex(failure.recovery_id or "", r"^[0-9a-f]{32}$")
+        self.assertIs(type(failure.__cause__), guard.ExtensionError)
+        self.assertEqual(failure.__cause__.recovery_id, failure.recovery_id)
+        self.assertNotIn("Status publication", str(failure))
+        journal = json.loads(
+            (self.state / guard._journal(self.site["id"])).read_text())
+        self.assertEqual(journal["phase"], "prepared")
+        self.assertEqual(journal["op"], failure.recovery_id)
+        self.assertEqual(self.fragment.read_bytes(), guard._include(journal["op"]))
+        self.assertFalse(self.active)
+        self.assertEqual(self.operate("recheck")["state"], "Recovery Required")
+        self.assertEqual(
+            self.operate("restore", recovery=journal["op"])["state"], "Restored")
+        self.assertFalse(self.fragment.exists())
         self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
 
     def test_syntax_failure_retains_recovery_without_nonspecific_reload(self):

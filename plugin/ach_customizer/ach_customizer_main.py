@@ -694,7 +694,7 @@ class ach_customizer_main:
         request_id = uuid4().hex
         action = self._argument(args, "guard_action")
         trusted_site_id = ""
-        guard_error_type = None
+        guard_stage_error_type = None
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
@@ -704,8 +704,10 @@ class ach_customizer_main:
             if (public.get_webserver() != "nginx" or
                     str(public.get_panel_version()).strip() != "8.0.7"):
                 raise MonitorInputError("Nginx security adapter requires aaPanel 8.0.7 Nginx")
-            from ach_customizer_nginx_security import manage_guard, GuardError
-            guard_error_type = GuardError
+            from ach_customizer_nginx_security import (
+                manage_guard, GuardError, ExtensionError,
+            )
+            guard_stage_error_type = ExtensionError
             from ach_customizer_state import _open_state_dir
             from ach_customizer_status_pages import _take_lock
             public, before, current_site = self._selected_native_website(args)
@@ -754,11 +756,12 @@ class ach_customizer_main:
             return self._fail("nginx_guard_authorization", exc, request_id,
                               target=trusted_site_id)
         except Exception as exc:
-            # Preserve a bounded, trusted GuardError phase in private Activity
-            # without changing the public action or recovery correlation.
+            # Both GuardError and the inherited native helper ExtensionError
+            # have trusted typed stages. Only GuardError may supply an owned
+            # Recovery ID at _fail; an arbitrary exception cannot inject one.
             phase = (getattr(exc, "stage", None)
-                     if guard_error_type and isinstance(exc, guard_error_type)
-                     else None)
+                     if guard_stage_error_type and
+                     isinstance(exc, guard_stage_error_type) else None)
             typed_stage = ("nginx_guard_" + phase
                            if isinstance(phase, str) and
                            re.fullmatch(r"[a-z][a-z_]{0,31}", phase) else None)

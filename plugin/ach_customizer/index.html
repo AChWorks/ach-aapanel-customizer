@@ -531,7 +531,7 @@
       <div class="ach-note" aria-label="Native site sensitive-path protection">
         <strong>Site-sensitive file protection — opt-in</strong>
         <p>Use the verified aaPanel 8.0.7 Nginx site extension (not .htaccess) to stop nested .env/.htaccess, backup-directory downloads and PHP execution from upload/media/tmp paths before PHP-FPM. Native site root is detected automatically; no /www/wwwroot assumption. Ordinary .well-known/OAuth/ACME URLs remain eligible. This rule does not claim every upload layout or HTTPS reverse-proxy path is covered.</p>
-        <p>A supported source is required. Apply creates one recoverable site-owned include, syntax-tests and reloads shared Nginx, then checks four real HTTP/80 guard locations three times. Restore is a separately approved Nginx reload. Neither option is automatic; source changes or interrupted operations require Recheck.</p>
+        <p>A supported source is required. Apply creates one recoverable site-owned include, syntax-tests and reloads shared Nginx, then checks real HTTP/80 guard paths over three consecutive rounds. Restore is a separately approved Nginx reload. Neither option is automatic; source changes or interrupted operations require Recheck.</p>
         <div class="ach-controls">
           <button id="ach-guard-preview" type="button" disabled>Check sensitive-path protection readiness</button>
           <button id="ach-guard-recheck" type="button" disabled>Recheck protection / recovery</button>
