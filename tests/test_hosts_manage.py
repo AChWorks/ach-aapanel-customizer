@@ -300,6 +300,124 @@ class NativeHostsManagementEndpointTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), original)
         self.assertEqual(self.read_count, 0)
 
+    def test_uncertain_postwrite_failure_persists_exact_recovery_correlation(self):
+        from ach_customizer_activity import read_activity
+        original = self.source.read_bytes()
+        original_save = manager._save_record
+
+        def fail_after_source_write(fd, site, row):
+            if row["phase"] == "applied":
+                raise OSError("PRIVATE failure injected after replacement")
+            return original_save(fd, site, row)
+
+        with patch.object(manager, "_save_record", side_effect=fail_after_source_write):
+            failed = self.call("remove")
+        self.assertIs(failed["status"], False)
+        self.assertEqual(failed["stage"], "hosts_management")
+        self.assertTrue(failed["activity_logged"])
+        recovery_id = failed["recovery_id"]
+        self.assertRegex(recovery_id, r"^[0-9a-f]{32}$")
+        self.assertNotEqual(failed["operation_id"], recovery_id)
+        self.assertEqual(failed["request_id"], failed["operation_id"])
+        self.assertEqual(self.source.read_bytes(), b"127.0.0.1 localhost\n")
+        self.assertNotIn("PRIVATE", str(failed))
+
+        events = read_activity(str(self.data), module="websites")
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event["action"], "hosts_management")
+        self.assertEqual(event["stage"], "hosts_management")
+        self.assertEqual(event["outcome"], "failed")
+        self.assertEqual(event["error_class"], "HostsManageError")
+        self.assertEqual(event["recovery_id"], recovery_id)
+        self.assertEqual(event["operation_id"], failed["operation_id"])
+        self.assertEqual(event["target"], "7")
+        self.assertNotIn("PRIVATE", str(event))
+        self.assertEqual(manager.inspect_recovery(
+            self.site, source_path=str(self.source), data_dir=str(self.data)),
+            {"state": "Applied", "recovery_id": recovery_id, "domain": "site.test"})
+
+        restored = self.call("restore", recovery_id=recovery_id)
+        self.assertTrue(restored["status"], restored)
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual(read_activity(str(self.data), module="websites")[0]["recovery_id"],
+                         recovery_id)
+        self.assertEqual(manager.inspect_recovery(
+            self.site, source_path=str(self.source), data_dir=str(self.data))["state"],
+            "restored")
+
+    def test_uncertain_prewrite_failure_retains_recovery_and_not_applied_state(self):
+        from ach_customizer_activity import read_activity
+        original_replace = manager.os.replace
+
+        def fail_source_replace(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+            if dst == "hosts":
+                raise PermissionError("PRIVATE prewrite rename failure")
+            return original_replace(src, dst, src_dir_fd=src_dir_fd,
+                                    dst_dir_fd=dst_dir_fd)
+
+        with patch.object(manager.os, "replace", side_effect=fail_source_replace):
+            failed = self.call("remove")
+        self.assertFalse(failed["status"])
+        self.assertRegex(failed["recovery_id"], r"^[0-9a-f]{32}$")
+        events = read_activity(str(self.data), module="websites")
+        self.assertEqual(events[0]["recovery_id"], failed["recovery_id"])
+        self.assertEqual(events[0]["operation_id"], failed["operation_id"])
+        self.assertEqual(events[0]["target"], "7")
+        self.assertNotIn("PRIVATE", str(events[0]))
+        state = manager.inspect_recovery(
+            self.site, source_path=str(self.source), data_dir=str(self.data))
+        self.assertEqual(state["state"], "Not Applied")
+        self.assertEqual(state["recovery_id"], failed["recovery_id"])
+
+    def test_failed_hosts_authorization_and_preflight_never_fabricate_recovery(self):
+        from ach_customizer_activity import read_activity
+        before = self.source.read_bytes()
+        for denied in (self.call("remove", flask=self.flask(uid=2)),
+                       self.call("remove", reviewed="false"),
+                       self.call("remove", domain="unrelated.test"),
+                       self.call("restore", recovery_id="f" * 32)):
+            self.assertFalse(denied["status"])
+            self.assertNotIn("recovery_id", denied)
+            self.assertEqual(self.source.read_bytes(), before)
+        entries = read_activity(str(self.data), module="websites", limit=20)
+        self.assertEqual(len(entries), 4)
+        self.assertTrue(all(row["recovery_id"] == "" for row in entries))
+        # Activity is newest first: failed preflight after selection, then
+        # failed authorization/approval before native site selection.
+        self.assertEqual([row["target"] for row in entries], ["7", "7", "", ""])
+
+    def test_restore_external_source_drift_logs_saved_recovery_and_needs_review(self):
+        from ach_customizer_activity import read_activity
+        applied = self.call("remove")
+        self.assertTrue(applied["status"])
+        self.source.write_bytes(b"127.0.0.1 localhost\n127.0.0.8 peer.test\n")
+        denied = self.call("restore", recovery_id=applied["recovery_id"])
+        self.assertFalse(denied["status"])
+        self.assertEqual(denied["stage"], "hosts_management")
+        self.assertEqual(denied["recovery_id"], applied["recovery_id"])
+        latest = read_activity(str(self.data), module="websites")[0]
+        self.assertEqual(latest["recovery_id"], applied["recovery_id"])
+        self.assertEqual(latest["operation_id"], denied["operation_id"])
+        self.assertEqual(latest["target"], "7")
+        self.assertEqual(manager.inspect_recovery(
+            self.site, source_path=str(self.source), data_dir=str(self.data))["state"],
+            "Needs Review")
+        self.assertEqual(self.source.read_bytes(),
+                         b"127.0.0.1 localhost\n127.0.0.8 peer.test\n")
+
+    def test_foreign_exception_recovery_id_is_not_trusted_for_hosts_failure(self):
+        from ach_customizer_activity import read_activity
+
+        class UntrustedError(RuntimeError):
+            recovery_id = "a" * 32
+
+        failed = self.plugin._fail("hosts_management", UntrustedError("private"),
+                                   "c" * 32)
+        self.assertFalse(failed["status"])
+        self.assertNotIn("recovery_id", failed)
+        self.assertEqual(read_activity(str(self.data), module="websites")[0]["recovery_id"], "")
+
     def test_unbound_alias_and_wrong_recovery_refused_without_modification(self):
         before = self.source.read_bytes()
         wrong = self.call("remove", domain="unrelated.test")

@@ -80,7 +80,8 @@ class ach_customizer_main:
             # only the request correlation, NEVER the recovery journal ID.
             cache_recovery = (module == "websites" and
                               action in ("manage_cache_policy", "cache_manage"))
-            hosts_recovery = module == "websites" and action == "manage_local_hosts"
+            hosts_recovery = (module == "websites" and
+                              action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
                         if module == "status_pages" or cache_recovery or hosts_recovery else
                         response.get("operation_id"))
@@ -95,7 +96,7 @@ class ach_customizer_main:
                 target=target, error_class=type(error).__name__ if error else "",
                 detail=detail,
                 recovery_id=recovery if (not failed or module == "status_pages" or
-                                           cache_recovery) else "",
+                                           cache_recovery or hosts_recovery) else "",
             )
             persisted = append_activity(_STATE_DIR, entry)
             # None means below verbosity threshold, NOT a persistence failure.
@@ -108,7 +109,7 @@ class ach_customizer_main:
         return response
 
     @staticmethod
-    def _fail(stage, error, operation_id, *, diagnostic_error=None):
+    def _fail(stage, error, operation_id, *, diagnostic_error=None, target=""):
         # Ordinary controlled validation/auth failures remain actionable.
         # Do not expose arbitrary DB/filesystem/internal exception text to
         # browsers: retain the precise exception class in private Activity.
@@ -128,7 +129,17 @@ class ach_customizer_main:
                 getattr(error, "reason_code", None) == "native_extension_include_missing"):
             response["reason_code"] = "native_extension_include_missing"
         actual_recovery = getattr(error, "recovery_id", None)
-        if (isinstance(actual_recovery, str) and
+        # Only the installed Hosts writer may supply a durable recovery ID
+        # for its failure stage. Do not promote an arbitrary exception's or
+        # caller-provided recovery_id into the audit trail.
+        trusted_hosts_recovery = True
+        if stage == "hosts_management":
+            try:
+                from ach_customizer_hosts_manage import HostsManageError
+                trusted_hosts_recovery = isinstance(error, HostsManageError)
+            except ImportError:
+                trusted_hosts_recovery = False
+        if (trusted_hosts_recovery and isinstance(actual_recovery, str) and
                 re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):
             response["recovery_id"] = actual_recovery
             response["request_id"] = operation_id
@@ -137,7 +148,7 @@ class ach_customizer_main:
                   "websites" if stage.startswith(("website_", "hosts_", "cache_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
-            response, module, stage,
+            response, module, stage, target=target,
             error=diagnostic_error if diagnostic_error is not None else error,
             # This text was explicitly reviewed at the typed endpoint boundary;
             # keep its original exception class and the actionable Activity cause.
@@ -572,6 +583,7 @@ class ach_customizer_main:
         resolver, nor that WordPress Toolkit will not recreate the entry.
         """
         request_id = uuid4().hex
+        trusted_site_id = ""
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
@@ -584,6 +596,7 @@ class ach_customizer_main:
             _, before, current_site = self._selected_native_website(args)
             if current_site() != before:
                 raise HostsManageError("Native site changed before hosts operation")
+            trusted_site_id = str(before["id"])
             names = [item["name"] for item in before["bound_domains"]]
             if action == "remove":
                 result = remove_loopback_alias(
@@ -607,7 +620,8 @@ class ach_customizer_main:
         except PermissionError as exc:
             return self._fail("hosts_authorization", exc, request_id)
         except Exception as exc:
-            return self._fail("hosts_management", exc, request_id)
+            return self._fail("hosts_management", exc, request_id,
+                              target=trusted_site_id)
 
     def _selected_native_website(self, args):
         """Revalidate a browser site snapshot using aaPanel's own site IDs.
