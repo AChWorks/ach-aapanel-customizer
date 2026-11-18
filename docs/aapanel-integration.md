@@ -146,9 +146,31 @@ Results distinguish `Local Loopback Entry`, `No Local Loopback Entry`,
 and `Needs Review` for partial wildcard inspection. A matching
 127.0.0.0/8, ::1 or mapped loopback entry establishes **only an
 origin-local file observation**, not a broken Gateway, DNS, resolver
-precedence, proxy route or external HTTPS request. This diagnostic
+precedence, proxy route or external HTTPS request. The inspection itself
 does **not** modify `/etc/hosts`, call a resolver, offer automatic
 repair, change routing or prove the origin's effective NSS lookup.
+
+**Unpublished source candidate (0.1.52): reviewed manual alias removal and
+recovery.** After a fresh inspection, the primary administrator may select
+one exact bound hostname that has a loopback entry, expressly confirm it is
+unwanted, and choose **Remove selected loopback alias**. The native endpoint
+revalidates the selected site, stored file SHA-256, file identity, ownership,
+absence of symlinks and the exact matching loopback alias. A root-owned backup
+and prepared journal are persisted before an atomic same-directory file
+replacement. Only this alias's loopback records are removed; unrelated hosts
+and comments are preserved. After an independent **Inspect local hosts file**
+check, the exact saved Recovery ID can restore the previous complete file
+only if no other write has since changed it. An uncommitted/uncertain write
+requires recovery inspection; do not blindly retry. If a provisioning tool
+recreates an alias, a new separately reviewed removal retains previous
+recovery material for forensics rather than overwriting it invisibly.
+
+**Not yet solved:** this manual step neither identifies WordPress Toolkit as
+the writer, guarantees external DNS/Gateway health, nor prevents repeated
+insertion. An event/lifecycle-level origin fix or compatible reconciliation
+still requires reproduction and isolated installed QA. This 0.1.52 source
+feature is **not** available in published native 0.1.51 and is not Production
+installation authorization.
 If a stale Python helper prevents inspection after an upgrade,
 use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
 not a blind server restart.

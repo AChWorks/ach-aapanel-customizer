@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.51'
+WORKER_SOURCE_VERSION = '0.1.52'
 
 _STATE_DIR = DATA_DIR
 
@@ -80,8 +80,9 @@ class ach_customizer_main:
             # only the request correlation, NEVER the recovery journal ID.
             cache_recovery = (module == "websites" and
                               action in ("manage_cache_policy", "cache_manage"))
+            hosts_recovery = module == "websites" and action == "manage_local_hosts"
             recovery = (response.get("recovery_id")
-                        if module == "status_pages" or cache_recovery else
+                        if module == "status_pages" or cache_recovery or hosts_recovery else
                         response.get("operation_id"))
             if (not response.get("request_id") or not isinstance(recovery, str)
                     or re.fullmatch(r"[0-9a-f]{32}", recovery) is None):
@@ -548,6 +549,11 @@ class ach_customizer_main:
                     "Selected website identity or bound domains changed; refresh native inventory")
             names = [item["name"] for item in before["bound_domains"]]
             result = inspect_hosts_file(names)
+            # Recovery is bound to the same site and the current origin file.
+            # A read-only diagnostic never acknowledges an unverified write.
+            from ach_customizer_hosts_manage import inspect_recovery
+            result["hosts_recovery"] = inspect_recovery(
+                before, data_dir=_STATE_DIR)
             if current_site() != before:
                 raise HostsInspectionError("Native site or bound domains changed; recheck")
             return self._activity_result(
@@ -558,6 +564,50 @@ class ach_customizer_main:
             return self._fail("hosts_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("hosts_inspection", exc, request_id)
+
+    def manage_local_hosts(self, args):
+        """Opt-in exact domain/hosts remediation with recoverable original bytes.
+
+        A successful source edit does not prove external DNS, another host's
+        resolver, nor that WordPress Toolkit will not recreate the entry.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            action = self._argument(args, "hosts_action")
+            if action not in ("remove", "restore") or self._argument(args, "reviewed") != "true":
+                raise HostsInspectionError("Review and explicitly approve the selected hosts operation")
+            from ach_customizer_hosts_manage import (
+                HostsManageError, remove_loopback_alias, restore_loopback_alias,
+            )
+            _, before, current_site = self._selected_native_website(args)
+            if current_site() != before:
+                raise HostsManageError("Native site changed before hosts operation")
+            names = [item["name"] for item in before["bound_domains"]]
+            if action == "remove":
+                result = remove_loopback_alias(
+                    site=before, domains=names,
+                    domain=self._argument(args, "domain"),
+                    expected_sha=self._argument(args, "expected_hosts_sha256"),
+                    data_dir=_STATE_DIR)
+            else:
+                result = restore_loopback_alias(
+                    site=before,
+                    expected_recovery_id=self._argument(args, "recovery_id"),
+                    data_dir=_STATE_DIR)
+            if current_site() != before:
+                raise HostsManageError(
+                    "Native site identity changed during hosts write; inspect recovery",
+                    result["recovery_id"])
+            return self._activity_result(
+                {"status": True, "request_id": request_id, "schema": 1,
+                 "site_id": before["id"], "site_key": before["name"], **result},
+                "websites", "manage_local_hosts", target=str(before["id"]))
+        except PermissionError as exc:
+            return self._fail("hosts_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("hosts_management", exc, request_id)
 
     def _selected_native_website(self, args):
         """Revalidate a browser site snapshot using aaPanel's own site IDs.
