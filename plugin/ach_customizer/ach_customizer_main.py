@@ -53,7 +53,8 @@ class ach_customizer_main:
 
     @staticmethod
     def _activity_result(response, module, action, *, target="", error=None,
-                         level="INFO", allow_error_detail=True, trusted_detail=None):
+                         level="INFO", allow_error_detail=True, trusted_detail=None,
+                         activity_stage=None):
         """Best-effort plugin diagnostics, independent of operation success."""
         correlation = response.get("request_id", response.get("operation_id"))
         try:
@@ -92,7 +93,7 @@ class ach_customizer_main:
             entry = record(
                 level=severity, module=module,
                 action=action, operation_id=correlation,
-                stage=response.get("stage", "complete"),
+                stage=activity_stage or response.get("stage", "complete"),
                 outcome=outcome,
                 target=target, error_class=type(error).__name__ if error else "",
                 detail=detail,
@@ -110,7 +111,8 @@ class ach_customizer_main:
         return response
 
     @staticmethod
-    def _fail(stage, error, operation_id, *, diagnostic_error=None, target=""):
+    def _fail(stage, error, operation_id, *, diagnostic_error=None, target="",
+              activity_stage=None):
         # Ordinary controlled validation/auth failures remain actionable.
         # Do not expose arbitrary DB/filesystem/internal exception text to
         # browsers: retain the precise exception class in private Activity.
@@ -130,14 +132,20 @@ class ach_customizer_main:
                 getattr(error, "reason_code", None) == "native_extension_include_missing"):
             response["reason_code"] = "native_extension_include_missing"
         actual_recovery = getattr(error, "recovery_id", None)
-        # Only the installed Hosts writer may supply a durable recovery ID
-        # for its failure stage. Do not promote an arbitrary exception's or
+        # Only a trusted Hosts or Nginx Guard writer may supply durable
+        # recovery identity. Never promote an arbitrary exception's or
         # caller-provided recovery_id into the audit trail.
         trusted_hosts_recovery = True
         if stage == "hosts_management":
             try:
                 from ach_customizer_hosts_manage import HostsManageError
                 trusted_hosts_recovery = isinstance(error, HostsManageError)
+            except ImportError:
+                trusted_hosts_recovery = False
+        if stage == "nginx_guard_manage":
+            try:
+                from ach_customizer_nginx_security import GuardError
+                trusted_hosts_recovery = isinstance(error, GuardError)
             except ImportError:
                 trusted_hosts_recovery = False
         if (trusted_hosts_recovery and isinstance(actual_recovery, str) and
@@ -153,7 +161,8 @@ class ach_customizer_main:
             error=diagnostic_error if diagnostic_error is not None else error,
             # This text was explicitly reviewed at the typed endpoint boundary;
             # keep its original exception class and the actionable Activity cause.
-            trusted_detail=message if typed_domain_detail else None)
+            trusted_detail=message if typed_domain_detail else None,
+            activity_stage=activity_stage)
 
     def get_activity(self, args):
         """Native full-primary-admin-only diagnostics. No arbitrary paths."""
@@ -684,6 +693,8 @@ class ach_customizer_main:
         """
         request_id = uuid4().hex
         action = self._argument(args, "guard_action")
+        trusted_site_id = ""
+        guard_error_type = None
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
@@ -694,9 +705,13 @@ class ach_customizer_main:
                     str(public.get_panel_version()).strip() != "8.0.7"):
                 raise MonitorInputError("Nginx security adapter requires aaPanel 8.0.7 Nginx")
             from ach_customizer_nginx_security import manage_guard, GuardError
+            guard_error_type = GuardError
             from ach_customizer_state import _open_state_dir
             from ach_customizer_status_pages import _take_lock
             public, before, current_site = self._selected_native_website(args)
+            # Only a fully revalidated native site becomes an Activity target.
+            # Browser-provided IDs are never trusted for failed pre-selection.
+            trusted_site_id = str(before["id"])
             approved = self._argument(args, "approved") == "true"
             # A globally shared native document root cannot justify an
             # isolated per-site protection claim. Reject before any write.
@@ -736,9 +751,19 @@ class ach_customizer_main:
                 level="WARNING" if result["state"] in
                     ("Needs Review", "Recovery Required", "Suspended") else "INFO")
         except PermissionError as exc:
-            return self._fail("nginx_guard_authorization", exc, request_id)
+            return self._fail("nginx_guard_authorization", exc, request_id,
+                              target=trusted_site_id)
         except Exception as exc:
-            return self._fail("nginx_guard_manage", exc, request_id)
+            # Preserve a bounded, trusted GuardError phase in private Activity
+            # without changing the public action or recovery correlation.
+            phase = (getattr(exc, "stage", None)
+                     if guard_error_type and isinstance(exc, guard_error_type)
+                     else None)
+            typed_stage = ("nginx_guard_" + phase
+                           if isinstance(phase, str) and
+                           re.fullmatch(r"[a-z][a-z_]{0,31}", phase) else None)
+            return self._fail("nginx_guard_manage", exc, request_id,
+                              target=trusted_site_id, activity_stage=typed_stage)
 
     def inspect_native_vhost(self, args):
         """Primary-admin-only file-level Nginx vs native site record drift.

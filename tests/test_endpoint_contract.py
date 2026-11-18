@@ -264,6 +264,101 @@ class EntrypointTests(unittest.TestCase):
             self.assertEqual(execute.call_args.args[:2], ("preview", site))
             self.assertFalse(execute.call_args.kwargs["approved"])
 
+    def test_nginx_guard_failure_activity_uses_verified_target_and_typed_phase(self):
+        from ach_customizer_activity import read_activity
+        from ach_customizer_monitor import MonitorInputError
+        from ach_customizer_nginx_security import GuardError
+
+        site = {"id": 9, "name": "paths85.aitest.gotohell.top",
+                "path": "/www/acdomains/paths85.aitest.gotohell.top",
+                "status": 1, "bound_domains": [
+                    {"name": "paths85.aitest.gotohell.top", "port": 80}]}
+        fake_public = types.ModuleType("public")
+        fake_public.get_webserver = lambda: "nginx"
+        fake_public.get_panel_version = lambda: "8.0.7"
+
+        class SingleRoot:
+            def where(self, *args):
+                return self
+            def field(self, *args):
+                return self
+            def limit(self, *args):
+                return self
+            def select(self):
+                return [{"id": site["id"], "path": site["path"]}]
+
+        fake_public.M = lambda name: SingleRoot()
+        flask_stub = types.ModuleType("flask")
+        flask_stub.session = {"uid": 1, "login": True}
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        import ach_customizer_nginx_security as manager
+
+        with patch.dict(sys.modules, {"public": fake_public, "flask": flask_stub}), patch.object(
+                self.plugin, "_selected_native_website",
+                return_value=(fake_public, site, lambda: site)) as selected, patch.object(
+                manager, "manage_guard") as managed:
+            def assert_failure(action, error, target, phase, recovery=""):
+                managed.side_effect = error
+                response = self.plugin.manage_nginx_protection(
+                    {"site_id": "999", "guard_action": action, "approved": "true"})
+                self.assertFalse(response["status"], response)
+                self.assertEqual(response["stage"], "nginx_guard_manage")
+                self.assertRegex(response["operation_id"], r"^[0-9a-f]{32}$")
+                self.assertEqual(response.get("recovery_id", ""), recovery)
+                self.assertEqual(response.get("request_id", response["operation_id"]),
+                                 response["operation_id"])
+                activity = read_activity(self.state_dir.name, module="websites")[0]
+                self.assertEqual(activity["action"], "nginx_guard_manage")
+                self.assertEqual(activity["stage"], phase)
+                self.assertEqual(activity["target"], target)
+                self.assertEqual(activity["operation_id"], response["operation_id"])
+                self.assertEqual(activity["recovery_id"], recovery)
+                self.assertEqual(activity["outcome"], "failed")
+                return response, activity
+
+            # Before primary-admin authentication, even a supplied site ID
+            # must not become a trusted attribution target.
+            flask_stub.request.method = "GET"
+            denied = self.plugin.manage_nginx_protection(
+                {"site_id": "9", "guard_action": "apply"})
+            self.assertEqual(denied["stage"], "nginx_guard_authorization")
+            self.assertEqual(read_activity(self.state_dir.name)[0]["target"], "")
+            selected.assert_not_called()
+            managed.assert_not_called()
+            flask_stub.request.method = "POST"
+
+            # The identity lookup must complete before attribution is valid.
+            selected.side_effect = MonitorInputError("Native site identity changed")
+            early = self.plugin.manage_nginx_protection(
+                {"site_id": "9", "guard_action": "preview"})
+            self.assertEqual(early["stage"], "nginx_guard_manage")
+            self.assertEqual(read_activity(self.state_dir.name)[0]["target"], "")
+            selected.side_effect = None
+            selected.return_value = (fake_public, site, lambda: site)
+
+            assert_failure("preview",
+                           GuardError("source", "Native selected VHost is absent"),
+                           "9", "nginx_guard_source")
+            for action in ("apply", "restore"):
+                response, activity = assert_failure(
+                    action, GuardError("uncertain",
+                                       "Nginx security operation requires Recheck",
+                                       recovery_id="d" * 32),
+                    "9", "nginx_guard_uncertain", "d" * 32)
+                self.assertEqual(activity["error_class"], "GuardError")
+                self.assertNotEqual(response["operation_id"], response["recovery_id"])
+
+            class Unexpected(RuntimeError):
+                recovery_id = "e" * 32
+
+            response, activity = assert_failure(
+                "recheck", Unexpected("PRIVATE INTERNAL ERROR"),
+                "9", "nginx_guard_manage")
+            self.assertNotIn("PRIVATE", str(response))
+            self.assertNotIn("PRIVATE", str(activity))
+            self.assertEqual(activity["error_class"], "Unexpected")
+
     def test_no_auth_bypassing_dynamic_check_or_mutation_entrypoint(self):
         self.assertNotIn('_check', vars(MODULE.ach_customizer_main))
         for name in vars(MODULE.ach_customizer_main):

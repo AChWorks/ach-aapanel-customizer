@@ -8292,6 +8292,47 @@ test('Sensitive-file Nginx guard requires fresh source plus distinct Apply and R
   assert.match(ui.state().guardResult,/Protection: Restored/);
 });
 
+test('Sensitive-file Nginx guard rejects read-only state and recovery inconsistencies',()=>{
+  const cases=[
+    ['Applied',{recovery_id:null}],
+    ['Restored',{recovery_id:null}],
+    ['Recovery Required',{recovery_id:null,journal_phase:'prepared'}],
+    ['Recovery Required',{recovery_id:'c'.repeat(32),journal_phase:'applied'}],
+    ['Unmanaged',{recovery_id:'c'.repeat(32),journal_phase:'applied'}],
+    ['Unmanaged',{journal_phase:'applied'}],
+    ['Applied',{vhost_sha256:null}],
+    ['Restored',{vhost_sha256:null}],
+    ['Recovery Required',{recovery_id:'c'.repeat(32),journal_phase:'prepared',
+      vhost_sha256:null}],
+    ['Unmanaged',{vhost_sha256:null}],
+    ['Needs Review',{journal_phase:'prepared'}]
+  ];
+  for(const [state,change] of cases) {
+    const ui=loadUi();selectHostsSite(ui);
+    const report=sensitiveGuardResponse(state,{
+      runtime_verified:state==='Applied'||state==='Restored',
+      ...change
+    });
+    if(state==='Recovery Required') report.runtime_verified=false;
+    ui.statusClick('#ach-guard-recheck').respond(report);
+    assert.equal(ui.state().guardApplyDisabled,true,JSON.stringify(report));
+    assert.equal(ui.state().guardRestoreDisabled,true,JSON.stringify(report));
+    ui.statusSetChecked('#ach-guard-restore-reviewed',true);
+    assert.equal(ui.state().guardRestoreDisabled,true,JSON.stringify(report));
+    assert.doesNotMatch(ui.state().guardResult,/Protection: (Applied|Restored)/);
+    assert.match(ui.state().guardResult,/unconfirmed|result was refused/i);
+  }
+  const valid=loadUi();selectHostsSite(valid);
+  valid.statusClick('#ach-guard-recheck').respond(
+    sensitiveGuardResponse('Recovery Required',{
+      recovery_id:'c'.repeat(32),journal_phase:'prepared',runtime_verified:false
+    }));
+  assert.match(valid.state().guardResult,/Protection: Recovery Required/);
+  assert.equal(valid.state().guardRestoreDisabled,true);
+  valid.statusSetChecked('#ach-guard-restore-reviewed',true);
+  assert.equal(valid.state().guardRestoreDisabled,false);
+});
+
 test('Sensitive-file Nginx guard rejects malformed optimistic success and stale selection',()=>{
   const invalid=[
     {site_key:'other.test'}, {site_root:'/www/wwwroot/wrong.test'},

@@ -2508,9 +2508,21 @@
     if (r.read_only === write || r.changed !== write) return false;
     if (write && (r.runtime_verified !== true || !token(r.recovery_id) ||
                   r.state !== (action === 'apply' ? 'Applied' : 'Restored'))) return false;
-    if (r.state === 'Applied' && (!r.runtime_verified || r.journal_phase !== 'applied')) return false;
-    if (r.state === 'Restored' && (!r.runtime_verified || r.journal_phase !== 'restored')) return false;
-    if (r.state === 'Unmanaged' && r.recovery_id !== null) return false;
+    // Every journal-bearing state must have a durable Recovery ID, including
+    // read-only Preview/Recheck. Never display positive protection without it.
+    if ((r.recovery_id === null) !== (r.journal_phase === null)) return false;
+    if (r.state === 'Applied' &&
+        (!r.runtime_verified || !token(r.recovery_id) ||
+         r.journal_phase !== 'applied' || !hash(r.vhost_sha256))) return false;
+    if (r.state === 'Restored' &&
+        (!r.runtime_verified || !token(r.recovery_id) ||
+         r.journal_phase !== 'restored' || !hash(r.vhost_sha256))) return false;
+    if (r.state === 'Recovery Required' &&
+        (!token(r.recovery_id) || r.journal_phase !== 'prepared' ||
+         !hash(r.vhost_sha256))) return false;
+    if (r.state === 'Unmanaged' &&
+        (r.recovery_id !== null || r.journal_phase !== null ||
+         !hash(r.vhost_sha256))) return false;
     if (['Unmanaged','Recovery Required','Needs Review','Suspended'].includes(r.state) &&
         r.runtime_verified) return false;
     return true;
