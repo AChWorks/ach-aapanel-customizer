@@ -130,6 +130,62 @@ shape; unsupported layouts show `Needs Review` rather than permission to
 repair. No scheduled per-site enforcement or automatic VHost reconciliation
 is implemented.
 
+## Selected-site Nginx sensitive-path guard (unpublished candidate 0.1.53)
+
+The full primary administrator may choose a **native website** in Routing &
+Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
+the selected ID, domain bindings and current Document Root from aaPanel itself,
+then verifies the corresponding generated VHost and the **exclusive server-scoped
+native `extension/<site>/*.conf` include graph**; `/www/wwwroot` is never a
+site-root assumption. The supported implementation targets the source-matched
+aaPanel 8.0.7 Nginx/HTTP-80 layout; no blanket Nginx-version claim.
+
+**Protection semantics:** After a fresh Preview and explicit one-site approval,
+an immutable policy fragment is atomically installed into that site's existing
+Nginx extension directory, validated with `nginx -t` and applied with a
+shared-service reload. Three fixed, server-rewrite `if ($uri ~* ...)` +
+`return 403` conditions block nested sensitive dotfiles (including
+`.env`, `.htaccess`, `.user.ini`), accesses below common backup directory
+names and PHP/PHTML/PHAR requests below common uploads/media/tmp directories.
+These **server rewrite-phase** returns run before Nginx Location selection:
+native `location ^~ /wp-content/uploads/` cannot silently bypass the filter.
+Safe `if` usage is limited to static server-scope **return-only** directives;
+no rewrite or application PHP is executed. The response includes a
+per-generation proof in a short body on matched requests (not in benign
+response headers); exact HTTP/80 403+proof is observed on ten bounded paths
+over three consecutive fresh request batches. This verifies *those* paths,
+not arbitrary path aliases or origin HTTPS/cached edge behavior.
+
+**Exceptions and scope:** No restriction is added to legitimate `.well-known`
+ACME/OAuth paths, the site homepage, ordinary public static downloads, or other
+sites. The policy is intentionally **not** a global block on all .zip/.sql,
+a replacement for Fail2ban, or complete protection for every custom upload/
+backup directory. A site with unsupported VHost/include, symlinked Document Root,
+missing native identity, unrecognized owner, changed foreign include or
+incompatible active Nginx workers must fail closed with `Needs Review` rather
+than claim protection. Custom shared Nginx/global security rules need
+environment-specific audit; browser/Caddy HTTPS is additional acceptance.
+
+**Lifecycle / recovery:** Under the same authorized site/source lock, Apply
+records an immutable root-owned journal before publication. Recheck can
+distinguish `Unmanaged`, `Applied`, `Recovery Required`, `Needs Review`
+and `Restored`. An uncertain Apply must NOT be automatically retried;
+an explicit saved Recovery ID permits narrowly retiring the owned include,
+revalidating and reloading Nginx, and checking that its proof disappeared.
+Changed site ID/root/domain, native VHost or another extension invalidates
+stale approvals. Other files, users and site configurations are not modified.
+After uninstall, saved policy/recovery may still be active: reinstall and
+use guarded Restore rather than delete Nginx files manually. No background
+enforcement/automatic regeneration repair is yet implemented.
+
+**Evidence boundary:** QA source-only and real manager transaction tests were
+run on the **new** isolated aaPanel 8.0.7 machine, including
+`/www/acdomains/paths85.aitest.gotohell.top` and
+`/www/other-sites/paths81.aitest.gotohell.top`. Refer to Issue #21 for
+exact test identity, status, and future rechecks. The source candidate is not
+published, approved for merge, or a Production rollout. Independent review and
+negative recovery cases remain mandatory integration gates.
+
 ## Selected-site origin-local Hosts inspection (read-only)
 
 Under **Routing & Nginx → Inspect local hosts file**, the primary

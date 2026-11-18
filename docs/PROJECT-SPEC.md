@@ -54,6 +54,31 @@ The product should produce these lasting outcomes:
 
 Correctness, continuity, usability, and recoverability matter more than the quantity of settings exposed.
 
+### Native document-root compatibility and per-site security ownership
+
+No website operation may assume all native aaPanel sites live under
+`/www/wwwroot`. The currently registered aaPanel site ID/path, domain
+bindings and generated VHost root provide the baseline for any selected-site
+action. Coexisting native-supported roots (including `/www/acdomains` and
+`/www/other-sites`) must work without a separately configured base path.
+Re-read and recheck whenever native roots or included source files change.
+Unsupported, aliasing or symlinked source/ownership cannot authorize writes.
+The static installation prefixes for aaPanel, Nginx and PHP-FPM are **separate**
+adapter concerns and need independent compatibility proof if relocated.
+
+An opt-in site-specific Nginx sensitive-path policy should deny known
+sensitive dotfile, backup-directory and upload-PHP requests *before* PHP-FPM
+work. Prefer source-verified server-rewrite `if` + `return 403` rather than
+a regex-only `location` policy which `^~` Nginx prefixes could bypass.
+Do not break legitimate `.well-known` ACME/OAuth, public assets, peer sites,
+or broad file types by default. Every active security policy needs fresh
+source ownership, guarded apply/reload, live response proof, durable recovery,
+separate approval for Restore and drift awareness. Exact URL probes are
+not universal proof of full HTTP/2/3, CDN/HTTPS or all custom site aliases.
+Security policy starts disabled until primary-admin opt-in. A successfully
+applied per-request guard is different from automated recovery after aaPanel
+regeneration; the latter is still an independent required lifecycle outcome.
+
 ### Owner-confirmed operational acceptance priority (2026-11-18)
 
 The existing Monitor/manual-preview foundation is **not** the operational

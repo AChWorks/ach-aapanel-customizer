@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.52'
+WORKER_SOURCE_VERSION = '0.1.53'
 
 _STATE_DIR = DATA_DIR
 
@@ -53,7 +53,8 @@ class ach_customizer_main:
 
     @staticmethod
     def _activity_result(response, module, action, *, target="", error=None,
-                         level="INFO", allow_error_detail=True, trusted_detail=None):
+                         level="INFO", allow_error_detail=True, trusted_detail=None,
+                         activity_stage=None):
         """Best-effort plugin diagnostics, independent of operation success."""
         correlation = response.get("request_id", response.get("operation_id"))
         try:
@@ -79,7 +80,8 @@ class ach_customizer_main:
             # Pages manager uses a separate recovery_id; its operation_id is
             # only the request correlation, NEVER the recovery journal ID.
             cache_recovery = (module == "websites" and
-                              action in ("manage_cache_policy", "cache_manage"))
+                              action in ("manage_cache_policy", "cache_manage",
+                                         "manage_nginx_protection", "nginx_guard_manage"))
             hosts_recovery = (module == "websites" and
                               action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
@@ -91,7 +93,7 @@ class ach_customizer_main:
             entry = record(
                 level=severity, module=module,
                 action=action, operation_id=correlation,
-                stage=response.get("stage", "complete"),
+                stage=activity_stage or response.get("stage", "complete"),
                 outcome=outcome,
                 target=target, error_class=type(error).__name__ if error else "",
                 detail=detail,
@@ -109,7 +111,8 @@ class ach_customizer_main:
         return response
 
     @staticmethod
-    def _fail(stage, error, operation_id, *, diagnostic_error=None, target=""):
+    def _fail(stage, error, operation_id, *, diagnostic_error=None, target="",
+              activity_stage=None):
         # Ordinary controlled validation/auth failures remain actionable.
         # Do not expose arbitrary DB/filesystem/internal exception text to
         # browsers: retain the precise exception class in private Activity.
@@ -129,8 +132,8 @@ class ach_customizer_main:
                 getattr(error, "reason_code", None) == "native_extension_include_missing"):
             response["reason_code"] = "native_extension_include_missing"
         actual_recovery = getattr(error, "recovery_id", None)
-        # Only the installed Hosts writer may supply a durable recovery ID
-        # for its failure stage. Do not promote an arbitrary exception's or
+        # Only a trusted Hosts or Nginx Guard writer may supply durable
+        # recovery identity. Never promote an arbitrary exception's or
         # caller-provided recovery_id into the audit trail.
         trusted_hosts_recovery = True
         if stage == "hosts_management":
@@ -139,20 +142,27 @@ class ach_customizer_main:
                 trusted_hosts_recovery = isinstance(error, HostsManageError)
             except ImportError:
                 trusted_hosts_recovery = False
+        if stage == "nginx_guard_manage":
+            try:
+                from ach_customizer_nginx_security import GuardError
+                trusted_hosts_recovery = isinstance(error, GuardError)
+            except ImportError:
+                trusted_hosts_recovery = False
         if (trusted_hosts_recovery and isinstance(actual_recovery, str) and
                 re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):
             response["recovery_id"] = actual_recovery
             response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_", "cache_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
             response, module, stage, target=target,
             error=diagnostic_error if diagnostic_error is not None else error,
             # This text was explicitly reviewed at the typed endpoint boundary;
             # keep its original exception class and the actionable Activity cause.
-            trusted_detail=message if typed_domain_detail else None)
+            trusted_detail=message if typed_domain_detail else None,
+            activity_stage=activity_stage)
 
     def get_activity(self, args):
         """Native full-primary-admin-only diagnostics. No arbitrary paths."""
@@ -673,6 +683,90 @@ class ach_customizer_main:
             raise MonitorInputError(
                 "Native site/root/bindings changed; refresh website inventory")
         return public, before, current_site
+
+    def manage_nginx_protection(self, args):
+        """Primary-admin native per-site pre-PHP sensitive-path protection.
+
+        A separate opt-in policy has no implicit auto-enforcement. Even
+        Recheck revalidates the current native site and include graph;
+        Apply/Restore additionally require an explicit site confirmation.
+        """
+        request_id = uuid4().hex
+        action = self._argument(args, "guard_action")
+        trusted_site_id = ""
+        guard_stage_error_type = None
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            if action not in ("preview", "apply", "recheck", "restore"):
+                raise MonitorInputError("Unsupported Nginx security operation")
+            import public
+            if (public.get_webserver() != "nginx" or
+                    str(public.get_panel_version()).strip() != "8.0.7"):
+                raise MonitorInputError("Nginx security adapter requires aaPanel 8.0.7 Nginx")
+            from ach_customizer_nginx_security import (
+                manage_guard, GuardError, ExtensionError,
+            )
+            guard_stage_error_type = ExtensionError
+            from ach_customizer_state import _open_state_dir
+            from ach_customizer_status_pages import _take_lock
+            public, before, current_site = self._selected_native_website(args)
+            # Only a fully revalidated native site becomes an Activity target.
+            # Browser-provided IDs are never trusted for failed pre-selection.
+            trusted_site_id = str(before["id"])
+            approved = self._argument(args, "approved") == "true"
+            # A globally shared native document root cannot justify an
+            # isolated per-site protection claim. Reject before any write.
+            if action in ("apply", "restore"):
+                same_roots = public.M("sites").where("path=?", (before["path"],)).field(
+                    "id,path").limit("0,2").select()
+                if (not isinstance(same_roots, list) or len(same_roots) != 1 or
+                        type(same_roots[0].get("id")) is not int or
+                        same_roots[0]["id"] != before["id"] or
+                        same_roots[0].get("path") != before["path"]):
+                    raise MonitorInputError(
+                        "Shared or unverified native site root; Nginx protection refused")
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock_fd = _take_lock(fd)
+                try:
+                    if current_site() != before:
+                        raise MonitorInputError("Native website changed before Nginx protection")
+                    result = manage_guard(
+                        action, before, data_fd=fd, approved=approved,
+                        expected_vhost=self._argument(args, "expected_vhost_sha256"),
+                        expected_proposal=self._argument(args, "expected_proposal_sha256"),
+                        expected_recovery=self._argument(args, "recovery_id"),
+                    )
+                    if current_site() != before:
+                        raise GuardError(
+                            "uncertain", "Native site changed during security operation; "
+                            "reinspect saved recovery before another action",
+                            recovery_id=result.get("recovery_id"))
+                finally:
+                    os.close(lock_fd)
+            finally:
+                os.close(fd)
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "manage_nginx_protection", target=str(before["id"]),
+                level="WARNING" if result["state"] in
+                    ("Needs Review", "Recovery Required", "Suspended") else "INFO")
+        except PermissionError as exc:
+            return self._fail("nginx_guard_authorization", exc, request_id,
+                              target=trusted_site_id)
+        except Exception as exc:
+            # Both GuardError and the inherited native helper ExtensionError
+            # have trusted typed stages. Only GuardError may supply an owned
+            # Recovery ID at _fail; an arbitrary exception cannot inject one.
+            phase = (getattr(exc, "stage", None)
+                     if guard_stage_error_type and
+                     isinstance(exc, guard_stage_error_type) else None)
+            typed_stage = ("nginx_guard_" + phase
+                           if isinstance(phase, str) and
+                           re.fullmatch(r"[a-z][a-z_]{0,31}", phase) else None)
+            return self._fail("nginx_guard_manage", exc, request_id,
+                              target=trusted_site_id, activity_stage=typed_stage)
 
     def inspect_native_vhost(self, args):
         """Primary-admin-only file-level Nginx vs native site record drift.
