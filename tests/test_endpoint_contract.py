@@ -209,6 +209,61 @@ class EntrypointTests(unittest.TestCase):
             self.assertEqual(unknown["stage"], "fpm_rollback")
             self.assertNotIn("confidential", str(unknown))
 
+    def test_nginx_guard_endpoint_does_not_expose_unauthorized_work(self):
+        from unittest.mock import Mock
+        guard = __import__("ach_customizer_nginx_security")
+        fake_public = types.ModuleType("public")
+        fake_public.get_webserver = lambda: "nginx"
+        fake_public.get_panel_version = lambda: "8.0.7"
+        flask_stub = types.ModuleType("flask")
+        flask_stub.session = {"uid": 1, "login": True}
+        flask_stub.request = types.SimpleNamespace(method="POST")
+        flask_stub.has_request_context = lambda: True
+        site = {"id": 9, "name": "alternate.invalid",
+                "path": "/www/acdomains/alternate.invalid", "status": 1,
+                "bound_domains": [{"name": "alternate.invalid", "port": 80}]}
+        response = {"schema": 1, "site_id": 9, "site_key": site["name"],
+                    "site_root": site["path"], "mode": "native_site_sensitive_paths",
+                    "ruleset": "nested-sensitive-v2", "state": "Unmanaged",
+                    "reason": "Native source checked", "read_only": True,
+                    "changed": False, "runtime_verified": False,
+                    "vhost_sha256": "a" * 64, "proposal_sha256": "b" * 64,
+                    "recovery_id": None, "journal_phase": None,
+                    "automatic_enforcement": False}
+        with patch.dict(sys.modules, {"flask": flask_stub, "public": fake_public}), patch.object(
+                self.plugin, "_selected_native_website", return_value=(
+                    fake_public, site, lambda: site)) as selected, patch.object(
+                guard, "manage_guard", return_value=response) as execute:
+            for label, auth, method, context in (
+                ("secondary", {"uid": 2, "login": True}, "POST", True),
+                ("anonymous", {"uid": 1, "login": False}, "POST", True),
+                ("temporary", {"uid": 1, "login": True, "tmp_login": True}, "POST", True),
+                ("get", {"uid": 1, "login": True}, "GET", True),
+                ("no-context", {"uid": 1, "login": True}, "POST", False),
+            ):
+                with self.subTest(label=label):
+                    flask_stub.session = auth
+                    flask_stub.request.method = method
+                    flask_stub.has_request_context = lambda: context
+                    denied = self.plugin.manage_nginx_protection(
+                        {"guard_action": "apply", "approved": "true"})
+                    self.assertFalse(denied["status"], denied)
+                    self.assertEqual(denied["stage"], "nginx_guard_authorization")
+                    selected.assert_not_called()
+                    execute.assert_not_called()
+            flask_stub.session = {"uid": 1, "login": True}
+            flask_stub.request.method = "POST"
+            flask_stub.has_request_context = lambda: True
+            result = self.plugin.manage_nginx_protection({"guard_action": "preview"})
+            self.assertTrue(result["status"], result)
+            self.assertEqual(result["state"], "Unmanaged")
+            self.assertTrue(result["read_only"])
+            self.assertEqual(result["site_root"], site["path"])
+            selected.assert_called_once()
+            execute.assert_called_once()
+            self.assertEqual(execute.call_args.args[:2], ("preview", site))
+            self.assertFalse(execute.call_args.kwargs["approved"])
+
     def test_no_auth_bypassing_dynamic_check_or_mutation_entrypoint(self):
         self.assertNotIn('_check', vars(MODULE.ach_customizer_main))
         for name in vars(MODULE.ach_customizer_main):

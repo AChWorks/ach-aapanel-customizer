@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.52'
+WORKER_SOURCE_VERSION = '0.1.53'
 
 _STATE_DIR = DATA_DIR
 
@@ -79,7 +79,8 @@ class ach_customizer_main:
             # Pages manager uses a separate recovery_id; its operation_id is
             # only the request correlation, NEVER the recovery journal ID.
             cache_recovery = (module == "websites" and
-                              action in ("manage_cache_policy", "cache_manage"))
+                              action in ("manage_cache_policy", "cache_manage",
+                                         "manage_nginx_protection", "nginx_guard_manage"))
             hosts_recovery = (module == "websites" and
                               action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
@@ -145,7 +146,7 @@ class ach_customizer_main:
             response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_", "cache_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_")) else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
             response, module, stage, target=target,
@@ -673,6 +674,71 @@ class ach_customizer_main:
             raise MonitorInputError(
                 "Native site/root/bindings changed; refresh website inventory")
         return public, before, current_site
+
+    def manage_nginx_protection(self, args):
+        """Primary-admin native per-site pre-PHP sensitive-path protection.
+
+        A separate opt-in policy has no implicit auto-enforcement. Even
+        Recheck revalidates the current native site and include graph;
+        Apply/Restore additionally require an explicit site confirmation.
+        """
+        request_id = uuid4().hex
+        action = self._argument(args, "guard_action")
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            if action not in ("preview", "apply", "recheck", "restore"):
+                raise MonitorInputError("Unsupported Nginx security operation")
+            import public
+            if (public.get_webserver() != "nginx" or
+                    str(public.get_panel_version()).strip() != "8.0.7"):
+                raise MonitorInputError("Nginx security adapter requires aaPanel 8.0.7 Nginx")
+            from ach_customizer_nginx_security import manage_guard, GuardError
+            from ach_customizer_state import _open_state_dir
+            from ach_customizer_status_pages import _take_lock
+            public, before, current_site = self._selected_native_website(args)
+            approved = self._argument(args, "approved") == "true"
+            # A globally shared native document root cannot justify an
+            # isolated per-site protection claim. Reject before any write.
+            if action in ("apply", "restore"):
+                same_roots = public.M("sites").where("path=?", (before["path"],)).field(
+                    "id,path").limit("0,2").select()
+                if (not isinstance(same_roots, list) or len(same_roots) != 1 or
+                        type(same_roots[0].get("id")) is not int or
+                        same_roots[0]["id"] != before["id"] or
+                        same_roots[0].get("path") != before["path"]):
+                    raise MonitorInputError(
+                        "Shared or unverified native site root; Nginx protection refused")
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock_fd = _take_lock(fd)
+                try:
+                    if current_site() != before:
+                        raise MonitorInputError("Native website changed before Nginx protection")
+                    result = manage_guard(
+                        action, before, data_fd=fd, approved=approved,
+                        expected_vhost=self._argument(args, "expected_vhost_sha256"),
+                        expected_proposal=self._argument(args, "expected_proposal_sha256"),
+                        expected_recovery=self._argument(args, "recovery_id"),
+                    )
+                    if current_site() != before:
+                        raise GuardError(
+                            "uncertain", "Native site changed during security operation; "
+                            "reinspect saved recovery before another action",
+                            recovery_id=result.get("recovery_id"))
+                finally:
+                    os.close(lock_fd)
+            finally:
+                os.close(fd)
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "manage_nginx_protection", target=str(before["id"]),
+                level="WARNING" if result["state"] in
+                    ("Needs Review", "Recovery Required", "Suspended") else "INFO")
+        except PermissionError as exc:
+            return self._fail("nginx_guard_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("nginx_guard_manage", exc, request_id)
 
     def inspect_native_vhost(self, args):
         """Primary-admin-only file-level Nginx vs native site record drift.

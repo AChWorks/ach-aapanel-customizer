@@ -79,6 +79,10 @@ function loadUi() {
     '#ach-reconcile-button', '#ach-reconcile-result',
     '#ach-reconcile-to-websites', '#ach-reconcile-to-cache',
     '#ach-reconcile-to-php', '#ach-reconcile-to-status',
+    '#ach-guard-preview', '#ach-guard-recheck', '#ach-guard-summary',
+    '#ach-guard-result', '#ach-guard-apply-why', '#ach-guard-apply-reviewed',
+    '#ach-guard-apply', '#ach-guard-restore-why', '#ach-guard-restore-reviewed',
+    '#ach-guard-restore',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
@@ -374,6 +378,11 @@ function loadUi() {
       cacheUrlPath: elements.get('#ach-cache-url-path').props.value,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
+      guardResult: elements.get('#ach-guard-result').textContent,
+      guardApplyDisabled: elements.get('#ach-guard-apply').props.disabled,
+      guardRestoreDisabled: elements.get('#ach-guard-restore').props.disabled,
+      guardPreviewDisabled: elements.get('#ach-guard-preview').props.disabled,
+      guardRecheckDisabled: elements.get('#ach-guard-recheck').props.disabled,
       nginxCandidateDisabled: elements.get('#ach-nginx-candidate-button').props.disabled,
       vhostInspectDisabled: elements.get('#ach-vhost-inspect-button').props.disabled,
       cacheInspectDisabled: elements.get('#ach-cache-inspect-button').props.disabled,
@@ -8224,4 +8233,84 @@ test('WordPress Bridge Disable is authorized separately and stale replies cannot
   assert.doesNotMatch(ui.state().cacheActivationResult,/stale-other-site-data/);
   assert.equal(ui.statusClick('#ach-bridge-inspect')?.options?.data?.cache_action,
     'bridge_inspect');
+});
+
+function sensitiveGuardResponse(state='Unmanaged', changes={}) {
+  const active=state==='Applied', retired=state==='Restored';
+  return {
+    status:true,schema:1,site_id:7,site_key:'site.test',
+    site_root:'/www/site.test',mode:'native_site_sensitive_paths',
+    ruleset:'nested-sensitive-v2',state,reason:'Native source and exclusive include verified',
+    read_only:true,changed:false,runtime_verified:active||retired,
+    vhost_sha256:'a'.repeat(64),proposal_sha256:'b'.repeat(64),
+    recovery_id:active||retired?'c'.repeat(32):null,
+    journal_phase:active?'applied':retired?'restored':null,
+    automatic_enforcement:false,...changes
+  };
+}
+
+test('Sensitive-file Nginx guard requires fresh source plus distinct Apply and Restore approval',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  assert.equal(ui.state().guardApplyDisabled,true);
+  assert.equal(ui.state().guardRestoreDisabled,true);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-guard-apply');
+  assert.equal(ui.requests.length,count,'Cannot Apply before verified readiness');
+  const preview=ui.statusClick('#ach-guard-preview');
+  assert.match(preview.options.url,/s=manage_nginx_protection$/);
+  assert.equal(preview.options.data.guard_action,'preview');
+  assert.equal(preview.options.data.site_id,'7');
+  assert.equal(preview.options.data.expected_site_key,'site.test');
+  assert.equal(preview.options.data.approved,undefined);
+  preview.respond(sensitiveGuardResponse());
+  assert.equal(ui.state().guardApplyDisabled,true,'Approval must remain unchecked');
+  ui.statusSetChecked('#ach-guard-apply-reviewed',true);
+  assert.equal(ui.state().guardApplyDisabled,false);
+  const applying=ui.statusClick('#ach-guard-apply');
+  assert.equal(applying.options.data.guard_action,'apply');
+  assert.equal(applying.options.data.approved,'true');
+  assert.equal(applying.options.data.expected_vhost_sha256,'a'.repeat(64));
+  assert.equal(applying.options.data.expected_proposal_sha256,'b'.repeat(64));
+  assert.equal(ui.state().guardApplyDisabled,true);
+  applying.respond(sensitiveGuardResponse('Applied',{read_only:false,changed:true}));
+  assert.match(ui.state().guardResult,/Live HTTP\/80 guard nonce verified: Yes/);
+  assert.equal(ui.state().guardRestoreDisabled,true,'Apply receipt does not authorize Restore');
+  const recheck=ui.statusClick('#ach-guard-recheck');
+  recheck.respond(sensitiveGuardResponse('Applied'));
+  assert.equal(ui.state().guardRestoreDisabled,true);
+  ui.statusSetChecked('#ach-guard-restore-reviewed',true);
+  assert.equal(ui.state().guardRestoreDisabled,false);
+  const restoring=ui.statusClick('#ach-guard-restore');
+  assert.equal(restoring.options.data.guard_action,'restore');
+  assert.equal(restoring.options.data.recovery_id,'c'.repeat(32));
+  assert.equal(restoring.options.data.approved,'true');
+  restoring.respond(sensitiveGuardResponse('Restored',{
+    read_only:false,changed:true,journal_phase:'restored'
+  }));
+  assert.equal(ui.state().guardRestoreDisabled,true);
+  assert.equal(ui.state().guardApplyDisabled,true);
+  assert.match(ui.state().guardResult,/Protection: Restored/);
+});
+
+test('Sensitive-file Nginx guard rejects malformed optimistic success and stale selection',()=>{
+  const invalid=[
+    {site_key:'other.test'}, {site_root:'/www/wwwroot/wrong.test'},
+    {ruleset:'nested-sensitive-v1'}, {automatic_enforcement:true},
+    {state:'Unmanaged',runtime_verified:true},{proposal_sha256:'bad'},
+    {state:'Applied',journal_phase:'prepared'},
+    {state:'Applied',recovery_id:null},
+  ];
+  for(const change of invalid) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-guard-preview').respond(sensitiveGuardResponse('Unmanaged',change));
+    assert.equal(ui.state().guardApplyDisabled,true,JSON.stringify(change));
+    ui.statusSetChecked('#ach-guard-apply-reviewed',true);
+    assert.equal(ui.state().guardApplyDisabled,true,JSON.stringify(change));
+    assert.match(ui.state().guardResult,/unconfirmed|result was refused/i);
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  const pending=ui.statusClick('#ach-guard-preview');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(sensitiveGuardResponse());
+  assert.equal(ui.state().guardApplyDisabled,true,'Stale async reply must not authorize new site');
 });
