@@ -97,6 +97,27 @@ class Panel:
 
 
 class WebsiteDiscoveryTests(unittest.TestCase):
+    def test_inventory_follows_native_roots_not_default_wwwroot(self):
+        rows = [
+            {"id": 9, "name": "paths85.test", "path": "/www/acdomains/paths85.test", "status": 1},
+            {"id": 10, "name": "paths81.test", "path": "/www/other-sites/paths81.test", "status": 1},
+        ]
+        domains = [
+            {"id": 109, "pid": 9, "name": "paths85.test", "port": 80},
+            {"id": 110, "pid": 10, "name": "paths81.test", "port": 80},
+        ]
+        panel = Panel(rows, domains)
+        observed = monitor.get_site_page(panel, strict_native=True)
+        self.assertEqual([site["document_root"] for site in observed["sites"]],
+                         [row["path"] for row in rows])
+        self.assertEqual([site["id"] for site in observed["sites"]], [9, 10])
+        self.assertEqual([site["canonical_domain_bound"] for site in observed["sites"]],
+                         [True, True])
+        rows[0]["path"] = "/mnt/data/moved/paths85.test"
+        changed = monitor.get_site_page(panel, strict_native=True)
+        self.assertEqual(changed["sites"][0]["document_root"], rows[0]["path"])
+        self.assertEqual(changed["sites"][1]["document_root"], rows[1]["path"])
+
     def test_dynamic_non_wordpress_pagination_is_read_only(self):
         panel = Panel([{'id': i, 'name': f'example{i}.test', 'path': '/srv/www/' + str(i), 'status': '1'} for i in range(1, 5)])
         data = monitor.get_site_page(panel, page=2, page_size=2)

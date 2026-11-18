@@ -118,6 +118,24 @@ class ExtensionTests(unittest.TestCase):
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
         self.assertEqual(sum("reload" in cmd for cmd in self.commands), 6)
 
+    def test_custom_document_root_extension_apply_recheck_and_restore(self):
+        """Native per-site source ownership does not require /www/wwwroot."""
+        relocated = self.root / "www" / "acdomains" / "demo.invalid"
+        relocated.mkdir(parents=True)
+        before = self.vhost.read_text()
+        self.vhost.write_text(before.replace(str(self.site_root), str(relocated)))
+        self.site["path"] = str(relocated)
+        self.site_root = relocated
+        self.assertEqual(self.run_manager("recheck")["state"], "Unmanaged")
+        applied = self.run_manager()
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+        self.assertEqual(self.run_manager("restore", recovery=applied["recovery_id"])["state"],
+                         "Restored")
+        self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
+        self.assertEqual(self.vhost.read_text(), before.replace(
+            str(self.root / "sites" / "demo.invalid"), str(relocated)))
+
     def test_native_stop_start_retains_recovery_record(self):
         applied = self.run_manager()
         op = applied["recovery_id"]

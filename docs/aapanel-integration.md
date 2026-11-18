@@ -130,6 +130,36 @@ shape; unsupported layouts show `Needs Review` rather than permission to
 repair. No scheduled per-site enforcement or automatic VHost reconciliation
 is implemented.
 
+## Non-default website roots and source ownership
+
+Do **not** assume "/www/wwwroot" for a site's Document Root. Native aaPanel
+`sites.path` is the source for current site-root identity and `sites.id`
+anchors ownership; native domain bindings and the actual site VHost must be
+re-resolved independently. A root move is material drift even when site ID
+and hostname are unchanged. Any pending preview, cache manifest, recovery,
+status-page write or site policy that references the former root must be
+rechecked before it may act. Operations must not silently migrate/rewrite
+paths or follow symlinks to make a changed root look compatible.
+
+Different **native-supported** roots may coexist under `/www/acdomains`,
+`/www/other-sites`, `/home/websites`, or elsewhere. The aaPanel website
+creation API may reject some otherwise-valid absolute directories as system
+paths, and the legacy One-Click WordPress frontend may supply a default
+`/www/wwwroot/<domain>` path. Neither is a reason for Customizer to hard-code
+its own document root or bypass aaPanel's path safety decisions. Distinguish
+native site API fixture creation from actual WP Toolkit provisioning when
+reporting QA. Read-only Website/VHost/Status/Cache discovery does not prove
+per-module Apply/Restore, URL routing, automatic drift correction, or all
+arbitrary Nginx path syntaxes. Unsupported paths should return a precise
+`Needs Review` / conflict state without creating or touching files.
+
+Static aaPanel application/service paths (panel data, Nginx binary/config,
+PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
+They must be discovered/validated through version-compatible service adapters
+before claiming alternate aaPanel installation-prefix support. See Issue #21
+for the current same-host custom-root QA fixture matrix and unresolved native
+WordPress Toolkit lifecycle tests.
+
 ## Selected-site origin-local Hosts inspection (read-only)
 
 Under **Routing & Nginx → Inspect local hosts file**, the primary

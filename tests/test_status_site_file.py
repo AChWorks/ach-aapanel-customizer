@@ -108,6 +108,42 @@ class NativeSiteFileTests(unittest.TestCase):
         self.assertTrue(all("-t" in run for run in self.commands))
         self.assertFalse(any("reload" in run for run in self.commands))
 
+    def test_nondefault_root_site_file_apply_restore_and_stale_root_rejection(self):
+        """Write/Restore on the native root, not a host-derived default."""
+        native_root = self.root / "www" / "acdomains" / "demo.invalid"
+        native_root.mkdir(parents=True)
+        original_root = self.root_site
+        source = self.original_vhost
+        source = source.replace(str(original_root).encode(), str(native_root).encode())
+        self.vhost.write_bytes(source)
+        self.original_vhost = source
+        self.site["path"] = str(native_root)
+        for code in ("404", "502"):
+            content = self.files[code].read_bytes()
+            target = native_root / (code + ".html")
+            target.write_bytes(content)
+            target.chmod(0o644)
+            self.files[code] = target
+        old = {code: self.files[code].read_bytes() for code in ("404", "502")}
+        for code in ("404", "502"):
+            with self.subTest(code=code):
+                self.assertEqual(self.operate(code=code)["state"], "Unmanaged")
+                applied = self.operate("apply", code=code)
+                self.assertEqual(applied["state"], "Applied")
+                self.assertEqual(self.files[code].read_bytes(), self.proposed.encode())
+                self.assertEqual(self.operate("recheck", code=code)["state"], "Applied")
+                self.assertEqual(self.operate("restore", code=code,
+                    expected_recovery=applied["recovery_id"])["state"],
+                    "Restored" if code == "404" else "Source Restored")
+                self.assertEqual(self.files[code].read_bytes(), old[code])
+        self.assertEqual(self.vhost.read_bytes(), source)
+        self.assertEqual((original_root / "404.html").read_bytes(), b"original 404")
+        self.site["path"] = str(self.root / "www" / "other-sites" / "demo.invalid")
+        with self.assertRaises(ExtensionError):
+            self.operate("apply")
+        self.assertEqual(self.files["404"].read_bytes(), old["404"])
+        self.assertEqual(self.vhost.read_bytes(), source)
+
     def test_exact_native_source_rejects_extension_and_unknown_directives(self):
         for modified in (
             self.original_vhost + b"include /www/server/panel/vhost/nginx/extension/demo.invalid/*.conf;\n",

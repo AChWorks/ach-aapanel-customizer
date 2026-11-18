@@ -60,6 +60,24 @@ class SiteSourceTests(unittest.TestCase):
         self.assertFalse((self.document_root / "404.html").exists())
         self.assertEqual(self.vhost.read_bytes(), before)
 
+    def test_custom_document_root_status_file_is_read_only(self):
+        """Never reconstruct site paths from the domain or default root."""
+        root = self.root / "www" / "acdomains" / self.key
+        root.mkdir(parents=True)
+        self.site["path"] = str(root)
+        content = b"native status file in custom website root"
+        (root / "404.html").write_bytes(content)
+        digest = hashlib.sha256(content).hexdigest()
+        observed = self.scan(digest=digest)
+        self.assertEqual(observed["state"], "File Match", observed)
+        self.assertEqual(observed["page_file_sha256"], digest)
+        self.assertFalse(observed["apply_supported"])
+        self.assertEqual((root / "404.html").read_bytes(), content)
+        self.site["path"] = str(self.document_root)
+        changed_identity = self.scan(digest=digest)
+        self.assertEqual(changed_identity["page_file_state"], "Absent")
+        self.assertEqual((root / "404.html").read_bytes(), content)
+
     def test_match_is_only_content_match_and_never_installed_claim(self):
         file = self.document_root / "404.html"
         content = b"<html>known local 404</html>"

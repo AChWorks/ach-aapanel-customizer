@@ -54,6 +54,27 @@ The product should produce these lasting outcomes:
 
 Correctness, continuity, usability, and recoverability matter more than the quantity of settings exposed.
 
+### Site-root and aaPanel layout portability
+
+Every selected website's **current native aaPanel record** is authoritative for
+its document root; "/www/wwwroot/<domain>" is not an invariant. Support several
+coexisting, panel-approved paths such as "/www/acdomains/<site>",
+"/www/other-sites/<site>" and other verified native layouts. The same rule
+applies to Website inventory, VHost drift, source inspections, Status Pages,
+site-owned cache, WordPress Bridge and any subsequent per-site protection.
+Never derive a writable path from the hostname or a global default setting.
+Re-read native ID, document root, current bindings and relevant generated
+source before guarded changes; a moved site invalidates old approval and
+requires Recheck. Only exact owned, canonical and appropriately scoped paths
+are eligible for writes. Symlinks, ambiguous paths, changed roots or unsupported
+native service/install layouts must fail closed **with an actionable reason**, not
+be rewritten into an assumed default. Dynamic site document roots are distinct
+from aaPanel's service-install roots (such as /www/server/panel or /www/server/php),
+which require separate compatibility adapters and native evidence if relocated.
+Actual per-module compatibility must be certified, not inferred from a
+successful read-only inventory or a default-root fixture. See Issue #21 for
+live custom-root and WordPress Toolkit acceptance evidence.
+
 ### Owner-confirmed operational acceptance priority (2026-11-18)
 
 The existing Monitor/manual-preview foundation is **not** the operational

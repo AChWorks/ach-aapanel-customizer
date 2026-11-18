@@ -121,6 +121,29 @@ class SiteChangesTests(unittest.TestCase):
                          "Selected Site Baseline Saved")
         self.assertEqual(self.preview()["state"], "No Changes")
 
+    def test_alternate_document_roots_are_fingerprinted_and_scoped(self):
+        first = "/www/acdomains/static.example.test"
+        second = "/www/other-sites/wp.example.test"
+        self.panel.sites[0]["path"] = first
+        self.panel.sites[1]["path"] = second
+        initial = self.preview()
+        self.assertEqual([row["document_root"] for row in initial["initial_sites"]],
+                         [first, second])
+        self.save(initial)
+        self.assertEqual(self.preview()["state"], "No Changes")
+        moved = "/home/websites/wp.example.test"
+        self.panel.sites[1]["path"] = moved
+        changes = self.preview()["changes"]
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["id"], 6)
+        self.assertEqual(changes[0]["fields"], ["document_root"])
+        self.assertEqual(changes[0]["before"]["document_root"], second)
+        self.assertEqual(changes[0]["after"]["document_root"], moved)
+        self.assertEqual(self.selected(self.preview(), site_id=6)["state"],
+                         "Selected Site Baseline Saved")
+        self.assertEqual(self.preview()["state"], "No Changes")
+        self.assertEqual(read_baseline(self.directory.name)["sites"][0]["document_root"], first)
+
     def test_scoped_save_accepts_only_selected_delta_not_old_peer_drift(self):
         self.save(self.preview())
         original = read_baseline(self.directory.name)

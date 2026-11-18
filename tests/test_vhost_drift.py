@@ -85,6 +85,33 @@ class GeneratedVhostDriftTests(unittest.TestCase):
         self.assertEqual(got["vhost_root"], "/www/another")
         self.assertIn("stale.test", got["vhost_names"])
 
+    def test_native_document_roots_across_approved_custom_layouts(self):
+        """The native record, not /www/wwwroot, determines the VHost root."""
+        roots = (
+            "/www/acdomains/alpha.test",
+            "/www/other-sites/alpha.test",
+            "/home/websites/alpha.test",
+            "/mnt/data/alpha.test",
+        )
+        for root in roots:
+            with self.subTest(root=root):
+                self.site["path"] = root
+                self.write(
+                    "server { listen 80; server_name alpha.test www.alpha.test;"
+                    " root " + root + "; }\n")
+                source = self.path.read_bytes()
+                matching = self.inspect()
+                self.assertEqual(matching["state"], "File Match", matching)
+                self.assertEqual(matching["native_root"], root)
+                self.assertEqual(matching["vhost_root"], root)
+                self.assertEqual(self.path.read_bytes(), source)
+                self.site["path"] = root + "-relocated"
+                stale = self.inspect()
+                self.assertEqual(stale["state"], "File Drift", stale)
+                self.assertEqual(stale["findings"], ["DOCUMENT_ROOT_MISMATCH"])
+                self.assertFalse(stale["fix_supported"])
+                self.assertEqual(self.path.read_bytes(), source)
+
     def test_only_one_terminal_document_root_slash_is_equivalent(self):
         cases = (
             ("/www/alpha", "/www/alpha", "File Match"),
