@@ -1896,8 +1896,11 @@
   }
   function hostsLock(busy) {
     hostsBusy = busy;
-    var blocked = busy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
-    root.find('#ach-hosts-site-id').prop('disabled', blocked || !hostsPageSites.size);
+    // Loading/inspection locks the chooser; lack of a selection only locks
+    // site-dependent actions. Otherwise the first site could never be chosen.
+    var inventoryLocked = busy || siteBusy || websitePolicyState !== 'stable';
+    var blocked = inventoryLocked || !hostsSiteId();
+    root.find('#ach-hosts-site-id').prop('disabled', inventoryLocked || !hostsPageSites.size);
     root.find('#ach-hosts-inspect-button').prop('disabled', blocked);
     var fresh = !blocked && hostsVerified && hostsVerified.siteId === hostsSiteId();
     var canChoose = fresh && hostsVerified.domains.length &&

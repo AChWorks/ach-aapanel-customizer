@@ -1632,6 +1632,37 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
   ui.statusSetValue('#ach-hosts-site-id',id,'input change');
 }
 
+test('Valid website inventory unlocks initial site selection without authorizing any write', () => {
+  const ui = loadUi();
+  assert.equal(ui.state().hostsSelectorDisabled, true, 'No inventory before load');
+  ui.openSites();
+  assert.equal(ui.state().hostsSelectorDisabled, true, 'Loading locks chooser');
+  ui.respond(hostsInventory());
+  assert.equal(ui.state().hostsSelectorDisabled, false,
+    'A fresh valid inventory must allow the first site to be selected');
+  assert.equal(ui.state().hostsInspectDisabled, true, 'No site selected yet');
+  assert.equal(ui.state().hostsRemovalDisabled, true, 'No unreviewed removal');
+
+  ui.statusSetValue('#ach-hosts-site-id', '7', 'input change');
+  assert.equal(ui.state().hostsSelectorDisabled, false);
+  assert.equal(ui.state().hostsInspectDisabled, false, 'Known selected site enables read-only check');
+  assert.equal(ui.state().hostsRemovalDisabled, true);
+
+  ui.openTab('routing');
+  ui.statusClick('#ach-hosts-inspect-button');
+  const req = ui.requests.at(-1);
+  assert.match(req.options.url, /s=inspect_local_hosts$/);
+  assert.equal(ui.state().hostsSelectorDisabled, true, 'Inspection temporarily locks chooser');
+  req.respond(hostsInspection());
+  assert.equal(ui.state().hostsSelectorDisabled, false);
+  assert.equal(ui.state().hostsRemovalDisabled, true, 'Remediation still requires reviewed alias');
+
+  ui.statusSetValue('#ach-hosts-site-id', '', 'input change');
+  assert.equal(ui.state().hostsSelectorDisabled, false,
+    'Clearing selection must not permanently lock chooser');
+  assert.equal(ui.state().hostsInspectDisabled, true);
+});
+
 const nginxHelperAudit = (overrides={}) => ({
   schema:1,state:'Not Installed',version:null,active_verified:false,
   purge_method_verified:false,cache_path_verified:false,purge_safe_verified:false,
