@@ -360,11 +360,18 @@ def inspect_recovery(site, *, data_dir=DATA_DIR, source_path=HOSTS_PATH):
         os.close(fd)
     if row is None:
         return {"state": "None", "recovery_id": None, "domain": None}
-    parent = _open_parent(source_path)
     try:
-        current, _ = _read_source(parent)
-    finally:
-        os.close(parent)
+        parent = _open_parent(source_path)
+        try:
+            current, _ = _read_source(parent)
+        finally:
+            os.close(parent)
+    except (HostsManageError, OSError):
+        # A previously saved journal must not break ordinary read-only hosts
+        # inspection if the source later acquires ACLs or changes ownership.
+        # No write or Restore is authorized by a degraded recovery summary.
+        return {"state": "Needs Review", "recovery_id": row["operation"],
+                "domain": row["domain"]}
     actual = _sha(current)
     state = row["phase"]
     if row["phase"] == "restored":

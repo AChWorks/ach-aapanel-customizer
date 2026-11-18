@@ -165,6 +165,15 @@ class HostsRemediationTests(unittest.TestCase):
         self.source.write_bytes(b"127.0.0.1 localhost\n127.0.0.7 unrelated.test\n")
         self.assertEqual(self.recovery()["state"], "Needs Review")
 
+    def test_source_ownership_drift_keeps_read_only_diagnostic_available(self):
+        applied = self.remove()
+        self.source.chmod(0o666)
+        self.assertEqual(self.recovery(),
+                         {"state": "Needs Review", "recovery_id": applied["recovery_id"],
+                          "domain": "site.test"})
+        with self.assertRaises(manager.HostsManageError):
+            self.restore(applied["recovery_id"])
+
     def test_site_identity_change_blocks_restore_even_if_file_matches(self):
         previous = self.remove()
         self.site["path"] = "/www/reassigned"
