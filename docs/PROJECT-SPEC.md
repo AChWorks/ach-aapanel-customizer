@@ -66,6 +66,12 @@ Unsupported, aliasing or symlinked source/ownership cannot authorize writes.
 The static installation prefixes for aaPanel, Nginx and PHP-FPM are **separate**
 adapter concerns and need independent compatibility proof if relocated.
 
+The same site-owned identity rule applies to Website inventory, VHost drift,
+Status Pages, site-owned cache and WordPress Bridge. A root move invalidates
+stale previews, cache manifests and recoveries; never silently replace it
+with a default path. Certify each module with representative real custom-root
+behavior rather than inferring compatibility from inventory alone.
+
 An opt-in site-specific Nginx sensitive-path policy should deny known
 sensitive dotfile, backup-directory and upload-PHP requests *before* PHP-FPM
 work. Prefer source-verified server-rewrite `if` + `return 403` rather than

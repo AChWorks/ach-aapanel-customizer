@@ -40,7 +40,7 @@ class CacheBridgeManifestTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="ach-native-bridge-")
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name) / "wp-site"
+        self.root = Path(self.tmp.name) / "www" / "acdomains" / "qa-wp.example"
         plugin = self.root / "wp-content/plugins/ach-aapanel-bridge"
         plugin.mkdir(parents=True)
         (self.root / "wp-config.php").write_text("<?php // test only")

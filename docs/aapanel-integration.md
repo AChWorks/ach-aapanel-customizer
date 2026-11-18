@@ -130,7 +130,37 @@ shape; unsupported layouts show `Needs Review` rather than permission to
 repair. No scheduled per-site enforcement or automatic VHost reconciliation
 is implemented.
 
-## Selected-site Nginx sensitive-path guard (unpublished candidate 0.1.53)
+## Non-default website roots and source ownership
+
+Do **not** assume "/www/wwwroot" for a site's Document Root. Native aaPanel
+`sites.path` is the source for current site-root identity and `sites.id`
+anchors ownership; native domain bindings and the actual site VHost must be
+re-resolved independently. A root move is material drift even when site ID
+and hostname are unchanged. Any pending preview, cache manifest, recovery,
+status-page write or site policy that references the former root must be
+rechecked before it may act. Operations must not silently migrate/rewrite
+paths or follow symlinks to make a changed root look compatible.
+
+Different **native-supported** roots may coexist under `/www/acdomains`,
+`/www/other-sites`, `/home/websites`, or elsewhere. The aaPanel website
+creation API may reject some otherwise-valid absolute directories as system
+paths, and the legacy One-Click WordPress frontend may supply a default
+`/www/wwwroot/<domain>` path. Neither is a reason for Customizer to hard-code
+its own document root or bypass aaPanel's path safety decisions. Distinguish
+native site API fixture creation from actual WP Toolkit provisioning when
+reporting QA. Read-only Website/VHost/Status/Cache discovery does not prove
+per-module Apply/Restore, URL routing, automatic drift correction, or all
+arbitrary Nginx path syntaxes. Unsupported paths should return a precise
+`Needs Review` / conflict state without creating or touching files.
+
+Static aaPanel application/service paths (panel data, Nginx binary/config,
+PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
+They must be discovered/validated through version-compatible service adapters
+before claiming alternate aaPanel installation-prefix support. See Issue #21
+for current custom-root and native WP Toolkit success/failure evidence.
+Automatic post-terminal Hosts/FPM reconciliation remains a separate P0 requirement.
+
+## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
@@ -182,9 +212,10 @@ enforcement/automatic regeneration repair is yet implemented.
 run on the **new** isolated aaPanel 8.0.7 machine, including
 `/www/acdomains/paths85.aitest.gotohell.top` and
 `/www/other-sites/paths81.aitest.gotohell.top`. Refer to Issue #21 for
-exact test identity, status, and future rechecks. The source candidate is not
-published, approved for merge, or a Production rollout. Independent review and
-negative recovery cases remain mandatory integration gates.
+exact test identity, status, and future rechecks. PR #99 was independently
+approved and merged into main; no public Release or Production deployment is
+authorized. The QA-installed earlier 0.1.53 ZIP is not byte-identical to the
+final merged ZIP; see Issue #21 for exact evidence.
 
 ## Selected-site origin-local Hosts inspection (read-only)
 
@@ -206,7 +237,7 @@ precedence, proxy route or external HTTPS request. The inspection itself
 does **not** modify `/etc/hosts`, call a resolver, offer automatic
 repair, change routing or prove the origin's effective NSS lookup.
 
-**Unpublished source candidate (0.1.52): reviewed manual alias removal and
+**Merged manual feature (introduced in source 0.1.52): selected alias removal and
 recovery.** After a fresh inspection, the primary administrator may select
 one exact bound hostname that has a loopback entry, expressly confirm it is
 unwanted, and choose **Remove selected loopback alias**. The native endpoint
