@@ -1,4 +1,5 @@
 """Plugin-owned, bounded, structured activity and native authorization."""
+import errno
 import json
 import os
 import sys
@@ -98,6 +99,36 @@ class ActivityTests(unittest.TestCase):
             with self.assertRaises(activity.ActivityError):
                 self.event(24,module="lifecycle",action="wp_terminal_manual_review",
                            target=value)
+
+    def test_read_normalizes_raw_filesystem_faults(self):
+        entry = self.event(6)
+        activity.append_activity(self.directory, entry)
+        original_open, original_read = os.open, os.read
+        fingerprint = (Path(self.directory) / activity.LOG_NAME).stat()
+        def interrupted_read(fd, length):
+            current = os.fstat(fd)
+            if (current.st_dev, current.st_ino) == (fingerprint.st_dev, fingerprint.st_ino):
+                raise OSError(errno.EIO, "synthetic-private-file-detail")
+            return original_read(fd, length)
+        with patch.object(activity.os, "read", side_effect=interrupted_read):
+            with self.assertRaises(activity.ActivityError) as caught:
+                activity.read_activity(self.directory)
+        self.assertIsInstance(caught.exception.__cause__, OSError)
+        self.assertNotIn("synthetic-private-file-detail", str(caught.exception))
+
+        for code in (errno.EACCES, errno.ELOOP):
+            with self.subTest(errno=code):
+                def interrupted_open(path, flags, *args, **kwargs):
+                    if path == activity.LOG_NAME:
+                        raise (PermissionError if code == errno.EACCES else OSError)(
+                            code, "synthetic-private-file-detail")
+                    return original_open(path, flags, *args, **kwargs)
+                with patch.object(activity.os, "open", side_effect=interrupted_open):
+                    with self.assertRaises(activity.ActivityError) as caught:
+                        activity.read_activity(self.directory)
+                self.assertIsInstance(caught.exception.__cause__, OSError)
+                self.assertNotIn("synthetic-private-file-detail", str(caught.exception))
+        self.assertEqual(activity.read_activity(self.directory), [entry])
 
     def test_rotation_is_bounded_and_recent_first(self):
         with patch.object(activity, "MAX_LOG_BYTES", 4096):

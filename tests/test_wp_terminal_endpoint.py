@@ -1,5 +1,8 @@
 """Native aaPanel authenticated route gate for opt-in WP terminal automation."""
+import errno
 import importlib.util
+import json
+import os
 import sys
 import types
 import tempfile
@@ -107,6 +110,75 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
         self.assertFalse(denied["status"])
         self.assertNotIn("entries",denied)
         self.assertNotIn("manual-review.example",str(denied))
+
+    def test_raw_general_log_failures_preserve_authorized_durable_evidence(self):
+        import ach_customizer_activity as activity
+        import ach_customizer_wp_terminal as terminal
+        operation = "e" * 32
+        domain = ".".join(("a" * 63, "b" * 63, "c" * 63, "d" * 61))
+        self.assertEqual(len(domain), 253)
+        with terminal._locked_state(MODULE._STATE_DIR) as fd:
+            terminal._prepare_manual_review(fd, operation, domain)
+        general = activity.record(
+            level="INFO", module="lifecycle", action="native_test",
+            operation_id="f" * 32, stage="fixture", outcome="Observed")
+        activity.append_activity(MODULE._STATE_DIR, general)
+        log_stat = (Path(MODULE._STATE_DIR) / activity.LOG_NAME).stat()
+        original_open, original_read = os.open, os.read
+
+        for code, at in ((errno.EIO, "read"), (errno.EACCES, "open"), (errno.ELOOP, "open")):
+            with self.subTest(errno=code, at=at):
+                def failing_open(path, flags, *args, **kwargs):
+                    if at == "open" and path == activity.LOG_NAME:
+                        raise (PermissionError if code == errno.EACCES else OSError)(
+                            code, "synthetic-private-file-detail")
+                    return original_open(path, flags, *args, **kwargs)
+                def failing_read(fd, length):
+                    current = os.fstat(fd)
+                    if (at == "read" and
+                            (current.st_dev, current.st_ino) ==
+                            (log_stat.st_dev, log_stat.st_ino)):
+                        raise OSError(code, "synthetic-private-file-detail")
+                    return original_read(fd, length)
+                with patch.object(activity.os, "open", side_effect=failing_open), patch.object(
+                        activity.os, "read", side_effect=failing_read):
+                    response = self.plugin.get_activity({"module": "lifecycle"})
+                self.assertTrue(response["status"], response)
+                self.assertIn("General Activity log unavailable", response["activity_warning"])
+                self.assertEqual(
+                    [(row["operation_id"], row["target"]) for row in response["entries"]
+                     if row["action"] == "wp_terminal_manual_review"],
+                    [(operation, domain)])
+                self.assertNotIn("synthetic-private-file-detail", json.dumps(response))
+
+        with patch.object(MODULE.ach_customizer_main, "_status_primary_admin_post",
+                          side_effect=PermissionError("primary admin required")), patch.object(
+                terminal, "manual_review_activity", side_effect=AssertionError(
+                    "authorization must precede evidence access")):
+            denied = self.plugin.get_activity({"module": "lifecycle"})
+        self.assertFalse(denied["status"])
+        self.assertEqual(denied["stage"], "activity_authorization")
+        self.assertNotIn(domain, json.dumps(denied))
+        self.assertNotIn("entries", denied)
+
+    def test_general_log_error_without_durable_evidence_does_not_fabricate_success(self):
+        import ach_customizer_activity as activity
+        general = activity.record(
+            level="INFO", module="lifecycle", action="native_test",
+            operation_id="f" * 32, stage="fixture", outcome="Observed")
+        activity.append_activity(MODULE._STATE_DIR, general)
+        original_open = os.open
+        def failing_open(path, flags, *args, **kwargs):
+            if path == activity.LOG_NAME:
+                raise PermissionError(errno.EACCES, "synthetic-private-file-detail")
+            return original_open(path, flags, *args, **kwargs)
+        with patch.object(activity.os, "open", side_effect=failing_open):
+            response = self.plugin.get_activity({"module": "lifecycle"})
+        self.assertFalse(response["status"], response)
+        self.assertEqual(response["stage"], "activity_read",
+            "File read availability is not a primary-admin authorization failure")
+        self.assertNotIn("entries", response)
+        self.assertNotIn("synthetic-private-file-detail", json.dumps(response))
 
     def test_resident_old_helper_blocks_enable_but_preserves_emergency_disable(self):
         import ach_customizer_wp_terminal as terminal

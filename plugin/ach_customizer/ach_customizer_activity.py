@@ -244,53 +244,57 @@ def read_activity(directory, *, level="", module="", limit=50):
         raise ActivityError("Invalid module filter")
     if type(limit) is not int or not 1 <= limit <= MAX_RESULTS:
         raise ActivityError("Invalid activity page size")
-    fd_dir = _directory(directory)
     try:
+        fd_dir = _directory(directory)
         try:
-            fd_lock = os.open(LOCK_NAME, _READ_FLAGS, dir_fd=fd_dir)
-        except FileNotFoundError:
-            # Reading a fresh install must not create any persistent state.
-            for name in (LOG_NAME, LOG_NAME + ".1"):
-                try:
-                    os.stat(name, dir_fd=fd_dir, follow_symlinks=False)
-                except FileNotFoundError:
-                    continue
-                raise ActivityError("Activity history exists without its lock")
-            return []
-        try:
-            _check_file(fd_lock)
-            fcntl.flock(fd_lock, fcntl.LOCK_SH)
-            items = []
-            for filename in (LOG_NAME + ".1", LOG_NAME):
-                fd = _open_optional(fd_dir, filename)
-                if fd is None:
-                    continue
-                try:
-                    data = bytearray()
-                    while True:
-                        part = os.read(fd, 32768)
-                        if not part:
-                            break
-                        data.extend(part)
-                        if len(data) > MAX_LOG_BYTES:
-                            raise ActivityError("Activity read exceeded size limit")
-                finally:
-                    os.close(fd)
-                for line in bytes(data).splitlines():
+            try:
+                fd_lock = os.open(LOCK_NAME, _READ_FLAGS, dir_fd=fd_dir)
+            except FileNotFoundError:
+                # Reading a fresh install must not create any persistent state.
+                for name in (LOG_NAME, LOG_NAME + ".1"):
                     try:
-                        item = json.loads(line)
-                    except (ValueError, UnicodeDecodeError) as exc:
-                        raise ActivityError("Unreadable activity history") from exc
-                    if (not isinstance(item, dict) or set(item) != _FIELDS
-                            or item.get("schema") != 1
-                            or item.get("level") not in LEVELS
-                            or item.get("module") not in MODULES):
-                        raise ActivityError("Unsupported activity record")
-                    if (level and item["level"] != level) or (module and item["module"] != module):
+                        os.stat(name, dir_fd=fd_dir, follow_symlinks=False)
+                    except FileNotFoundError:
                         continue
-                    items.append(item)
-            return list(reversed(items[-limit:]))
+                    raise ActivityError("Activity history exists without its lock")
+                return []
+            try:
+                _check_file(fd_lock)
+                fcntl.flock(fd_lock, fcntl.LOCK_SH)
+                items = []
+                for filename in (LOG_NAME + ".1", LOG_NAME):
+                    fd = _open_optional(fd_dir, filename)
+                    if fd is None:
+                        continue
+                    try:
+                        data = bytearray()
+                        while True:
+                            part = os.read(fd, 32768)
+                            if not part:
+                                break
+                            data.extend(part)
+                            if len(data) > MAX_LOG_BYTES:
+                                raise ActivityError("Activity read exceeded size limit")
+                    finally:
+                        os.close(fd)
+                    for line in bytes(data).splitlines():
+                        try:
+                            item = json.loads(line)
+                        except (ValueError, UnicodeDecodeError) as exc:
+                            raise ActivityError("Unreadable activity history") from exc
+                        if (not isinstance(item, dict) or set(item) != _FIELDS
+                                or item.get("schema") != 1
+                                or item.get("level") not in LEVELS
+                                or item.get("module") not in MODULES):
+                            raise ActivityError("Unsupported activity record")
+                        if (level and item["level"] != level) or (module and item["module"] != module):
+                            continue
+                        items.append(item)
+                return list(reversed(items[-limit:]))
+            finally:
+                os.close(fd_lock)
         finally:
-            os.close(fd_lock)
-    finally:
-        os.close(fd_dir)
+            os.close(fd_dir)
+
+    except OSError as exc:
+        raise ActivityError("Activity history read unavailable: " + type(exc).__name__) from exc
