@@ -3691,6 +3691,29 @@ const statusInspection = (overrides = {}) => ({
   note:'Textual source only; no HTTP verification.',...overrides
 });
 
+test('Status Pages inspection accepts complete native source inventories beyond 32 files', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-scope','site','change');
+  loadNativeStatusSiteSelection(ui,'7');
+  ui.requests.at(-1).respond(statusPrefs());
+  const longestNativeName='x'.repeat(250) + '.conf';
+  const names=Array.from({length:43}, (_,i) => `extension-${i}.conf`)
+    .concat([longestNativeName]);
+  const sources=names.map(name => 'extension/' + name);
+  ui.statusClick('#ach-status-inspect-button').respond(statusInspection({
+    state:'Needs Review',
+    reason:'Multiple selected-status references need review',
+    route_source_state:'Ambiguous',
+    extensions_scanned:names,
+    error_page_sources:sources
+  }));
+  assert.match(ui.state().statusInspect,/State: Needs Review/);
+  assert.match(ui.state().statusInspect,/extension-42\.conf/);
+  assert.ok(ui.state().statusInspect.includes('extension/' + longestNativeName));
+  assert.doesNotMatch(ui.state().statusInspect,/unconfirmed or incompatible/);
+});
+
 test('Site inspection is scoped, read-only, renders a bounded disk/source diagnosis', () => {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());

@@ -3887,9 +3887,12 @@
                        'Unreferenced Extension','Alternate','Ambiguous'];
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
-    var boundedStrings = function (value, max) {
-      return Array.isArray(value) && value.length <= max &&
-        value.every(function (entry) { return typeof entry === 'string' && entry.length > 0 && entry.length <= 256; });
+    var nativeSourceNames = function (value, maxEntryLength) {
+      return Array.isArray(value) &&
+        value.every(function (entry) {
+          return typeof entry === 'string' && entry.length > 0 &&
+            entry.length <= maxEntryLength;
+        });
     };
     var comparison = r && r.comparison;
     var integerWithin = function (value, max) {
@@ -3946,8 +3949,8 @@
       maybeHash(r.vhost_sha256) &&
       (r.page_file_bytes === null || (Number.isSafeInteger(r.page_file_bytes) && r.page_file_bytes >= 0 && r.page_file_bytes <= 65536)) &&
       typeof r.extension_include_textual === 'boolean' &&
-      boundedStrings(r.extensions_scanned, 32) &&
-      boundedStrings(r.error_page_sources, 33) &&
+      nativeSourceNames(r.extensions_scanned, 255) &&
+      nativeSourceNames(r.error_page_sources, 265) &&
       (r.route_source_state === undefined || routeStates.includes(r.route_source_state)) &&
       (r.route_source_state !== 'Native VHost' ||
         r.error_page_sources.includes('site VHost')) &&
