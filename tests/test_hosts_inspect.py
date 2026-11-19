@@ -235,13 +235,20 @@ class LocalHostsTests(unittest.TestCase):
                 self.inspect()
         self.assertTrue(changed)
 
-    def test_bounded_sizes_line_counts_and_matches(self):
-        self.write("127.0.0.1 localhost\n" * 2050)
-        with self.assertRaises(HostsInspectionError):
-            self.inspect()
-        self.write("127.0.0.1 example.test\n" * 101)
-        self.assertEqual(len(self.inspect()["entries"]), 101)
-        self.write("x" * 65537)
+    def test_large_valid_line_counts_and_alias_lists_stay_inspectable(self):
+        self.write("127.0.0.1 localhost\n" * 2150 +
+                   "127.0.0.2 example.test\n")
+        observed = self.inspect()
+        self.assertEqual(observed["entries"][0]["line"], 2151)
+        self.write("127.0.0.1 " + " ".join(
+            f"alias{i}.test" for i in range(170)) + " example.test\n")
+        self.assertEqual(self.inspect()["entries"][0]["domain"], "example.test")
+        # A moderately large valid Hosts source is not rejected merely
+        # because it exceeds the previous 64 KiB read capacity.
+        self.write("127.0.0.1 localhost\n" * 4000 +
+                   "127.0.0.2 example.test\n")
+        self.assertEqual(self.inspect()["entries"][0]["line"], 4001)
+        self.write("x" * (hosts.MAX_BYTES + 1))
         with self.assertRaises(HostsInspectionError):
             self.inspect()
 

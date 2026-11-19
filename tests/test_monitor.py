@@ -580,11 +580,11 @@ class PHPMonitorTests(unittest.TestCase):
         with self.assertRaises(monitor.MonitorInputError):
             self.preview(bad)
 
-    def test_missing_version_and_many_includes(self):
+    def test_missing_version_and_many_valid_includes(self):
         self.assertEqual(monitor.preview_php_fpm(self.root, '84', EXPECTED)['state'], 'Needs Review')
-        for i in range(33):
+        for i in range(45):
             (self.pool.parent / f'pool{i}.conf').write_text('[other]\n', encoding='utf-8')
-        self.assertEqual(self.preview()['state'], 'Needs Review')
+        self.assertEqual(self.preview()['state'], 'File Match')
 
 
 class SharedPHPFileImpactTests(unittest.TestCase):
@@ -1288,56 +1288,30 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         # A fresh, stable scan is allowed to show read-only attribution.
         self.assertEqual(self.inspect()['state'], 'File Mapping')
 
-    def test_native_extension_entry_limit_counts_all_directory_entries(self):
+    def test_many_inert_extension_directory_entries_are_fingerprinted(self):
         self._native_qa_shapes()
         extension = self.vhosts / 'extension' / 'site-a.example.test'
-        # One real .conf entry plus 31 harmless non-.conf entries is allowed.
-        for number in range(monitor.CONFIG_FILES_LIMIT - 1):
-            (extension / f'note-{number:02d}.txt').write_text(
-                'test fixture\n', encoding='utf-8')
-        accepted = self.inspect()
-        self.assertEqual(accepted['state'], 'File Mapping', accepted)
-        self.assertIs(accepted['manual_apply_eligible'], True)
-        self.assertIn('dependency_sha256', accepted)
+        for number in range(46):
+            (extension / f'note-{number:03d}.txt').write_text('test fixture\n')
+        original = self.inspect()
+        self.assertEqual(original['state'], 'File Mapping', original)
+        self.assertTrue(original['manual_apply_eligible'])
+        digest = original['dependency_sha256']
+        (extension / 'note-045.txt').rename(extension / 'note-renamed.txt')
+        updated = self.inspect()
+        self.assertEqual(updated['state'], 'File Mapping', updated)
+        self.assertNotEqual(updated['dependency_sha256'], digest)
 
-        (extension / 'one-more.txt').write_text('over limit\n', encoding='utf-8')
-        refused = self.inspect()
-        self.assertEqual(refused['state'], 'Needs Review', refused)
-        self.assertEqual([site['id'] for site in refused['unresolved_sites']], [3])
-        self.assertNotIn('dependency_sha256', refused)
-        self.assertIs(refused['manual_apply_eligible'], False)
-
-    def test_native_extension_scandir_stops_at_entry_33_and_closes(self):
+    def test_many_native_extension_config_entries_are_fingerprinted(self):
         self._native_qa_shapes()
-
-        class InstrumentedScandir:
-            def __init__(self):
-                self.consumed = 0
-                self.closed = False
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_):
-                self.closed = True
-
-            def __iter__(self):
-                return self
-
-            def __next__(self):
-                self.consumed += 1
-                if self.consumed > monitor.CONFIG_FILES_LIMIT + 1:
-                    raise AssertionError('Unbounded directory iteration')
-                return SimpleNamespace(name=f'note-{self.consumed:05d}.txt')
-
         extension = self.vhosts / 'extension' / 'site-a.example.test'
-        iterator = InstrumentedScandir()
-        with patch('os.scandir', return_value=iterator):
-            with self.assertRaises(monitor.MonitorInputError) as error:
-                monitor._native_extension_fingerprint(extension)
-        self.assertIn('exceeds bounded inventory', str(error.exception))
-        self.assertEqual(iterator.consumed, monitor.CONFIG_FILES_LIMIT + 1)
-        self.assertTrue(iterator.closed)
+        for index in range(43):
+            (extension / f'note-{index:05d}.conf').write_text(
+                'access_log /tmp/inert.log;\n')
+        digest = monitor._native_extension_fingerprint(extension)
+        self.assertRegex(digest, r'^[a-f0-9]{64}$')
+        (extension / 'note-00042.conf').write_text('error_log /tmp/inert.log;\n')
+        self.assertNotEqual(digest, monitor._native_extension_fingerprint(extension))
 
     def test_native_extension_glob_rejects_unsafe_or_ambiguous_shapes(self):
         self._native_qa_shapes()

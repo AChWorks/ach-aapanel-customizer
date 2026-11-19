@@ -94,7 +94,7 @@ function loadUi() {
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
     '#ach-fpm-policy-recheck', '#ach-fpm-policy-recheck-status',
     '#ach-fpm-policy-diff-rows', '#ach-fpm-policy-impact', '#ach-fpm-policy-impact-rows',
-    '#ach-fpm-policy-load', '#ach-fpm-policy-reviewed', '#ach-fpm-policy-save',
+    '#ach-fpm-policy-load', '#ach-fpm-policy-save',
     '#ach-fpm-policy-status', '#ach-fpm-policy-why', '#ach-fpm-prepare-why',
     '#ach-fpm-auto-refresh', '#ach-fpm-auto-reviewed',
     '#ach-fpm-auto-enable', '#ach-fpm-auto-disable', '#ach-fpm-auto-status',
@@ -498,7 +498,6 @@ function loadUi() {
         tr.children.map(td => td.textContent)),
       fpmPolicySaveDisabled: elements.get('#ach-fpm-policy-save').props.disabled,
       fpmPolicyLoadDisabled: elements.get('#ach-fpm-policy-load').props.disabled,
-      fpmPolicyReviewedDisabled: elements.get('#ach-fpm-policy-reviewed').props.disabled,
       fpmAutoStatus: elements.get('#ach-fpm-auto-status').textContent,
       fpmAutoInspectDisabled: elements.get('#ach-fpm-auto-refresh').props.disabled,
       fpmAutoEnableDisabled: elements.get('#ach-fpm-auto-enable').props.disabled,
@@ -625,10 +624,6 @@ function loadUi() {
     reviewFpmAuto:checked => {
       elements.get('#ach-fpm-auto-reviewed').props.checked=checked;
       trigger(elements.get('#ach-fpm-auto-reviewed'),'change');
-    },
-    reviewFpmPolicy:checked => {
-      elements.get('#ach-fpm-policy-reviewed').props.checked=checked;
-      trigger(elements.get('#ach-fpm-policy-reviewed'),'change');
     },
     inspectPhpRuntime: () => { trigger(elements.get('#ach-php-runtime-check'), 'click'); return requests.at(-1); },
     selectPhpVersion: v => { elements.get('#ach-php-version').props.value=v; trigger(elements.get('#ach-php-version'), 'change'); },
@@ -1313,9 +1308,6 @@ test('Fresh PHP preview permits reviewed desired-policy save without invoking FP
   const ui = loadUi();
   const preview = ui.submitPhp();
   preview.respond(fpmPolicyPreview());
-  assert.equal(ui.state().fpmPolicyReviewedDisabled,false);
-  assert.equal(ui.state().fpmPolicySaveDisabled,true);
-  ui.reviewFpmPolicy(true);
   assert.equal(ui.state().fpmPolicySaveDisabled,false);
   const saving = ui.saveFpmPolicy();
   assert.match(saving.options.url, /s=fpm_policy_save$/);
@@ -1336,10 +1328,8 @@ test('Fresh PHP preview permits reviewed desired-policy save without invoking FP
 test('Changing PHP values or missing a trusted source token revokes policy-save authorization', () => {
   const ui = loadUi();
   ui.submitPhp().respond(fpmPolicyPreview());
-  ui.reviewFpmPolicy(true);
   ui.changePhp('max_children','81');
   assert.equal(ui.state().fpmPolicySaveDisabled,true);
-  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
   const count = ui.requests.length;
   ui.saveFpmPolicy();
   assert.equal(ui.requests.length,count);
@@ -1347,13 +1337,11 @@ test('Changing PHP values or missing a trusted source token revokes policy-save 
     fpm_observation_sha256:'not-a-hash'
   }));
   assert.equal(ui.state().fpmPolicySaveDisabled,true);
-  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
 });
 
 test('Rejected PHP policy save preserves actionable backend stage and Operation ID inline', () => {
   const ui = loadUi();
   ui.submitPhp().respond(fpmPolicyPreview());
-  ui.reviewFpmPolicy(true);
   const req = ui.saveFpmPolicy();
   req.respond({status:false, stage:'fpm_policy_save',
     msg:'Saved PHP policy changed; reload and inspect again',
@@ -1383,7 +1371,6 @@ test('Policy read authorization failure explains cause instead of a generic empt
 test('Transport-unknown policy save never pretends rejection or successful persistence', () => {
   const ui = loadUi();
   ui.submitPhp().respond(fpmPolicyPreview());
-  ui.reviewFpmPolicy(true);
   const req = ui.saveFpmPolicy();
   req.reject(null,'timeout');
   assert.match(ui.state().fpmPolicyStatus,/Policy save outcome unconfirmed/);
@@ -1393,14 +1380,12 @@ test('Transport-unknown policy save never pretends rejection or successful persi
 test('A stale policy save cannot claim a completed host operation or restore review', () => {
   const ui = loadUi();
   ui.submitPhp().respond(fpmPolicyPreview());
-  ui.reviewFpmPolicy(true);
   const pending = ui.saveFpmPolicy();
   ui.changePhp('max_children','101');
   pending.respond({status:true,schema:1,state:'Policy Saved',version:'85',
     scope:'shared_service',auto_enforce:false,runtime_verified:false,
     policy_revision:1,changed:true});
   assert.equal(ui.state().fpmPolicySaveDisabled,true);
-  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
   assert.doesNotMatch(ui.state().fpmPolicyStatus,/Policy Saved/);
 });
 
@@ -3113,11 +3098,60 @@ test('Different canonical cache paths remain Unknown; UI never grants site purge
   assert.doesNotMatch(result,/safe to purge|private content protected/);
 });
 
+test('Large Cache peer inventories remain visible instead of failing at 100 sites', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const peers=Array.from({length:143}, (_,index) =>
+    ({id:index + 8,site_key:'site'+(index + 8)+'.test'}));
+  ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection({
+    inspected_sites:144,other_sites_same_zone:peers,
+    other_sites_same_directory:peers
+  }));
+  assert.doesNotMatch(ui.state().cacheResult,/unavailable or incompatible/);
+  assert.match(ui.state().cacheResult,/site150\.test/);
+  assert.match(ui.state().cacheResult,/unresolved sites: 0\/144/);
+});
+
+test('Large read-only Hosts and VHost reports remain usable', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  const names=['site.test',...Array.from({length:135},(_,n)=>'alias'+n+'.test')];
+  ui.statusClick('#ach-hosts-inspect-button').respond(hostsInspection({
+    domains:names,entries:names.map((domain,n) => ({
+      domain,address:'127.0.0.2',line:2080+n,loopback:true
+    }))
+  }));
+  assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+  assert.doesNotMatch(ui.state().hostsResult,/unconfirmed|incompatible/);
+  ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection({
+    native_names:names,vhost_names:names,
+    listen_ports:[80,443]
+  }));
+  assert.match(ui.state().vhostResult,/Generated VHost: File Match/);
+  assert.doesNotMatch(ui.state().vhostResult,/unavailable or incompatible/);
+});
+
+test('More than 32 installed PHP versions and an older version remain preview-selectable', () => {
+  const ui=loadUi();
+  const codes=['74',...Array.from({length:9},(_,i)=>'8'+(i+1)),
+    ...Array.from({length:31},(_,i)=>'8'+(i+10))];
+  const versions=codes.map(code=>({
+    code,label:'PHP '+code[0]+'.'+Number(code.slice(1)),
+    state:'File Preview Candidate',binary_present:true,config_present:true,
+    preview_candidate:true,manual_apply_adapter:code==='81'?'guarded_php81':'none',
+    apply_eligible:false,reason:'Read-only preview candidate'
+  }));
+  ui.openPhp().respond(ui.phpVersions(versions));
+  assert.equal(ui.state().phpOptions.length,codes.length+1);
+  assert.equal(ui.state().phpOptions.find(item=>item.value==='74').disabled,undefined);
+  assert.match(ui.state().phpDiscovery,/41 file-preview candidate/);
+});
+
 test('Forged FastCGI cache source responses fail closed and do not enable mutation', () => {
   const forged = [
     {site_id:8},{site_key:'other.test'},{fix_supported:true},
     {purge_supported:true},{cache_safe_verified:true},{runtime_verified:true},
-    {source_sha256:'fake'},{inspected_sites:101},
+    {source_sha256:'fake'},{inspected_sites:0},
     {zone_state:'Direct Zone',cache_zone:null},{zone_state:'Direct Off'},
     {state:'Source Observed',unresolved_other_sites:1},
     {state:'Partial',unresolved_other_sites:0},
@@ -8026,7 +8060,6 @@ test('Every gated approval has nearby visible cause and action guidance, not tit
   const pairs=[
     ['ach-cache-activation-reviewed','ach-cache-apply-why'],
     ['ach-cache-restore-reviewed','ach-cache-restore-why'],
-    ['ach-fpm-policy-reviewed','ach-fpm-policy-why'],
     ['ach-status-manage-apply-approve','ach-status-site-apply-why'],
     ['ach-status-manage-restore-approve','ach-status-site-restore-why'],
     ['ach-status-default-apply-approve','ach-status-default-apply-why'],
@@ -8100,12 +8133,10 @@ test('PHP Monitor approval guidance changes only on valid preview and becomes st
   const preview=ui.submitPhp();
   assert.equal(ui.gate('ach-fpm-policy-why').state,'blocked');
   preview.respond(fpmPolicyPreview());
-  assert.equal(ui.state().fpmPolicyReviewedDisabled,false);
   assert.equal(ui.gate('ach-fpm-policy-why').state,'ready');
-  assert.match(ui.gate('ach-fpm-policy-why').text,/Monitor-only baseline/);
+  assert.match(ui.gate('ach-fpm-policy-why').text,/desired Monitor settings/);
   assert.equal(ui.gate('ach-fpm-prepare-why').state,'ready');
   ui.selectPhpVersion('85');
-  assert.equal(ui.state().fpmPolicyReviewedDisabled,true);
   assert.equal(ui.gate('ach-fpm-policy-why').state,'blocked');
   assert.equal(ui.gate('ach-fpm-prepare-why').state,'blocked');
 });

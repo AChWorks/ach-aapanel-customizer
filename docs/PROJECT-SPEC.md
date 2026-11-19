@@ -60,6 +60,14 @@ branding preferences; do not require a second approval checkbox for these
 low-risk state updates. Low-contrast branding is a nonblocking accessibility
 note, not a schema rejection. Paginate native inventories rather than
 rejecting an otherwise valid 101st site, domain alias or branding scope.
+A read-only inspection must not reject actual PHP installations, additional
+native Nginx source files, or large but valid local inventories merely
+because they exceed a convenient test quantity. Prefer actual stable
+enumeration and parser evidence, with byte/resource bounds proportionate
+to the operation. For saved Monitor-only PHP desired values, a fresh valid
+Preview plus explicit Save is sufficient; do not add a redundant checkbox.
+Actual PHP-FPM/Cache mutation adapters remain separate and must understand
+the target service/configuration before writing.
 Earlier checklists and proposed complexity must be re-evaluated against this
 principle. Recording it does not imply other runtime controls have changed.
 

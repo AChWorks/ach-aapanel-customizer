@@ -416,6 +416,22 @@ show accessibility advice instead of rejecting the user's chosen palette.
 This source package has not yet passed new-version native installed UI
 acceptance or been published; it is not a Production deployment.
 
+A second cross-layer limit audit additionally removes stale frontend
+ceilings on large Hosts/VHost/Cache peer results, the 32-installation/128-root
+PHP inventory limits, artificial Linux process/FD count stops, the 32-profile
+Monitor-only PHP intent cap, the 32-fragment Nginx/PHP source reader caps,
+and the 64-event historical WordPress recovery count stop. Inspection
+of installed older PHP versions and newer aaPanel Nginx sources uses
+observed readable files rather than version-text bans. The explicitly
+implemented 8.1/8.5 PHP-FPM and Cache write adapters, native WP watcher
+source fingerprint and data-ownership boundaries remain unchanged.
+Large-source handling still retains per-file/resource budgets and current
+target/ownership validation; these are not absolute support ceilings.
+
+The saved shared PHP-FPM Monitor policy also uses the current Preview and
+direct Save click without requiring an additional checkbox. This only writes
+plugin-owned desired values, not shared service configuration.
+
 ## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 
 The 0.1.62 candidate fixes the standalone systemd worker's missing
@@ -584,8 +600,10 @@ automated Hosts cleanup, nor does it cover unrelated aaPanel PHP operations.
   distinguish a failed/uncertain reload from successful worker adoption,
   and never blindly repeat Apply or cross-version Restore.
 
-PHP 8.1+ is a **product discovery/compatibility target**, not a promise of
-guarded Apply on every newer version or nonstandard pool.
+Installed native PHP versions are read-only discovery and inspection candidates
+when their actual files and service shapes can be understood, including
+older installations. The currently implemented PHP 8.1/8.5 **write adapters**
+are not a claim of guarded Apply on every other version or pool.
 
 ## Status Pages: static assets and distinct delivery modes
 

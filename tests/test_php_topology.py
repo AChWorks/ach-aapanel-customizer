@@ -137,6 +137,26 @@ class SiteTopologyTests(unittest.TestCase):
         self.assertEqual(before, {str(p): hashlib.sha256(p.read_bytes()).digest()
                                   for p in files})
 
+    def test_older_php_and_newer_panel_identify_actual_site_file_dependencies(self):
+        socket74 = str(self.root / "pool-74.sock")
+        self.setup_php("74", socket74)
+        (self.nginx / "enable-php-74.conf").write_text(
+            "location ~ \\.php$ {\n include fastcgi.conf;\n"
+            " fastcgi_pass unix:" + socket74 + ";\n}\n")
+        first = self.vhosts / "first.test.conf"
+        first.write_text(first.read_text().replace(
+            "enable-php-81.conf", "enable-php-74.conf"))
+        self.panel.version = "8.1.0"
+        got = self.inspect("74")
+        self.assertEqual(got["state"], "File Mapping", got)
+        self.assertEqual(got["matched_sites"], [{"id": 3, "site_key": "first.test"}])
+        self.assertFalse(got["apply_eligible"])
+        original = self.inspect("81")
+        self.assertEqual(original["state"], "File Mapping", original)
+        self.assertEqual([x["id"] for x in original["matched_sites"]], [4])
+        self.assertTrue(any(item["version"] == "74"
+                            for item in original["other_sites"]))
+
     def test_php85_reverse_view_and_no_cross_version_false_link(self):
         got = self.inspect("85")
         self.assertEqual(got["state"], "File Mapping")
@@ -256,10 +276,12 @@ class SiteTopologyTests(unittest.TestCase):
         self.assertEqual(got["matched_sites"], [])
 
     def test_alternate_engine_version_or_incomplete_installed_source_is_not_mapped(self):
-        for webserver, version in (("apache", "8.0.7"), ("nginx", "8.1.1")):
-            self.panel.webserver = webserver
-            self.panel.version = version
-            self.assertEqual(self.inspect()["state"], "Needs Review")
+        self.panel.webserver = "apache"
+        self.panel.version = "8.0.7"
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+        self.panel.webserver = "nginx"
+        self.panel.version = "8.1.1"
+        self.assertEqual(self.inspect()["state"], "File Mapping")
         self.panel.webserver = "nginx"
         self.panel.version = "8.0.7"
         (self.php / "81" / "etc" / "php-fpm.conf").unlink()

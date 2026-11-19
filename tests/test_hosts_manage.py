@@ -65,6 +65,18 @@ class HostsRemediationTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), before)
         self.assertEqual(self.recovery()["state"], "restored")
 
+    def test_large_hosts_source_and_many_unrelated_aliases_remain_removable(self):
+        unrelated = " ".join(f"alias{i}.test" for i in range(160))
+        original = (b"# unrelated entry\n" * 2130 +
+                    ("127.0.0.1 " + unrelated + " site.test\n").encode())
+        self.write(original)
+        result = self.remove()
+        self.assertEqual(result["removed_aliases"], 1)
+        self.assertEqual(self.source.read_bytes(),
+                         original.replace(b" site.test\n", b"\n"))
+        self.restore(result["recovery_id"])
+        self.assertEqual(self.source.read_bytes(), original)
+
     def test_preserve_unrelated_names_and_comments_including_crlf(self):
         original = (b"# first\r\n127.0.0.1 localhost site.test OTHER.test # keep me\r\n"
                     b"::1 alias.test\n::ffff:127.0.0.9 site.test\n"

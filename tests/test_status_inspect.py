@@ -330,15 +330,15 @@ class SiteSourceTests(unittest.TestCase):
         self.assertEqual(r["state"], "Needs Review")
         self.assertIsNone(r["vhost_sha256"])
 
-    def test_extension_count_is_bounded_and_no_partial_positive_claims(self):
+    def test_more_than_32_extension_fragments_are_inspected(self):
         folder = self.vhosts / "extension" / self.key
         folder.mkdir(parents=True)
-        for i in range(inspection.MAX_EXTENSIONS + 1):
+        for i in range(43):
             (folder / f"fragment-{i:02d}.conf").write_text("listen 80;")
         r = self.scan()
-        self.assertEqual(r["state"], "Needs Review")
-        self.assertEqual(r["extensions_scanned"], [])
-        self.assertIsNone(r["vhost_sha256"])
+        self.assertEqual(len(r["extensions_scanned"]), 43, r)
+        self.assertIsNotNone(r["vhost_sha256"])
+        self.assertNotIn("Too many", r["reason"])
 
     def test_invalid_input_prevents_arbitrary_paths_or_pages(self):
         for item in ("../../etc/shadow", "bad/x", "x"*256, ""):

@@ -535,9 +535,9 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         if (type(site_id) is not int or not 1 <= site_id <= 2147483647 or
                 not isinstance(site_key, str) or not SITE_KEY.fullmatch(site_key)):
             raise CacheAuditError("Invalid selected native site")
-        if (panel_public.get_webserver() != "nginx" or
-                str(panel_public.get_panel_version()).strip() != "8.0.7"):
-            raise CacheAuditError("Only verified aaPanel 8.0.7 Nginx source layout can be inspected")
+        if panel_public.get_webserver() != "nginx":
+            raise CacheAuditError("Native Nginx webserver is required for source audit")
+        panel_version = str(panel_public.get_panel_version()).strip()
 
         def scan():
             sites = _native_sites(panel_public)
@@ -592,7 +592,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         if first != scan():
             raise CacheAuditError("Nginx/native website sources changed during cache audit")
         if (panel_public.get_webserver() != "nginx" or
-                str(panel_public.get_panel_version()).strip() != "8.0.7"):
+                str(panel_public.get_panel_version()).strip() != panel_version):
             raise CacheAuditError("Native web engine or panel version changed during audit")
         (sites, globals_, directives, php_version, zone_state, zone, peers,
          directory_peers, different_directory_peer, physical_peer_paths,

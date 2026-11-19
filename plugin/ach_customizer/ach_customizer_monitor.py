@@ -25,7 +25,6 @@ PM_PASSTHROUGH_KEYS = frozenset((
 # Conservative INI key syntax: regular FPM directives and php/env array keys.
 FPM_INI_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*(?:\[[A-Za-z0-9_./:-]+\])?")
 
-CONFIG_FILES_LIMIT = 32
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_DOMAIN_ROWS_PER_PAGE = 1000
 MAX_DOMAIN_NAME_BYTES = 1024
@@ -48,12 +47,8 @@ class MonitorInputError(ValueError):
 
 
 PHP_DISCOVERY_SCHEMA_VERSION = 1
-MAX_PHP_ROOT_ENTRIES = 128
-MAX_PHP_VERSION_DIRECTORIES = 32
-
-
 def discover_php_fpm_versions(config_root):
-    """Bounded aaPanel PHP installation *file presence*, never runtime proof.
+    """Inspect installed aaPanel PHP file presence, never runtime proof.
 
     Names are discovered from the trusted aaPanel PHP root, not user input.
     Open each directory relative to the pinned parent with O_NOFOLLOW;
@@ -71,8 +66,8 @@ def discover_php_fpm_versions(config_root):
         "reason": "",
         "note": ("Observed aaPanel versioned files only. This does not prove installed "
                  "processes, effective pool configuration, or runtime compatibility. "
-                 "PHP 8.5 has a separate guarded Manual Apply adapter; discovery "
-                 "never authorizes a change or enables another adapter."),
+                 "Only the write adapters actually implemented in this package "
+                 "can Apply; discovery never authorizes a change."),
     }
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     path = Path(config_root)
@@ -118,14 +113,11 @@ def discover_php_fpm_versions(config_root):
         finally:
             os.close(sub)
 
-    def bounded_names(fd):
-        names = []
+    def root_names(fd):
+        # The actual installation directory determines its own cardinality.
+        # Read-only listing is not a reason to cap supported PHP versions.
         with os.scandir(fd) as entries:
-            for entry in entries:
-                if len(names) >= MAX_PHP_ROOT_ENTRIES:
-                    raise MonitorInputError("Too many entries in aaPanel PHP installation root")
-                names.append(entry.name)
-        return sorted(names)
+            return sorted(entry.name for entry in entries)
 
     try:
         root = anchored_root()
@@ -133,14 +125,12 @@ def discover_php_fpm_versions(config_root):
         response["reason"] = "aaPanel PHP installation root missing or inaccessible"
         return response
     try:
-        # Two bounded scans are compared; the second is rooted at the actual
+        # Two scans are compared; the second is rooted at the actual
         # current path, not the original, possibly detached descriptor.
-        names = bounded_names(root)
+        names = root_names(root)
         original_root_identity = identity(os.fstat(root))
         version_names = [name for name in names if re.fullmatch(r"[1-9][0-9]{1,2}", name)]
         observed = {}
-        if len(version_names) > MAX_PHP_VERSION_DIRECTORIES:
-            raise MonitorInputError("Too many PHP version directories for bounded discovery")
         for code in sorted(version_names, key=lambda x: (int(x[0]), int(x[1:]))):
             major, minor = int(code[0]), int(code[1:])
             version = {"code": code, "label": "PHP " + str(major) + "." + str(minor),
@@ -162,10 +152,7 @@ def discover_php_fpm_versions(config_root):
                 observed[code] = (ver_identity, binary_identity, config_identity)
                 version["binary_present"] = binary
                 version["config_present"] = config
-                if (major, minor) < (8, 1):
-                    version["state"] = "Unsupported"
-                    version["reason"] = "Below the PHP 8.1+ inspection target"
-                elif version["binary_present"] and version["config_present"]:
+                if version["binary_present"] and version["config_present"]:
                     version["state"] = "File Preview Candidate"
                     version["preview_candidate"] = True
                     # This indicates only that an adapter exists in source;
@@ -184,7 +171,7 @@ def discover_php_fpm_versions(config_root):
             current_root = anchored_root()
             try:
                 if (identity(os.fstat(current_root)) != original_root_identity
-                        or bounded_names(current_root) != names):
+                        or root_names(current_root) != names):
                     raise OSError("PHP installation root or entries changed")
                 for code in version_names:
                     try:
@@ -738,8 +725,6 @@ def preview_php_fpm(config_root, version, expected):
         if not includes_dir.is_dir():
             return {"state": "Needs Review", "reason": "Unexpected PHP-FPM include directory type", "scope": "shared_service", "version": version}
         include_files = sorted(includes_dir.glob("*.conf"))
-        if len(include_files) > CONFIG_FILES_LIMIT:
-            return {"state": "Needs Review", "reason": "Too many PHP-FPM files for bounded discovery", "scope": "shared_service", "version": version}
         paths.extend(include_files)
     found = []
     try:
@@ -1023,17 +1008,9 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
             if (not stat.S_ISDIR(before.st_mode) or before.st_uid != os.geteuid()
                     or before.st_mode & 0o022):
                 raise MonitorInputError("Unsafe native extension directory")
-            # Count every entry, including non-.conf files, and stop before
-            # collecting or sorting an unbounded directory listing.
+            # Snapshot every real entry; quantity is not proof of invalid routing.
             with os.scandir(fd) as iterator:
-                entries = []
-                for entry in iterator:
-                    if len(entries) >= CONFIG_FILES_LIMIT:
-                        raise MonitorInputError(
-                            "Native extension directory exceeds bounded inventory"
-                        )
-                    entries.append(entry.name)
-            entries.sort()
+                entries = sorted(entry.name for entry in iterator)
             files = []
             for name in entries:
                 if not name.endswith(".conf"):

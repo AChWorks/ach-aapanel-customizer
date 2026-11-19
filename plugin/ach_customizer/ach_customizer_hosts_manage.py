@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from uuid import uuid4
 
 from ach_customizer_hosts import (
-    HOSTS_PATH, MAX_BYTES, MAX_LINES, MAX_ALIASES_PER_LINE,
+    HOSTS_PATH, MAX_BYTES,
     HostsInspectionError, _hostname, _site_domains, inspect_local_hosts,
     native_site_snapshot,
 )
@@ -255,8 +255,6 @@ def _remove_domain_aliases(payload, domain):
     except UnicodeError as exc:
         raise HostsManageError("Hosts file text encoding is unsupported") from exc
     lines = payload.splitlines(keepends=True)
-    if len(lines) > MAX_LINES:
-        raise HostsManageError("Hosts file has too many lines")
     output, removed = [], 0
     for line in lines:
         active, marker, comment = line.partition(b"#")
@@ -264,7 +262,7 @@ def _remove_domain_aliases(payload, domain):
         if not spans:
             output.append(line)
             continue
-        if len(spans) < 2 or len(spans) > MAX_ALIASES_PER_LINE + 1:
+        if len(spans) < 2:
             raise HostsManageError("Cannot safely edit malformed hosts line")
         try:
             ip = ipaddress.ip_address(spans[0].group().decode("ascii"))

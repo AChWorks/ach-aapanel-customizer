@@ -639,7 +639,7 @@
       <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP service + site files (read-only)</button></div>
       <p id="ach-php-runtime-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect the selected PHP service and site file assignments.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
-        <p id="ach-php-runtime-result" class="ach-status-metadata" role="status">Select a discovered PHP 8.1+ version for bounded Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
+        <p id="ach-php-runtime-result" class="ach-status-metadata" role="status">Select a discovered PHP installation for read-only Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
       </details>
       <p id="ach-php-topology-summary" class="ach-status-metadata" role="status" aria-live="polite">No site-to-PHP socket file mapping loaded. The runtime process check does not by itself identify impacted sites.</p>
       <div class="ach-scroll" aria-label="Read-only native PHP file assignments"><table>
@@ -672,8 +672,8 @@
         <div class="ach-controls">
           <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>
           <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
-          <p id="ach-fpm-policy-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Not available yet: select PHP, enter five settings, and run Preview PHP-FPM settings. Only a current valid preview unlocks this approval.</p>
-          <label><input id="ach-fpm-policy-reviewed" type="checkbox" aria-describedby="ach-fpm-policy-why" disabled /> I reviewed the PHP service, proposed values and latest file preview; save as Monitor-only desired settings (no service reload).</label>
+          <p id="ach-fpm-policy-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Select PHP, enter five settings, then run Preview PHP-FPM settings. A current valid preview enables Save; the PHP service remains unchanged.</p>
+          <p class="ach-note">Saving records desired Monitor settings only; it does not reload PHP. Review the affected service and proposed values if useful, then choose Save.</p>
           <button id="ach-fpm-policy-save" type="button" disabled>Save desired policy (Monitor)</button>
         </div>
         <p id="ach-fpm-policy-status" role="status" aria-live="polite">Select an installed version and Preview to compare or save an explicit policy.</p>
@@ -1994,9 +1994,9 @@
         typeof r.reason !== 'string' || r.reason.length > 300 ||
         typeof r.note !== 'string' || r.note.length > 600 ||
         !['Local Loopback Entry','No Local Loopback Entry','Needs Review'].includes(r.state) ||
-        !Array.isArray(r.domains) || r.domains.length < 1 || r.domains.length > 100 ||
-        !Array.isArray(r.uninspected_wildcards) || r.uninspected_wildcards.length > 100 ||
-        !Array.isArray(r.entries) || r.entries.length > 100) return false;
+        !Array.isArray(r.domains) || r.domains.length < 1 ||
+        !Array.isArray(r.uninspected_wildcards) ||
+        !Array.isArray(r.entries)) return false;
     var nameOK = x => typeof x === 'string' && x.length > 0 && x.length <= 253 &&
       /^[a-z0-9.-]+$/.test(x);
     if (!r.domains.every(nameOK) || !r.uninspected_wildcards.every(
@@ -2005,7 +2005,7 @@
     for (const item of r.entries) {
       if (!item || !r.domains.includes(item.domain) ||
           typeof item.address !== 'string' || !/^[0-9a-f:.]{2,45}$/i.test(item.address) ||
-          !Number.isSafeInteger(item.line) || item.line < 1 || item.line > 2048 ||
+          !Number.isSafeInteger(item.line) || item.line < 1 ||
           typeof item.loopback !== 'boolean') return false;
       hasLoopback = hasLoopback || item.loopback;
     }
@@ -2271,9 +2271,9 @@
           'VHOST_HOST_NOT_IN_NATIVE_BINDINGS'
         ].includes(x)) ||
         new Set(r.findings).size !== r.findings.length ||
-        !Array.isArray(r.native_names) || r.native_names.length > 100 ||
-        !Array.isArray(r.vhost_names) || r.vhost_names.length > 100 ||
-        !Array.isArray(r.listen_ports) || r.listen_ports.length > 20 ||
+        !Array.isArray(r.native_names) ||
+        !Array.isArray(r.vhost_names) ||
+        !Array.isArray(r.listen_ports) ||
         !r.listen_ports.every(x => Number.isSafeInteger(x) && x >= 1 && x <= 65535)) return false;
     var hostOK = x => typeof x === 'string' && x.length > 0 && x.length <= 253 &&
       /^[a-z0-9.-]+$/.test(x) && !x.endsWith('.') && !x.includes('..');
@@ -2644,21 +2644,18 @@
         !['Unknown','Shared Registered Directory','No Registered Directory Peer'].includes(r.purge_scope) ||
         !Array.isArray(r.global_ignore_headers) || r.global_ignore_headers.length > 5 ||
         !Array.isArray(r.other_sites_same_directory) ||
-        r.other_sites_same_directory.length > 99 ||
         typeof r.bypass_directive_seen !== 'boolean' ||
         typeof r.no_cache_directive_seen !== 'boolean' ||
         typeof r.host_key_variable_seen !== 'boolean' ||
         typeof r.purge_directive_seen !== 'boolean' ||
         !Number.isSafeInteger(r.inspected_sites) || r.inspected_sites < 0 ||
-        r.inspected_sites > 100 ||
         !Number.isSafeInteger(r.unresolved_other_sites) ||
-        r.unresolved_other_sites < 0 || r.unresolved_other_sites > 99 ||
+        r.unresolved_other_sites < 0 ||
         typeof r.reason !== 'string' || r.reason.length > 250 ||
         typeof r.note !== 'string' || r.note.length > 650 ||
         !Array.isArray(r.findings) || r.findings.length > 12 ||
         !Array.isArray(r.ignore_headers) || r.ignore_headers.length > 5 ||
-        !Array.isArray(r.other_sites_same_zone) ||
-        r.other_sites_same_zone.length > 99) return false;
+        !Array.isArray(r.other_sites_same_zone)) return false;
     var codes = new Set([
       'NO_DIRECT_CACHE_BYPASS','NO_DIRECT_CACHE_WRITE_GUARD',
       'KEY_NOT_DIRECTLY_OBSERVED','HOST_PARTITION_NOT_OBSERVED',
@@ -4986,9 +4983,7 @@
     }
     for (var other of t.other_sites) {
       var validCode = other.version === '00' ||
-        typeof other.version === 'string' && /^[1-9][0-9]{1,2}$/.test(other.version) &&
-        (Number(other.version[0]) > 8 ||
-         Number(other.version[0]) === 8 && Number(other.version.slice(1)) >= 1);
+        typeof other.version === 'string' && /^[1-9][0-9]{1,2}$/.test(other.version);
       if (!validCode || other.version === version ||
           (other.version === '00' ? other.socket_path !== null : !socket(other.socket_path))) return false;
     }
@@ -5051,7 +5046,7 @@
         ['Observed','Partial','Needs Review'].indexOf(r.state) < 0 ||
         typeof r.reason !== 'string' || r.reason.length > 250 ||
         typeof r.note !== 'string' || r.note.length > 600 ||
-        !Array.isArray(r.versions) || r.versions.length > 32) return false;
+        !Array.isArray(r.versions)) return false;
     var seen = new Set(), previous = -1, incomplete = 0;
     for (var i = 0; i < r.versions.length; i++) {
       var v = r.versions[i];
@@ -5069,8 +5064,7 @@
           ['guarded_php81','guarded_php85'].includes(v.manual_apply_adapter) &&
             (v.manual_apply_adapter !== 'guarded_php' + v.code || !v.preview_candidate) ||
           (v.preview_candidate !== (v.state === 'File Preview Candidate')) ||
-          v.preview_candidate && (!v.binary_present || !v.config_present || major < 8 ||
-            major === 8 && minor < 1)) return false;
+          v.preview_candidate && (!v.binary_present || !v.config_present)) return false;
       previous = major * 100 + minor;
       seen.add(v.code);
       if (!v.preview_candidate) incomplete++;
@@ -5525,16 +5519,11 @@
   }
   function resetFpmPolicyEvidence(note) {
     fpmPolicyEvidence = null;
-    root.find('#ach-fpm-policy-reviewed').prop('checked', false).prop('disabled', true);
     root.find('#ach-fpm-policy-save').prop('disabled', true);
     if (note) root.find('#ach-fpm-policy-status').text(note);
     explainGate('ach-fpm-policy-why', 'blocked',
       'Locked: the five values need a new valid PHP file preview. This approval saves desired Monitor values only, not PHP-FPM configuration.');
   }
-  root.find('#ach-fpm-policy-reviewed').on('change', function () {
-    root.find('#ach-fpm-policy-save').prop('disabled', fpmPolicyBusy ||
-      !fpmPolicyEvidence || !root.find('#ach-fpm-policy-reviewed').prop('checked'));
-  });
   root.find('#ach-fpm-policy-load').on('click', function () {
     var version = String(root.find('#ach-php-version').val() || '');
     if (fpmPolicyBusy || !phpInventory.get(version)?.preview_candidate) return;
@@ -5574,7 +5563,7 @@
   });
   root.find('#ach-fpm-policy-save').on('click', function () {
     var evidence = fpmPolicyEvidence, data = phpFields();
-    if (!evidence || fpmPolicyBusy || !root.find('#ach-fpm-policy-reviewed').prop('checked') ||
+    if (!evidence || fpmPolicyBusy ||
         JSON.stringify(data) !== evidence.form ||
         data.php_version !== evidence.version) return;
     fpmPolicyBusy = true;
@@ -5882,9 +5871,9 @@
           version:data.php_version, form:snapshot, digest:r.fpm_observation_sha256,
           policy_revision:saved.policy_revision, monitor_revision:saved.monitor_revision
         };
-        root.find('#ach-fpm-policy-reviewed').prop('disabled', false);
+        root.find('#ach-fpm-policy-save').prop('disabled', false);
         explainGate('ach-fpm-policy-why', 'ready',
-          'Review complete preview and affected sites first. Then check to enable Save desired policy; this stores a Monitor-only baseline and does not reload PHP.');
+          'Preview is current. Choose Save to store these desired Monitor settings; the PHP service and site files will not change.');
         var match = saved.saved && fpmPolicyKeys.every(function (key) {
           return Number(data[key.replace('pm.','')]) === saved.desired[key];
         });

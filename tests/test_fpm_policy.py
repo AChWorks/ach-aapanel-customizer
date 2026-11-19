@@ -119,7 +119,7 @@ class FpmPolicyTests(unittest.TestCase):
         self.assertEqual(policy.read_policy(str(self.data))["revision"], 1)
 
     def test_malformed_source_and_profile_refused_safely(self):
-        for version in ("", "85.0", "74", "8/5", 85, "8500"):
+        for version in ("", "85.0", "8/5", 85, "8500"):
             with self.subTest(version=version):
                 with self.assertRaises(policy.FpmPolicyError):
                     policy.get_policy(version, directory=str(self.data))
@@ -145,6 +145,19 @@ class FpmPolicyTests(unittest.TestCase):
         path.chmod(0o666)
         with self.assertRaisesRegex(policy.FpmPolicyError, "Untrusted"):
             policy.read_policy(str(self.data))
+
+    def test_many_versioned_monitor_preferences_and_older_php_are_supported(self):
+        codes = ["74"] + [f"8{i}" for i in range(1, 10)] + [
+            f"8{i}" for i in range(10, 43)]
+        stored = {"schema": 1, "revision": 1,
+                  "profiles": {code: dict(VALUES) for code in codes}}
+        target = self.data / policy.POLICY_FILE
+        target.write_text(json.dumps(stored))
+        target.chmod(0o600)
+        observed = policy.read_policy(str(self.data))
+        self.assertEqual(len(observed["profiles"]), len(codes))
+        self.assertEqual(observed["profiles"]["74"], VALUES)
+        self.assertEqual(policy.get_policy("74", directory=str(self.data))["desired"], VALUES)
 
     def test_atomic_store_is_rooted_and_bounded_by_monitor_lock(self):
         self._save()
@@ -314,7 +327,7 @@ class FpmPolicyEntrypointTests(unittest.TestCase):
         self.assertFalse(fail["status"])
         self.assertEqual(fail["stage"],"fpm_policy_recheck")
         self.assertRegex(fail["operation_id"],r"^[a-f0-9]{32}$")
-        for version in ("74","85/../bad"):
+        for version in ("7/4","85/../bad"):
             invalid=self.plugin.fpm_policy_recheck({"php_version":version})
             self.assertFalse(invalid["status"])
             self.assertEqual(invalid["stage"],"fpm_policy_recheck")

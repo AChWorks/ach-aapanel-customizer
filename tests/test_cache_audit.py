@@ -662,7 +662,10 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         self.assertEqual(self.inspect()["state"], "Needs Review")
         self.panel.engine = "nginx"
         self.panel.version = "8.1.0"
-        self.assertEqual(self.inspect()["state"], "Needs Review")
+        observed = self.inspect()
+        self.assertEqual(observed["state"], "Source Observed", observed)
+        self.assertFalse(observed["fix_supported"])
+        self.assertFalse(observed["purge_supported"])
 
 
     def test_native_wordpress_owned_regex_precedence_counts_only_site_zone(self):

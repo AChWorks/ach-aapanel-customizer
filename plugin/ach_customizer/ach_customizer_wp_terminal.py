@@ -51,7 +51,6 @@ MAX_MANUAL_REVIEW_BYTES = 2048
 MAX_STATE_BYTES = 8192
 MAX_PROGRESS_BYTES = 32768
 MAX_AGE_NS = 15 * 60 * 1_000_000_000
-MAX_RECOVERIES = 64
 OP = re.compile(r"[0-9a-f]{32}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -144,7 +143,7 @@ def _validate(row):
             or type(row["revision"]) is not int or not 0 <= row["revision"] <= 2147483647
             or type(row["enabled"]) is not bool
             or type(row["enabled_ns"]) is not int or row["enabled_ns"] < 0
-            or type(row["recoveries"]) is not int or not 0 <= row["recoveries"] <= MAX_RECOVERIES
+            or type(row["recoveries"]) is not int or row["recoveries"] < 0
             or not isinstance(row["last_reason"], str) or len(row["last_reason"]) > 240):
         raise TerminalError("Invalid native WordPress automation policy")
     worker = row["last_worker"]
@@ -865,9 +864,6 @@ def recheck_recovery(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGR
         updated["active"] = None
         if state in ("applied", "restored"):
             if updated["last_recovery"] != recovery_id:
-                if updated["recoveries"] >= MAX_RECOVERIES:
-                    return {"state": "Needs Review", "changed": False,
-                            "recovery_id": recovery_id, "reason": "Recovery accounting needs review"}
                 updated["recoveries"] += 1
             updated["last_recovery"] = recovery_id
         updated["last_reason"] = {
