@@ -8627,6 +8627,14 @@ test('Native WP stale resident helper refuses unsafe operations and permits emer
   assert.equal(ui.state().wpTerminalDisableDisabled,false);
 });
 
+test('Historical WP recovery count above 64 remains inspectable', () => {
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(
+    nativeWpPolicy({recoveries:135}));
+  assert.doesNotMatch(ui.state().wpTerminalStatus,/incompatible|unavailable/);
+  assert.match(ui.state().wpTerminalStatus,/Disabled/);
+});
+
 test('Native WP recovery Restore requires independently reviewed saved recovery',()=>{
   const ui=loadUi();
   ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({

@@ -5966,7 +5966,7 @@
     wpTerminalHelperStale = false;
     if (!r || r.schema !== 1 || typeof r.enabled !== 'boolean' ||
         !Number.isSafeInteger(r.revision) || r.revision < 0 ||
-        !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 || r.recoveries > 64 ||
+        !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 ||
         r.auto_hosts !== false || r.auto_fpm !== false ||
         r.scope !== 'failed_native_single_site_wp_toolkit' ||
         typeof r.last_reason !== 'string' || r.last_reason.length > 240 ||
