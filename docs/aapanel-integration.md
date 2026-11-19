@@ -161,7 +161,7 @@ They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
 Automatic post-terminal Hosts correction remains P0. Unpublished candidate
-0.1.61 adds separate opt-in shared PHP-FPM auto repair after a witnessed
+0.1.62 adds separate opt-in shared PHP-FPM auto repair after a witnessed
 native WordPress start/terminal transition; live enabled-watcher acceptance
 is still PENDING. The merged v0.1.60 Hosts witness remains read-only and
 does not autonomously clean up Hosts.
@@ -264,7 +264,7 @@ adds a **separate, opt-in, observer-only native WP Toolkit failed-install
 witness** described immediately below. The Owner explicitly **rejected**
 observer-only reporting as a substitute for automatic correction. No-loss
 Hosts cleanup remains OPEN P0; source-stage PHP-FPM automatic correction
-exists only in unpublished 0.1.61 and still requires native end-to-end QA.
+exists only in unpublished 0.1.62 and still requires native end-to-end QA.
 The manual 0.1.52 capability is **not**
 available in published native 0.1.51. Installed-package fixture QA has
 passed, but authenticated resident-watcher/end-to-end acceptance remains
@@ -397,7 +397,50 @@ WordPress success/failure and recovery on the old automatic candidate.
 Revised observation-only behavior requires fresh exact-source validation;
 previous native QA is not a source of approval for unattended writes.
 
-## Source-stage automatic PHP-FPM repair (unpublished 0.1.61)
+## Source-stage automatic PHP-FPM repair (unpublished 0.1.62)
+
+The 0.1.62 candidate fixes the standalone systemd worker's missing
+root-owned aaPanel Python import roots. Its existing path-triggered worker
+now rechecks verified native install progress in a bounded 20-second window
+(200 ms interval) so the native optimizer cannot as easily outrun the
+initial witness. The existing timer remains the longer-install fallback.
+There is no new daemon, native source patch, or unattended Hosts edit.
+
+**Native QA (2026-11-19):** The exact 0.1.62 ZIP SHA256
+0b18ff8eb0a8c3ca1dd2029de10085ff06087ef47968e4407013d021b3dd8d1d
+was installed with 63/63 byte-identical payload members using the real
+aaPanel importer. Two independent isolated aaPanel 8.0.7 guests exercised
+the unchanged native optimizer with the standard systemd path/timer/service
+already active, and no external high-frequency observer or manual repair:
+
+- **PHP 8.1 successful installation:** native AddWPSite completed
+  [1,1,1,1], created a real WordPress 7.1.4 OneKey site (ID 12), and
+  reset shared pm.max_spare_servers from 20 to 30. The watcher had
+  witnessed its start, then returned the value to the saved 20
+  (pm.max_requests=300). Recovery ID:
+  418d944918894f7c8698823a4279e19c.
+  The installed site and three existing peer origins returned HTTP 200.
+- **PHP 8.5 failed initialization:** on a separate new VM, a test-only
+  restricted CLI staging permission caused a native WP initialization
+  failure after the optimizer completed. Native progress finished
+  [1,1,1,-1]; site/domain/binding rows were all removed. The same
+  ordinary watcher returned Applied and recovered the shared pool from
+  native 30 to saved 20, with the PHP 8.1 source byte-identical.
+  Recovery ID: 25493fc8377d4cc5bb521050dc5df8f9.
+  Three peer sites retained HTTP 200.
+- Native Recovery Journal SHA, PHP/Nginx syntax, live services,
+  idempotent repeat worker run, and actual Emergency Disable were
+  verified; turning off both watcher policies preserved corrected FPM
+  files and stopped the owned path/timer units.
+
+All three task-owned QA VMs were stopped after validation. Production
+was untouched; the existing primary QA guest was not modified by these
+tests. These two concrete source-verified lifecycles do not prove general
+compatibility with other aaPanel versions, arbitrary external writers or
+unexpectedly delayed native starts. Exact candidate review, CI, fresh
+authenticated Browser QA and Production rollout remain distinct gates.
+The detailed reproducible source identity and native QA results are in
+[the 0.1.62 native systemd QA evidence](evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json).
 
 This addresses automatic correction, not additional detection-only reporting.
 In native PHP-FPM, save the desired PHP 8.1 or PHP 8.5 shared `[www]` settings,
@@ -425,6 +468,13 @@ FPM write or reload: an earlier intentional administrator edit is retained.
 When the file changed, the saved versioned desired policy, Monitor status,
 native service adapter, source fingerprints and shared-site attribution
 are revalidated, including immediately before a guarded file write.
+If native WP initialization failed *after* optimization and native cleanup
+removed the site, a narrow fallback additionally proves exact terminal
+identity, a newly present optimizer marker, source-pinned RAM-derived
+vendor values, and absence of the precise native site/domain/binding records.
+The remaining shared-pool consumers must still map successfully.
+A successful native task, surviving/reassigned site or mismatched source
+cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 

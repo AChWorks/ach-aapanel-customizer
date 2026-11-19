@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import time
 from uuid import uuid4
@@ -37,6 +38,35 @@ TOKEN = re.compile(r"[a-f0-9]{64}\Z")
 
 class FpmAutoError(RuntimeError):
     pass
+
+
+def _configure_native_python_paths(panel_root="/www/server/panel"):
+    """Load native aaPanel modules in the standalone systemd/CLI worker.
+
+    The aaPanel HTTP process supplies its own Python import roots, but the
+    independently started repair worker does not inherit that bootstrap.
+    Accept only the root-owned, canonical native installation directories:
+    never trust PATH, PYTHONPATH, cwd or plugin/user-selected path values.
+    """
+    panel = Path(panel_root)
+    targets = (panel, panel / "class", panel / "class_v2")
+    if not panel.is_absolute():
+        raise FpmAutoError("Native aaPanel import root must be absolute")
+    for directory in targets:
+        try:
+            info = directory.lstat()
+            canonical = directory.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise FpmAutoError("Native aaPanel Python source directory unavailable") from exc
+        if (not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & 0o022
+                or canonical != directory):
+            raise FpmAutoError("Untrusted native aaPanel Python source directory")
+    for directory in reversed(targets):
+        source = str(directory)
+        if source not in sys.path:
+            sys.path.insert(0, source)
 
 
 def _digest(version, desired):
@@ -453,7 +483,12 @@ def _args(version, desired):
 
 def _native_progress():
     native._native_supported()
-    result = native._progress()
+    try:
+        result = native._progress()
+    except FileNotFoundError:
+        # The native tool creates the progress log on demand. A path-triggered
+        # systemd worker may run just before its first complete write.
+        return None
     if (result["mtime_ns"] > time.time_ns()
             or time.time_ns() - result["mtime_ns"] > native.MAX_AGE_NS
             or os.path.lexists(native.BATCH_LOCK)):
@@ -604,6 +639,46 @@ def _completed_native_repair(fd_state, version, profile, progress, config_root, 
             "recovery", "Repaired native FPM source no longer matches committed recovery")
     return {"state": "Applied", "operation_id": record["operation_id"],
             "reconciled": True}
+
+
+def _terminal_site_owned(controller, impact, progress, domain):
+    """Prove shared-pool ownership even if failed native WP cleanup removed its site.
+
+    On success, the just-created site must still be a verified member of
+    the selected shared PHP pool. Native WP initialization failure is
+    different: aaPanel removes the site itself *after* its one-time optimizer
+    may have replaced the shared FPM file. A verified failed terminal
+    event with the exact former hostname absent from native site records
+    can use the separately witnessed source/marker/vendor-values evidence.
+    Never infer this exception for success, an existing site, unsupported
+    native identity or an unverified shared-service impact.
+    """
+    if any(site["site_key"] == domain for site in impact["matched_sites"]):
+        return True
+    if progress["steps"] != [1, 1, 1, -1]:
+        return False
+    panel = controller._environment(impact["version"])
+    native_db = getattr(panel, "M", None)
+    if not callable(native_db):
+        return False
+    try:
+        row = native_db("sites").where("name=?", (domain,)).field("id").find()
+        # A removed site can retain an independently bound domain if
+        # foreign/native cleanup was partial; that identity is NOT a safe
+        # stand-in for the failed installer. Require all native aliases gone.
+        remaining_domains = native_db("domain").where("name=?", (domain,)).count()
+        remaining_bindings = native_db("binding").where("domain=?", (domain,)).count()
+    except Exception as exc:
+        raise FpmAutoError(
+            "Native failed WordPress site records could not be checked"
+        ) from exc
+    if row not in (None, [], {}):
+        if isinstance(row, dict):
+            return False
+        raise FpmAutoError("Invalid native WordPress site lookup result")
+    if type(remaining_domains) is not int or type(remaining_bindings) is not int:
+        raise FpmAutoError("Invalid native WordPress domain lookup result")
+    return remaining_domains == 0 and remaining_bindings == 0
 
 
 def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
@@ -766,10 +841,11 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                 # THIS PHP shared pool. Another version/service can change
                 # during the task without being owned by the WP installer.
                 impact = prepared["shared_impact"]
-                if not any(site["site_key"] == active["domain"]
-                           for site in impact["matched_sites"]):
-                    # No write, reload, recovery archive or token consumption:
-                    # the unrelated PHP service belongs to another owner.
+                if not _terminal_site_owned(
+                        controller, impact, progress, active["domain"]):
+                    # A successful WP site must map to this pool. The only
+                    # exception is an exact native failed terminal whose
+                    # cleanup removed the former site from native records.
                     continue
                 # Pre-existing drift is not attributable to this native run.
                 # Likewise, an unrelated later source rewrite must not grant
@@ -795,8 +871,8 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                     latest = controller._prepare(_args(version, desired))
                     if (latest["impact_sha256"] != prepared["impact_sha256"]
                             or latest["plan"] != plan
-                            or not any(site["site_key"] == active["domain"]
-                                       for site in latest["shared_impact"]["matched_sites"])
+                            or not _terminal_site_owned(
+                                controller, latest["shared_impact"], progress, active["domain"])
                             or reader() != progress):
                         raise recovery.FpmApplyError(
                             "fpm_conflict",
@@ -817,6 +893,8 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                         auto_source_verify=lambda: (
                             _native_vendor_values(controller.config_root, version, active)
                             if _native_opt_marker(controller.config_root, version) is not None
+                            and _terminal_site_owned(
+                                controller, latest["shared_impact"], progress, active["domain"])
                             and reader() == progress else None))
                 updated = {**profile, "last_token": progress["token"],
                            "last_state": result["state"],
@@ -867,6 +945,35 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
             "services": outcomes}
 
 
+def _run_event_window(*, budget_seconds=20.0, interval_seconds=0.2):
+    """Keep a source-verified native install wakeup alive through its fast start.
+
+    Native aaPanel can write its first progress record *before* its install
+    lock appears, then optimize PHP between adjacent file notifications.
+    One-shot path callbacks alone may miss the pre-optimizer baseline.
+    A bounded active-task window polls the same guarded run() operation and
+    exits at a terminal state; the existing timer covers longer installs.
+    No extra persistent state, daemon or vendor modification is involved.
+    """
+    outcome = run()
+    progress = _native_progress()
+    if progress is None or progress["status"] != 0:
+        return outcome
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        time.sleep(interval_seconds)
+        outcome = run()
+        progress = _native_progress()
+        if progress is None or (
+                progress["status"] == 1
+                and not os.path.lexists(native.LOCK)
+                and not os.path.lexists(native.BATCH_LOCK)):
+            return outcome
+        if outcome.get("state") in ("Disabled", "Pending Disable"):
+            return outcome
+    return outcome
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv != ["run"]:
@@ -874,7 +981,14 @@ def main(argv=None):
         return 2
     completed = False
     try:
-        result = run()
+        # Only the true standalone entrypoint requires the native aaPanel
+        # import bootstrap. In-process unit callers and Flask plugin routes
+        # already own their explicit import environment.
+        if __name__ == "__main__":
+            _configure_native_python_paths()
+            result = _run_event_window()
+        else:
+            result = run()
         completed = True
         print(json.dumps(result, sort_keys=True))
         return 0

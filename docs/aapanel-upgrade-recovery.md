@@ -66,7 +66,7 @@ all aaPanel versions or a blanket reason to restart after every install.
    watcher. Follow the controlled recovery procedure below **only after
    explicit target-specific authorization**.
 
-## Unpublished 0.1.61 FPM automatic watcher lifecycle
+## Unpublished 0.1.62 FPM automatic watcher lifecycle
 
 The independent `ach-customizer-fpm-auto` systemd path/timer/service is
 never installed by ordinary ZIP import. The primary admin must opt in

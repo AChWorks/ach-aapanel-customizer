@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-19",
+  "repository": "AChWorks/ach-aapanel-customizer",
+  "version": "0.1.62",
+  "release_state": "UNPUBLISHED; no Production deployment",
+  "environment": "Nonproduction Incus aaPanel 8.0.7 / Debian 13 / Nginx / PHP-FPM 8.1.35 and 8.5.12",
+  "incus_project": "ach-aapanel-qa",
+  "snapshot_source": "aac-wptoolkit-negative-qa-20261118/before-native-negative-20261118",
+  "native_source_sha256": {
+    "class_v2/one_key_wp_v2.py": "7578c279424f0b653c0f65ca2f22fbf0b86ce873673b05939e4b4b16c6713bf8",
+    "class/config.py": "22f61688e0a41b6599f09d3addcea1b2dea9ce12f87ac9770a897aea32a6657d"
+  },
+  "plugin_package": {
+    "sha256": "0b18ff8eb0a8c3ca1dd2029de10085ff06087ef47968e4407013d021b3dd8d1d",
+    "zip_members": 63,
+    "installed_member_mismatches": 0,
+    "installer": "aaPanel panelPlugin.update_zip -> input_zip"
+  },
+  "successful_wp_case": {
+    "guest": "aac-fpm-window-e2e-20261119",
+    "guest_uuid": "0e03d976-50e6-4ee6-bd2f-2936cb4978ab",
+    "native_api": "panel_site_v2.panelSite.AddWPSite",
+    "terminal_steps": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "php": "81",
+    "native_test_site_id": 12,
+    "native_test_domain": "auto-window81-e2e.aitest.gotohell.top",
+    "native_onekey_record": true,
+    "wordpress_version": "7.1.4",
+    "wp_cli_core_is_installed": true,
+    "first_time_optimizer_marker": "absent at start; present at terminal",
+    "worker": "ordinary enabled systemd path/timer/service; no external observer and no manually started worker",
+    "witness": "Witness Armed",
+    "native_pm_max_spare_servers": 30,
+    "saved_pm_max_spare_servers": 20,
+    "saved_pm_max_requests": 300,
+    "worker_outcome": "Applied",
+    "operation_id": "418d944918894f7c8698823a4279e19c",
+    "applied_php_conf_sha256": "68e8dcf1bad696d2b7a9690a6dc85d2bd25b7d8a08701cb9d84583f1d13226d2",
+    "peer_and_new_site_http200": 4,
+    "php_fpm_syntax_pass": true,
+    "nginx_syntax_pass": true,
+    "nginx_php81_php85_mysqld_active": true,
+    "idempotent_replay_no_change": true,
+    "emergency_disable_both_policies_success": true,
+    "owned_watcher_stopped": true,
+    "php_sources_unchanged_on_disable": true
+  },
+  "failed_wp_case": {
+    "guest": "aac-fpm-failed-live-e2e-20261119",
+    "guest_uuid": "5d4aaa91-9894-4ad9-aa1a-d904921d8729",
+    "native_api": "panel_site_v2.panelSite.AddWPSite",
+    "terminal_steps": [
+      1,
+      1,
+      1,
+      -1
+    ],
+    "php": "85",
+    "test_domain": "auto-failed85-v062.aitest.gotohell.top",
+    "qa_injected_failure": "test-only restrictive CLI staging-file umask in native caller; unmodified vendor source",
+    "native_records_removed": {
+      "sites": 0,
+      "domain": 0,
+      "binding": 0
+    },
+    "first_time_optimizer_marker": "absent at start; present at terminal",
+    "worker": "ordinary enabled systemd path/timer/service; no external observer and no manually started worker",
+    "witness": "Witness Armed",
+    "native_pm_max_spare_servers": 30,
+    "saved_pm_max_spare_servers": 20,
+    "saved_pm_max_requests": 300,
+    "worker_outcome": "Applied",
+    "operation_id": "25493fc8377d4cc5bb521050dc5df8f9",
+    "vendor_rewritten_php_conf_sha256": "9b61c3d7532790c3501242c44dee9a7cf493e338b9ed2efb0fe4d3c8ccd087c6",
+    "applied_php_conf_sha256": "836e29d07851414c3679264d85bc3e7317f3eb1b1aafdca6362b8b55aab8333e",
+    "unrelated_php81_conf_sha256": "c7b5b98974336652b6a7bfbd4e0fd2ce28eb64cf8d0b45fe11d78beb5df5f214",
+    "peer_http200": 3,
+    "php_fpm_syntax_pass": true,
+    "nginx_syntax_pass": true,
+    "nginx_php81_php85_mysqld_active": true,
+    "idempotent_replay_no_change": true,
+    "emergency_disable_success": true,
+    "owned_watcher_stopped": true,
+    "php_sources_unchanged_on_disable": true
+  },
+  "upgrade_reconciliation_case": {
+    "guest": "aac-fpm-window-e2e-20261119",
+    "description": "A prior enabled-watcher native PHP85 failed-install witness remained pending because the former site had been removed; native 0.1.62 re-import followed by one explicit standard systemd unit wakeup reconciled the durable witness.",
+    "outcome": "Applied",
+    "operation_id": "9306fe94d83045ceb63105a7875a4c71",
+    "qualification": "This separate upgrade-replay case is NOT counted as an ordinary systemd-only fresh-failure scenario."
+  },
+  "source_gates": {
+    "python_unittest_cases": 997,
+    "python_failed": 0,
+    "python_skipped": 1,
+    "targeted_fpm_auto_cases": 45,
+    "targeted_failed": 0,
+    "ui_node_ci": "pending exact-candidate GitHub CI",
+    "independent_review": "pending"
+  },
+  "isolation": {
+    "production_touched": false,
+    "primary_qa_guest_touched": false,
+    "task_created_guests_stopped": true,
+    "host_transfer_staging_removed": true,
+    "task_guest_recovery_state_retained_until_review": true,
+    "confidential_credentials_in_evidence": false,
+    "external_hosts_alias_automatic_removal": false
+  },
+  "limits": [
+    "These are verified aaPanel 8.0.7 source-pinned lifecycle cases, not guarantees for arbitrary vendor versions or delayed external writes.",
+    "Fresh authenticated native Browser acceptance is not part of this systemd/backend validation.",
+    "Automatic lossless /etc/hosts cleanup remains separate open P0; installed Hosts witness is observer-only.",
+    "Independent review, current exact-HEAD CI, Owner merge authorization, public release and Production deployment are separate gates."
+  ]
+}

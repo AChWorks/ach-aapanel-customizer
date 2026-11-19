@@ -31,6 +31,114 @@ VENDOR_BYTES = (BASELINE
     .replace(b"pm.max_spare_servers=20", b"pm.max_spare_servers=30"))
 
 
+class NativeEventWindowTests(unittest.TestCase):
+    def test_early_native_progress_is_retried_until_terminal(self):
+        start = {"status":0}
+        completed = {"status":1}
+        calls = [
+            {"state":"No new owned event","changed":False},
+            {"state":"Processed","changed":False,"services":[{"state":"Witness Armed"}]},
+            {"state":"No new owned event","changed":False},
+            {"state":"Processed","changed":True,"services":[{"state":"Applied"}]},
+        ]
+        events = [start,start,start,completed]
+        with (patch.object(worker,"run",side_effect=calls) as run,
+              patch.object(worker,"_native_progress",side_effect=events) as progress,
+              patch.object(worker.os.path,"lexists",return_value=False),
+              patch.object(worker.time,"sleep") as sleep,
+              patch.object(worker.time,"monotonic",side_effect=range(12))):
+            outcome=worker._run_event_window(budget_seconds=20,interval_seconds=.2)
+        self.assertTrue(outcome["changed"])
+        self.assertEqual(run.call_count,4)
+        self.assertEqual(progress.call_count,4)
+        self.assertEqual(sleep.call_count,3)
+
+    def test_terminal_or_unavailable_progress_exits_without_polling(self):
+        for progress in (None,{"status":1}):
+            with self.subTest(progress=progress):
+                with (patch.object(worker,"run",return_value={"state":"No new owned event"}) as run,
+                      patch.object(worker,"_native_progress",return_value=progress),
+                      patch.object(worker.time,"sleep") as sleep):
+                    outcome=worker._run_event_window()
+                self.assertEqual(outcome["state"],"No new owned event")
+                run.assert_called_once_with()
+                sleep.assert_not_called()
+
+    def test_active_window_is_strictly_bounded(self):
+        with (patch.object(worker,"run",return_value={"state":"No new owned event"}) as run,
+              patch.object(worker,"_native_progress",return_value={"status":0}),
+              patch.object(worker.time,"sleep") as sleep,
+              patch.object(worker.time,"monotonic",side_effect=[0,1,3,4,8])):
+            worker._run_event_window(budget_seconds=3,interval_seconds=.2)
+        self.assertEqual(run.call_count,2)
+        self.assertEqual(sleep.call_count,1)
+
+    def test_terminal_reader_failure_does_not_forge_completion(self):
+        with (patch.object(worker,"run",return_value={"state":"No new owned event"}) as run,
+              patch.object(worker,"_native_progress",side_effect=[{"status":0},worker.native.TerminalError("bad source")]),
+              patch.object(worker.time,"sleep"),
+              patch.object(worker.time,"monotonic",side_effect=[0,1])):
+            with self.assertRaises(worker.native.TerminalError):
+                worker._run_event_window()
+        self.assertEqual(run.call_count,2)
+
+    def test_missing_native_progress_is_an_expected_absent_event(self):
+        with (patch.object(worker.native,"_native_supported"),
+              patch.object(worker.native,"_progress",side_effect=FileNotFoundError(2,"transient"))):
+            self.assertIsNone(worker._native_progress())
+
+
+class StandaloneNativeImportTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="ach-fpm-native-bootstrap-")
+        self.addCleanup(temp.cleanup)
+        self.panel = Path(temp.name) / "panel"
+        (self.panel / "class").mkdir(parents=True)
+        (self.panel / "class_v2").mkdir()
+        (self.panel / "class" / "public.py").write_text("SENTINEL = 'aaPanel'\n")
+
+    def test_native_import_roots_are_canonical_and_repeatable(self):
+        import importlib.machinery
+        with patch.object(worker.sys, "path", list(sys.path)):
+            worker._configure_native_python_paths(self.panel)
+            expected = [str(self.panel), str(self.panel / "class"),
+                        str(self.panel / "class_v2")]
+            self.assertEqual(worker.sys.path[:3], expected)
+            source = importlib.machinery.PathFinder.find_spec(
+                "public", worker.sys.path)
+            self.assertIsNotNone(source)
+            self.assertEqual(Path(source.origin), self.panel / "class/public.py")
+            worker._configure_native_python_paths(self.panel)
+            self.assertEqual(worker.sys.path[:3], expected)
+
+    def test_unsafe_or_missing_native_source_never_enters_sys_path(self):
+        for broken in ("symlink", "group_writable", "missing"):
+            with self.subTest(broken=broken):
+                source = self.panel / "class_v2"
+                if broken == "symlink":
+                    source.rmdir()
+                    source.symlink_to(self.panel / "class")
+                elif broken == "group_writable":
+                    source.chmod(0o770)
+                else:
+                    source.rmdir()
+                before = list(sys.path)
+                with patch.object(worker.sys, "path", list(before)):
+                    with self.assertRaises(worker.FpmAutoError):
+                        worker._configure_native_python_paths(self.panel)
+                    self.assertEqual(worker.sys.path, before)
+                if source.is_symlink():
+                    source.unlink()
+                elif source.exists():
+                    source.chmod(0o700)
+                    source.rmdir()
+                source.mkdir(mode=0o700)
+
+    def test_relative_python_root_is_rejected(self):
+        with self.assertRaises(worker.FpmAutoError):
+            worker._configure_native_python_paths("relative/panel")
+
+
 class AutoNativeFpmTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix="ach-auto-fpm-")
@@ -307,6 +415,82 @@ class AutoNativeFpmTests(unittest.TestCase):
         result = self._run()
         self.assertTrue(result["changed"], result)
         self.assertEqual(result["services"][0]["state"], "Applied")
+
+    def test_failed_native_init_removed_site_repairs_proven_optimizer(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self.assertEqual(self._run()["services"][0]["state"], "Witness Armed")
+        self._vendor_reset()
+        self._terminal()
+        # Native WP deletes the site record after post-optimizer install
+        # failure, while unrelated PHP sites continue using this same pool.
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        lookup = Mock()
+        lookup.where.return_value.field.return_value.find.return_value = []
+        lookup.where.return_value.count.return_value = 0
+        self.panel.M = Mock(return_value=lookup)
+        result = self._run()
+        self.assertTrue(result["changed"], result)
+        self.assertEqual(result["services"][0]["state"], "Applied")
+        from ach_customizer_monitor import preview_php_fpm
+        self.assertEqual(preview_php_fpm(
+            self.php_root,"85",DESIRED)["state"],"File Match")
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertEqual(self._run()["changed"], False)
+        self.assertGreaterEqual(self.panel.M.call_count,2)
+
+    def test_failed_native_init_existing_other_php_site_never_repairs(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        lookup = Mock()
+        lookup.where.return_value.field.return_value.find.return_value = {"id":3}
+        self.panel.M = Mock(return_value=lookup)
+        result = self._run()
+        self.assertFalse(result["changed"])
+        self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"),0)
+
+    def test_native_failed_cleanup_with_existing_domain_binding_never_repairs(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        def lookup(kind):
+            ref = Mock()
+            ref.where.return_value.field.return_value.find.return_value = []
+            ref.where.return_value.count.return_value = (
+                1 if kind == "domain" else 0)
+            return ref
+        self.panel.M = Mock(side_effect=lookup)
+        result = self._run()
+        self.assertFalse(result["changed"])
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"), 0)
+
+    def test_native_success_without_attributed_site_never_repairs(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self.lock_path.unlink()
+        self.event = {**self.event, "status": 1, "steps": [1, 1, 1, 1],
+                      "mtime_ns": time.time_ns(), "token": "a"*64}
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        self.panel.M = Mock()
+        result = self._run()
+        self.assertFalse(result["changed"])
+        self.panel.M.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
 
     def test_vendor_marker_preexisting_at_start_prevents_auto_overwrite(self):
         self._enable()
