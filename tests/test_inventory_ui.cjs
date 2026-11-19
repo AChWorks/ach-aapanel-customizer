@@ -8376,6 +8376,7 @@ function nativeWpPolicy(extra={}) {
     enabled:false, revision:0, last_reason:'Disabled', last_recovery:null,
     last_recovery_state:null, active_domain:null, recoveries:0,
     manual_review:null,manual_review_count:0,
+    manual_review_integrity:{state:'Complete',incomplete_count:0,first_operation_id:null},
     auto_hosts:false, auto_fpm:false, read_only:true, scope:'failed_native_single_site_wp_toolkit',
     watcher_ready:false, watcher_source_verified:false, watcher_status:'Watcher units not installed',
     last_worker:{state:'Not Observed',stage:'idle',reason:'No event evaluated',operation_id:null}},extra);
@@ -8432,6 +8433,46 @@ test('Native WP durable manual-review identity survives Activity failure and old
   }));
   assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
   assert.equal(ui.state().wpTerminalEnableDisabled,true);
+});
+
+test('Native WP long canonical domain remains exact in Activity and Routing',()=>{
+  const domain=['a'.repeat(50),'b'.repeat(50),'c'.repeat(50),'d'.repeat(7)].join('.');
+  assert.equal(domain.length,160);
+  const ui=loadUi();
+  ui.openActivity().respond(reviewActivity([Object.assign(reviewActivityEntry(),{
+    level:'WARNING',module:'lifecycle',action:'wp_terminal_manual_review',
+    stage:'native_terminal',outcome:'Manual Review Required',target:domain
+  })]));
+  assert.match(JSON.stringify(ui.activityRows()),new RegExp(domain));
+  ui.openTab('routing');
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain,activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,new RegExp(domain));
+  const invalid=ui.statusClick('#ach-wp-terminal-refresh');
+  invalid.respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain:'x'.repeat(254),activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+});
+
+test('Incomplete private Outbox yields precise read-only review status without hiding valid reports',()=>{
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    manual_review:{operation_id:'a'.repeat(32),domain:'good.test',activity_delivered:true},
+    manual_review_count:1,
+    manual_review_integrity:{state:'Needs Review',incomplete_count:1,first_operation_id:'b'.repeat(32)}
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Incomplete private manual-review evidence: 1/);
+  assert.match(ui.state().wpTerminalStatus,/b{32}/);
+  assert.match(ui.state().wpTerminalStatus,/good.test/);
+  const bad=ui.statusClick('#ach-wp-terminal-refresh');
+  bad.respond(nativeWpPolicy({
+    manual_review_integrity:{state:'Complete',incomplete_count:1,first_operation_id:'b'.repeat(32)}
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
 });
 
 test('Native WP stale resident helper refuses unsafe operations and permits emergency disable',()=>{

@@ -37,6 +37,18 @@ def configured_level():
     return value if value in LEVELS else "INFO"
 
 
+def _exact_manual_review_target(target):
+    from ach_customizer_hosts import HostsInspectionError, _hostname
+    if not isinstance(target, str) or "." not in target:
+        raise ActivityError("Native WP manual-review domain is not canonical")
+    try:
+        if _hostname(target) != target:
+            raise ActivityError("Native WP manual-review domain is not canonical")
+    except HostsInspectionError as exc:
+        raise ActivityError("Invalid native WP manual-review hostname") from exc
+    return target
+
+
 def record(*, level, module, action, operation_id, stage, outcome,
            target="", error_class="", detail="", recovery_id=""):
     if level not in LEVELS or module not in MODULES:
@@ -52,7 +64,12 @@ def record(*, level, module, action, operation_id, stage, outcome,
         "stage": str(stage)[:72],
         "outcome": str(outcome)[:40],
         "operation_id": operation_id,
-        "target": str(target)[:120],
+        # Domain identity is not descriptive log text. The native WP
+        # manual-review event must preserve the *entire* canonical name.
+        # Other Activity targets retain their existing 120-character bound.
+        "target": _exact_manual_review_target(target) if (
+            module == "lifecycle" and action == "wp_terminal_manual_review"
+        ) else str(target)[:120],
         "error_class": str(error_class)[:64],
         "detail": str(detail)[:240],
         "recovery_id": str(recovery_id)[:64],
@@ -170,7 +187,8 @@ def append_activity(directory, event, *, mandatory_manual_review=False):
             and event["action"] == "wp_terminal_manual_review"
             and event["stage"] == "native_terminal"
             and event["outcome"] == "Manual Review Required"
-            and event["recovery_id"] == "" and event["target"]):
+            and event["recovery_id"] == ""
+            and event["target"] == _exact_manual_review_target(event["target"])):
         raise ActivityError("Only immutable native WP manual-review events bypass verbosity")
     if not mandatory_manual_review and LEVELS[event["level"]] < LEVELS[configured_level()]:
         # Ordinary debug/info/warning events honor the operator's log policy.

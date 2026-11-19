@@ -54,7 +54,10 @@ all aaPanel versions or a blanket reason to restart after every install.
    returned the old response without the mandatory manual-review fields.
    The UI correctly refused that incompatible response. Candidate v0.1.57
    adds a **loaded-helper contract check** to the authenticated WP observer
-   endpoint. When the helper is stale, Enable/Inspect/Recheck/Restore/
+   endpoint. The unpublished v0.1.58 candidate increments that contract
+   to v2: long-domain and incomplete-evidence fields must be present before
+   the installed entrypoint may trust the resident helper. When the helper
+   is stale, Enable/Inspect/Recheck/Restore/
    Discard are refused with a specific reason; Emergency disable remains
    available. Generic Activity stays readable with a warning that private
    manual-review outbox projection cannot be verified. This does not reload

@@ -130,6 +130,228 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual((self.data / LOG_NAME).read_text().count('"wp_terminal_manual_review"'),1)
         self.assertEqual(self.hosts.read_bytes(), self.before + marker)
 
+    def test_exact_long_domain_survives_private_outbox_activity_and_crash(self):
+        from ach_customizer_activity import read_activity
+        import ach_customizer_main as api
+        domain=".".join(("a"*50,"b"*50,"c"*50,"d"*7))
+        self.assertEqual(len(domain),160)
+        self.arm(domain=domain)
+        marker=b"\n127.0.0.1 "+domain.encode("ascii")
+        self.hosts.write_bytes(self.before+marker)
+        real=worker._worker_outcome
+        def interruption(fd,policy,state,stage,reason,**kwargs):
+            if state=="Manual Review Required":
+                raise SystemExit("injected crash after complete Outbox publication")
+            return real(fd,policy,state,stage,reason,**kwargs)
+        with patch.object(worker,"_worker_outcome",side_effect=interruption):
+            with self.assertRaisesRegex(SystemExit,"injected crash"):
+                self.finish(domain=domain)
+        first=worker.inspect(data_dir=str(self.data))
+        op=first["manual_review"]["operation_id"]
+        self.assertEqual(first["active_domain"],domain)
+        self.assertEqual(first["manual_review"]["domain"],domain)
+        self.assertEqual(len(first["manual_review"]["domain"]),160)
+        self.assertEqual(first["recoveries"],0)
+        self.assertEqual(self.tick()["state"],"Manual Review Required")
+        current=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(current["manual_review"]["operation_id"],op)
+        self.assertEqual(current["manual_review"]["domain"],domain)
+        self.assertEqual(current["manual_review_count"],1)
+        self.assertEqual(current["recoveries"],0)
+        self.assertIsNone(current["last_recovery"])
+        with worker._locked_state(str(self.data)) as fd:
+            private=worker._read_manual_review(fd,op)
+        self.assertEqual(private["event"]["target"],domain)
+        logs=[e for e in read_activity(str(self.data)) if e["action"]=="wp_terminal_manual_review"]
+        self.assertEqual(len(logs),1)
+        self.assertEqual(logs[0]["target"],domain)
+        with patch.object(api,"_STATE_DIR",str(self.data)), patch.object(
+                api.ach_customizer_main,"_status_primary_admin_post",return_value=None):
+            feed=api.ach_customizer_main().get_activity({"module":"lifecycle"})
+        self.assertTrue(feed["status"],feed)
+        matches=[e for e in feed["entries"] if e["action"]=="wp_terminal_manual_review"]
+        self.assertEqual(len(matches),1)
+        self.assertEqual(matches[0]["target"],domain)
+        self.assertEqual(self.hosts.read_bytes(),self.before+marker)
+
+    def test_interrupted_initial_staging_write_is_never_canonical(self):
+        from ach_customizer_activity import read_activity
+        self.arm()
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        with worker._locked_state(str(self.data)) as fd:
+            op=worker._load(fd)["active"]["operation"]
+        original=worker._new_file
+        def fail_partial(fd,name,content):
+            if name.startswith("."+worker._manual_review_name(op)+".") and name.endswith(".tmp"):
+                handle=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=fd)
+                try:
+                    os.write(handle,content[:15])
+                finally:
+                    os.close(handle)
+                raise OSError(errno.ENOSPC,"injected partial write")
+            return original(fd,name,content)
+        with patch.object(worker,"_new_file",side_effect=fail_partial):
+            with self.assertRaises(OSError):
+                self.finish()
+        canonical=self.data/worker._manual_review_name(op)
+        self.assertFalse(canonical.exists())
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_count"],0)
+        with worker._locked_state(str(self.data)) as fd:
+            policy=worker._load(fd)
+        self.assertEqual(policy["active"]["operation"],op)
+        self.assertIsNone(policy["last_token"])
+        self.assertEqual(self.tick()["state"],"Manual Review Required")
+        record=worker.inspect(data_dir=str(self.data))["manual_review"]
+        self.assertEqual(record["operation_id"],op)
+        self.assertEqual(record["domain"],"failed.test")
+        self.assertEqual(len([e for e in read_activity(str(self.data))
+                              if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
+
+    def test_crash_leftover_incomplete_staging_is_ignored_and_original_operation_reused(self):
+        self.arm()
+        with worker._locked_state(str(self.data)) as fd:
+            op=worker._load(fd)["active"]["operation"]
+        orphan=self.data/("."+worker._manual_review_name(op)+".crashed.tmp")
+        orphan.write_bytes(b"\x00partial previous process")
+        orphan.chmod(0o600)
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_count"],0)
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_integrity"]["state"],"Complete")
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        self.assertEqual(self.finish()["state"],"Manual Review Required")
+        row=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(row["manual_review"]["operation_id"],op)
+        self.assertTrue(orphan.exists(),"An unreviewed orphan stage is not auto-deleted")
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
+
+    def test_link_publication_failure_preserves_witness_without_canonical_record(self):
+        self.arm()
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        with worker._locked_state(str(self.data)) as fd:
+            op=worker._load(fd)["active"]["operation"]
+        with patch.object(worker.os,"link",side_effect=OSError(errno.EIO,"injected link failure")):
+            with self.assertRaises(OSError):
+                self.finish()
+        self.assertFalse((self.data/worker._manual_review_name(op)).exists())
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_count"],0)
+        self.assertEqual(self.tick()["state"],"Manual Review Required")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review"]["operation_id"],op)
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],0)
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
+
+    def test_incomplete_canonical_is_preserved_reported_and_operator_recoverable(self):
+        import ach_customizer_main as api
+        from ach_customizer_activity import read_activity
+        self.arm(domain="first.test")
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 first.test")
+        self.assertEqual(self.finish(domain="first.test")["state"],"Manual Review Required")
+        first=worker.inspect(data_dir=str(self.data))["manual_review"]["operation_id"]
+        self.arm(domain="second.test")
+        with worker._locked_state(str(self.data)) as fd:
+            second=worker._load(fd)["active"]["operation"]
+        broken=self.data/worker._manual_review_name(second)
+        broken.write_bytes(b"\x00partial canonical bytes")
+        broken.chmod(0o600)
+        state=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(state["manual_review_count"],1)
+        self.assertEqual(state["manual_review"]["operation_id"],first)
+        self.assertEqual(state["manual_review_integrity"],
+                         {"state":"Needs Review","incomplete_count":1,"first_operation_id":second})
+        with patch.object(api,"_STATE_DIR",str(self.data)), patch.object(
+                api.ach_customizer_main,"_status_primary_admin_post",return_value=None):
+            report=api.ach_customizer_main().get_activity({"module":"lifecycle"})
+        self.assertTrue(report["status"],report)
+        self.assertIn(second,report["activity_warning"])
+        self.assertEqual(len([e for e in report["entries"] if e["action"]=="wp_terminal_manual_review"]),1)
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 first.test"+b"\n127.0.0.1 second.test")
+        with self.assertRaisesRegex(worker.TerminalError,second):
+            self.finish(domain="second.test")
+        self.assertEqual(broken.read_bytes(),b"\x00partial canonical bytes")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["active_domain"],"second.test")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],0)
+        # Simulate a separately reviewed *OS operator* quarantine of this exact
+        # malformed file: the worker itself never deletes or overwrites it.
+        quarantined=self.data/(broken.name+".quarantined")
+        broken.rename(quarantined)
+        self.assertEqual(self.tick()["state"],"Manual Review Required")
+        reports=worker.manual_review_activity(data_dir=str(self.data))
+        self.assertEqual({e["target"] for e in reports},{"first.test","second.test"})
+        self.assertEqual(len([e for e in read_activity(str(self.data))
+                              if e["action"]=="wp_terminal_manual_review"]),2)
+        self.assertTrue(quarantined.exists())
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_integrity"]["state"],"Complete")
+        self.assertIsNone(worker.inspect(data_dir=str(self.data))["last_recovery"])
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 first.test"+
+                         b"\n127.0.0.1 second.test")
+
+    def test_directory_fsync_failure_after_atomic_link_is_recoverable(self):
+        self.arm()
+        marker=b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(self.before+marker)
+        with worker._locked_state(str(self.data)) as fd:
+            op=worker._load(fd)["active"]["operation"]
+        original=worker.os.fsync
+        seen=[False]
+        def fail_post_link(fd):
+            if (not seen[0] and os.fstat(fd).st_mode & 0o170000 == 0o040000 and
+                    (self.data/worker._manual_review_name(op)).exists()):
+                seen[0]=True
+                raise OSError(errno.EIO,"injected directory fsync failure after link")
+            return original(fd)
+        with patch.object(worker.os,"fsync",side_effect=fail_post_link):
+            with self.assertRaises(OSError):
+                self.finish()
+        self.assertTrue(seen[0])
+        with worker._locked_state(str(self.data)) as fd:
+            first=worker._read_manual_review(fd,op)
+            self.assertEqual(worker._load(fd)["active"]["operation"],op)
+        self.assertEqual(first["event"]["target"],"failed.test")
+        self.assertEqual(self.tick()["state"],"Manual Review Required")
+        with worker._locked_state(str(self.data)) as fd:
+            self.assertEqual(worker._read_manual_review(fd,op)["event"],first["event"])
+        from ach_customizer_activity import read_activity
+        self.assertEqual(len([e for e in read_activity(str(self.data))
+                              if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(self.hosts.read_bytes(),self.before+marker)
+
+    def test_only_corrupt_canonical_and_broken_general_log_report_precise_metadata(self):
+        import ach_customizer_main as api
+        from ach_customizer_activity import LOG_NAME
+        self.arm()
+        with worker._locked_state(str(self.data)) as fd:
+            operation=worker._load(fd)["active"]["operation"]
+        canonical=self.data/worker._manual_review_name(operation)
+        canonical.write_bytes(b"partial")
+        canonical.chmod(0o600)
+        log=self.data/LOG_NAME
+        log.write_text("invalid JSONL\n")
+        log.chmod(0o600)
+        with patch.object(api,"_STATE_DIR",str(self.data)),patch.object(
+                api.ach_customizer_main,"_status_primary_admin_post",return_value=None):
+            response=api.ach_customizer_main().get_activity({"module":"lifecycle"})
+        self.assertTrue(response["status"],response)
+        self.assertEqual(response["entries"],[])
+        self.assertIn(operation,response["activity_warning"])
+        self.assertIn("General Activity log unavailable",response["activity_warning"])
+        self.assertEqual(canonical.read_bytes(),b"partial")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["active_domain"],"failed.test")
+        self.assertEqual(self.hosts.read_bytes(),self.before)
+
+    def test_existing_valid_canonical_record_cannot_be_clobbered(self):
+        from ach_customizer_activity import read_activity
+        self.arm()
+        with worker._locked_state(str(self.data)) as fd:
+            op=worker._load(fd)["active"]["operation"]
+            original=worker._prepare_manual_review(fd,op,"failed.test")
+            attempted={**original,"event":{**original["event"],"time_utc":"2026-01-01T00:00:00+00:00"}}
+            worker._write_manual_review(fd,attempted,initial=True)
+            unchanged=worker._read_manual_review(fd,op)
+            self.assertEqual(unchanged,original)
+            forged={**original,"event":{**original["event"],"target":"another.test"}}
+            with self.assertRaises(worker.TerminalError):
+                worker._write_manual_review(fd,forged,initial=True)
+            self.assertEqual(worker._read_manual_review(fd,op),original)
+
     def test_manual_review_outbox_recovers_after_activity_disk_failure(self):
         from ach_customizer_activity import ActivityError, LOG_NAME, append_activity, read_activity
         from ach_customizer_main import ach_customizer_main

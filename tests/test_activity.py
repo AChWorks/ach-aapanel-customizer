@@ -83,6 +83,22 @@ class ActivityTests(unittest.TestCase):
                                          mandatory_manual_review=True)
         self.assertEqual(len(activity.read_activity(self.directory)),1)
 
+    def test_full_canonical_wp_domain_activity_retains_253_characters(self):
+        domain=".".join(("a"*63,"b"*63,"c"*63,"d"*61))
+        self.assertEqual(len(domain),253)
+        entry=self.event(20,level="WARNING",module="lifecycle",
+            action="wp_terminal_manual_review",stage="native_terminal",
+            outcome="Manual Review Required",target=domain,recovery_id="")
+        self.assertEqual(entry["target"],domain)
+        self.assertTrue(activity.append_activity(self.directory,entry,mandatory_manual_review=True))
+        self.assertEqual(activity.read_activity(self.directory)[0]["target"],domain)
+        self.assertEqual(self.event(22,target=domain)["target"],domain[:120],
+            "Unrelated Activity targets keep their previous bounded schema")
+        for value in (domain.upper(),domain[:95]+"\n"+domain[96:],domain+"x"):
+            with self.assertRaises(activity.ActivityError):
+                self.event(24,module="lifecycle",action="wp_terminal_manual_review",
+                           target=value)
+
     def test_rotation_is_bounded_and_recent_first(self):
         with patch.object(activity, "MAX_LOG_BYTES", 4096):
             for n in range(1, 37):

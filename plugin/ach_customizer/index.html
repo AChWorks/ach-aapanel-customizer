@@ -867,7 +867,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.57'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.58'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -4897,7 +4897,9 @@
             typeof item.level === 'string' && ['DEBUG','INFO','WARNING','ERROR'].indexOf(item.level) >= 0 &&
             typeof item.operation_id === 'string' && /^[0-9a-f]{32}$/.test(item.operation_id) &&
             typeof item.outcome === 'string' && item.outcome.length <= 40 &&
-            typeof item.target === 'string' && item.target.length <= 120 &&
+            typeof item.target === 'string' &&
+            item.target.length <= (item.module === 'lifecycle' &&
+              item.action === 'wp_terminal_manual_review' ? 253 : 120) &&
             typeof item.detail === 'string' && item.detail.length <= 240 &&
             typeof item.recovery_id === 'string' &&
               (item.recovery_id === '' || /^[0-9a-f]{32}$/.test(item.recovery_id)) &&
@@ -5882,6 +5884,16 @@
         typeof r.last_worker.reason !== 'string' ||
         r.last_worker.state.length > 40 || r.last_worker.stage.length > 64 ||
         r.last_worker.reason.length > 240 ||
+        !r.manual_review_integrity ||
+        !['Complete','Needs Review'].includes(r.manual_review_integrity.state) ||
+        !Number.isSafeInteger(r.manual_review_integrity.incomplete_count) ||
+        r.manual_review_integrity.incomplete_count < 0 ||
+        (r.manual_review_integrity.incomplete_count === 0) !==
+          (r.manual_review_integrity.state === 'Complete') ||
+        (r.manual_review_integrity.first_operation_id !== null &&
+         !/^[0-9a-f]{32}$/.test(r.manual_review_integrity.first_operation_id || '')) ||
+        (r.manual_review_integrity.incomplete_count === 0) !==
+          (r.manual_review_integrity.first_operation_id === null) ||
         !Number.isSafeInteger(r.manual_review_count) || r.manual_review_count < 0 ||
         ((r.manual_review_count === 0) !== (r.manual_review === null)) ||
         (r.manual_review !== null &&
@@ -5920,6 +5932,11 @@
          ' · Activity confirmed; durable evidence retained.' :
          ' · Activity delivery pending; durable evidence retained in private state.') :
         ' · No observed manual-review candidates.') +
+      (r.manual_review_integrity.state === 'Needs Review' ?
+        ' · Incomplete private manual-review evidence: ' +
+        r.manual_review_integrity.incomplete_count +
+        ' (first Operation: ' + r.manual_review_integrity.first_operation_id +
+        '). Preserve for OS review; do not delete automatically.' : '') +
       ' · Manual-review reports: ' + r.manual_review_count +
       ' · Historical auto repairs: ' + r.recoveries + '. PHP-FPM auto enforcement: Off.');
     root.find('#ach-wp-terminal-recovery').text(r.last_recovery ?

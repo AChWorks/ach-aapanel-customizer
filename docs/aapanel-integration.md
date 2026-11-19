@@ -160,7 +160,7 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.57 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
+Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.58 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -255,7 +255,7 @@ recreates an alias, a new separately reviewed removal retains previous
 recovery material for forensics rather than overwriting it invisibly.
 
 The manual tool alone cannot identify the writer, guarantee external
-DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.57**
+DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.58**
 adds a **separate, expressly approved, narrow native WP Toolkit failure
 reconciler** described immediately below. The manual 0.1.52 capability is
 **not** available in published native 0.1.51. Installed-package/native
@@ -265,7 +265,7 @@ If a stale Python helper prevents inspection after an upgrade,
 use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
 not a blind server restart.
 
-## Native WordPress Toolkit failed-install witness (unpublished 0.1.57)
+## Native WordPress Toolkit failed-install witness (unpublished 0.1.58)
 
 The primary admin can explicitly enable **Routing & Nginx → Native WordPress
 failed-install witness**. Native ZIP installation/reinstallation does not enable
@@ -328,16 +328,42 @@ Hosts edits. The Activity writer bypasses
 checks both retained JSONL generations under its lock before appending,
 preventing duplicate delivery after a crash between log fsync and receipt.
 The primary-admin Activity endpoint projects the private records exactly
-once, independently of rolling JSONL. If the general log is corrupted or
+once, independently of rolling JSONL. A verified canonical hostname is
+preserved in full (up to 253 ASCII characters after IDNA normalization),
+without the descriptive Activity target's 120-character shortening.
+Initial Outbox publication is atomic: a private fsynced staging file is
+linked under the canonical name without overwriting any existing report,
+then the directory is synced. An incomplete staging file is never an
+authoritative record. If the general log is corrupted or
 unavailable, the endpoint still shows durable manual-review evidence with
 a bounded warning. Routing Inspect shows the latest domain, Operation ID
-and delivery state after subsequent worker updates. Records remain private
-and retained; a separate future retention policy must not silently discard
-actionable manual-review evidence.
+and delivery state after subsequent worker updates. An older malformed
+canonical record is preserved, not replaced. Other valid reports still
+appear, while Routing and primary-admin Activity report the first affected
+Operation ID and a `Needs Review` warning. Processing the matching active
+witness is blocked until separately reviewed recovery. Records remain
+private and retained; a separate future retention policy must not silently
+discard actionable manual-review evidence.
+
+**Recovery of malformed canonical evidence — OS-operator procedure only:**
+1. Disable the watcher, check native WP task and lock state, and identify
+   the exact affected Operation ID and the matching saved witness.
+2. Under separately authorized root maintenance, confirm regular-file
+   ownership and mode, inspect the exact file
+   `/www/server/panel/data/ach_customizer.wp-terminal.<operation-id>.manual-review.json`,
+   and preserve a verified protected byte-for-byte copy.
+3. After establishing that this **canonical** file is malformed, move that
+   exact file to a distinct private quarantine filename without overwriting
+   another file; sync the directory. Never delete the forensic copy, another
+   operation's report, or a historical recovery journal.
+4. Reinspect policy and original native progress. Resume the watcher only
+   through its separately authorized controls, and only when all normal
+   source/lock/timing guards remain satisfied. If stale, retain evidence and
+   arrange manual OS remediation instead of forcing replay.
 
 After ZIP upgrades, the resident aaPanel Python process may retain a
 previous `ach_customizer_wp_terminal` module despite exact installed bytes
-and a matching entrypoint version. The v0.1.57 endpoint checks the
+and a matching entrypoint version. The v0.1.58 endpoint checks the
 **loaded helper's** durable-review contract before non-emergency actions,
 refuses stale helpers with `resident_wp_helper_stale`, and leaves Emergency
 disable available. Ordinary general Activity remains readable with a

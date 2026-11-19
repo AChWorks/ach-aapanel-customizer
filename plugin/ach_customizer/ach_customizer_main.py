@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.57'
+WORKER_SOURCE_VERSION = '0.1.58'
 
 _STATE_DIR = DATA_DIR
 
@@ -181,7 +181,7 @@ class ach_customizer_main:
             # projection keeps actionable identities visible during JSONL
             # persistence failures, ERROR verbosity and log rotation.
             import ach_customizer_wp_terminal as terminal
-            stale_helper = getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v1"
+            stale_helper = getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v2"
             from ach_customizer_activity import MAX_RESULTS
             if (type(limit) is not int or not 1 <= limit <= MAX_RESULTS
                     or level not in ("", "DEBUG", "INFO", "WARNING", "ERROR")
@@ -191,20 +191,30 @@ class ach_customizer_main:
             # Preserve unrelated Activity when aaPanel has retained an old
             # helper import after ZIP upgrade. Do not claim to have read the
             # private WP outbox until an operator-approved panel reload.
-            durable_manual = ([] if stale_helper else terminal.manual_review_activity(
-                data_dir=_STATE_DIR, level=level, module=module))
+            durable_manual, incomplete = (([], []) if stale_helper else
+                terminal.manual_review_activity(
+                    data_dir=_STATE_DIR, level=level, module=module,
+                    with_integrity=True))
             log_warning = ("Resident WP helper stale; durable manual-review evidence "
                            "unavailable until an approved panel reload" if stale_helper else None)
+            if incomplete:
+                warning = ("Incomplete private native WP manual-review evidence for "
+                           + str(len(incomplete)) + " operation(s); first Operation ID: "
+                           + incomplete[0] + ". Preserve files for independent OS review.")
+                log_warning = (log_warning + " " + warning) if log_warning else warning
             try:
                 generic = read_activity(
                     _STATE_DIR, level=level, module=module, limit=MAX_RESULTS)
             except ActivityError:
-                if not durable_manual:
+                if not durable_manual and not incomplete:
                     raise
-                # Never hide the primary manual-review identity merely because
-                # the optional rolling JSONL history is currently unavailable.
+                # Do not hide valid reports or the precise incomplete Outbox
+                # operation identity merely because rolling JSONL is damaged.
                 generic = []
-                log_warning = "General Activity log unavailable; durable WordPress manual-review evidence shown"
+                warning = ("General Activity log unavailable; "
+                           + ("durable WordPress manual-review evidence shown" if durable_manual
+                              else "incomplete manual-review evidence metadata shown"))
+                log_warning = (log_warning + " " + warning) if log_warning else warning
             seen = set()
             entries = []
             for event in durable_manual + generic:
@@ -684,7 +694,7 @@ class ach_customizer_main:
             action = self._argument(args, "terminal_action")
             import ach_customizer_wp_terminal as terminal
             if (action != "disable" and
-                    getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v1"):
+                    getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v2"):
                 response = self._fail(
                     "wp_terminal_management", MonitorInputError(
                         "Resident native WP helper is stale. Emergency disable remains available; "

@@ -39,7 +39,7 @@ NATIVE_SITE_SHA = "b75a5a0b45c319df7eb49381363d3c3e90208157ebfd88de6f9b173d013d9
 NATIVE_META = "/www/server/panel/class/common.py"
 # Advertise the loaded Python module's actual safety/diagnostic contract,
 # not a fresh on-disk version which may hide stale aaPanel worker imports.
-MANUAL_REVIEW_CONTRACT = "durable-manual-review-v1"
+MANUAL_REVIEW_CONTRACT = "durable-manual-review-v2"
 STATE_FILE = "ach_customizer.wp-terminal.json"
 MANUAL_REVIEW_PREFIX = "ach_customizer.wp-terminal."
 MANUAL_REVIEW_SUFFIX = ".manual-review.json"
@@ -236,15 +236,30 @@ def _read_manual_review(fd, operation):
     return row
 
 
-def _manual_review_rows(fd):
-    """Private durable audit entries outlive last_worker, Activity rotation and restarts."""
-    rows = []
+def _scan_manual_reviews(fd):
+    """Preserve usable evidence even if one older canonical record is damaged.
+
+    Only the strictly validated, final canonical filename is authoritative.
+    Leftover private staging files from a killed writer are never enumerated.
+    An invalid canonical record is NOT deleted, hidden or auto-repaired;
+    its Operation ID is surfaced for a separately reviewed OS-level recovery.
+    """
+    rows, incomplete = [], []
     for filename in os.listdir(fd):
         match = MANUAL_REVIEW_FILE.fullmatch(filename)
-        if match:
-            rows.append(_read_manual_review(fd, match.group(1)))
-    return sorted(rows, key=lambda row: (row["created_ns"], row["event"]["operation_id"]),
-                  reverse=True)
+        if not match:
+            continue
+        operation = match.group(1)
+        try:
+            rows.append(_read_manual_review(fd, operation))
+        except (OSError, HostsManageError, TerminalError, ValueError):
+            incomplete.append(operation)
+    return (sorted(rows, key=lambda row: (row["created_ns"], row["event"]["operation_id"]),
+                   reverse=True), sorted(incomplete))
+
+
+def _manual_review_rows(fd):
+    return _scan_manual_reviews(fd)[0]
 
 
 def _write_manual_review(fd, row, *, initial=False):
@@ -254,14 +269,29 @@ def _write_manual_review(fd, row, *, initial=False):
     if len(payload) > MAX_MANUAL_REVIEW_BYTES:
         raise TerminalError("Native WP manual-review evidence is too large")
     if initial:
+        # Write and fsync a unique private staging inode FIRST, then
+        # atomically publish by hard-linking it at the operation's canonical
+        # name. link(2) is no-clobber (EEXIST) and does not expose partially
+        # written bytes to readers; a killed writer leaves only an ignored
+        # .tmp file. Never rename-replace an existing evidence record.
+        staging = "." + name + "." + uuid4().hex + ".tmp"
         try:
-            _new_file(fd, name, payload)
+            _new_file(fd, staging, payload)
+            try:
+                os.link(staging, name, src_dir_fd=fd, dst_dir_fd=fd,
+                        follow_symlinks=False)
+            except FileExistsError:
+                previous = _read_manual_review(fd, operation)
+                if (previous["event"]["target"] != row["event"]["target"]
+                        or previous["event"]["detail"] != row["event"]["detail"]):
+                    raise TerminalError("Conflicting native WP manual-review ownership")
+            # Covers both the final link and any staging cleanup after it.
             os.fsync(fd)
-        except FileExistsError:
-            previous = _read_manual_review(fd, operation)
-            if (previous["event"]["target"] != row["event"]["target"]
-                    or previous["event"]["detail"] != row["event"]["detail"]):
-                raise TerminalError("Conflicting native WP manual-review ownership")
+        finally:
+            try:
+                os.unlink(staging, dir_fd=fd)
+            except FileNotFoundError:
+                pass
         return
     staging = "." + name + "." + uuid4().hex + ".tmp"
     _new_file(fd, staging, payload)
@@ -277,10 +307,16 @@ def _write_manual_review(fd, row, *, initial=False):
 
 def _prepare_manual_review(fd, operation, domain):
     """Durable, single-operation source of truth BEFORE the terminal token save."""
-    existing = _read_owned(fd, _manual_review_name(operation),
-                           max_bytes=MAX_MANUAL_REVIEW_BYTES)
-    if existing is not None:
-        row = _read_manual_review(fd, operation)
+    try:
+        existing = _read_owned(fd, _manual_review_name(operation),
+                               max_bytes=MAX_MANUAL_REVIEW_BYTES)
+        row = _read_manual_review(fd, operation) if existing is not None else None
+    except (OSError, HostsManageError, TerminalError, ValueError) as exc:
+        raise TerminalError(
+            "Incomplete canonical manual-review evidence for Operation ID "
+            + operation + "; preserve and quarantine only after independent OS review"
+        ) from exc
+    if row is not None:
         if row["event"]["target"] != domain:
             raise TerminalError("Conflicting native WP manual-review domain")
         return row
@@ -318,17 +354,16 @@ def _deliver_pending_manual_reviews(fd, data_dir):
             continue
 
 
-def manual_review_activity(*, data_dir=DATA_DIR, level="", module=""):
-    """Return durable, immutable Activity events even if JSONL delivery failed.
-
-    Intended for the separately authorized primary-admin Activity endpoint.
-    """
+def manual_review_activity(*, data_dir=DATA_DIR, level="", module="",
+                           with_integrity=False):
+    """Privileged projection of usable events plus optional incomplete IDs."""
     fd = _open_state_dir(data_dir)
     try:
-        rows = _manual_review_rows(fd)
-        return [row["event"] for row in rows
-                if (not level or row["event"]["level"] == level)
-                and (not module or row["event"]["module"] == module)]
+        rows, incomplete = _scan_manual_reviews(fd)
+        events = [row["event"] for row in rows
+                  if (not level or row["event"]["level"] == level)
+                  and (not module or row["event"]["module"] == module)]
+        return (events, incomplete) if with_integrity else events
     finally:
         os.close(fd)
 
@@ -347,7 +382,7 @@ def inspect(*, data_dir=DATA_DIR):
                 recovery_state = _read_recovery(fd, recovery_id)["phase"]
             except (TerminalError, HostsManageError):
                 recovery_state = "Needs Review"
-        manual_rows = _manual_review_rows(fd)
+        manual_rows, incomplete = _scan_manual_reviews(fd)
         latest = manual_rows[0] if manual_rows else None
         manual_review = ({
             "operation_id": latest["event"]["operation_id"],
@@ -357,6 +392,11 @@ def inspect(*, data_dir=DATA_DIR):
         return {key: value[key] for key in ("enabled", "revision", "last_reason", "recoveries", "last_worker")} | {
             "manual_review": manual_review,
             "manual_review_count": len(manual_rows),
+            "manual_review_integrity": {
+                "state": "Needs Review" if incomplete else "Complete",
+                "incomplete_count": len(incomplete),
+                "first_operation_id": incomplete[0] if incomplete else None,
+            },
             "last_recovery": recovery_id,
             "active_domain": value["active"]["domain"] if value["active"] else None,
             "last_recovery_state": recovery_state,
