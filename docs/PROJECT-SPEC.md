@@ -103,7 +103,17 @@ are also required operational outcomes, not simply a list of diagnostics.
 
 Keep installation itself observation-only; automatic remediation begins
 only after explicit primary-admin approval of the particular compatible
-site/service policy. Unknown vendor layouts, IP trust assumptions, external
+site/service policy. The first bounded **unpublished 0.1.54** exception is
+failed-native-single-site WordPress Toolkit **Hosts** alias cleanup: an
+explicitly enabled watcher must observe a progress event while setup is
+active, verify actual terminal failure and unique vendor source fingerprints,
+then accept only an exact new temporary loopback append to a previously
+clean `/etc/hosts` file. A prepared write journal, root-owned backup,
+read-only crash-window Recheck and separately reviewed Restore are mandatory.
+The feature does **not** authorize generic Hosts alias cleanup, batch WP
+install mutation or shared PHP-FPM auto-enforcement. An aaPanel source update,
+active operation, missed start or concurrent editor must fail closed and
+produce actionable evidence; sources are not patched in-place. Unknown vendor layouts, IP trust assumptions, external
 WordPress integrations and Production deployments require their respective
 review/approval and working rollback. Issue #2 holds the exact current
 acceptance matrix; #21 holds installed/negative/recovery verification.

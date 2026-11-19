@@ -5,6 +5,7 @@ set -eu
 
 cleanup=/www/server/panel/plugin/ach_customizer/ach_customizer_cleanup.py
 lifecycle=/www/server/panel/plugin/ach_customizer/ach_customizer_lifecycle.py
+wp_watcher=/www/server/panel/plugin/ach_customizer/ach_customizer_wp_watcher.py
 panel_python=/www/server/panel/pyenv/bin/python3
 
 trusted_helper_path() {
@@ -45,6 +46,19 @@ case "${1:-}" in
         log_lifecycle install_registered
         ;;
     uninstall)
+        # Explicit opt-in watcher is not registered by ordinary installation.
+        # On uninstall, disable any previously opted-in watcher before native
+        # aaPanel removes plugin files. Preserve unreadable policy evidence.
+        if [ -f /etc/systemd/system/ach-customizer-wp-terminal.path ] || \
+           [ -f /www/server/panel/data/ach_customizer.wp-terminal.json ]; then
+            if [ -x "$panel_python" ] && trusted_lifecycle_path && \
+               [ -f "$wp_watcher" ] && [ ! -L "$wp_watcher" ]; then
+                "$panel_python" "$wp_watcher" uninstall ||
+                    echo 'ACh WP terminal watcher disable/uninstall unconfirmed; inspect systemd units'
+            else
+                echo 'ACh WP terminal watcher helper unavailable; inspect systemd units'
+            fi
+        fi
         # The cleanup helper performs descriptor-anchored, no-symlink and
         # ownership validation before removing only our copied icon.
         # If the executable or helper is unavailable, fail safely.

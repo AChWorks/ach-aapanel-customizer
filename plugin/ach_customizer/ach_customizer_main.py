@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.53'
+WORKER_SOURCE_VERSION = '0.1.54'
 
 _STATE_DIR = DATA_DIR
 
@@ -632,6 +632,62 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("hosts_management", exc, request_id,
                               target=trusted_site_id)
+
+    def wp_terminal_manage(self, args):
+        """Primary-admin, opt-in control of a constrained native WP failure watcher.
+
+        This is independent of the selected native site's manual Hosts editor.
+        It NEVER changes the shared PHP-FPM policy or a successful WP install.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            action = self._argument(args, "terminal_action")
+            from ach_customizer_wp_terminal import inspect, restore, recheck_recovery, abandon_witness
+            if action == "inspect":
+                result = inspect(data_dir=_STATE_DIR)
+                level = "DEBUG"
+            elif action == "enable":
+                if self._argument(args, "reviewed") != "true":
+                    raise MonitorInputError("Explicit native WP Hosts auto-reconciliation approval is required")
+                import public
+                if public.get_panel_version() != "8.0.7" or public.get_webserver() != "nginx":
+                    raise MonitorInputError("Native WP Hosts automation is verified only for aaPanel 8.0.7 Nginx")
+                from ach_customizer_wp_watcher import enable
+                result = enable(data_dir=_STATE_DIR)
+                level = "WARNING"
+            elif action == "disable":
+                from ach_customizer_wp_watcher import disable
+                result = disable(data_dir=_STATE_DIR)
+                level = "WARNING"
+            elif action == "recheck":
+                result = recheck_recovery(data_dir=_STATE_DIR)
+                level = "INFO" if result["state"] not in ("Needs Review", "Active or Unknown") else "WARNING"
+            elif action == "abandon":
+                if self._argument(args, "reviewed") != "true":
+                    raise MonitorInputError("Explicit stale WP witness abandonment approval is required")
+                result = abandon_witness(data_dir=_STATE_DIR)
+                level = "WARNING"
+            elif action == "restore":
+                if self._argument(args, "reviewed") != "true":
+                    raise MonitorInputError("Explicit recovery approval is required")
+                result = restore(self._argument(args, "recovery_id"), data_dir=_STATE_DIR)
+                level = "WARNING"
+            else:
+                raise MonitorInputError("Unsupported native WordPress terminal operation")
+            return self._activity_result(
+                {"status": True, "schema": 1, "request_id": request_id, **result},
+                "lifecycle", "wp_terminal_" + action, level=level)
+        except PermissionError as exc:
+            return self._fail("wp_terminal_authorization", exc, request_id)
+        except Exception as exc:
+            # Only our own exception messages are suitable for the native UI.
+            from ach_customizer_wp_terminal import TerminalError
+            from ach_customizer_wp_watcher import WatcherError
+            if isinstance(exc, (TerminalError, WatcherError)):
+                return self._fail("wp_terminal_management", str(exc), request_id,
+                                  diagnostic_error=exc)
+            return self._fail("wp_terminal_management", exc, request_id)
 
     def _selected_native_website(self, args):
         """Revalidate a browser site snapshot using aaPanel's own site IDs.

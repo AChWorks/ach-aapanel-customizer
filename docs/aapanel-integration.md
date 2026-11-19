@@ -11,9 +11,11 @@ unfinished compatibility and acceptance live in
 
 ## Evidence versus support
 
-The verified installed nonproduction reference is **aaPanel 8.0.7 / Nginx
-1.28.3 / PHP-FPM 8.1 and 8.5**, with specific site, native ZIP and recovery
-tests recorded under #21. A reported source-file match, permitted read-only
+The verified installed nonproduction reference is **aaPanel 8.0.7 / Nginx /
+PHP-FPM 8.1 and 8.5**, with specific site, native ZIP and recovery
+tests recorded under #21. The guest currently reports **Nginx 1.30.6**
+(2026-11-19); earlier QA receipts used Nginx 1.28.3. These are observations,
+not a general Nginx-version support guarantee. A reported source-file match, permitted read-only
 inventory, synthetic HTTP probe or matching entrypoint version proves only
 its named observation. It does **not** certify every runtime worker, another
 PHP layout, real customer/private-data safety, DNS/TLS, aaPanel version or
@@ -252,15 +254,67 @@ requires recovery inspection; do not blindly retry. If a provisioning tool
 recreates an alias, a new separately reviewed removal retains previous
 recovery material for forensics rather than overwriting it invisibly.
 
-**Not yet solved:** this manual step neither identifies WordPress Toolkit as
-the writer, guarantees external DNS/Gateway health, nor prevents repeated
-insertion. An event/lifecycle-level origin fix or compatible reconciliation
-still requires reproduction and isolated installed QA. This 0.1.52 source
-feature is **not** available in published native 0.1.51 and is not Production
-installation authorization.
+The manual tool alone cannot identify the writer, guarantee external
+DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.54**
+adds a **separate, expressly approved, narrow native WP Toolkit failure
+reconciler** described immediately below. The manual 0.1.52 capability is
+**not** available in published native 0.1.51. Installed-package/native
+acceptance for the new candidate is still required; this is not Production
+authorization.
 If a stale Python helper prevents inspection after an upgrade,
 use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
 not a blind server restart.
+
+## Native WordPress Toolkit failed-install Hosts cleanup (unpublished 0.1.54)
+
+A **primary-admin POST** exposes the independent **Routing & Nginx → Native
+WordPress failed-install Hosts cleanup** opt-in. Ordinary native plugin ZIP
+install/reinstall does **not** activate it. The single supported writer is the
+observed native **aaPanel 8.0.7 / Nginx** `AddWPSite → add_sites → deploy_wp`
+progress path, with exact version and source SHA-256 checks of the native
+`one_key_wp_v2.py`, `panel_site_v2.py` and panel version. These fixed-source
+checks deliberately fail closed after a vendor upgrade. Do not modify
+`/www/server/panel/class_v2` or deploy this candidate on Production.
+
+After explicit approval, plugin-owned systemd `.path` and `.timer` units run a
+bounded one-shot watcher on changes to `/tmp/wp_aapanel_deploy.log`, with a
+30-second fallback tick to detect native lock release. It is **not** a
+persistent polling daemon. While a **fresh single-site** progress record is
+active and its lock is present, the worker stores a root-owned witness of the
+current `/etc/hosts` bytes **only when the intended domain has no prior
+Hosts alias**. When the same native progress inode/domain reaches terminal
+`status=1`, `initialize_wp_website.status=-1`, and no WP/batch lock exists,
+the worker checks that `/etc/hosts` equals the witness **plus exactly**
+`\n127.0.0.1 domain`. A prepared journal and recovery backup precede the
+existing descriptor-anchored, same-directory atomic CAS replacement.
+Successful installs and unrelated or changed Hosts never trigger a write.
+
+If the watcher misses setup before terminality, the native progress file is
+replaced, aaPanel source changes, the domain already had any alias, a bulk
+install runs, or the file is edited externally, **no automatic repair** occurs.
+The watcher never edits shared PHP-FPM settings, deleted site records,
+third-party mappings, general loopback aliases, or unobserved operations.
+No network, DNS or HTTPS health is inferred. `Emergency disable` stores
+**disabled** before attempting to stop the plugin-owned units; an
+interrupted `prepared` journal refuses automatic retry. `Recheck interrupted
+recovery` is read-only for `/etc/hosts` and reconciles only verified
+before/after digests, then a separately consented **Restore** can restore
+exact original bytes if the file still matches the saved after-state.
+A stale witness whose original progress was overwritten can be discarded only
+by an explicit **Disable → Recheck → Discard stale witness** sequence with an
+additional operator checkbox, no active native lock and **no** prepared
+journal; no Hosts edit occurs. The initial implementation intentionally
+limits automatic recoveries to 64 per retained policy for bounded evidence;
+a later policy/journal-retention design is required before that threshold.
+
+The worker stores state/recovery under aaPanel's private plugin state
+directory, bounded Activity records and root-owned systemd unit files.
+Uninstall disables verified plugin-owned units but retains already-applied
+file changes and recovery material; never delete a foreign unit. Verify
+systemd unit readiness, active source writer fingerprint, worker logs,
+current site functionality and previously successful WP peers on isolated
+native QA before declaring operational acceptance. The initial source tests
+and simulated filesystem cases do **not** prove real native event timing.
 
 ## PHP-FPM scope and guarded change
 
