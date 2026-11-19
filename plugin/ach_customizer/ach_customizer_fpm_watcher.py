@@ -184,7 +184,8 @@ def disable(version, *, data_dir=DATA_DIR, expected_auto_revision):
             logging.getLogger("ach_customizer").exception(
                 "Durable PHP-FPM disable pending; retry timer/wakeup unavailable")
             return {**result, "wakeup_ready": False}
-    if not worker.any_enabled(data_dir=data_dir):
+    if (not worker.any_enabled(data_dir=data_dir)
+            and not worker.any_pending_disable(data_dir=data_dir)):
         _stop()
     return result
 
@@ -200,8 +201,10 @@ def uninstall(*, data_dir=DATA_DIR, unit_root=UNIT_ROOT):
             if status["enabled"] or status["pending_disable"]:
                 raise FpmWatcherError(
                     "PHP-FPM automatic disable pending; preserve installed worker until complete")
-    if worker.any_enabled(data_dir=data_dir):
-        raise FpmWatcherError("PHP-FPM automatic worker is still enabled")
+    if (worker.any_enabled(data_dir=data_dir)
+            or worker.any_pending_disable(data_dir=data_dir)):
+        raise FpmWatcherError(
+            "PHP-FPM automatic safe-stop is incomplete; preserve the owned retry worker")
     _stop()
     for ext, content in UNITS.items():
         path = unit_root / (UNIT + "." + ext)

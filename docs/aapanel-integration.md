@@ -465,8 +465,16 @@ and restores the former bytes on a verified failure when possible.
   without another operator action. A completed request durably disables
   the affected version and stops owned watcher units when no other
   PHP version remains enabled. Other enabled version policies and
-  existing recovery files are preserved. Uninstall refuses to remove
-  source while safe-stop remains pending; it never kills PHP-FPM.
+  existing recovery files are preserved. A crash after the durable
+  policy-off commit but before unlink/fsync of the canonical request
+  **still displays Pending Disable even with enabled=false**. Both
+  worker shutdown and uninstall must retain the owned retry mechanism
+  until the canonical request is actually consumed and durably removed;
+  a subsequent worker invocation cleans it up idempotently without
+  any host Apply/reload. A failed revocation-directory fsync also prevents
+  shutdown; the next worker must successfully sync and recheck the state
+  directory before stopping the retry timer. Only then does Disabled permit
+  fresh Enable. Cancellation never kills PHP-FPM.
 
 A successful auto repair leaves a current per-version journal and pre-image,
 allowing the existing explicitly approved Rollback flow. On a later genuine

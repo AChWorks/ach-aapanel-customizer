@@ -690,6 +690,225 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.assertFalse(worker.inspect("85",data_dir=str(self.state))["enabled"])
         self.assertFalse(filename.exists())
 
+    def test_policy_off_commit_crash_before_revoke_unlink_stays_visible_and_recovers(self):
+        """A durable policy-off does not mean the canonical request is retired."""
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            original=worker._read(fd)["profiles"]["85"]
+            worker._publish_revoke(fd,"85",original)
+        finally:
+            os.close(fd)
+        # An independently enabled sibling remains untouched by 85 cleanup.
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            current=worker._read(fd)
+            sibling={**current["profiles"]["85"],"enabled_ns":123456,
+                     "active":None,"last_token":None,"last_operation":None}
+            worker._save(fd,{**current,"revision":current["revision"]+1,
+                             "profiles":{**current["profiles"],"81":sibling}})
+        finally:
+            os.close(fd)
+        canonical=self.state/worker._revoke_name("85")
+        assert canonical.is_file()
+        child=os.fork()
+        if child == 0:
+            try:
+                actual_unlink=worker.os.unlink
+                def crash_before_unlink(path,*args,**kwargs):
+                    if path == worker._revoke_name("85"):
+                        os._exit(83)
+                    return actual_unlink(path,*args,**kwargs)
+                with patch.object(worker.os,"unlink",side_effect=crash_before_unlink):
+                    fd=worker._open_state_dir(str(self.state))
+                    lock=worker._exclusive_lock(fd)
+                    try:
+                        worker._consume_revoke_locked(fd,"85")
+                    finally:
+                        os.close(lock)
+                        os.close(fd)
+            except BaseException:
+                os._exit(92)
+            os._exit(93)
+        pid,status=os.waitpid(child,0)
+        self.assertEqual(pid,child)
+        self.assertTrue(os.WIFEXITED(status))
+        self.assertEqual(os.WEXITSTATUS(status),83)
+        persisted=worker.inspect("85",data_dir=str(self.state))
+        self.assertFalse(persisted["enabled"])
+        self.assertTrue(canonical.exists())
+        self.assertEqual(canonical.stat().st_mode & 0o777,0o600)
+        self.assertTrue(persisted["pending_disable"])
+        self.assertEqual(persisted["last_state"],"Pending Disable")
+        self.assertTrue(worker.any_pending_disable(data_dir=str(self.state)))
+        # A fresh Disable is not needed to finish the crash-recovered request.
+        before=self.config.read_bytes()
+        calls_before=list(self.calls)
+        finished=worker.run(data_dir=str(self.state),
+                            controller_factory=self.factory,
+                            terminal_reader=lambda:None)
+        self.assertTrue(finished["revocation_completed"])
+        self.assertFalse(finished["changed"])
+        self.assertEqual(self.config.read_bytes(),before)
+        self.assertEqual(self.calls,calls_before)
+        self.assertFalse(canonical.exists())
+        completed=worker.inspect("85",data_dir=str(self.state))
+        self.assertFalse(completed["enabled"])
+        self.assertFalse(completed["pending_disable"])
+        self.assertEqual(completed["last_state"],"Disabled")
+        self.assertFalse(worker.any_pending_disable(data_dir=str(self.state)))
+        self.assertTrue(worker.inspect("81",data_dir=str(self.state))["enabled"])
+        approved=self._enable()
+        self.assertTrue(approved["enabled"])
+        self.assertFalse(worker.inspect("85",data_dir=str(self.state))["pending_disable"])
+
+    def test_post_policy_off_lock_busy_worker_preserves_timer_and_uninstall(self):
+        """Real independent-process flock must not strand a disabled profile."""
+        import ach_customizer_fpm_watcher as watcher
+        import contextlib
+        import io
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            before=worker._read(fd)
+            current=before["profiles"]["85"]
+            worker._publish_revoke(fd,"85",current)
+            disabled={**current,"enabled":False,"active":None,"last_state":"Disabled"}
+            worker._save(fd,{**before,"revision":before["revision"]+1,
+                             "profiles":{**before["profiles"],"85":disabled}})
+        finally:
+            os.close(fd)
+        unit_dir=self.base/"systemd-qa-units"
+        unit_dir.mkdir(mode=0o700)
+        watcher._ensure_units(unit_dir)
+        ready_read,ready_write=os.pipe()
+        release_read,release_write=os.pipe()
+        child=os.fork()
+        if child == 0:
+            os.close(ready_read)
+            os.close(release_write)
+            try:
+                shared_fd=worker._open_state_dir(str(self.state))
+                lock_fd=worker._exclusive_lock(shared_fd)
+                os.write(ready_write,b"1")
+                os.read(release_read,1)
+                os.close(lock_fd)
+                os.close(shared_fd)
+                os._exit(0)
+            except BaseException:
+                os._exit(97)
+        os.close(ready_write)
+        os.close(release_read)
+        try:
+            self.assertEqual(os.read(ready_read,1),b"1")
+            self.assertFalse(worker.inspect("85",data_dir=str(self.state))["enabled"])
+            self.assertTrue(worker.inspect("85",data_dir=str(self.state))["pending_disable"])
+            real_run=worker.run
+            real_any_enabled=worker.any_enabled
+            real_any_pending=worker.any_pending_disable
+            output=io.StringIO()
+            with patch.object(worker,"run",side_effect=lambda:real_run(
+                    data_dir=str(self.state),controller_factory=self.factory,
+                    terminal_reader=lambda:None)), patch.object(
+                    worker,"any_enabled",side_effect=lambda *a,**k:real_any_enabled(
+                    data_dir=str(self.state))), patch.object(
+                    worker,"any_pending_disable",side_effect=lambda *a,**k:real_any_pending(
+                    data_dir=str(self.state))),patch.object(
+                    watcher,"_stop") as stop,contextlib.redirect_stdout(output):
+                self.assertEqual(worker.main(["run"]),0)
+                stop.assert_not_called()
+            self.assertEqual(json.loads(output.getvalue())["state"],"Pending Disable")
+            self.assertTrue((self.state/worker._revoke_name("85")).exists())
+            with patch.object(watcher,"_stop") as stop,patch.object(
+                    watcher,"_run") as run_systemctl:
+                with self.assertRaisesRegex(watcher.FpmWatcherError,"pending"):
+                    watcher.uninstall(data_dir=str(self.state),unit_root=unit_dir)
+                stop.assert_not_called()
+                run_systemctl.assert_not_called()
+            self.assertEqual(len(list(unit_dir.glob(watcher.UNIT+".*"))),3)
+        finally:
+            os.write(release_write,b"x")
+            os.close(release_write)
+            os.close(ready_read)
+            pid,status=os.waitpid(child,0)
+            self.assertEqual(pid,child)
+            self.assertTrue(os.WIFEXITED(status),status)
+            self.assertEqual(os.WEXITSTATUS(status),0)
+        previously=self.config.read_bytes()
+        completed=worker.run(data_dir=str(self.state),controller_factory=self.factory,
+                             terminal_reader=lambda:None)
+        self.assertTrue(completed["revocation_completed"])
+        self.assertEqual(completed["state"],"Disabled")
+        self.assertEqual(self.config.read_bytes(),previously)
+        self.assertEqual(self.calls,[])
+        self.assertFalse(worker.inspect("85",data_dir=str(self.state))["pending_disable"])
+        with patch.object(watcher,"_stop") as stop,patch.object(
+                watcher,"_run") as run_systemctl:
+            watcher.uninstall(data_dir=str(self.state),unit_root=unit_dir)
+            stop.assert_called_once_with()
+            run_systemctl.assert_called_once_with("daemon-reload")
+        self.assertEqual(list(unit_dir.glob(watcher.UNIT+".*")),[])
+        self.assertTrue(self._enable()["enabled"])
+
+    def test_failed_directory_fsync_after_revoke_unlink_never_stops_retry(self):
+        """An uncertain unlink must not stop timer from an exception path."""
+        import ach_customizer_fpm_watcher as watcher
+        import contextlib
+        import io
+        import stat
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            profile=worker._read(fd)["profiles"]["85"]
+            worker._publish_revoke(fd,"85",profile)
+        finally:
+            os.close(fd)
+        canonical=self.state/worker._revoke_name("85")
+        self.assertTrue(canonical.is_file())
+        real_fsync=os.fsync
+        observed=[False]
+        def failed_ack(fd):
+            if (not canonical.exists() and stat.S_ISDIR(os.fstat(fd).st_mode)
+                    and not observed[0]):
+                observed[0]=True
+                raise OSError("synthetic revocation directory fsync failure")
+            return real_fsync(fd)
+        real_run=worker.run
+        real_any_enabled=worker.any_enabled
+        real_any_pending=worker.any_pending_disable
+        output=io.StringIO()
+        with patch.object(worker,"run",side_effect=lambda:real_run(
+                data_dir=str(self.state),controller_factory=self.factory,
+                terminal_reader=lambda:None)),patch.object(
+                worker,"any_enabled",side_effect=lambda *a,**k:real_any_enabled(
+                data_dir=str(self.state))),patch.object(
+                worker,"any_pending_disable",side_effect=lambda *a,**k:real_any_pending(
+                data_dir=str(self.state))),patch.object(
+                worker.os,"fsync",side_effect=failed_ack),patch.object(
+                watcher,"_stop") as stop,contextlib.redirect_stderr(output):
+            self.assertEqual(worker.main(["run"]),1)
+            stop.assert_not_called()
+        self.assertTrue(observed[0])
+        self.assertIn("OSError",output.getvalue())
+        self.assertFalse(worker.inspect("85",data_dir=str(self.state))["enabled"])
+        self.assertEqual(self.config.read_bytes(),BASELINE)
+        self.assertEqual(self.calls,[])
+        # Once filesystem access returns, the next invocation can verify
+        # the directory and finish without rewriting PHP-FPM.
+        done=worker.run(data_dir=str(self.state),controller_factory=self.factory,
+                        terminal_reader=lambda:None)
+        self.assertEqual(done["state"],"Disabled")
+        self.assertFalse(done["changed"])
+        self.assertFalse(worker.any_pending_disable(data_dir=str(self.state)))
+        self.assertTrue(self._enable()["enabled"])
+
+    def test_unverified_directory_sync_refuses_last_watcher_stop(self):
+        with patch.object(worker.os,"fsync",
+                          side_effect=OSError("synthetic journal directory sync error")):
+            with self.assertRaisesRegex(worker.FpmAutoError,"durability unverified"):
+                worker.any_pending_disable(data_dir=str(self.state))
+        self.assertFalse(worker.any_pending_disable(data_dir=str(self.state)))
+
     def test_pending_disable_recovers_after_cancellation_process_crash(self):
         self._enable()
         fd=worker._open_state_dir(str(self.state))

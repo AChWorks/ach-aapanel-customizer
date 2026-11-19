@@ -310,7 +310,10 @@ def inspect(version, *, data_dir=DATA_DIR):
                 profile["enabled_ns"] != request["enabled_ns"] or
                 profile["policy_sha256"] != request["policy_sha256"]):
             raise FpmAutoError("Pending PHP disable identity differs from current profile")
-        pending = bool(request and profile and profile["enabled"])
+        # The policy-off fsync and canonical-request unlink are separate
+        # durable commits. A crash between them leaves valid revocation
+        # evidence that must remain Pending, even though enabled is false.
+        pending = request is not None
         return {"version": version, "scope": "shared_service", "schema": 1,
                 "state_revision": store["revision"],
                 "enabled": bool(profile and profile["enabled"]),
@@ -331,6 +334,29 @@ def any_enabled(*, data_dir=DATA_DIR):
         return any(profile["enabled"] for profile in _read(fd)["profiles"].values())
     finally:
         os.close(fd)
+
+
+def any_pending_disable(*, data_dir=DATA_DIR):
+    """Verify no valid revocation remains before stopping the owned retry timer.
+
+    A prior unlink might have succeeded while its directory fsync failed.
+    Durably confirm the current directory entries before reporting no work,
+    and recheck canonical identities after that sync. Existing requests are
+    never hidden by the disabled profile state.
+    """
+    if any(inspect(version, data_dir=data_dir)["pending_disable"]
+           for version in recovery.SUPPORTED_VERSIONS):
+        return True
+    fd = _open_state_dir(data_dir)
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            raise FpmAutoError("PHP-FPM revocation cleanup durability unverified") from exc
+    finally:
+        os.close(fd)
+    return any(inspect(version, data_dir=data_dir)["pending_disable"]
+               for version in recovery.SUPPORTED_VERSIONS)
 
 
 def set_enabled(version, enabled, *, data_dir=DATA_DIR,
@@ -603,7 +629,9 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
     fd = _open_state_dir(data_dir)
     try:
         if not any(profile["enabled"] for profile in _read(fd)["profiles"].values()):
-            return {"state": "Disabled", "changed": False, "revocation_completed": revoked}
+            return {"state": ("Pending Disable" if any_pending_disable(data_dir=data_dir)
+                              else "Disabled"),
+                    "changed": False, "revocation_completed": revoked}
     finally:
         os.close(fd)
 
@@ -844,8 +872,10 @@ def main(argv=None):
     if argv != ["run"]:
         print("Usage: ach_customizer_fpm_auto.py run", file=sys.stderr)
         return 2
+    completed = False
     try:
         result = run()
+        completed = True
         print(json.dumps(result, sort_keys=True))
         return 0
     except Exception as exc:
@@ -853,7 +883,10 @@ def main(argv=None):
         return 1
     finally:
         try:
-            if not any_enabled():
+            # A failed/unacknowledged revocation must keep its only owned
+            # retry mechanism, including after an unlink-directory fsync
+            # failure when the canonical path is temporarily absent.
+            if completed and not any_enabled() and not any_pending_disable():
                 import ach_customizer_fpm_watcher as watcher
                 watcher._stop()
         except Exception as exc:

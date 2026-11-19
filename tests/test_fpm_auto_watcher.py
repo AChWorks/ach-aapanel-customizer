@@ -85,6 +85,23 @@ class FpmWatcherTests(unittest.TestCase):
         self.assertIn(("start","--no-block",service.UNIT+".service"),calls)
         stop.assert_not_called()
 
+    def test_pending_after_policy_off_keeps_owned_retry_timer(self):
+        recorded=[]
+        original=service._ensure_units
+        with patch.object(auto,"request_disable",return_value={
+            "version":"85","enabled":False,"pending_disable":True,
+            "state_revision":6,"last_state":"Pending Disable"}),patch.object(
+                service,"_stop") as stop,patch.object(
+                service,"_ensure_units",side_effect=lambda:original(self.root)),patch.object(
+                service,"_run",side_effect=lambda *a:recorded.append(a)):
+            reply=service.disable("85",data_dir=str(self.root),
+                                  expected_auto_revision=5)
+        self.assertFalse(reply["enabled"])
+        self.assertTrue(reply["pending_disable"])
+        self.assertTrue(reply["wakeup_ready"])
+        self.assertIn(("enable","--now",service.UNIT+".timer"),recorded)
+        stop.assert_not_called()
+
     def test_uninstall_refuses_to_remove_source_when_revocation_pending(self):
         service._ensure_units(self.root)
         with patch.object(auto,"inspect",return_value={
