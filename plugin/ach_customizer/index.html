@@ -668,8 +668,8 @@
         <button type="submit">Preview PHP-FPM settings (no changes)</button>
       </form>
       <div class="ach-note" aria-label="Saved shared PHP-FPM Monitor policy">
-        <strong>Saved shared PHP-FPM intent — Monitor only</strong>
-        <p>Save five reviewed desired [www] settings; later use <strong>Recheck saved policy</strong> to compare current native files and see the shared-site mapping without changing the form. To recover from drift, Load saved values, Preview, Prepare and explicitly approve the existing guarded PHP 8.1/8.5 Apply. No automatic enforcement; source comparison does not prove loaded PHP settings.</p>
+        <strong>Saved shared PHP-FPM policy</strong>
+        <p>Save five reviewed desired [www] values first, then choose whether to enable native WordPress post-install automatic repair below. Saving alone never changes the service. Automatic repair affects the entire shared PHP pool, only after a witnessed native WP Toolkit configuration change; unrelated PHP changes are not automatically overridden.</p>
         <div class="ach-controls">
           <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>
           <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
@@ -682,6 +682,13 @@
         <div class="ach-scroll" aria-label="Saved-policy file changes"><table><thead><tr><th>Setting</th><th>Saved desired</th><th>Current file/default</th></tr></thead><tbody id="ach-fpm-policy-diff-rows"></tbody></table></div>
         <p id="ach-fpm-policy-impact" class="ach-status-metadata" role="status" aria-live="polite">No affected-site file mapping checked.</p>
         <div class="ach-scroll" aria-label="Saved-policy impacted site assignments"><table><thead><tr><th>Site ID</th><th>Native site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-fpm-policy-impact-rows"></tbody></table></div>
+        <div class="ach-controls" aria-label="Automatic PHP-FPM repair">
+          <button id="ach-fpm-auto-refresh" type="button" disabled>Inspect automatic repair</button>
+          <label><input type="checkbox" id="ach-fpm-auto-reviewed" disabled /> Enable repeated, verified native WP Toolkit post-terminal repair of this entire PHP shared pool</label>
+          <button type="button" id="ach-fpm-auto-enable" disabled>Enable automatic repair</button>
+          <button type="button" id="ach-fpm-auto-disable" disabled>Emergency disable automatic repair</button>
+        </div>
+        <p id="ach-fpm-auto-status" class="ach-status-metadata" role="status" aria-live="polite">Select a PHP version, inspect current automatic repair state, and recheck the saved policy before enabling. Normal install is disabled.</p>
       </div>
       <p id="ach-fpm-result" role="status" aria-live="polite"></p>
       <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Configured / PHP default</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
@@ -867,7 +874,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.60'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.61'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -884,6 +891,7 @@
   var fpmFormGeneration = 0, fpmPreviewTicket = 0, fpmPrepareTicket = 0;
   var fpmPolicyEvidence = null, fpmPolicyBusy = false, fpmPolicyLoadTicket = 0;
   var fpmRecheckTicket = 0, fpmRecheckBusy = false;
+  var fpmAutoTicket = 0, fpmAutoBusy = false, fpmAutoStatus = null, fpmAutoReview = null;
   var fpmPolicyKeys = ['pm.max_children','pm.start_servers','pm.min_spare_servers',
                        'pm.max_spare_servers','pm.max_requests'];
   var fpmActivePrepareTicket = 0;
@@ -1059,7 +1067,7 @@
       method === 'manage_nginx_protection' || method === 'wp_terminal_manage' || method === 'status_manage' || method === 'status_defaults' ||
       method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
-      method === 'fpm_policy_save' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection';
+      method === 'fpm_policy_save' || method === 'fpm_auto_manage' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection';
   }
   function validInventoryPage(r, expectedPage) {
     if (!r || typeof r !== 'object' || Array.isArray(r) ||
@@ -1177,9 +1185,11 @@
                method === 'status_defaults' && data.default_action !== 'recheck' ||
                method === 'status_unbound' && data.unbound_action !== 'recheck' ||
                method === 'status_stopped' && data.stopped_action !== 'recheck' ||
-               method === 'fpm_policy_save')) ?
+               method === 'fpm_policy_save' || method === 'fpm_auto_manage')) ?
               (method === 'fpm_policy_save' ?
                 '. Save outcome unknown: read the saved policy before trying again.' :
+                method === 'fpm_auto_manage' ?
+                '. Automatic repair outcome unknown: inspect current enabled state before retrying.' :
                 '. Outcome unknown: inspect saved recovery before any retry.') : ''), true);
         }
         done(null);
@@ -5111,6 +5121,7 @@
     ++fpmPolicyLoadTicket;
     root.find('#ach-fpm-policy-load').prop('disabled', true);
     resetFpmRecheck('PHP inventory changed; select a service to recheck saved policy.');
+    resetFpmAuto('PHP inventory changed; select and inspect automatic repair state.');
     $('<option>').val('').text('Select installed PHP').appendTo(root.find('#ach-php-version'));
     root.find('#ach-php-discover').prop('disabled', true);
     root.find('#ach-php-discovery-status').text('Discovering native PHP versioned files...');
@@ -5143,6 +5154,8 @@
       root.find('#ach-fpm-policy-load').prop('disabled', !selectable ||
         !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
       resetFpmRecheck('PHP inventory ready; recheck saved policy for the selected service.');
+      root.find('#ach-fpm-auto-refresh').prop('disabled',
+        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
       phpRuntimeLock();
       root.find('#ach-php-discovery-status').text(
         r.versions.length + ' PHP version(s) observed; ' + selectable +
@@ -5154,6 +5167,7 @@
   root.find('#ach-php-version').on('change', function () {
     ++fpmPolicyLoadTicket;
     resetFpmRecheck('PHP version changed; recheck this service against saved intent.');
+    resetFpmAuto('PHP version changed; inspect automatic repair state for this service.');
     root.find('#ach-fpm-policy-load').prop('disabled',
       !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
     invalidatePhpRuntime('PHP version changed. Inspect the selected version again.');
@@ -5287,7 +5301,120 @@
     root.find('#ach-php-form').serializeArray().forEach(function (field) { data[field.name] = field.value; });
     return data;
   }
+  function resetFpmAuto(note) {
+    ++fpmAutoTicket;
+    fpmAutoBusy = false;
+    fpmAutoStatus = null;
+    fpmAutoReview = null;
+    root.find('#ach-fpm-auto-reviewed').prop('checked', false);
+    root.find('#ach-fpm-auto-reviewed,#ach-fpm-auto-enable,#ach-fpm-auto-disable')
+      .prop('disabled', true);
+    root.find('#ach-fpm-auto-refresh').prop('disabled',
+      !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+    if (note) root.find('#ach-fpm-auto-status').text(note);
+  }
+  function renderFpmAutoControls() {
+    var r = fpmAutoStatus, version = String(root.find('#ach-php-version').val() || '');
+    var same = r && r.version === version;
+    root.find('#ach-fpm-auto-reviewed').prop('disabled',
+      !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy);
+    root.find('#ach-fpm-auto-enable').prop('disabled',
+      !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy ||
+      !root.find('#ach-fpm-auto-reviewed').prop('checked'));
+    root.find('#ach-fpm-auto-disable').prop('disabled',
+      !same || !r.enabled || r.pending_disable || fpmAutoBusy);
+  }
+  function refreshFpmAuto() {
+    var version = String(root.find('#ach-php-version').val() || '');
+    if (fpmAutoBusy || !phpInventory.get(version)?.preview_candidate) return;
+    var ticket = ++fpmAutoTicket;
+    fpmAutoBusy = true;
+    fpmAutoStatus = null;
+    renderFpmAutoControls();
+    root.find('#ach-fpm-auto-status').text('Inspecting automatic PHP-FPM policy and systemd readiness...');
+    request('fpm_auto_manage', {php_version:version, auto_action:'inspect'}, function (r, failure) {
+      if (ticket !== fpmAutoTicket || version !== String(root.find('#ach-php-version').val() || '')) return;
+      fpmAutoBusy = false;
+      if (!r || r.status !== true || r.schema !== 1 || r.version !== version ||
+          typeof r.enabled !== 'boolean' ||
+          !Number.isSafeInteger(r.state_revision) || r.state_revision < 0 ||
+          typeof r.watcher_ready !== 'boolean' ||
+          typeof r.pending_disable !== 'boolean' ||
+          typeof r.last_state !== 'string') {
+        fpmAutoStatus = null;
+        root.find('#ach-fpm-auto-status').text(
+          'Automatic repair status unverified; retry Inspect. ' +
+          fpmPolicyFailure('read', failure, 'No automatic repair state can be trusted.'));
+      } else {
+        fpmAutoStatus = r;
+        root.find('#ach-fpm-auto-status').text(
+          'PHP '+version+': '+(r.pending_disable ? 'Pending Disable' :
+            r.enabled ? 'enabled' : 'disabled')+
+          '; watcher '+(r.watcher_ready ? 'active' : 'not ready')+
+          '; last result: '+r.last_state+'. '+
+          (r.pending_disable ?
+             (r.watcher_ready ?
+               ' Emergency revocation is durably queued; the active worker/timer will finish it.' :
+               ' Emergency revocation is durably queued; worker/timer readiness must be checked.') :
+            r.enabled ? 'Emergency disable remains available.' :
+             'To enable, inspect a saved policy and its affected shared sites first.')+
+          (r.last_operation ? ' Last Operation ID: '+r.last_operation : ''));
+      }
+      renderFpmAutoControls();
+    }, function () { return ticket === fpmAutoTicket; });
+  }
+  root.find('#ach-fpm-auto-refresh').on('click', refreshFpmAuto);
+  root.find('#ach-fpm-auto-reviewed').on('change', renderFpmAutoControls);
+  function mutateFpmAuto(action) {
+    var version = String(root.find('#ach-php-version').val() || '');
+    var r = fpmAutoStatus, review = fpmAutoReview;
+    if (fpmAutoBusy || !r || r.version !== version ||
+        (action === 'enable' && (r.enabled || !review || review.version !== version ||
+         !root.find('#ach-fpm-auto-reviewed').prop('checked'))) ||
+        (action === 'disable' && !r.enabled)) return;
+    fpmAutoBusy = true;
+    var ticket = ++fpmAutoTicket;
+    fpmAutoStatus = null;
+    root.find('#ach-fpm-auto-reviewed').prop('checked', false);
+    renderFpmAutoControls();
+    root.find('#ach-fpm-auto-status').text(
+      (action === 'enable' ? 'Enabling' : 'Disabling') +
+      ' automatic PHP-FPM repair; response must be verified before another action.');
+    request('fpm_auto_manage', {
+      php_version:version, auto_action:action,
+      expected_auto_revision:r.state_revision,
+      expected_policy_revision:review ? review.policy_revision : null,
+      expected_monitor_revision:review ? review.monitor_revision : null,
+      expected_impact:review ? review.impact_sha256 : null,
+      reviewed:action === 'enable' ? 'true' : 'false'
+    }, function (reply, failure) {
+      if (ticket !== fpmAutoTicket || version !== String(root.find('#ach-php-version').val() || '')) return;
+      fpmAutoBusy = false;
+      // Even a successful mutation requires a fresh read before the next one.
+      fpmAutoStatus = null;
+      renderFpmAutoControls();
+      root.find('#ach-fpm-auto-status').text(
+        reply && reply.status === true && action === 'disable' &&
+          reply.pending_disable === true ?
+          'Emergency Disable durably queued; a current transaction may finish safely. '+
+          (reply.wakeup_ready === true ?
+            'The verified retry timer will finish the revocation automatically.' :
+            'Worker wakeup is unverified; inspect the watcher and pending revocation.')+
+          ' Inspect to verify the final status.' :
+        reply && reply.status === true && reply.enabled === (action === 'enable') &&
+          reply.pending_disable !== true ?
+          'Automatic repair '+(reply.enabled ? 'enabled' : 'disabled')+
+          '; click Inspect to confirm watcher and revision.' :
+          'Automatic repair outcome uncertain or rejected; Inspect before retry. '+
+          fpmPolicyFailure('read', failure, 'No enabled state inferred.'));
+    }, function () { return ticket === fpmAutoTicket; });
+  }
+  root.find('#ach-fpm-auto-enable').on('click', function () { mutateFpmAuto('enable'); });
+  root.find('#ach-fpm-auto-disable').on('click', function () { mutateFpmAuto('disable'); });
   function resetFpmRecheck(note) {
+    fpmAutoReview = null;
+    root.find('#ach-fpm-auto-reviewed').prop('checked', false);
+    renderFpmAutoControls();
     ++fpmRecheckTicket;
     fpmRecheckBusy = false;
     root.find('#ach-fpm-policy-diff-rows').empty();
@@ -5353,6 +5480,15 @@
           ' Load the saved values, Preview, Prepare, and separately approve guarded Apply to restore; no automatic enforcement.' : '')+
         ' Point-in-time file/default evidence, not loaded PHP-FPM proof.');
       if (r.state === 'No Policy' || r.state === 'Needs Review') return;
+      if (r.shared_impact.state === 'File Mapping' &&
+          r.shared_impact.manual_apply_eligible === true &&
+          r.shared_impact.unresolved_sites.length === 0 &&
+          typeof r.impact_sha256 === 'string' &&
+          /^[a-f0-9]{64}$/.test(r.impact_sha256)) {
+        fpmAutoReview = {version:version, policy_revision:r.policy_revision,
+          monitor_revision:r.monitor_revision, impact_sha256:r.impact_sha256};
+        renderFpmAutoControls();
+      }
       r.changes.forEach(function (item) {
         var tr=$('<tr>');
         $('<td>').text(item.setting).appendTo(tr);

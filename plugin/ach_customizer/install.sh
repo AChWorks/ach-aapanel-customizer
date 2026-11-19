@@ -6,6 +6,7 @@ set -eu
 cleanup=/www/server/panel/plugin/ach_customizer/ach_customizer_cleanup.py
 lifecycle=/www/server/panel/plugin/ach_customizer/ach_customizer_lifecycle.py
 wp_watcher=/www/server/panel/plugin/ach_customizer/ach_customizer_wp_watcher.py
+fpm_watcher=/www/server/panel/plugin/ach_customizer/ach_customizer_fpm_watcher.py
 panel_python=/www/server/panel/pyenv/bin/python3
 
 trusted_helper_path() {
@@ -46,6 +47,21 @@ case "${1:-}" in
         log_lifecycle install_registered
         ;;
     uninstall)
+        # Disable opted-in FPM auto repair before aaPanel removes its worker
+        # source; preserve existing FPM settings and all recovery journals.
+        if [ -f /etc/systemd/system/ach-customizer-fpm-auto.path ] || \
+           [ -f /www/server/panel/data/ach_customizer.fpm-auto.json ]; then
+            if [ -x "$panel_python" ] && trusted_lifecycle_path && \
+               [ -f "$fpm_watcher" ] && [ ! -L "$fpm_watcher" ]; then
+                if ! "$panel_python" "$fpm_watcher" uninstall; then
+                    echo 'ACh PHP-FPM auto watcher removal blocked: an in-flight safe-stop or ownership review remains' >&2
+                    exit 1
+                fi
+            else
+                echo 'ACh PHP-FPM auto watcher helper unavailable; refusing unattended removal of an enabled worker' >&2
+                exit 1
+            fi
+        fi
         # Explicit opt-in watcher is not registered by ordinary installation.
         # On uninstall, disable any previously opted-in watcher before native
         # aaPanel removes plugin files. Preserve unreadable policy evidence.

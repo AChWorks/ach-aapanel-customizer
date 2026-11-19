@@ -255,6 +255,12 @@ class FpmPolicyEntrypointTests(unittest.TestCase):
         self.assertEqual(value["changes"][0]["actual"],80)
         self.assertEqual(value["desired"],VALUES)
         self.assertEqual(value["shared_impact"]["matched_sites"][0]["id"],3)
+        from ach_customizer_fpm_workflow import ManualFpmWorkflow
+        _, digest = ManualFpmWorkflow()._impact(
+            None, {"version":"85"}, observed=value["shared_impact"])
+        self.assertEqual(value["impact_sha256"],digest,
+                         "Enable must reuse exact guarded Manual Apply site-impact identity")
+        self.assertEqual(value["monitor_revision"],0)
         self.assertFalse(value["auto_enforce"])
         self.assertFalse(value["apply_eligible"])
         self.assertFalse(value["runtime_verified"])

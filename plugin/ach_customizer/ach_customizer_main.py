@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.60'
+WORKER_SOURCE_VERSION = '0.1.61'
 
 _STATE_DIR = DATA_DIR
 
@@ -1234,9 +1234,18 @@ class ach_customizer_main:
                      "Native PHP source needs review; saved policy was not changed."},
                     "php_fpm", "fpm_policy_recheck", target=str(version), level="WARNING")
             impact = inspected["shared_impact"]
+            # Reuse the guarded Manual Apply identity contract. Never issue
+            # an Enable approval token for an unresolved native site map.
+            impact_hash = None
+            if (isinstance(impact, dict) and impact.get("state") == "File Mapping"
+                    and impact.get("manual_apply_eligible") is True):
+                from ach_customizer_fpm_workflow import ManualFpmWorkflow
+                _, impact_hash = ManualFpmWorkflow()._impact(
+                    None, {"version": version}, observed=impact)
             response = {
                 **baseline, "state": inspected["state"], "reason": inspected.get("reason") or "",
                 "changes": inspected["changes"], "shared_impact": impact,
+                "impact_sha256": impact_hash,
                 "source": inspected["source"],
                 "source_observation_sha256": inspected["fpm_observation_sha256"],
                 "note": ("Point-in-time desired-versus-file comparison only. "
@@ -1281,6 +1290,57 @@ class ach_customizer_main:
             return self._fail("fpm_policy_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("fpm_policy_save", exc, request_id)
+
+    def fpm_auto_manage(self, args):
+        """Primary-admin-only auto repair of a previously reviewed PHP policy.
+
+        Enablement is scoped to a saved desired [www] service profile.
+        A root systemd worker owns later native post-terminal corrections;
+        this HTTP method never directly mutates PHP configuration.
+        """
+        request_id = uuid4().hex
+        action = self._argument(args, "auto_action", "inspect")
+        version = self._argument(args, "php_version")
+        try:
+            self._status_primary_admin_post()
+        except PermissionError as exc:
+            return self._fail("fpm_auto_authorization", exc, request_id)
+        try:
+            from ach_customizer_fpm_auto import inspect
+            from ach_customizer_fpm_watcher import health
+            if action == "inspect":
+                result = inspect(version, data_dir=_STATE_DIR)
+            elif action == "enable":
+                self._require_enabled("php_fpm_file_preview")
+                from ach_customizer_fpm_watcher import enable
+                result = enable(
+                    version, data_dir=_STATE_DIR,
+                    expected_auto_revision=self._argument(args, "expected_auto_revision"),
+                    expected_policy_revision=self._argument(args, "expected_policy_revision"),
+                    expected_monitor_revision=self._argument(args, "expected_monitor_revision"),
+                    expected_impact=self._argument(args, "expected_impact"),
+                    reviewed=self._argument(args, "reviewed") == "true",
+                )
+            elif action == "disable":
+                from ach_customizer_fpm_watcher import disable
+                result = disable(
+                    version, data_dir=_STATE_DIR,
+                    expected_auto_revision=self._argument(args, "expected_auto_revision"),
+                )
+            else:
+                raise MonitorInputError("Unsupported automatic PHP service action")
+            result = {**result, **health()}
+            return self._activity_result(
+                {"status": True, "schema": 1, "request_id": request_id, **result},
+                "php_fpm", "fpm_auto_" + action,
+                target=str(version), level="WARNING" if action != "inspect" else "DEBUG")
+        except Exception as exc:
+            from ach_customizer_fpm_auto import FpmAutoError
+            from ach_customizer_fpm_watcher import FpmWatcherError
+            if isinstance(exc, (FpmAutoError, FpmWatcherError, MonitorInputError)):
+                return self._fail("fpm_auto_management", str(exc), request_id,
+                                  diagnostic_error=exc)
+            return self._fail("fpm_auto_management", exc, request_id)
 
     def preview_php_fpm(self, args):
         operation_id = uuid4().hex

@@ -160,7 +160,11 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.60 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
+Automatic post-terminal Hosts correction remains P0. Unpublished candidate
+0.1.61 adds separate opt-in shared PHP-FPM auto repair after a witnessed
+native WordPress start/terminal transition; live enabled-watcher acceptance
+is still PENDING. The merged v0.1.60 Hosts witness remains read-only and
+does not autonomously clean up Hosts.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -257,9 +261,11 @@ recovery material for forensics rather than overwriting it invisibly.
 The manual tool alone cannot identify the writer, guarantee external
 DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.60**
 adds a **separate, opt-in, observer-only native WP Toolkit failed-install
-witness** described immediately below. Owner acceptance of the reduced
-observer scope is pending; automatic no-loss Hosts cleanup and shared PHP-FPM
-reconciliation remain OPEN P0. The manual 0.1.52 capability is **not**
+witness** described immediately below. The Owner explicitly **rejected**
+observer-only reporting as a substitute for automatic correction. No-loss
+Hosts cleanup remains OPEN P0; source-stage PHP-FPM automatic correction
+exists only in unpublished 0.1.61 and still requires native end-to-end QA.
+The manual 0.1.52 capability is **not**
 available in published native 0.1.51. Installed-package fixture QA has
 passed, but authenticated resident-watcher/end-to-end acceptance remains
 incomplete; this is not Production authorization.
@@ -390,6 +396,103 @@ Independent native QA previously established watcher timing, authentic
 WordPress success/failure and recovery on the old automatic candidate.
 Revised observation-only behavior requires fresh exact-source validation;
 previous native QA is not a source of approval for unattended writes.
+
+## Source-stage automatic PHP-FPM repair (unpublished 0.1.61)
+
+This addresses automatic correction, not additional detection-only reporting.
+In native PHP-FPM, save the desired PHP 8.1 or PHP 8.5 shared `[www]` settings,
+select the same version, **Recheck saved policy**, review the complete
+shared-site mapping, **Inspect automatic repair**, explicitly approve the
+shared-service effect and **Enable automatic repair**. A separate managed
+`ach-customizer-fpm-auto.path`, `.timer` and `.service` are installed
+only on this opt-in; an ordinary plugin ZIP import creates no such units.
+
+The worker is source-pinned to the verified aaPanel 8.0.7 Nginx single-site
+native WP Toolkit path. The installed native source checks
+`php-fpm.conf_record` before invoking `setFpmConfig` and writes its
+single-space completion marker only after success. An already-present marker
+at the witnessed task start **prevents automatic repair**: the verified
+vendor path will skip FPM optimization. The worker must witness an absent
+marker and capture the FPM source hash before a later matching terminal
+result with that exact valid marker newly present. Failed installs before
+optimization are retired without FPM writes. No marker is created or
+removed by the Customizer, and no exact nanosecond timestamp match is
+assumed for differently clocked filesystems. The
+terminal must be successful or failed at the exact relevant step, with
+native locks absent and within the verified freshness bound. If the file
+was not changed during that witnessed operation, the worker performs no
+FPM write or reload: an earlier intentional administrator edit is retained.
+When the file changed, the saved versioned desired policy, Monitor status,
+native service adapter, source fingerprints and shared-site attribution
+are revalidated, including immediately before a guarded file write.
+The existing FPM transaction validates syntax, reloads, verifies the service
+and restores the former bytes on a verified failure when possible.
+
+### Independent-review R1–R4 control-flow remediation (candidate only)
+
+- **Reviewed-site consent (R1):** Enable carries the exact versioned
+  `impact_sha256` from saved-policy Recheck plus the saved policy and
+  Monitor revisions. The server recomputes the **same** site-impact digest
+  used by guarded Manual Apply under its Monitor state lock. Added,
+  removed or reassigned PHP consumers and changed file dependencies force
+  a new review; Emergency Disable remains independent of this gate.
+- **Native writer attribution (R2):** In addition to the existing
+  absent-before/present-after optimizer completion marker, the worker
+  verifies the installed root-owned aaPanel `class/config.py`
+  `setFpmConfig` source SHA256. It records native physical RAM and the
+  original `pm.max_requests` at the witnessed start. The four values
+  rewritten by the source-pinned native optimizer must still equal its
+  RAM-derived output **immediately before the guarded CAS replacement**.
+  If an administrator edited one of those values afterward, or modified
+  `pm.max_requests` (not written by the native optimizer), no automatic
+  write is allowed. Unrelated directives remain preserved by the exact
+  current-file plan, and ambiguous ownership is refused.
+- **Crash acknowledgment (R3):** Newly committed schema-2 automatic
+  recovery journals bind the exact terminal `event_token` in addition
+  to owner, saved-policy digest, PHP version, Operation ID and before/after
+  file SHA256. A restarted worker reconciles that private applied journal
+  and snapshot *before* treating the terminal as a no-op; a matching
+  completed repair is acknowledged with its original Operation ID **without
+  another write or reload**. Older schema-2 journals without a token
+  remain readable, but cannot impersonate a new event. Malformed,
+  conflicting or uncertain recovery still blocks repair.
+- **Emergency Disable (R4):** The authenticated per-version Disable first
+  atomically publishes a root-owned, fsynced, no-clobber revocation request
+  independently of the three-second Monitor lock. A busy transaction may
+  finish safely while the API truthfully returns **Pending Disable**.
+  The running worker consumes the request before releasing its shared
+  lock, or the existing systemd timer finishes it on a later invocation
+  without another operator action. A completed request durably disables
+  the affected version and stops owned watcher units when no other
+  PHP version remains enabled. Other enabled version policies and
+  existing recovery files are preserved. A crash after the durable
+  policy-off commit but before unlink/fsync of the canonical request
+  **still displays Pending Disable even with enabled=false**. Both
+  worker shutdown and uninstall must retain the owned retry mechanism
+  until the canonical request is actually consumed and durably removed;
+  a subsequent worker invocation cleans it up idempotently without
+  any host Apply/reload. A failed revocation-directory fsync also prevents
+  shutdown; the next worker must successfully sync and recheck the state
+  directory before stopping the retry timer. Only then does Disabled permit
+  fresh Enable. Cancellation never kills PHP-FPM.
+
+A successful auto repair leaves a current per-version journal and pre-image,
+allowing the existing explicitly approved Rollback flow. On a later genuine
+native WP operation, an older *verified automatic* applied journal is
+moved into an immutable operation-ID archive before the next guarded
+repair; manual/uncertain/malformed recovery is never automatically retired.
+A crash between archive renames leaves incomplete state requiring supervised
+recovery, not discarded files. The saved policy hash is part of each
+automatic recovery identity; a changed policy requires explicit re-enable.
+Emergency Disable clears future authority before stopping the owned watcher,
+potentially waiting on an existing guarded operation. Uninstall preserves
+host PHP settings, snapshots, archived recovery and desired policy.
+
+This is a **development candidate**, not a claim of operational acceptance:
+real start/terminal event timing under a resident enabled watcher, end-to-end
+PHP 8.1/8.5 corrections, peer-site health, restart/duplicate behavior, and
+browser authorization must be verified in isolated native QA. It is not
+automated Hosts cleanup, nor does it cover unrelated aaPanel PHP operations.
 
 ## PHP-FPM scope and guarded change
 
