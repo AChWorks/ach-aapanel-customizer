@@ -54,8 +54,9 @@ all aaPanel versions or a blanket reason to restart after every install.
    returned the old response without the mandatory manual-review fields.
    The UI correctly refused that incompatible response. Candidate v0.1.57
    adds a **loaded-helper contract check** to the authenticated WP observer
-   endpoint. The unpublished v0.1.58 candidate increments that contract
-   to v2: long-domain and incomplete-evidence fields must be present before
+   endpoint. The unpublished v0.1.59 candidate increments that contract
+   to v3: long-domain, incomplete-evidence and single-link crash-safe
+   atomic rename semantics must be present before
    the installed entrypoint may trust the resident helper. When the helper
    is stale, Enable/Inspect/Recheck/Restore/
    Discard are refused with a specific reason; Emergency disable remains

@@ -39,7 +39,7 @@ NATIVE_SITE_SHA = "b75a5a0b45c319df7eb49381363d3c3e90208157ebfd88de6f9b173d013d9
 NATIVE_META = "/www/server/panel/class/common.py"
 # Advertise the loaded Python module's actual safety/diagnostic contract,
 # not a fresh on-disk version which may hide stale aaPanel worker imports.
-MANUAL_REVIEW_CONTRACT = "durable-manual-review-v2"
+MANUAL_REVIEW_CONTRACT = "durable-manual-review-v3"
 STATE_FILE = "ach_customizer.wp-terminal.json"
 MANUAL_REVIEW_PREFIX = "ach_customizer.wp-terminal."
 MANUAL_REVIEW_SUFFIX = ".manual-review.json"
@@ -202,6 +202,27 @@ def _manual_review_name(operation):
     return MANUAL_REVIEW_PREFIX + operation + MANUAL_REVIEW_SUFFIX
 
 
+def _publish_manual_review_noreplace(fd, staging, canonical):
+    """Atomically publish one already-fsynced inode with no overwrite.
+
+    Linux renameat2(RENAME_NOREPLACE) moves the staging name rather than
+    creating a second hard link. A SIGKILL at any point leaves either an
+    ignored private stage or a readable canonical file with st_nlink=1.
+    Never fall back to rename(2), which would replace evidence.
+    """
+    import ctypes
+    try:
+        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as exc:
+        raise TerminalError("Atomic no-clobber manual-review publication unavailable") from exc
+    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                          ctypes.c_char_p, ctypes.c_uint)
+    renameat2.restype = ctypes.c_int
+    if renameat2(fd, os.fsencode(staging), fd, os.fsencode(canonical), 1) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), canonical)
+
+
 def _read_manual_review(fd, operation):
     """Read one private, immutable-identity event and its delivery receipt."""
     payload = _read_owned(fd, _manual_review_name(operation), required=True,
@@ -269,23 +290,21 @@ def _write_manual_review(fd, row, *, initial=False):
     if len(payload) > MAX_MANUAL_REVIEW_BYTES:
         raise TerminalError("Native WP manual-review evidence is too large")
     if initial:
-        # Write and fsync a unique private staging inode FIRST, then
-        # atomically publish by hard-linking it at the operation's canonical
-        # name. link(2) is no-clobber (EEXIST) and does not expose partially
-        # written bytes to readers; a killed writer leaves only an ignored
-        # .tmp file. Never rename-replace an existing evidence record.
+        # Write and fsync a unique private staging inode FIRST, then use
+        # Linux atomic RENAME_NOREPLACE. No canonical truncation, overwrite,
+        # or post-publish hard-link window (st_nlink must remain exactly 1).
         staging = "." + name + "." + uuid4().hex + ".tmp"
         try:
             _new_file(fd, staging, payload)
             try:
-                os.link(staging, name, src_dir_fd=fd, dst_dir_fd=fd,
-                        follow_symlinks=False)
+                _publish_manual_review_noreplace(fd, staging, name)
             except FileExistsError:
                 previous = _read_manual_review(fd, operation)
                 if (previous["event"]["target"] != row["event"]["target"]
                         or previous["event"]["detail"] != row["event"]["detail"]):
                     raise TerminalError("Conflicting native WP manual-review ownership")
-            # Covers both the final link and any staging cleanup after it.
+            # Commit the newly published canonical directory entry before
+            # the caller may advance the terminal token.
             os.fsync(fd)
         finally:
             try:

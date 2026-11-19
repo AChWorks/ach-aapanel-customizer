@@ -110,7 +110,7 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
 
     def test_resident_old_helper_blocks_enable_but_preserves_emergency_disable(self):
         import ach_customizer_wp_terminal as terminal
-        with patch.object(terminal,"MANUAL_REVIEW_CONTRACT",None):
+        with patch.object(terminal,"MANUAL_REVIEW_CONTRACT","durable-manual-review-v2"):
             with patch("ach_customizer_wp_watcher.enable") as enable, patch(
                     "ach_customizer_wp_watcher.disable",return_value={"enabled":False}) as disable:
                 for action in ("inspect","enable","recheck","abandon","restore"):

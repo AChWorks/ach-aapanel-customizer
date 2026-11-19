@@ -101,7 +101,7 @@ Fail2ban compatibility. Site-level `.well-known`/OAuth/hotlink exceptions
 and authorized WordPress HTTPS URL, debugging, Cron and XML-RPC corrections
 are also required operational outcomes, not simply a list of diagnostics.
 
-Keep native plugin installation observation-only. **Unpublished 0.1.58**
+Keep native plugin installation observation-only. **Unpublished 0.1.59**
 implements an opt-in, source-pinned **observation-only witness** of actual
 failed, single-site WP Toolkit installs: it captures a previously alias-free
 Hosts baseline during native setup, verifies the terminal failure and exact
@@ -112,7 +112,7 @@ event must be persisted in a bounded, private per-operation outbox *before*
 the terminal token. Preserve the entire canonical native domain (up to
 253 ASCII characters) in manual-review Activity; unrelated descriptive
 targets keep their existing bound. Atomically publish the initial Outbox
-record by fsyncing a private staging inode, no-clobber link, and directory
+record by fsyncing a private staging inode, atomic no-clobber rename, and directory
 fsync. Incomplete stages are non-authoritative. If older canonical evidence
 is malformed, retain it intact, identify the affected Operation ID in
 Routing/Activity while retaining other valid reports, and require explicit

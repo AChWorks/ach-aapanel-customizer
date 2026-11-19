@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.58'
+WORKER_SOURCE_VERSION = '0.1.59'
 
 _STATE_DIR = DATA_DIR
 
@@ -181,7 +181,7 @@ class ach_customizer_main:
             # projection keeps actionable identities visible during JSONL
             # persistence failures, ERROR verbosity and log rotation.
             import ach_customizer_wp_terminal as terminal
-            stale_helper = getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v2"
+            stale_helper = getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v3"
             from ach_customizer_activity import MAX_RESULTS
             if (type(limit) is not int or not 1 <= limit <= MAX_RESULTS
                     or level not in ("", "DEBUG", "INFO", "WARNING", "ERROR")
@@ -694,7 +694,7 @@ class ach_customizer_main:
             action = self._argument(args, "terminal_action")
             import ach_customizer_wp_terminal as terminal
             if (action != "disable" and
-                    getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v2"):
+                    getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v3"):
                 response = self._fail(
                     "wp_terminal_management", MonitorInputError(
                         "Resident native WP helper is stale. Emergency disable remains available; "

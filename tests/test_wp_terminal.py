@@ -224,12 +224,13 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertTrue(orphan.exists(),"An unreviewed orphan stage is not auto-deleted")
         self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
 
-    def test_link_publication_failure_preserves_witness_without_canonical_record(self):
+    def test_atomic_rename_publication_failure_preserves_witness_without_canonical_record(self):
         self.arm()
         self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
         with worker._locked_state(str(self.data)) as fd:
             op=worker._load(fd)["active"]["operation"]
-        with patch.object(worker.os,"link",side_effect=OSError(errno.EIO,"injected link failure")):
+        with patch.object(worker,"_publish_manual_review_noreplace",
+                          side_effect=OSError(errno.EIO,"injected atomic rename failure")):
             with self.assertRaises(OSError):
                 self.finish()
         self.assertFalse((self.data/worker._manual_review_name(op)).exists())
@@ -284,7 +285,7 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 first.test"+
                          b"\n127.0.0.1 second.test")
 
-    def test_directory_fsync_failure_after_atomic_link_is_recoverable(self):
+    def test_directory_fsync_failure_after_atomic_rename_is_recoverable(self):
         self.arm()
         marker=b"\n127.0.0.1 failed.test"
         self.hosts.write_bytes(self.before+marker)
@@ -312,6 +313,43 @@ class TestNativeWpWitness(unittest.TestCase):
         from ach_customizer_activity import read_activity
         self.assertEqual(len([e for e in read_activity(str(self.data))
                               if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(self.hosts.read_bytes(),self.before+marker)
+
+    def test_sigkill_after_atomic_publication_recovers_single_link_canonical(self):
+        """A real child process exit cannot execute Python finally cleanup."""
+        from ach_customizer_activity import read_activity
+        self.arm()
+        marker=b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(self.before+marker)
+        with worker._locked_state(str(self.data)) as fd:
+            operation=worker._load(fd)["active"]["operation"]
+        pid=os.fork()
+        if pid == 0:
+            real=worker._publish_manual_review_noreplace
+            def die_after_publish(*args):
+                real(*args)
+                os._exit(77)
+            try:
+                with patch.object(worker,"_publish_manual_review_noreplace",
+                                  side_effect=die_after_publish):
+                    self.finish()
+            except BaseException:
+                os._exit(88)
+            os._exit(89)
+        _,status=os.waitpid(pid,0)
+        self.assertEqual(os.waitstatus_to_exitcode(status),77)
+        canonical=self.data/worker._manual_review_name(operation)
+        self.assertTrue(canonical.is_file())
+        self.assertEqual(canonical.stat().st_nlink,1,
+            "A crash must not leave a linked private stage that blocks safe reads")
+        self.assertFalse(list(self.data.glob("."+canonical.name+".*.tmp")))
+        state=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(state["manual_review"]["operation_id"],operation)
+        self.assertEqual(state["manual_review_integrity"]["state"],"Complete")
+        self.assertEqual(self.tick()["state"],"Manual Review Required")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_count"],1)
+        self.assertEqual(len([r for r in read_activity(str(self.data))
+                              if r["action"]=="wp_terminal_manual_review"]),1)
         self.assertEqual(self.hosts.read_bytes(),self.before+marker)
 
     def test_only_corrupt_canonical_and_broken_general_log_report_precise_metadata(self):
