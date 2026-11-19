@@ -128,7 +128,7 @@ and fail closed if stale, while keeping Emergency disable accessible.
 A panel reload is separately authorized, never triggered by import.
 
 The originally requested **automatic post-terminal Hosts cleanup** remains
-outstanding P0. **Unpublished candidate 0.1.61** adds an independently
+outstanding P0. **Unpublished candidate 0.1.62** adds an independently
 opt-in, service-scoped PHP 8.1/8.5 auto-repair worker. It records a trusted
 pre-terminal native WP progress identity and FPM file fingerprint, requires a
 matching later successful/failed terminal and changed FPM source, then
@@ -168,7 +168,7 @@ journal and require Recheck. Distinguish Enabled observation policy, actual
 watcher readiness and typed last worker result in UI and Activity.
 The Hosts witness alone does **not** authorize generic alias cleanup,
 batch WP install mutation, or shared PHP-FPM auto-enforcement. The separate
-0.1.61 FPM worker is opt-in and has its own narrower native-writer boundary.
+0.1.62 FPM worker is opt-in and has its own narrower native-writer boundary.
 An aaPanel source update, active native
 operation, missed start or concurrent editor must produce actionable refusal
 evidence; sources are not patched in place.

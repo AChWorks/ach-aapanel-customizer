@@ -161,7 +161,7 @@ They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
 Automatic post-terminal Hosts correction remains P0. Unpublished candidate
-0.1.61 adds separate opt-in shared PHP-FPM auto repair after a witnessed
+0.1.62 adds separate opt-in shared PHP-FPM auto repair after a witnessed
 native WordPress start/terminal transition; live enabled-watcher acceptance
 is still PENDING. The merged v0.1.60 Hosts witness remains read-only and
 does not autonomously clean up Hosts.
@@ -264,7 +264,7 @@ adds a **separate, opt-in, observer-only native WP Toolkit failed-install
 witness** described immediately below. The Owner explicitly **rejected**
 observer-only reporting as a substitute for automatic correction. No-loss
 Hosts cleanup remains OPEN P0; source-stage PHP-FPM automatic correction
-exists only in unpublished 0.1.61 and still requires native end-to-end QA.
+exists only in unpublished 0.1.62 and still requires native end-to-end QA.
 The manual 0.1.52 capability is **not**
 available in published native 0.1.51. Installed-package fixture QA has
 passed, but authenticated resident-watcher/end-to-end acceptance remains
@@ -397,7 +397,26 @@ WordPress success/failure and recovery on the old automatic candidate.
 Revised observation-only behavior requires fresh exact-source validation;
 previous native QA is not a source of approval for unattended writes.
 
-## Source-stage automatic PHP-FPM repair (unpublished 0.1.61)
+## Source-stage automatic PHP-FPM repair (unpublished 0.1.62)
+
+The 0.1.62 candidate fixes the standalone systemd worker's missing
+root-owned aaPanel Python import roots. Its existing path-triggered worker
+now rechecks verified native install progress in a bounded 20-second window
+(200 ms interval) so the native optimizer cannot as easily outrun the
+initial witness. The existing timer remains the longer-install fallback.
+There is no new daemon, native source patch, or unattended Hosts edit.
+
+**QA scope (2026-11-19):** The official native 0.1.62 ZIP installed with
+63/63 byte-identical payloads into isolated aaPanel 8.0.7; root-executed
+worker bootstrap and an idle systemd worker succeeded. Separately, a real
+native PHP 8.1 WordPress installation with a temporary high-frequency QA
+observer recorded Witness Armed -> Applied and returned shared
+pm.max_spare_servers from native 30 to saved 20, with PHP runtime and site
+health verified. **This does NOT prove the ordinary systemd schedule
+reliably captures the initial baseline.** The new bounded event window has
+unit coverage, but full real first-time optimizer acceptance with the
+standard systemd-only watcher and authenticated browser QA remain PENDING.
+Issue #21 owns those operational acceptance outcomes.
 
 This addresses automatic correction, not additional detection-only reporting.
 In native PHP-FPM, save the desired PHP 8.1 or PHP 8.5 shared `[www]` settings,

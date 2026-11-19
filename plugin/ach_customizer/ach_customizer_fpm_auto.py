@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import time
 from uuid import uuid4
@@ -37,6 +38,35 @@ TOKEN = re.compile(r"[a-f0-9]{64}\Z")
 
 class FpmAutoError(RuntimeError):
     pass
+
+
+def _configure_native_python_paths(panel_root="/www/server/panel"):
+    """Load native aaPanel modules in the standalone systemd/CLI worker.
+
+    The aaPanel HTTP process supplies its own Python import roots, but the
+    independently started repair worker does not inherit that bootstrap.
+    Accept only the root-owned, canonical native installation directories:
+    never trust PATH, PYTHONPATH, cwd or plugin/user-selected path values.
+    """
+    panel = Path(panel_root)
+    targets = (panel, panel / "class", panel / "class_v2")
+    if not panel.is_absolute():
+        raise FpmAutoError("Native aaPanel import root must be absolute")
+    for directory in targets:
+        try:
+            info = directory.lstat()
+            canonical = directory.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise FpmAutoError("Native aaPanel Python source directory unavailable") from exc
+        if (not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & 0o022
+                or canonical != directory):
+            raise FpmAutoError("Untrusted native aaPanel Python source directory")
+    for directory in reversed(targets):
+        source = str(directory)
+        if source not in sys.path:
+            sys.path.insert(0, source)
 
 
 def _digest(version, desired):
@@ -453,7 +483,12 @@ def _args(version, desired):
 
 def _native_progress():
     native._native_supported()
-    result = native._progress()
+    try:
+        result = native._progress()
+    except FileNotFoundError:
+        # The native tool creates the progress log on demand. A path-triggered
+        # systemd worker may run just before its first complete write.
+        return None
     if (result["mtime_ns"] > time.time_ns()
             or time.time_ns() - result["mtime_ns"] > native.MAX_AGE_NS
             or os.path.lexists(native.BATCH_LOCK)):
@@ -867,6 +902,35 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
             "services": outcomes}
 
 
+def _run_event_window(*, budget_seconds=20.0, interval_seconds=0.2):
+    """Keep a source-verified native install wakeup alive through its fast start.
+
+    Native aaPanel can write its first progress record *before* its install
+    lock appears, then optimize PHP between adjacent file notifications.
+    One-shot path callbacks alone may miss the pre-optimizer baseline.
+    A bounded active-task window polls the same guarded run() operation and
+    exits at a terminal state; the existing timer covers longer installs.
+    No extra persistent state, daemon or vendor modification is involved.
+    """
+    outcome = run()
+    progress = _native_progress()
+    if progress is None or progress["status"] != 0:
+        return outcome
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        time.sleep(interval_seconds)
+        outcome = run()
+        progress = _native_progress()
+        if progress is None or (
+                progress["status"] == 1
+                and not os.path.lexists(native.LOCK)
+                and not os.path.lexists(native.BATCH_LOCK)):
+            return outcome
+        if outcome.get("state") in ("Disabled", "Pending Disable"):
+            return outcome
+    return outcome
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv != ["run"]:
@@ -874,7 +938,14 @@ def main(argv=None):
         return 2
     completed = False
     try:
-        result = run()
+        # Only the true standalone entrypoint requires the native aaPanel
+        # import bootstrap. In-process unit callers and Flask plugin routes
+        # already own their explicit import environment.
+        if __name__ == "__main__":
+            _configure_native_python_paths()
+            result = _run_event_window()
+        else:
+            result = run()
         completed = True
         print(json.dumps(result, sort_keys=True))
         return 0
