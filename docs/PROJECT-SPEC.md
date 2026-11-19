@@ -135,8 +135,18 @@ matching later successful/failed terminal and changed FPM source, then
 rechecks saved admin intent and shared-site mapping before guarded
 syntax/reload/runtime verification and per-cycle recovery. Prior verified
 automatic recovery is archived rather than erased for repeated repairs;
-manual or uncertain recovery blocks automation. Emergency Disable removes
-future authority after completing any already-locked operation.
+manual or uncertain recovery blocks automation. Independent-review
+remediation additionally requires Enable to match the exact user-reviewed
+shared-site fingerprint plus policy/Monitor revisions; the verified native
+`setFpmConfig` RAM-derived output must still own all four modified pool
+values immediately before replacement while pre-task `pm.max_requests`
+remains unchanged. Automatic recovery must bind the native event token so
+a SIGKILL after a committed Apply can be acknowledged idempotently without
+another reload. Emergency Disable durably queues a version-specific
+revocation even when a guarded operation holds the shared lock longer than
+the request timeout, then completes autonomously at the next safe worker
+boundary; it never silently leaves future authority active after a
+successfully acknowledged final Disable.
 This is source/isolated-fixture implementation only: operational Native
 enabled-watcher timing and real corrected FPM service/peer behavior remain
 OPEN before closing the shared PHP-FPM automatic P0. The read-only Hosts

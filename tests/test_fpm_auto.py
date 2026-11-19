@@ -24,7 +24,11 @@ BASELINE = (b"[global]\npid=/tmp/php-auto-test.pid\n[www]\npm=dynamic\n"
 DESIRED = {"pm.max_children": 20, "pm.start_servers": 5,
            "pm.min_spare_servers": 5, "pm.max_spare_servers": 10,
            "pm.max_requests": 300}
-VENDOR_BYTES = BASELINE.replace(b"pm.max_children=50", b"pm.max_children=80")
+VENDOR_BYTES = (BASELINE
+    .replace(b"pm.max_children=50", b"pm.max_children=80")
+    .replace(b"pm.start_servers=5", b"pm.start_servers=10")
+    .replace(b"pm.min_spare_servers=5", b"pm.min_spare_servers=10")
+    .replace(b"pm.max_spare_servers=20", b"pm.max_spare_servers=30"))
 
 
 class AutoNativeFpmTests(unittest.TestCase):
@@ -60,6 +64,12 @@ class AutoNativeFpmTests(unittest.TestCase):
         for mock in locks:
             mock.start()
             self.addCleanup(mock.stop)
+        ram = patch.object(worker, "_native_memory_mib", return_value=4096)
+        ram.start()
+        self.addCleanup(ram.stop)
+        native_setter = patch.object(worker, "_verified_native_fpm_setter", return_value=None)
+        native_setter.start()
+        self.addCleanup(native_setter.stop)
 
     def _policy(self):
         path = self.state / desired_policy.POLICY_FILE
@@ -87,8 +97,11 @@ class AutoNativeFpmTests(unittest.TestCase):
     def _enable(self):
         return worker.set_enabled("85", True, data_dir=str(self.state),
             expected_auto_revision=worker.inspect("85",data_dir=str(self.state))["state_revision"],
-            expected_policy_revision=self.settings["revision"],reviewed=True,
-            controller_factory=self.factory)
+            expected_policy_revision=self.settings["revision"],
+            expected_monitor_revision=0,
+            expected_impact=self._controller()._prepare(
+                worker._args("85", self.settings["profiles"]["85"]))["impact_sha256"],
+            reviewed=True, controller_factory=self.factory)
 
     def _start(self):
         self.token += 1
@@ -111,7 +124,17 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.marker.chmod(0o644)
 
     def _vendor_reset(self):
-        self.config.write_bytes(VENDOR_BYTES)
+        # Emulate the verified aaPanel setter's four numeric substitutions
+        # while retaining other pool directives (including max_requests).
+        import re
+        content = self.config.read_bytes()
+        expected = worker._native_php_tuning(4096)
+        for key, value in expected.items():
+            pattern = rb"(?m)^([ \\t]*" + re.escape(key.encode()) + rb"[ \\t]*=[ \\t]*)[0-9]+"
+            content, count = re.subn(pattern, lambda m: m.group(1) + str(value).encode(), content)
+            if count != 1:
+                raise AssertionError("Native fixture missing " + key)
+        self.config.write_bytes(content)
         self._mark_optimized()
 
     def _run(self):
@@ -129,6 +152,62 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), BASELINE)
         self.assertTrue(worker.inspect("85",data_dir=str(self.state))["enabled"])
         self.assertEqual(self._run()["changed"],False)
+
+    def test_reviewed_impact_identity_rejects_all_stale_site_owners(self):
+        from ach_customizer_state import set_enabled as monitor_toggle
+        args = worker._args("85", DESIRED)
+        approved=self._controller()._prepare(args)["impact_sha256"]
+        scenarios=[
+            ("added", lambda: self.impact["matched_sites"].append(
+                {"id":8,"site_key":"new.example"})),
+            ("removed",lambda:self.impact["matched_sites"].pop()),
+            ("reassigned",lambda:self.impact["matched_sites"][0].update(
+                site_key="new-owner.example")),
+            ("dependency",lambda:self.impact.update(dependency_sha256="b"*64)),
+        ]
+        for name,mutate in scenarios:
+            with self.subTest(name=name):
+                self.impact["matched_sites"]=[{"id":3,"site_key":"native.example"}]
+                self.impact["site_count"]=1
+                self.impact["dependency_sha256"]="a"*64
+                mutate()
+                self.impact["site_count"]=len(self.impact["matched_sites"])
+                with self.assertRaises((worker.FpmAutoError, recovery.FpmApplyError)):
+                    worker.set_enabled("85",True,data_dir=str(self.state),
+                        expected_auto_revision=0,expected_policy_revision=1,
+                        expected_monitor_revision=0,expected_impact=approved,
+                        reviewed=True,controller_factory=self.factory)
+                self.assertFalse(worker.inspect("85",data_dir=str(self.state))["enabled"])
+        self.impact["matched_sites"]=[{"id":3,"site_key":"native.example"}]
+        self.impact["site_count"]=1
+        self.impact["dependency_sha256"]="a"*64
+        for forged in ("q"*64,"",None):
+            with self.subTest(forged=forged):
+                with self.assertRaises(worker.FpmAutoError):
+                    worker.set_enabled("85",True,data_dir=str(self.state),
+                        expected_auto_revision=0,expected_policy_revision=1,
+                        expected_monitor_revision=0,expected_impact=forged,
+                        reviewed=True,controller_factory=self.factory)
+        with self.assertRaises(worker.FpmAutoError):
+            worker.set_enabled("85",True,data_dir=str(self.state),
+                expected_auto_revision=0,expected_policy_revision=2,
+                expected_monitor_revision=0,expected_impact=approved,
+                reviewed=True,controller_factory=self.factory)
+        # Changing Monitor without disabling the FPM module is also material.
+        monitor_toggle("site_inventory",False,directory=str(self.state),expected_revision=0)
+        with self.assertRaises(worker.FpmAutoError):
+            worker.set_enabled("85",True,data_dir=str(self.state),
+                expected_auto_revision=0,expected_policy_revision=1,
+                expected_monitor_revision=0,expected_impact=approved,
+                reviewed=True,controller_factory=self.factory)
+        result=worker.set_enabled("85",True,data_dir=str(self.state),
+            expected_auto_revision=0,expected_policy_revision=1,
+            expected_monitor_revision=1,expected_impact=approved,
+            reviewed=True,controller_factory=self.factory)
+        self.assertTrue(result["enabled"])
+        result=worker.set_enabled("85",False,data_dir=str(self.state),
+            expected_auto_revision=result["state_revision"])
+        self.assertFalse(result["enabled"])
 
     def test_two_distinct_vendor_resets_auto_repair_and_archive_prior_recovery(self):
         self._enable()
@@ -255,6 +334,31 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.assertEqual(self.calls.count("reload"), 0)
         self.assertEqual(self._run()["changed"], False)
 
+    def test_fpm_setter_source_drift_refuses_without_host_mutation(self):
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        with patch.object(worker,"_verified_native_fpm_setter",
+                          side_effect=worker.FpmAutoError("Native writer drift")):
+            with self.assertRaisesRegex(worker.FpmAutoError,"writer drift"):
+                self._run()
+        self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"),0)
+
+    def test_native_memory_change_after_witness_refuses_without_rewrite(self):
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        with patch.object(worker,"_native_memory_mib",return_value=2048):
+            with self.assertRaisesRegex(worker.FpmAutoError,"physical-memory tier"):
+                self._run()
+        self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"),0)
+
     def test_native_optimizer_crash_after_config_change_without_marker_refuses(self):
         self._enable()
         self._start()
@@ -270,6 +374,84 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.assertEqual(self.calls.count("reload"), 0)
         self.assertEqual(worker.inspect("85", data_dir=str(self.state))["last_state"],
                          "Repair refused at FpmAutoError")
+
+    def test_admin_edit_after_native_optimizer_is_not_overwritten(self):
+        for changed_key, changed_value in (
+            ("pm.max_children", "61"),
+            ("pm.start_servers", "7"),
+            ("pm.min_spare_servers", "6"),
+            ("pm.max_spare_servers", "18"),
+            ("pm.max_requests", "999"),
+        ):
+            with self.subTest(setting=changed_key):
+                # Each case is a separate guarded native event.
+                self.config.write_bytes(BASELINE)
+                if self.marker.exists():
+                    self.marker.unlink()
+                status=worker.inspect("85",data_dir=str(self.state))
+                if status["enabled"]:
+                    worker.set_enabled("85",False,data_dir=str(self.state),
+                                       expected_auto_revision=status["state_revision"])
+                self._enable()
+                self._start()
+                self._run()
+                self._vendor_reset()
+                current=self.config.read_bytes()
+                key=changed_key.encode()
+                import re
+                matches=list(re.finditer(rb"(?m)^"+re.escape(key)+rb"\s*=\s*\d+",current))
+                if matches:
+                    match=matches[0]
+                    modified=(current[:match.start()]+key+b" = "+changed_value.encode()
+                              +current[match.end():])
+                else:
+                    modified=current+b"pm.max_requests = "+changed_value.encode()+b"\n"
+                self.config.write_bytes(modified)
+                self._terminal()
+                with self.assertRaisesRegex(worker.FpmAutoError,
+                                            "optimizer output|max_requests"):
+                    self._run()
+                self.assertEqual(self.config.read_bytes(), modified)
+                self.assertEqual(self.calls.count("reload"), 0)
+
+    def test_unrelated_directives_are_preserved_by_native_auto_repair(self):
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self.config.write_bytes(self.config.read_bytes() +
+                                b"request_terminate_timeout = 23s\n")
+        self._terminal()
+        result=self._run()
+        self.assertTrue(result["changed"])
+        self.assertIn(b"request_terminate_timeout = 23s\n",self.config.read_bytes())
+        self.assertEqual(self.calls.count("reload"),1)
+
+    def test_source_ownership_is_rechecked_inside_final_apply_cas(self):
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        real=worker.recovery.apply
+        captured=[]
+        def race(*args, **kwargs):
+            verifier=kwargs["auto_source_verify"]
+            def before_mutation():
+                value=verifier()
+                captured.append(value)
+                if len(captured)==1:
+                    self.config.write_bytes(self.config.read_bytes().replace(
+                        b"pm.max_children=80",b"pm.max_children=68"))
+                return value
+            kwargs["auto_source_verify"]=before_mutation
+            return real(*args,**kwargs)
+        with patch.object(worker.recovery,"apply",side_effect=race):
+            with self.assertRaises(recovery.FpmApplyError):
+                self._run()
+        self.assertGreaterEqual(len(captured),1)
+        self.assertIn(b"pm.max_children=68",self.config.read_bytes())
+        self.assertEqual(self.calls.count("reload"),0)
 
     def test_foreign_vendor_marker_never_authorizes_fpm_change(self):
         self._enable()
@@ -394,6 +576,301 @@ class AutoNativeFpmTests(unittest.TestCase):
             self._run()
         self.assertEqual(blocked.exception.stage,"recovery")
         self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
+
+    def test_emergency_disable_during_long_reload_is_durable_and_auto_completed(self):
+        import threading
+        import time as clock
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        entered=threading.Event()
+        finish=threading.Event()
+        results=[]
+        errors=[]
+        def slow_factory():
+            controller=self._controller()
+            real=controller.hooks_factory
+            def hooks(version, desired):
+                validate, activate, verify = real(version, desired)
+                if desired.get("pm.max_children") == 20:
+                    def long_reload():
+                        entered.set()
+                        if not finish.wait(timeout=12):
+                            raise AssertionError("long reload was never released")
+                        activate()
+                    return validate, long_reload, verify
+                return validate, activate, verify
+            controller.hooks_factory=hooks
+            return controller
+        self.factory=slow_factory
+        def run_thread():
+            try:
+                results.append(self._run())
+            except BaseException as exc:
+                errors.append(exc)
+        task=threading.Thread(target=run_thread, name="isolated-shared-fpm-repair")
+        task.start()
+        try:
+            self.assertTrue(entered.wait(timeout=5),"guarded FPM operation did not reach reload")
+            before=clock.monotonic()
+            queued=worker.request_disable("85",data_dir=str(self.state),
+                                          expected_auto_revision=0)
+            self.assertLess(clock.monotonic()-before,5)
+            self.assertTrue(queued["pending_disable"])
+            self.assertTrue(queued["enabled"])
+            self.assertEqual(queued["last_state"],"Pending Disable")
+            self.assertTrue((self.state/worker._revoke_name("85")).is_file())
+            # The current operation finishes at its safe transaction
+            # boundary, but no new automatic mutation is authorized.
+        finally:
+            finish.set()
+            task.join(timeout=12)
+        self.assertFalse(task.is_alive(),"shared lock was not released")
+        self.assertEqual(errors,[])
+        self.assertEqual(len(results),1)
+        self.assertTrue(results[0]["changed"])
+        self.assertTrue(results[0]["revocation_completed"])
+        status=worker.inspect("85",data_dir=str(self.state))
+        self.assertFalse(status["enabled"])
+        self.assertFalse(status["pending_disable"])
+        self.assertEqual(status["last_state"],"Disabled")
+        self.assertRegex(status["last_operation"],"^[0-9a-f]{32}$")
+        self.assertFalse((self.state/worker._revoke_name("85")).exists())
+        before_count=self.calls.count("reload")
+        self.config.write_bytes(BASELINE)
+        self.marker.unlink()
+        self._start()
+        self._terminal()
+        self.assertFalse(self._run()["changed"])
+        self.assertEqual(self.calls.count("reload"),before_count)
+        again=worker.request_disable("85",data_dir=str(self.state),
+                                     expected_auto_revision=0)
+        self.assertFalse(again["enabled"])
+        self.assertFalse(again["pending_disable"])
+
+    def test_sigkill_at_atomic_disable_publication_preserves_complete_intent(self):
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            request=worker._read(fd)["profiles"]["85"]
+        finally:
+            os.close(fd)
+        published=worker.native._publish_manual_review_noreplace
+        pid=os.fork()
+        if pid==0:
+            try:
+                def abrupt(*args):
+                    published(*args)
+                    os._exit(78)
+                with patch.object(worker.native,"_publish_manual_review_noreplace",
+                                  side_effect=abrupt):
+                    fd=worker._open_state_dir(str(self.state))
+                    try:
+                        worker._publish_revoke(fd,"85",request)
+                    finally:
+                        os.close(fd)
+            except BaseException:
+                os._exit(96)
+            os._exit(97)
+        child,status=os.waitpid(pid,0)
+        self.assertEqual(child,pid)
+        self.assertTrue(os.WIFEXITED(status),status)
+        self.assertEqual(os.WEXITSTATUS(status),78)
+        filename=self.state/worker._revoke_name("85")
+        self.assertEqual(filename.stat().st_nlink,1)
+        self.assertEqual(filename.stat().st_mode&0o777,0o600)
+        self.assertTrue(worker.inspect("85",data_dir=str(self.state))["pending_disable"])
+        # A later worker honors the completed intent even though the first
+        # process was killed before directory fsync/HTTP acknowledgment.
+        state=worker.run(data_dir=str(self.state),controller_factory=self.factory,
+                         terminal_reader=lambda:None)
+        self.assertTrue(state["revocation_completed"])
+        self.assertFalse(worker.inspect("85",data_dir=str(self.state))["enabled"])
+        self.assertFalse(filename.exists())
+
+    def test_pending_disable_recovers_after_cancellation_process_crash(self):
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            data=worker._read(fd)
+            worker._publish_revoke(fd,"85",data["profiles"]["85"])
+            self.assertIsNotNone(worker._read_revoke(fd,"85"))
+        finally:
+            os.close(fd)
+        status=worker.inspect("85",data_dir=str(self.state))
+        self.assertTrue(status["pending_disable"])
+        # Simulate restart with no vendor progress at all; a timer worker
+        # must complete the durable request before looking for an event.
+        result=worker.run(data_dir=str(self.state),controller_factory=self.factory,
+                          terminal_reader=lambda:None)
+        self.assertFalse(result["changed"])
+        self.assertTrue(result["revocation_completed"])
+        self.assertFalse(worker.inspect("85",data_dir=str(self.state))["enabled"])
+        self.assertFalse((self.state/worker._revoke_name("85")).exists())
+        second=worker.run(data_dir=str(self.state),controller_factory=self.factory,
+                          terminal_reader=lambda:None)
+        self.assertEqual(second["state"],"Disabled")
+
+    def test_emergency_disable_preserves_other_enabled_php_service(self):
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            store=worker._read(fd)
+            unrelated={**store["profiles"]["85"],"enabled_ns":12345,
+                       "active":None,"last_token":None,"last_operation":None}
+            worker._save(fd,{**store,"revision":store["revision"]+1,
+                             "profiles":{**store["profiles"],"81":unrelated}})
+        finally:
+            os.close(fd)
+        result=worker.request_disable("85",data_dir=str(self.state),
+                                      expected_auto_revision=0)
+        self.assertFalse(result["enabled"])
+        self.assertFalse(result["pending_disable"])
+        self.assertTrue(worker.inspect("81",data_dir=str(self.state))["enabled"])
+        self.assertTrue(worker.any_enabled(data_dir=str(self.state)))
+
+    def test_sigkill_after_committed_native_apply_recovers_exact_operation(self):
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        pid=os.fork()
+        if pid == 0:
+            try:
+                native_apply=worker.recovery.apply
+                def interrupted(*args,**kwargs):
+                    result=native_apply(*args,**kwargs)
+                    os._exit(77)  # committed host journal; no worker ACK
+                with patch.object(worker.recovery,"apply",side_effect=interrupted):
+                    self._run()
+            except BaseException:
+                os._exit(91)
+            os._exit(92)
+        child,status=os.waitpid(pid,0)
+        self.assertEqual(child,pid)
+        self.assertTrue(os.WIFEXITED(status),status)
+        self.assertEqual(os.WEXITSTATUS(status),77,
+                         "Child must have terminated after committed host Apply")
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            committed=recovery._read_journal(fd,"85")
+        finally:
+            os.close(fd)
+        self.assertEqual(committed["phase"],"applied")
+        self.assertEqual(committed["schema"],2)
+        self.assertEqual(committed["event_token"],self.event["token"])
+        previous=worker.inspect("85",data_dir=str(self.state))
+        self.assertIsNone(previous["last_operation"])
+        self.assertEqual(previous["last_state"],"Witness Armed")
+        recovered=self._run()
+        self.assertEqual(recovered["services"][0]["state"],"Applied")
+        self.assertEqual(recovered["services"][0]["operation_id"],
+                         committed["operation_id"])
+        self.assertFalse(recovered["changed"],
+                         "Recovery acknowledgment does not perform a new host write")
+        self.assertEqual(self.calls.count("reload"),0,
+                         "Parent must not reload FPM on journal-only replay")
+        current=worker.inspect("85",data_dir=str(self.state))
+        self.assertEqual(current["last_operation"],committed["operation_id"])
+        self.assertEqual(current["last_state"],"Applied")
+        self.assertEqual(self._run()["changed"],False)
+        self.assertEqual(self.calls.count("reload"),0)
+
+    def test_failed_final_ack_commit_replays_exact_host_journal(self):
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        genuine=worker._save
+        failed=[False]
+        def fail_before_ack(fd,value):
+            profile=value["profiles"]["85"]
+            if profile["last_state"]=="Applied" and not failed[0]:
+                failed[0]=True
+                raise OSError("synthetic interrupted final automatic-state fsync")
+            return genuine(fd,value)
+        with patch.object(worker,"_save",side_effect=fail_before_ack):
+            with self.assertRaises(OSError):
+                self._run()
+        prior_reload=self.calls.count("reload")
+        self.assertEqual(prior_reload,1)
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            committed=recovery._read_journal(fd,"85")
+        finally:
+            os.close(fd)
+        self.assertEqual(committed["phase"],"applied")
+        self.assertIsNone(worker.inspect("85",data_dir=str(self.state))["last_operation"])
+        answer=self._run()
+        self.assertFalse(answer["changed"])
+        self.assertEqual(answer["services"][0]["operation_id"],committed["operation_id"])
+        self.assertEqual(self.calls.count("reload"),prior_reload)
+        self.assertEqual(worker.inspect("85",data_dir=str(self.state))["last_state"],"Applied")
+
+    def test_uncertain_final_ack_fsync_does_not_erase_committed_identity(self):
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        genuine=worker._save
+        failed=[False]
+        def failure_after_commit(fd,value):
+            result=genuine(fd,value)
+            if value["profiles"]["85"]["last_state"]=="Applied" and not failed[0]:
+                failed[0]=True
+                raise OSError("synthetic final directory fsync after rename")
+            return result
+        with patch.object(worker,"_save",side_effect=failure_after_commit):
+            with self.assertRaises(OSError):
+                self._run()
+        recorded=worker.inspect("85",data_dir=str(self.state))
+        self.assertEqual(recorded["last_state"],"Applied")
+        self.assertRegex(recorded["last_operation"],r"^[0-9a-f]{32}$")
+        self.assertFalse(self._run()["changed"])
+        self.assertEqual(self.calls.count("reload"),1)
+
+    def test_uncertain_or_conflicting_committed_recovery_refuses_replay(self):
+        for phase in ("uncertain","applied"):
+            with self.subTest(phase=phase):
+                self.config.write_bytes(BASELINE)
+                if self.marker.exists():
+                    self.marker.unlink()
+                status=worker.inspect("85",data_dir=str(self.state))
+                if status["enabled"]:
+                    worker.set_enabled("85",False,data_dir=str(self.state),
+                                       expected_auto_revision=status["state_revision"])
+                self._enable()
+                self._start()
+                self._run()
+                self._vendor_reset()
+                self._terminal()
+                native_apply=worker.recovery.apply
+                def crash(*args,**kwargs):
+                    result=native_apply(*args,**kwargs)
+                    raise OSError("synthetic crash after host journal fsync")
+                with patch.object(worker.recovery,"apply",side_effect=crash):
+                    with self.assertRaises(OSError):
+                        self._run()
+                from json import loads,dumps
+                name=self.state/recovery._recovery_names("85")[0]
+                record=loads(name.read_text())
+                record["phase"]=phase
+                if phase=="applied":
+                    record["after_sha256"]="a"*64
+                name.write_text(dumps(record)+"\n")
+                name.chmod(0o600)
+                with self.assertRaises(recovery.FpmApplyError):
+                    self._run()
+                self.assertNotEqual(worker.inspect("85",data_dir=str(self.state))["last_state"],
+                                    "Applied")
+                # Restore disposable fixtures to a new versioned run.
+                name.unlink()
+                (self.state/recovery._recovery_names("85")[1]).unlink()
 
     def test_stale_replay_and_failed_owner_archive_refuse(self):
         self._enable()

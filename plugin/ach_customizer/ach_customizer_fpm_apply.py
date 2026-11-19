@@ -332,10 +332,17 @@ def _read_journal(fd_dir, version=VERSION):
     if not isinstance(record, dict):
         raise FpmApplyError("recovery", "Unsupported PHP-FPM recovery journal")
     if record.get("schema") == 2:
-        if (set(record) != required | {"owner", "policy_sha256"}
+        # Older schema-2 source candidates did not bind an event token.
+        # Their recovery evidence remains readable, but can never be
+        # mistaken for a particular newly witnessed automatic task.
+        auto_keys = required | {"owner", "policy_sha256"}
+        if (set(record) not in (auto_keys, auto_keys | {"event_token"})
                 or record["owner"] != "auto"
                 or not isinstance(record["policy_sha256"], str)
-                or not re.fullmatch(r"[0-9a-f]{64}", record["policy_sha256"])):
+                or not re.fullmatch(r"[0-9a-f]{64}", record["policy_sha256"])
+                or ("event_token" in record and
+                    (not isinstance(record["event_token"], str)
+                     or not re.fullmatch(r"[0-9a-f]{64}", record["event_token"])))):
             raise FpmApplyError("recovery", "Unsupported automatic PHP-FPM recovery journal")
     elif record.get("schema") != 1 or set(record) != required:
         raise FpmApplyError("recovery", "Unsupported PHP-FPM recovery journal")
@@ -404,7 +411,8 @@ def _archive_prior_auto(fd, version, record):
 
 
 def apply(config_root, state_dir, version, desired, *, expected_before, expected_after,
-          validate, activate, verify, verify_restored, auto_policy_sha256=None):
+          validate, activate, verify, verify_restored, auto_policy_sha256=None,
+          auto_event_token=None, auto_source_verify=None):
     """Guarded shared-service write; auto mode requires separately persisted opt-in.
 
     This lower-level function only enforces transaction and recovery safety.
@@ -415,6 +423,13 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
             (not isinstance(auto_policy_sha256, str)
              or not re.fullmatch(r"[0-9a-f]{64}", auto_policy_sha256))):
         raise FpmApplyError("validation", "Invalid automatic FPM policy identity")
+    if auto_policy_sha256 is not None:
+        if (not isinstance(auto_event_token, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", auto_event_token)
+                or not callable(auto_source_verify)):
+            raise FpmApplyError("validation", "Automatic operation requires a verified native event/source")
+    elif auto_event_token is not None or auto_source_verify is not None:
+        raise FpmApplyError("validation", "Native source verifier cannot be used by manual Apply")
     _check_callbacks(validate, activate, verify)
     if not callable(verify_restored):
         raise FpmApplyError("validation", "Independent baseline runtime verification is required")
@@ -425,6 +440,9 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
         if plan["before_sha256"] != expected_before or plan["after_sha256"] != expected_after:
             raise FpmApplyError("conflict", "PHP-FPM file or desired policy differs from preview")
         existing = _read_journal(fd_state, version)
+        if auto_source_verify is not None:
+            if auto_source_verify() != plan["before_sha256"]:
+                raise FpmApplyError("conflict", "Native optimizer ownership changed before Apply")
         if before == after:
             # Never mask an uncertain or unpaired recovery even on file-match.
             if existing is not None:
@@ -451,12 +469,18 @@ def apply(config_root, state_dir, version, desired, *, expected_before, expected
                   "before_sha256":plan["before_sha256"], "after_sha256":plan["after_sha256"],
                   "timestamp":int(time.time())}
         if auto_policy_sha256 is not None:
-            record.update(owner="auto", policy_sha256=auto_policy_sha256)
+            record.update(owner="auto", policy_sha256=auto_policy_sha256,
+                          event_token=auto_event_token)
         try:
             # Stage durable exact recovery bytes and journal before changing FPM.
             _write_new(fd_state, snapshot, before, mode=0o600)
             _persist_journal(fd_state, record)
             validate()
+            if auto_source_verify is not None:
+                # Check the exact source owner again immediately before the
+                # guarded CAS write, not merely when the preview was created.
+                if auto_source_verify() != plan["before_sha256"]:
+                    raise FpmApplyError("conflict", "Independent FPM edit replaced the native optimizer output")
             mutation_attempted = True
             _replace(config_fd, "php-fpm.conf", after, _Expected(original_stat, before), prefix="ach_customizer")
             validate()

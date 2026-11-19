@@ -53,10 +53,13 @@ case "${1:-}" in
            [ -f /www/server/panel/data/ach_customizer.fpm-auto.json ]; then
             if [ -x "$panel_python" ] && trusted_lifecycle_path && \
                [ -f "$fpm_watcher" ] && [ ! -L "$fpm_watcher" ]; then
-                "$panel_python" "$fpm_watcher" uninstall ||
-                    echo 'ACh PHP-FPM auto watcher cleanup unconfirmed; inspect systemd units'
+                if ! "$panel_python" "$fpm_watcher" uninstall; then
+                    echo 'ACh PHP-FPM auto watcher removal blocked: an in-flight safe-stop or ownership review remains' >&2
+                    exit 1
+                fi
             else
-                echo 'ACh PHP-FPM auto watcher helper unavailable; disable systemd units manually'
+                echo 'ACh PHP-FPM auto watcher helper unavailable; refusing unattended removal of an enabled worker' >&2
+                exit 1
             fi
         fi
         # Explicit opt-in watcher is not registered by ordinary installation.

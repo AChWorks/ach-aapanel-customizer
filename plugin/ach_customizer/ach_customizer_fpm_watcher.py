@@ -133,7 +133,8 @@ def health(*, unit_root=UNIT_ROOT):
 
 
 def enable(version, *, data_dir=DATA_DIR, expected_auto_revision,
-           expected_policy_revision, reviewed):
+           expected_policy_revision, expected_monitor_revision,
+           expected_impact, reviewed):
     native._native_supported()
     if not Path(PANEL_PYTHON).is_file() or not Path(PLUGIN_WORKER).is_file():
         raise FpmWatcherError("Native panel Python and installed auto repair helper are required")
@@ -147,6 +148,8 @@ def enable(version, *, data_dir=DATA_DIR, expected_auto_revision,
         return worker.set_enabled(version, True, data_dir=data_dir,
                                   expected_auto_revision=expected_auto_revision,
                                   expected_policy_revision=expected_policy_revision,
+                                  expected_monitor_revision=expected_monitor_revision,
+                                  expected_impact=expected_impact,
                                   reviewed=reviewed)
     except Exception:
         if not existing and not worker.any_enabled(data_dir=data_dir):
@@ -160,10 +163,27 @@ def enable(version, *, data_dir=DATA_DIR, expected_auto_revision,
 
 
 def disable(version, *, data_dir=DATA_DIR, expected_auto_revision):
-    # Disable the durable policy first. The worker serializes against the
-    # same state lock and cannot continue a future write after this succeeds.
-    result = worker.set_enabled(version, False, data_dir=data_dir,
-                                expected_auto_revision=expected_auto_revision)
+    # Persist an independent revocation before waiting on the shared lock.
+    # A host reload can hold that lock beyond the normal 3-second timeout.
+    # The owned timer/worker drains an acknowledged Pending Disable without
+    # a second operator click; never stop the timer before consumption.
+    result = worker.request_disable(
+        version, data_dir=data_dir, expected_auto_revision=expected_auto_revision)
+    if result["pending_disable"]:
+        try:
+            # An externally deactivated path/timer must not strand a durable
+            # revocation after a long-running transaction. Re-arm only the
+            # trusted retry timer until the worker commits policy-off.
+            _ensure_units()
+            _run("daemon-reload")
+            _run("enable", "--now", UNIT + ".timer")
+            _run("start", "--no-block", UNIT + ".service")
+            return {**result, "wakeup_ready": True}
+        except FpmWatcherError:
+            import logging
+            logging.getLogger("ach_customizer").exception(
+                "Durable PHP-FPM disable pending; retry timer/wakeup unavailable")
+            return {**result, "wakeup_ready": False}
     if not worker.any_enabled(data_dir=data_dir):
         _stop()
     return result
@@ -173,9 +193,15 @@ def uninstall(*, data_dir=DATA_DIR, unit_root=UNIT_ROOT):
     # Enforce policy-off before removing units or plugin source.
     for version in worker.recovery.SUPPORTED_VERSIONS:
         status = worker.inspect(version, data_dir=data_dir)
-        if status["enabled"]:
-            worker.set_enabled(version, False, data_dir=data_dir,
-                               expected_auto_revision=status["state_revision"])
+        if status["enabled"] or status["pending_disable"]:
+            status = worker.request_disable(
+                version, data_dir=data_dir,
+                expected_auto_revision=status["state_revision"])
+            if status["enabled"] or status["pending_disable"]:
+                raise FpmWatcherError(
+                    "PHP-FPM automatic disable pending; preserve installed worker until complete")
+    if worker.any_enabled(data_dir=data_dir):
+        raise FpmWatcherError("PHP-FPM automatic worker is still enabled")
     _stop()
     for ext, content in UNITS.items():
         path = unit_root / (UNIT + "." + ext)

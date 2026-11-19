@@ -1123,6 +1123,7 @@ const fpmPolicyRecheck = (overrides = {}) => ({
     'pm.min_spare_servers':5,'pm.max_spare_servers':10,'pm.max_requests':300},
   source:'/www/server/php/85/etc/php-fpm.conf',
   source_observation_sha256:'f'.repeat(64),
+  impact_sha256:'d'.repeat(64),
   changes:[{setting:'pm.max_children',desired:50,actual:80}],
   shared_impact:phpImpact(), ...overrides
 });
@@ -1161,7 +1162,7 @@ test('Auto PHP repair requires explicit per-version policy review and supports e
   assert.equal(pre.options.data.auto_action,'inspect');
   assert.equal(pre.options.data.php_version,'85');
   pre.respond({status:true,schema:1,version:'85',state_revision:0,
-    enabled:false,last_state:'Disabled',watcher_ready:false});
+    enabled:false,pending_disable:false,last_state:'Disabled',watcher_ready:false});
   assert.match(ui.state().fpmAutoStatus,/PHP 85: disabled/);
   assert.equal(ui.state().fpmAutoEnableDisabled,true);
   ui.recheckFpmPolicy().respond(fpmPolicyRecheck());
@@ -1174,6 +1175,8 @@ test('Auto PHP repair requires explicit per-version policy review and supports e
   assert.equal(enable.options.data.auto_action,'enable');
   assert.equal(enable.options.data.expected_auto_revision,0);
   assert.equal(enable.options.data.expected_policy_revision,4);
+  assert.equal(enable.options.data.expected_monitor_revision,2);
+  assert.equal(enable.options.data.expected_impact,'d'.repeat(64));
   assert.equal(enable.options.data.reviewed,'true');
   enable.respond({status:true,schema:1,version:'85',enabled:true,state_revision:1,
     last_state:'Armed',watcher_ready:true});
@@ -1182,7 +1185,7 @@ test('Auto PHP repair requires explicit per-version policy review and supports e
   assert.equal(ui.state().fpmAutoDisableDisabled,true);
   const inspect=ui.inspectFpmAuto();
   inspect.respond({status:true,schema:1,version:'85',state_revision:1,
-    enabled:true,last_state:'Armed',watcher_ready:true});
+    enabled:true,pending_disable:false,last_state:'Armed',watcher_ready:true});
   assert.equal(ui.state().fpmAutoDisableDisabled,false,
     'Emergency Disable must not depend on the saved-policy review flag');
   const disable=ui.disableFpmAuto();
@@ -1195,6 +1198,34 @@ test('Auto PHP repair requires explicit per-version policy review and supports e
   assert.equal(ui.requests.filter(r=>/s=fpm_apply$/.test(r.options.url)).length,0);
 });
 
+test('Emergency Disable acknowledges pending revocation without another Disable click', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  ui.inspectFpmAuto().respond({status:true,schema:1,version:'85',state_revision:6,
+    enabled:true,pending_disable:false,last_state:'Armed',watcher_ready:true});
+  assert.equal(ui.state().fpmAutoDisableDisabled,false);
+  const stop=ui.disableFpmAuto();
+  assert.equal(stop.options.data.auto_action,'disable');
+  stop.respond({status:true,schema:1,version:'85',state_revision:6,
+    enabled:true,pending_disable:true,last_state:'Pending Disable',watcher_ready:true,
+    wakeup_ready:true});
+  assert.match(ui.state().fpmAutoStatus,/durably queued/);
+  assert.equal(ui.state().fpmAutoDisableDisabled,true);
+  ui.inspectFpmAuto().respond({status:true,schema:1,version:'85',state_revision:6,
+    enabled:true,pending_disable:true,last_state:'Pending Disable',watcher_ready:true});
+  assert.match(ui.state().fpmAutoStatus,/Pending Disable/);
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
+  assert.equal(ui.state().fpmAutoDisableDisabled,true);
+  // The worker finishes after the guarded transaction; Inspect is read-only.
+  ui.inspectFpmAuto().respond({status:true,schema:1,version:'85',state_revision:7,
+    enabled:false,pending_disable:false,last_state:'Disabled',watcher_ready:false});
+  assert.match(ui.state().fpmAutoStatus,/PHP 85: disabled/);
+  assert.equal(ui.requests.filter(r=>
+    r.options.url.endsWith('fpm_auto_manage') &&
+    r.options.data.auto_action === 'disable').length,1);
+});
+
 test('Auto PHP controls reject forged responses and stale policy boundaries', () => {
   const ui=loadUi();
   ui.submitPhp().respond(fpmPolicyPreview());
@@ -1202,19 +1233,19 @@ test('Auto PHP controls reject forged responses and stale policy boundaries', ()
   const stale=ui.inspectFpmAuto();
   ui.selectPhpVersion('81');
   stale.respond({status:true,schema:1,version:'85',state_revision:0,
-    enabled:false,last_state:'Disabled',watcher_ready:true});
+    enabled:false,pending_disable:false,last_state:'Disabled',watcher_ready:true});
   assert.equal(ui.state().fpmAutoEnableDisabled,true);
   ui.selectPhpVersion('85');
   const bad=ui.inspectFpmAuto();
   bad.respond({status:true,schema:1,version:'85',state_revision:-1,
-    enabled:false,last_state:'Disabled',watcher_ready:true});
+    enabled:false,pending_disable:false,last_state:'Disabled',watcher_ready:true});
   assert.equal(ui.state().fpmAutoEnableDisabled,true);
   assert.match(ui.state().fpmAutoStatus,/unverified/);
   const count=ui.requests.length;
   ui.enableFpmAuto();
   assert.equal(ui.requests.length,count);
   ui.inspectFpmAuto().respond({status:true,schema:1,version:'85',state_revision:0,
-    enabled:false,last_state:'Disabled',watcher_ready:false});
+    enabled:false,pending_disable:false,last_state:'Disabled',watcher_ready:false});
   ui.recheckFpmPolicy().respond(fpmPolicyRecheck({
     shared_impact:phpImpact({state:'Needs Review',site_count:4,
       unresolved_sites:[{id:99,site_key:'unknown.example',reason:'unknown pool'}]})

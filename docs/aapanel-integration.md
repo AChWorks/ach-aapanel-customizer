@@ -428,6 +428,46 @@ are revalidated, including immediately before a guarded file write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
+### Independent-review R1–R4 control-flow remediation (candidate only)
+
+- **Reviewed-site consent (R1):** Enable carries the exact versioned
+  `impact_sha256` from saved-policy Recheck plus the saved policy and
+  Monitor revisions. The server recomputes the **same** site-impact digest
+  used by guarded Manual Apply under its Monitor state lock. Added,
+  removed or reassigned PHP consumers and changed file dependencies force
+  a new review; Emergency Disable remains independent of this gate.
+- **Native writer attribution (R2):** In addition to the existing
+  absent-before/present-after optimizer completion marker, the worker
+  verifies the installed root-owned aaPanel `class/config.py`
+  `setFpmConfig` source SHA256. It records native physical RAM and the
+  original `pm.max_requests` at the witnessed start. The four values
+  rewritten by the source-pinned native optimizer must still equal its
+  RAM-derived output **immediately before the guarded CAS replacement**.
+  If an administrator edited one of those values afterward, or modified
+  `pm.max_requests` (not written by the native optimizer), no automatic
+  write is allowed. Unrelated directives remain preserved by the exact
+  current-file plan, and ambiguous ownership is refused.
+- **Crash acknowledgment (R3):** Newly committed schema-2 automatic
+  recovery journals bind the exact terminal `event_token` in addition
+  to owner, saved-policy digest, PHP version, Operation ID and before/after
+  file SHA256. A restarted worker reconciles that private applied journal
+  and snapshot *before* treating the terminal as a no-op; a matching
+  completed repair is acknowledged with its original Operation ID **without
+  another write or reload**. Older schema-2 journals without a token
+  remain readable, but cannot impersonate a new event. Malformed,
+  conflicting or uncertain recovery still blocks repair.
+- **Emergency Disable (R4):** The authenticated per-version Disable first
+  atomically publishes a root-owned, fsynced, no-clobber revocation request
+  independently of the three-second Monitor lock. A busy transaction may
+  finish safely while the API truthfully returns **Pending Disable**.
+  The running worker consumes the request before releasing its shared
+  lock, or the existing systemd timer finishes it on a later invocation
+  without another operator action. A completed request durably disables
+  the affected version and stops owned watcher units when no other
+  PHP version remains enabled. Other enabled version policies and
+  existing recovery files are preserved. Uninstall refuses to remove
+  source while safe-stop remains pending; it never kills PHP-FPM.
+
 A successful auto repair leaves a current per-version journal and pre-image,
 allowing the existing explicitly approved Rollback flow. On a later genuine
 native WP operation, an older *verified automatic* applied journal is

@@ -1234,9 +1234,18 @@ class ach_customizer_main:
                      "Native PHP source needs review; saved policy was not changed."},
                     "php_fpm", "fpm_policy_recheck", target=str(version), level="WARNING")
             impact = inspected["shared_impact"]
+            # Reuse the guarded Manual Apply identity contract. Never issue
+            # an Enable approval token for an unresolved native site map.
+            impact_hash = None
+            if (isinstance(impact, dict) and impact.get("state") == "File Mapping"
+                    and impact.get("manual_apply_eligible") is True):
+                from ach_customizer_fpm_workflow import ManualFpmWorkflow
+                _, impact_hash = ManualFpmWorkflow()._impact(
+                    None, {"version": version}, observed=impact)
             response = {
                 **baseline, "state": inspected["state"], "reason": inspected.get("reason") or "",
                 "changes": inspected["changes"], "shared_impact": impact,
+                "impact_sha256": impact_hash,
                 "source": inspected["source"],
                 "source_observation_sha256": inspected["fpm_observation_sha256"],
                 "note": ("Point-in-time desired-versus-file comparison only. "
@@ -1308,6 +1317,8 @@ class ach_customizer_main:
                     version, data_dir=_STATE_DIR,
                     expected_auto_revision=self._argument(args, "expected_auto_revision"),
                     expected_policy_revision=self._argument(args, "expected_policy_revision"),
+                    expected_monitor_revision=self._argument(args, "expected_monitor_revision"),
+                    expected_impact=self._argument(args, "expected_impact"),
                     reviewed=self._argument(args, "reviewed") == "true",
                 )
             elif action == "disable":

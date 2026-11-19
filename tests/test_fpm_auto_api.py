@@ -45,13 +45,16 @@ class FpmAutoApiTests(unittest.TestCase):
             reply=self.plugin.fpm_auto_manage({
                 "auto_action":"enable","php_version":"85",
                 "expected_auto_revision":"0","expected_policy_revision":"1",
+                "expected_monitor_revision":"0","expected_impact":"d"*64,
                 "reviewed":"true"})
             self.assertTrue(reply["status"],reply)
             self.assertTrue(reply["enabled"])
             self.assertTrue(reply["watcher_ready"])
             on.assert_called_once_with("85",data_dir=main._STATE_DIR,
                                        expected_auto_revision="0",
-                                       expected_policy_revision="1",reviewed=True)
+                                       expected_policy_revision="1",
+                                       expected_monitor_revision="0",
+                                       expected_impact="d"*64,reviewed=True)
 
         self.flask.session={"login":True,"uid":2}
         with patch.object(watcher,"enable") as on:
@@ -75,6 +78,22 @@ class FpmAutoApiTests(unittest.TestCase):
         self.assertFalse(response["enabled"])
         stop.assert_called_once()
         monitor.assert_not_called()
+
+    def test_disable_can_ack_durable_pending_while_php_monitor_is_off(self):
+        with patch.object(main.ach_customizer_main,"_require_enabled",
+                          side_effect=RuntimeError("Monitor off")) as guard, patch.object(
+                watcher,"disable",return_value={"version":"85","enabled":True,
+                    "pending_disable":True,"state_revision":4,
+                    "last_state":"Pending Disable"}) as stop, patch.object(
+                watcher,"health",return_value={"watcher_ready":True}):
+            result=self.plugin.fpm_auto_manage({
+                "auto_action":"disable","php_version":"85","expected_auto_revision":"2"})
+        self.assertTrue(result["status"],result)
+        self.assertTrue(result["enabled"])
+        self.assertTrue(result["pending_disable"])
+        self.assertEqual(result["last_state"],"Pending Disable")
+        guard.assert_not_called()
+        stop.assert_called_once()
 
     def test_unapproved_or_unknown_action_does_not_toggle_watcher(self):
         for action in ("ignore","", "enable_no_review"):

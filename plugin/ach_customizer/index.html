@@ -5317,12 +5317,12 @@
     var r = fpmAutoStatus, version = String(root.find('#ach-php-version').val() || '');
     var same = r && r.version === version;
     root.find('#ach-fpm-auto-reviewed').prop('disabled',
-      !same || r.enabled || !fpmAutoReview || fpmAutoBusy);
+      !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy);
     root.find('#ach-fpm-auto-enable').prop('disabled',
-      !same || r.enabled || !fpmAutoReview || fpmAutoBusy ||
+      !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy ||
       !root.find('#ach-fpm-auto-reviewed').prop('checked'));
     root.find('#ach-fpm-auto-disable').prop('disabled',
-      !same || !r.enabled || fpmAutoBusy);
+      !same || !r.enabled || r.pending_disable || fpmAutoBusy);
   }
   function refreshFpmAuto() {
     var version = String(root.find('#ach-php-version').val() || '');
@@ -5339,6 +5339,7 @@
           typeof r.enabled !== 'boolean' ||
           !Number.isSafeInteger(r.state_revision) || r.state_revision < 0 ||
           typeof r.watcher_ready !== 'boolean' ||
+          typeof r.pending_disable !== 'boolean' ||
           typeof r.last_state !== 'string') {
         fpmAutoStatus = null;
         root.find('#ach-fpm-auto-status').text(
@@ -5347,11 +5348,16 @@
       } else {
         fpmAutoStatus = r;
         root.find('#ach-fpm-auto-status').text(
-          'PHP '+version+': '+(r.enabled ? 'enabled' : 'disabled')+
+          'PHP '+version+': '+(r.pending_disable ? 'Pending Disable' :
+            r.enabled ? 'enabled' : 'disabled')+
           '; watcher '+(r.watcher_ready ? 'active' : 'not ready')+
           '; last result: '+r.last_state+'. '+
-          (r.enabled ? 'Emergency disable remains available.' :
-           'To enable, inspect a saved policy and its affected shared sites first.')+
+          (r.pending_disable ?
+             (r.watcher_ready ?
+               ' Emergency revocation is durably queued; the active worker/timer will finish it.' :
+               ' Emergency revocation is durably queued; worker/timer readiness must be checked.') :
+            r.enabled ? 'Emergency disable remains available.' :
+             'To enable, inspect a saved policy and its affected shared sites first.')+
           (r.last_operation ? ' Last Operation ID: '+r.last_operation : ''));
       }
       renderFpmAutoControls();
@@ -5378,6 +5384,8 @@
       php_version:version, auto_action:action,
       expected_auto_revision:r.state_revision,
       expected_policy_revision:review ? review.policy_revision : null,
+      expected_monitor_revision:review ? review.monitor_revision : null,
+      expected_impact:review ? review.impact_sha256 : null,
       reviewed:action === 'enable' ? 'true' : 'false'
     }, function (reply, failure) {
       if (ticket !== fpmAutoTicket || version !== String(root.find('#ach-php-version').val() || '')) return;
@@ -5386,7 +5394,15 @@
       fpmAutoStatus = null;
       renderFpmAutoControls();
       root.find('#ach-fpm-auto-status').text(
-        reply && reply.status === true && reply.enabled === (action === 'enable') ?
+        reply && reply.status === true && action === 'disable' &&
+          reply.pending_disable === true ?
+          'Emergency Disable durably queued; a current transaction may finish safely. '+
+          (reply.wakeup_ready === true ?
+            'The verified retry timer will finish the revocation automatically.' :
+            'Worker wakeup is unverified; inspect the watcher and pending revocation.')+
+          ' Inspect to verify the final status.' :
+        reply && reply.status === true && reply.enabled === (action === 'enable') &&
+          reply.pending_disable !== true ?
           'Automatic repair '+(reply.enabled ? 'enabled' : 'disabled')+
           '; click Inspect to confirm watcher and revision.' :
           'Automatic repair outcome uncertain or rejected; Inspect before retry. '+
@@ -5466,8 +5482,11 @@
       if (r.state === 'No Policy' || r.state === 'Needs Review') return;
       if (r.shared_impact.state === 'File Mapping' &&
           r.shared_impact.manual_apply_eligible === true &&
-          r.shared_impact.unresolved_sites.length === 0) {
-        fpmAutoReview = {version:version, policy_revision:r.policy_revision};
+          r.shared_impact.unresolved_sites.length === 0 &&
+          typeof r.impact_sha256 === 'string' &&
+          /^[a-f0-9]{64}$/.test(r.impact_sha256)) {
+        fpmAutoReview = {version:version, policy_revision:r.policy_revision,
+          monitor_revision:r.monitor_revision, impact_sha256:r.impact_sha256};
         renderFpmAutoControls();
       }
       r.changes.forEach(function (item) {

@@ -82,10 +82,17 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
   owned `ach-customizer-fpm-auto.path`/`.timer`/`.service` tracks the
   source-verified aaPanel native WP Toolkit start and terminal. It captures
   FPM file identity before the native task and repairs only a changed source
-  after the exact terminal event, revalidating site mapping and PHP syntax,
+  after the exact terminal event, revalidating the **administrator-reviewed**
+  shared-site impact SHA and Monitor/policy revisions. The native writer's
+  RAM-derived numeric output and unchanged max_requests are verified
+  before each guarded write, preventing unrelated administrator edits;
+  revalidating site mapping and PHP syntax,
   reload, health and durable rollback. Prior automatic recovery is archived
-  by operation identity before repeat repair. No ordinary installation
-  activates this watcher; skipped starts and unrelated PHP changes do not
+  by operation identity before repeat repair. Journal event-token
+  reconciliation preserves truthful Operation IDs after worker crashes.
+  Emergency Disable is durably queued and auto-completed if a guarded
+  reload holds the shared lock; no repeated click is necessary.
+  No ordinary installation activates this watcher; skipped starts and unrelated PHP changes do not
   authorize writes. It is not a universal aaPanel FPM hook or a Hosts fix,
   and has NOT passed live native enabled-watcher acceptance or Production
   qualification. Do not deploy it based on fixture tests alone.
