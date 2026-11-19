@@ -96,6 +96,8 @@ function loadUi() {
     '#ach-fpm-policy-diff-rows', '#ach-fpm-policy-impact', '#ach-fpm-policy-impact-rows',
     '#ach-fpm-policy-load', '#ach-fpm-policy-reviewed', '#ach-fpm-policy-save',
     '#ach-fpm-policy-status', '#ach-fpm-policy-why', '#ach-fpm-prepare-why',
+    '#ach-fpm-auto-refresh', '#ach-fpm-auto-reviewed',
+    '#ach-fpm-auto-enable', '#ach-fpm-auto-disable', '#ach-fpm-auto-status',
     '#ach-max-children', '#ach-start-servers', '#ach-min-spare',
     '#ach-max-spare', '#ach-max-requests',
     '#ach-impact-summary', '#ach-impact-rows',
@@ -499,6 +501,11 @@ function loadUi() {
       fpmPolicySaveDisabled: elements.get('#ach-fpm-policy-save').props.disabled,
       fpmPolicyLoadDisabled: elements.get('#ach-fpm-policy-load').props.disabled,
       fpmPolicyReviewedDisabled: elements.get('#ach-fpm-policy-reviewed').props.disabled,
+      fpmAutoStatus: elements.get('#ach-fpm-auto-status').textContent,
+      fpmAutoInspectDisabled: elements.get('#ach-fpm-auto-refresh').props.disabled,
+      fpmAutoEnableDisabled: elements.get('#ach-fpm-auto-enable').props.disabled,
+      fpmAutoDisableDisabled: elements.get('#ach-fpm-auto-disable').props.disabled,
+      fpmAutoReviewedDisabled: elements.get('#ach-fpm-auto-reviewed').props.disabled,
       fpmCommitDisabled: elements.get('#ach-fpm-commit').props.disabled,
       fpmRecovery: elements.get('#ach-fpm-recovery-status').textContent,
       fpmRecoveryImpact: elements.get('#ach-fpm-recovery-impact').textContent,
@@ -614,6 +621,13 @@ function loadUi() {
     loadFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-load'),'click'); return requests.at(-1); },
     recheckFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-recheck'),'click'); return requests.at(-1); },
     saveFpmPolicy: () => { trigger(elements.get('#ach-fpm-policy-save'),'click'); return requests.at(-1); },
+    inspectFpmAuto: () => { trigger(elements.get('#ach-fpm-auto-refresh'),'click'); return requests.at(-1); },
+    enableFpmAuto: () => { trigger(elements.get('#ach-fpm-auto-enable'),'click'); return requests.at(-1); },
+    disableFpmAuto: () => { trigger(elements.get('#ach-fpm-auto-disable'),'click'); return requests.at(-1); },
+    reviewFpmAuto:checked => {
+      elements.get('#ach-fpm-auto-reviewed').props.checked=checked;
+      trigger(elements.get('#ach-fpm-auto-reviewed'),'change');
+    },
     reviewFpmPolicy:checked => {
       elements.get('#ach-fpm-policy-reviewed').props.checked=checked;
       trigger(elements.get('#ach-fpm-policy-reviewed'),'change');
@@ -1135,6 +1149,77 @@ test('Recheck saved PHP service intent reports real drift and affected file-link
     ['6','<img src=x onerror=alert(1)>','PHP 85 (file only)']]);
   assert.equal(actual.fpmCommitDisabled,true);
   assert.equal(ui.requests.filter(req=>/s=fpm_apply$/.test(req.options.url)).length,0);
+});
+
+test('Auto PHP repair requires explicit per-version policy review and supports emergency disable', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
+  const pre=ui.inspectFpmAuto();
+  assert.match(pre.options.url,/s=fpm_auto_manage$/);
+  assert.equal(pre.options.data.auto_action,'inspect');
+  assert.equal(pre.options.data.php_version,'85');
+  pre.respond({status:true,schema:1,version:'85',state_revision:0,
+    enabled:false,last_state:'Disabled',watcher_ready:false});
+  assert.match(ui.state().fpmAutoStatus,/PHP 85: disabled/);
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
+  ui.recheckFpmPolicy().respond(fpmPolicyRecheck());
+  assert.equal(ui.state().fpmAutoReviewedDisabled,false);
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
+  ui.reviewFpmAuto(true);
+  assert.equal(ui.state().fpmAutoEnableDisabled,false);
+  const enable=ui.enableFpmAuto();
+  assert.match(enable.options.url,/s=fpm_auto_manage$/);
+  assert.equal(enable.options.data.auto_action,'enable');
+  assert.equal(enable.options.data.expected_auto_revision,0);
+  assert.equal(enable.options.data.expected_policy_revision,4);
+  assert.equal(enable.options.data.reviewed,'true');
+  enable.respond({status:true,schema:1,version:'85',enabled:true,state_revision:1,
+    last_state:'Armed',watcher_ready:true});
+  assert.match(ui.state().fpmAutoStatus,/enabled; click Inspect/);
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
+  assert.equal(ui.state().fpmAutoDisableDisabled,true);
+  const inspect=ui.inspectFpmAuto();
+  inspect.respond({status:true,schema:1,version:'85',state_revision:1,
+    enabled:true,last_state:'Armed',watcher_ready:true});
+  assert.equal(ui.state().fpmAutoDisableDisabled,false,
+    'Emergency Disable must not depend on the saved-policy review flag');
+  const disable=ui.disableFpmAuto();
+  assert.equal(disable.options.data.auto_action,'disable');
+  assert.equal(disable.options.data.expected_auto_revision,1);
+  assert.equal(disable.options.data.reviewed,'false');
+  disable.respond({status:true,schema:1,version:'85',enabled:false,state_revision:2,
+    last_state:'Disabled',watcher_ready:false});
+  assert.match(ui.state().fpmAutoStatus,/disabled; click Inspect/);
+  assert.equal(ui.requests.filter(r=>/s=fpm_apply$/.test(r.options.url)).length,0);
+});
+
+test('Auto PHP controls reject forged responses and stale policy boundaries', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  const stale=ui.inspectFpmAuto();
+  ui.selectPhpVersion('81');
+  stale.respond({status:true,schema:1,version:'85',state_revision:0,
+    enabled:false,last_state:'Disabled',watcher_ready:true});
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
+  ui.selectPhpVersion('85');
+  const bad=ui.inspectFpmAuto();
+  bad.respond({status:true,schema:1,version:'85',state_revision:-1,
+    enabled:false,last_state:'Disabled',watcher_ready:true});
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
+  assert.match(ui.state().fpmAutoStatus,/unverified/);
+  const count=ui.requests.length;
+  ui.enableFpmAuto();
+  assert.equal(ui.requests.length,count);
+  ui.inspectFpmAuto().respond({status:true,schema:1,version:'85',state_revision:0,
+    enabled:false,last_state:'Disabled',watcher_ready:false});
+  ui.recheckFpmPolicy().respond(fpmPolicyRecheck({
+    shared_impact:phpImpact({state:'Needs Review',site_count:4,
+      unresolved_sites:[{id:99,site_key:'unknown.example',reason:'unknown pool'}]})
+  }));
+  assert.equal(ui.state().fpmAutoEnableDisabled,true);
 });
 
 test('No saved PHP policy is distinguished from File Match and does not invent impact', () => {
