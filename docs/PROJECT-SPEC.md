@@ -24,6 +24,16 @@ operation. Do not add compatibility allowlists, exhaustive scenario checks,
 persistent recovery machinery or strict blocking preconditions merely for
 hypothetical risks.
 
+Avoid **arbitrary hard-coded limits** on supported versions, paths, ports,
+providers, domains, counts, payload sizes, timeouts or feature combinations.
+When a property varies by deployment, discover the actual environment or use
+existing operator configuration instead of freezing a convenient test value
+into a product restriction. Lack of prior test coverage alone is not a reason
+to block an otherwise supported action; explain uncertainty and let the
+operator proceed when technically feasible. Retain fixed values only when
+required by an actual protocol, resource capacity, correctness or evidenced
+safety boundary, and make legitimately operator-variable settings adjustable.
+
 If the operation could have side effects or some checks are unverified, show
 the administrator a **brief, plain-language pre-action note** identifying the
 affected scope, meaningful risks and a few suggested checks (such as verifying
