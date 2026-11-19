@@ -641,6 +641,46 @@ def _completed_native_repair(fd_state, version, profile, progress, config_root, 
             "reconciled": True}
 
 
+def _terminal_site_owned(controller, impact, progress, domain):
+    """Prove shared-pool ownership even if failed native WP cleanup removed its site.
+
+    On success, the just-created site must still be a verified member of
+    the selected shared PHP pool. Native WP initialization failure is
+    different: aaPanel removes the site itself *after* its one-time optimizer
+    may have replaced the shared FPM file. A verified failed terminal
+    event with the exact former hostname absent from native site records
+    can use the separately witnessed source/marker/vendor-values evidence.
+    Never infer this exception for success, an existing site, unsupported
+    native identity or an unverified shared-service impact.
+    """
+    if any(site["site_key"] == domain for site in impact["matched_sites"]):
+        return True
+    if progress["steps"] != [1, 1, 1, -1]:
+        return False
+    panel = controller._environment(impact["version"])
+    native_db = getattr(panel, "M", None)
+    if not callable(native_db):
+        return False
+    try:
+        row = native_db("sites").where("name=?", (domain,)).field("id").find()
+        # A removed site can retain an independently bound domain if
+        # foreign/native cleanup was partial; that identity is NOT a safe
+        # stand-in for the failed installer. Require all native aliases gone.
+        remaining_domains = native_db("domain").where("name=?", (domain,)).count()
+        remaining_bindings = native_db("binding").where("domain=?", (domain,)).count()
+    except Exception as exc:
+        raise FpmAutoError(
+            "Native failed WordPress site records could not be checked"
+        ) from exc
+    if row not in (None, [], {}):
+        if isinstance(row, dict):
+            return False
+        raise FpmAutoError("Invalid native WordPress site lookup result")
+    if type(remaining_domains) is not int or type(remaining_bindings) is not int:
+        raise FpmAutoError("Invalid native WordPress domain lookup result")
+    return remaining_domains == 0 and remaining_bindings == 0
+
+
 def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
     """Repair only configuration drift attributable to a witnessed native task.
 
@@ -801,10 +841,11 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                 # THIS PHP shared pool. Another version/service can change
                 # during the task without being owned by the WP installer.
                 impact = prepared["shared_impact"]
-                if not any(site["site_key"] == active["domain"]
-                           for site in impact["matched_sites"]):
-                    # No write, reload, recovery archive or token consumption:
-                    # the unrelated PHP service belongs to another owner.
+                if not _terminal_site_owned(
+                        controller, impact, progress, active["domain"]):
+                    # A successful WP site must map to this pool. The only
+                    # exception is an exact native failed terminal whose
+                    # cleanup removed the former site from native records.
                     continue
                 # Pre-existing drift is not attributable to this native run.
                 # Likewise, an unrelated later source rewrite must not grant
@@ -830,8 +871,8 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                     latest = controller._prepare(_args(version, desired))
                     if (latest["impact_sha256"] != prepared["impact_sha256"]
                             or latest["plan"] != plan
-                            or not any(site["site_key"] == active["domain"]
-                                       for site in latest["shared_impact"]["matched_sites"])
+                            or not _terminal_site_owned(
+                                controller, latest["shared_impact"], progress, active["domain"])
                             or reader() != progress):
                         raise recovery.FpmApplyError(
                             "fpm_conflict",
@@ -852,6 +893,8 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                         auto_source_verify=lambda: (
                             _native_vendor_values(controller.config_root, version, active)
                             if _native_opt_marker(controller.config_root, version) is not None
+                            and _terminal_site_owned(
+                                controller, latest["shared_impact"], progress, active["domain"])
                             and reader() == progress else None))
                 updated = {**profile, "last_token": progress["token"],
                            "last_state": result["state"],

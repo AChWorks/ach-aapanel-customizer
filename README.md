@@ -85,17 +85,23 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
   after the exact terminal event, revalidating the **administrator-reviewed**
   shared-site impact SHA and Monitor/policy revisions. The native writer's
   RAM-derived numeric output and unchanged max_requests are verified
-  before each guarded write, preventing unrelated administrator edits;
-  revalidating site mapping and PHP syntax,
-  reload, health and durable rollback. Prior automatic recovery is archived
+  before each guarded write, preventing unrelated administrator edits.
+  Current site mapping is checked before syntax-validated reload and runtime
+  verification. Failed native WP initialization that removed the temporary
+  site additionally requires confirmed absence of its site/domain/binding
+  records. Prior automatic recovery is archived
   by operation identity before repeat repair. Journal event-token
   reconciliation preserves truthful Operation IDs after worker crashes.
   Emergency Disable is durably queued and auto-completed if a guarded
   reload holds the shared lock; no repeated click is necessary.
   No ordinary installation activates this watcher; skipped starts and unrelated PHP changes do not
-  authorize writes. It is not a universal aaPanel FPM hook or a Hosts fix,
-  and has NOT passed live native enabled-watcher acceptance or Production
-  qualification. Do not deploy it based on fixture tests alone.
+  authorize writes. The exact 0.1.62 source passed isolated real aaPanel
+  8.0.7 systemd-only WordPress PHP 8.1 success and post-optimizer
+  PHP 8.5 failure automatic repair. See the
+  [native QA evidence](docs/evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json).
+  It is not a universal FPM hook or a Hosts fix. Authenticated Browser
+  acceptance, independent review and Production qualification remain
+  separate gates. Do not deploy to Production based on isolated QA alone.
 - Per-site website roots are discovered from current native aaPanel records,
   not assumed under `/www/wwwroot`. Confirmed QA roots include `/www/acdomains`
   and `/www/other-sites`; unrelated aaPanel service-install prefixes and

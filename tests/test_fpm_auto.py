@@ -416,6 +416,82 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.assertTrue(result["changed"], result)
         self.assertEqual(result["services"][0]["state"], "Applied")
 
+    def test_failed_native_init_removed_site_repairs_proven_optimizer(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self.assertEqual(self._run()["services"][0]["state"], "Witness Armed")
+        self._vendor_reset()
+        self._terminal()
+        # Native WP deletes the site record after post-optimizer install
+        # failure, while unrelated PHP sites continue using this same pool.
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        lookup = Mock()
+        lookup.where.return_value.field.return_value.find.return_value = []
+        lookup.where.return_value.count.return_value = 0
+        self.panel.M = Mock(return_value=lookup)
+        result = self._run()
+        self.assertTrue(result["changed"], result)
+        self.assertEqual(result["services"][0]["state"], "Applied")
+        from ach_customizer_monitor import preview_php_fpm
+        self.assertEqual(preview_php_fpm(
+            self.php_root,"85",DESIRED)["state"],"File Match")
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertEqual(self._run()["changed"], False)
+        self.assertGreaterEqual(self.panel.M.call_count,2)
+
+    def test_failed_native_init_existing_other_php_site_never_repairs(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        lookup = Mock()
+        lookup.where.return_value.field.return_value.find.return_value = {"id":3}
+        self.panel.M = Mock(return_value=lookup)
+        result = self._run()
+        self.assertFalse(result["changed"])
+        self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"),0)
+
+    def test_native_failed_cleanup_with_existing_domain_binding_never_repairs(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self._terminal()
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        def lookup(kind):
+            ref = Mock()
+            ref.where.return_value.field.return_value.find.return_value = []
+            ref.where.return_value.count.return_value = (
+                1 if kind == "domain" else 0)
+            return ref
+        self.panel.M = Mock(side_effect=lookup)
+        result = self._run()
+        self.assertFalse(result["changed"])
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"), 0)
+
+    def test_native_success_without_attributed_site_never_repairs(self):
+        from unittest.mock import Mock
+        self._enable()
+        self._start()
+        self._run()
+        self._vendor_reset()
+        self.lock_path.unlink()
+        self.event = {**self.event, "status": 1, "steps": [1, 1, 1, 1],
+                      "mtime_ns": time.time_ns(), "token": "a"*64}
+        self.impact["matched_sites"] = [{"id": 17, "site_key": "peer.example"}]
+        self.panel.M = Mock()
+        result = self._run()
+        self.assertFalse(result["changed"])
+        self.panel.M.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
+
     def test_vendor_marker_preexisting_at_start_prevents_auto_overwrite(self):
         self._enable()
         self._mark_optimized()

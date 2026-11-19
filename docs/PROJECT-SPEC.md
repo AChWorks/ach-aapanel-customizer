@@ -147,9 +147,12 @@ revocation even when a guarded operation holds the shared lock longer than
 the request timeout, then completes autonomously at the next safe worker
 boundary; it never silently leaves future authority active after a
 successfully acknowledged final Disable.
-This is source/isolated-fixture implementation only: operational Native
-enabled-watcher timing and real corrected FPM service/peer behavior remain
-OPEN before closing the shared PHP-FPM automatic P0. The read-only Hosts
+Live native aaPanel 8.0.7 systemd-only QA on two isolated guests now
+proves a successful WordPress PHP 8.1 first-time optimizer reset and a
+failed-installation/removed-site PHP 8.5 reset both repaired to saved
+shared policy, with service and peer-site checks. Independent exact-candidate
+review, native authenticated Browser QA, broader compatibility proof and
+Production approval remain separate OPEN gates. The read-only Hosts
 witness is not an automatic recurrence-prevention deliverable. An exact
 no-loss removal cannot rely on Linux F_SETLEASE alone: a lease can be forcibly
 revoked after the timeout while the holder is suspended, and an intervening
