@@ -66,6 +66,16 @@ all aaPanel versions or a blanket reason to restart after every install.
    watcher. Follow the controlled recovery procedure below **only after
    explicit target-specific authorization**.
 
+## Unpublished 0.1.61 FPM automatic watcher lifecycle
+
+The independent `ach-customizer-fpm-auto` systemd path/timer/service is
+never installed by ordinary ZIP import. The primary admin must opt in
+separately for a saved reviewed PHP 8.1/8.5 shared service policy. An
+uninstall attempts owned-unit removal while preserving existing PHP values
+and recoveries. Native import cannot certify aaPanel's in-memory helper
+freshness. Use the existing separately approved reload procedure if a
+resident entrypoint remains stale; never restart aaPanel silently.
+
 ## Controlled recovery only with operator authorization
 
 If the installed files are confirmed, the new functionality is blocked by

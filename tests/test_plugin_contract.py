@@ -46,7 +46,8 @@ class PackageContractTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), first)
             with ZipFile(target) as archive:
                 names = archive.namelist()
-                self.assertEqual(len(names), 61)
+                from scripts.build_plugin import FILES
+                self.assertEqual(len(names), len(FILES))
                 self.assertTrue(all(n.startswith('ach_customizer/') and '..' not in n for n in names))
                 self.assertIn('ach_customizer/info.json', names)
                 self.assertIn('ach_customizer/install.sh', names)
@@ -77,6 +78,8 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_hosts_manage.py', names)
                 self.assertIn('ach_customizer/ach_customizer_wp_terminal.py', names)
                 self.assertIn('ach_customizer/ach_customizer_wp_watcher.py', names)
+                self.assertIn('ach_customizer/ach_customizer_fpm_auto.py', names)
+                self.assertIn('ach_customizer/ach_customizer_fpm_watcher.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_audit.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_policy.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_manage.py', names)

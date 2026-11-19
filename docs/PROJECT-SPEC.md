@@ -125,10 +125,22 @@ No new unattended Hosts mutation is permitted. A matching installed
 manifest or resident entrypoint version cannot prove Python helper freshness:
 non-emergency watcher controls must verify the **loaded helper** contract
 and fail closed if stale, while keeping Emergency disable accessible.
-A panel reload is separately authorized, never triggered by import. The
-originally requested **automatic post-terminal Hosts cleanup**
-and shared PHP-FPM desired-policy reconciliation both remain outstanding P0
-work; do not advertise this witness as recurrence prevention. An exact
+A panel reload is separately authorized, never triggered by import.
+
+The originally requested **automatic post-terminal Hosts cleanup** remains
+outstanding P0. **Unpublished candidate 0.1.61** adds an independently
+opt-in, service-scoped PHP 8.1/8.5 auto-repair worker. It records a trusted
+pre-terminal native WP progress identity and FPM file fingerprint, requires a
+matching later successful/failed terminal and changed FPM source, then
+rechecks saved admin intent and shared-site mapping before guarded
+syntax/reload/runtime verification and per-cycle recovery. Prior verified
+automatic recovery is archived rather than erased for repeated repairs;
+manual or uncertain recovery blocks automation. Emergency Disable removes
+future authority after completing any already-locked operation.
+This is source/isolated-fixture implementation only: operational Native
+enabled-watcher timing and real corrected FPM service/peer behavior remain
+OPEN before closing the shared PHP-FPM automatic P0. The read-only Hosts
+witness is not an automatic recurrence-prevention deliverable. An exact
 no-loss removal cannot rely on Linux F_SETLEASE alone: a lease can be forcibly
 revoked after the timeout while the holder is suspended, and an intervening
 uncoordinated writer can append data before ftruncate. Extra userland
@@ -143,9 +155,11 @@ claiming a successful Restore. Separately approved legacy Restore uses
 O_APPEND write semantics, so forced lease expiry cannot cause an offset-based
 overwrite of competing appended lines; uncertain results retain the recovery
 journal and require Recheck. Distinguish Enabled observation policy, actual
-watcher readiness and typed last worker result in UI and Activity. The feature
-does **not** authorize generic Hosts alias cleanup, batch WP install mutation,
-or shared PHP-FPM auto-enforcement. An aaPanel source update, active native
+watcher readiness and typed last worker result in UI and Activity.
+The Hosts witness alone does **not** authorize generic alias cleanup,
+batch WP install mutation, or shared PHP-FPM auto-enforcement. The separate
+0.1.61 FPM worker is opt-in and has its own narrower native-writer boundary.
+An aaPanel source update, active native
 operation, missed start or concurrent editor must produce actionable refusal
 evidence; sources are not patched in place.
 Unknown vendor layouts, IP trust assumptions, external
