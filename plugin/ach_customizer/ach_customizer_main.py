@@ -35,11 +35,12 @@ from ach_customizer_status_inspect import SUPPORTED_PAGES, inspect_site_files
 from ach_customizer_status_pages import (
     DEFAULT_BRAND, BRAND_KEYS, PAGES, LOCALES, StatusPageError,
     read_preferences, render_page, select_brand, update_preferences, validate_brand,
+    contrast_advisories,
 )
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.62'
+WORKER_SOURCE_VERSION = '0.1.63'
 
 _STATE_DIR = DATA_DIR
 
@@ -1495,6 +1496,7 @@ class ach_customizer_main:
                 "effective": effective, "source": source, "site_id": site_id,
                 "templates": list(PAGES), "locales": list(LOCALES),
                 "mode": "Preview only", "apply_supported": False,
+                "advisories": contrast_advisories(effective),
             }
             return self._activity_result(
                 response, "status_pages", "status_preferences",
@@ -2192,6 +2194,7 @@ class ach_customizer_main:
                 "schema": 1, "revision": state["revision"],
                 "changed": changed, "scope": scope, "site_id": site_id,
                 "source": source, "effective": effective,
+                "advisories": contrast_advisories(effective),
                 "message": (
                     "Branding preferences reset for this scope; no site files or services changed"
                     if action == "reset" else

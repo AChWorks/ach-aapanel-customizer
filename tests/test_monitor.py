@@ -53,6 +53,7 @@ class DomainDB:
         self.rows = rows
         self.calls = []
         self.pids = ()
+        self.start, self.size = 0, 0
 
     def where(self, clause, pids):
         self.calls.append(('where', clause, pids))
@@ -67,7 +68,8 @@ class DomainDB:
 
     def limit(self, expression):
         self.calls.append(('limit', expression))
-        assert expression == '0,1001'
+        start, count = expression.split(',')
+        self.start, self.size = int(start), int(count)
         return self
 
     def field(self, fields):
@@ -80,7 +82,7 @@ class DomainDB:
         return sorted(
             (row for row in self.rows if row.get('pid') in self.pids),
             key=lambda row: (row.get('pid', 0), row.get('id', 0)),
-        )[:1001]
+        )[self.start:self.start + self.size]
 
 
 class Panel:
@@ -176,7 +178,7 @@ class WebsiteDiscoveryTests(unittest.TestCase):
         self.assertFalse(page['sites'][0]['canonical_domain_bound'])
         self.assertEqual(panel.domain_db.calls, [
             ('where', 'pid IN (?)', (3,)), ('order', 'pid asc, id asc'),
-            ('limit', '0,1001'), ('field', 'id,pid,name,port'), ('select',),
+            ('limit', '0,257'), ('field', 'id,pid,name,port'), ('select',),
         ])
 
     def test_empty_site_page_skips_domain_query(self):
@@ -202,10 +204,10 @@ class WebsiteDiscoveryTests(unittest.TestCase):
         oversized = [dict(valid[0], name='a' * (monitor.MAX_DOMAIN_NAME_BYTES + 1))]
         with self.assertRaisesRegex(RuntimeError, 'domain name exceeds'):
             monitor.get_site_page(Panel(site, oversized))
-        # The bounded record count is not enough when every string is large.
+        # Many valid large names are fetched in bounded pages, not rejected
+        # because the first native query previously carried a fixed row cap.
         rows = [dict(valid[0], id=i, name='a' * 1020 + str(i)) for i in range(1, 300)]
-        with self.assertRaisesRegex(RuntimeError, 'response text limit'):
-            monitor.get_site_page(Panel(site, rows))
+        self.assertEqual(len(monitor.get_site_page(Panel(site, rows))['sites'][0]['bound_domains']), 299)
         bad_unicode = [dict(valid[0], name='\ud800')]
         with self.assertRaisesRegex(RuntimeError, 'domain encoding'):
             monitor.get_site_page(Panel(site, bad_unicode))
@@ -592,13 +594,15 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         def __init__(self, rows):
             self.rows = rows
             self.calls = []
+            self.start, self.size = 0, 0
 
         def order(self, key):
             assert key == 'id asc'
             return self
 
         def limit(self, limit):
-            assert limit == '0,101'
+            start, size = map(int, limit.split(','))
+            self.start, self.size = start, size
             return self
 
         def field(self, fields):
@@ -606,7 +610,7 @@ class SharedPHPFileImpactTests(unittest.TestCase):
             return self
 
         def select(self):
-            return self.rows[:101]
+            return self.rows[self.start:self.start + self.size]
 
     class Panel:
         def __init__(self, rows):
@@ -1089,13 +1093,16 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         self.assertIn('single literal Unix socket', got['reason'])
         self.assertEqual(got['matched_sites'], [])
 
-    def test_too_many_sites_fail_closed_instead_of_partial_shared_pool_claim(self):
-        rows = [{'id': i, 'name': 's{}.example.test'.format(i)} for i in range(1, 102)]
+    def test_more_than_100_sites_are_attributed_without_truncation(self):
+        rows = [{'id': i, 'name': f's{i}.example.test'} for i in range(1, 139)]
+        for row in rows:
+            self.vhost(row['name']).write_text(
+                'server {\n include enable-php-85.conf;\n}\n', encoding='utf-8')
         got = self.inspect(rows)
-        self.assertEqual(got['state'], 'Needs Review')
-        self.assertEqual(got['site_count'], 0)
-        self.assertEqual(got['matched_sites'], [])
-        self.assertIn('exceeds bounded', got['reason'])
+        self.assertEqual(got['site_count'], 138)
+        self.assertEqual(len(got['matched_sites']), 138)
+        self.assertEqual(got['unresolved_sites'], [])
+        self.assertEqual(got['state'], 'File Mapping')
 
     def test_duplicate_identity_never_returns_partial_success(self):
         duplicate = [self.rows[0], dict(self.rows[0])]
@@ -1103,7 +1110,7 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         self.assertEqual(got['state'], 'Needs Review')
         self.assertEqual(got['matched_sites'], [])
         self.assertEqual(got['site_count'], 0)
-        self.assertIn('Duplicate', got['reason'])
+        self.assertIn('repeated an ID', got['reason'])
 
     def test_missing_site_does_not_claim_complete_mapping(self):
         self.vhost('site-b.example.test').unlink()

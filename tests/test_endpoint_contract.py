@@ -51,7 +51,7 @@ class MemoryDomainQuery:
         return self
 
     def limit(self, expression):
-        assert expression == '0,1001'
+        assert expression == '0,257'
         return self
 
     def field(self, projection):

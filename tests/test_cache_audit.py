@@ -15,18 +15,19 @@ class FastCgiCacheSourceTests(unittest.TestCase):
     class Query:
         def __init__(self, panel):
             self.panel = panel
+            self.start, self.size = 0, 0
         def order(self, s):
             assert s == "id asc"
             return self
         def limit(self, s):
-            assert s == "0,101"
+            self.start, self.size = map(int, s.split(","))
             return self
         def field(self, s):
             assert s == "id,name"
             return self
         def select(self):
             self.panel.reads += 1
-            return [dict(x) for x in self.panel.rows[:101]]
+            return [dict(x) for x in self.panel.rows[self.start:self.start + self.size]]
 
     class Panel:
         def __init__(self, rows):
@@ -41,6 +42,14 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         def M(self, name):
             assert name == "sites"
             return FastCgiCacheSourceTests.Query(self)
+
+    def test_more_than_100_registered_sites_are_visible_to_cache_audit(self):
+        panel = self.Panel([
+            {"id": i, "name": f"site{i}.example.test"}
+            for i in range(1, 142)
+        ])
+        self.assertEqual(len(audit._native_sites(panel)), 141)
+        self.assertEqual(panel.reads, 2)
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix="ach-fastcgi-cache-source-")

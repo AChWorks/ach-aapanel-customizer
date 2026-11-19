@@ -54,10 +54,14 @@ Protect the intended operation from errors while preserving the administrator's
 choice over acceptable *disclosed* residual risk.
 
 This owner decision governs subsequent design and the simplification of
-overly defensive existing workflows. Earlier checklists and proposed
-complexity must be re-evaluated against it when their affected areas are next
-revised; recording this decision alone does not imply existing runtime
-controls have already changed.
+overly defensive existing workflows. An explicit Save/Reset button suffices
+as an operator decision for plugin-owned website observation baselines and
+branding preferences; do not require a second approval checkbox for these
+low-risk state updates. Low-contrast branding is a nonblocking accessibility
+note, not a schema rejection. Paginate native inventories rather than
+rejecting an otherwise valid 101st site, domain alias or branding scope.
+Earlier checklists and proposed complexity must be re-evaluated against this
+principle. Recording it does not imply other runtime controls have changed.
 
 
 ### Optional WordPress companion
@@ -261,7 +265,16 @@ Provide site selectors from validated, paginated aaPanel inventory rather than r
 
 The plugin must expose a built-in Activity/Diagnostics view backed by bounded persistent structured log records. Include UTC timestamp, severity, module/action, stage/outcome/error class, target/service identity, correlation ID and relevant recovery reference. Keep useful bounded troubleshooting context without recording session tokens, credentials, request payloads or arbitrary exception messages. Preserve successful operation outcomes if audit persistence fails; surface that failure separately. Diagnose real authorizations, failures and recoveries. Use aaPanel-compatible ownership/permissions, bounded retention and configurable verbosity.
 
-**PHP compatibility:** Inspect/manage installed PHP 8.1 and newer versions, but distinguish *detected*, *file-only preview*, *native Apply eligible* and *recoverably tested*. The currently verified 8.1/8.5 shared-[www] adapters are not authorization to write an untested version/pool by string substitution. Each other version and pool shape must pass native aaPanel PHP discovery, mapping, syntax/reload, shared-service attribution, after-state, website and rollback/fault tests before Apply eligibility. Unsupported configurations fail closed. PHP 8.1+ remains an acceptance target, not a claim of tested compatibility.
+**PHP compatibility:** Discover installed PHP versions and real service
+capabilities, not a fixed whitelist. Distinguish detected, preview-capable,
+native Apply-capable and tested-in-QA. The current 8.1/8.5 shared-pool
+adapters are the implemented write paths, not a permanent version limit.
+For other layouts, prefer a capability-derived adapter with targeted
+syntax/reload/impact checks rather than a blanket compatibility matrix.
+Never guess an unfamiliar destructive file rewrite; offer inspection,
+an actionable explanation and a usable manual route until a correct writer
+exists. Real authorization, target identity and unrelated-site integrity
+remain mandatory.
 
 These are durable product requirements; verified implementation and release readiness must be recorded against the exact candidate and non-production environment, independently reviewed and separately approved by the Owner. Production changes and automatic enforcement remain separately gated; an approved pre-release publication is not an installation or rollout.
 
@@ -438,14 +451,13 @@ This is not a universal support matrix. Actual installed site/PHP topology,
 versioned service controls, VHost includes, filesystem ownership and reload
 behavior determine whether a target-specific operation is eligible.
 
-Future aaPanel releases, Apache variants, other PHP pool layouts,
-alternative operating systems or web-server plugins require explicit
-capability detection and representative acceptance before enabling writes.
-Unrecognized shapes may still be **inspected read-only** and reported as
-`Needs Review`. A new website or aaPanel upgrade never silently inherits
-previous write eligibility. Live worker state, DNS/TLS behavior, shared
-cache ownership and vendor Purge All must be established independently of
-source-file and installed-package version checks.
+For future aaPanel versions, web servers, PHP pool layouts, and alternate
+installation paths, probe actual capabilities instead of rejecting version
+strings by default. Correct writer support still requires understanding the
+target format, reload semantics and ownership. Operator notes can cover
+reasonable residual uncertainty, not make destructive writes on unrelated
+state safe. Live worker status, DNS/TLS, cache isolation and vendor Purge All
+must be determined from their actual runtime behavior, not version labels.
 
 Exact integration/operation details are maintained in
 [the native technical guide](aapanel-integration.md); accepted gaps and

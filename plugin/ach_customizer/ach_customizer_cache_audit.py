@@ -18,7 +18,7 @@ from ach_customizer_monitor import (
     _native_nginx_php_version, _native_extension_fingerprint,
     _native_unused_subdir, _native_server_direct_include,
     _unsupported_nginx_upstream, MAX_NGINX_SITE_BYTES,
-    PHP_IMPACT_SITE_LIMIT,
+    iter_native_site_rows,
 )
 
 SITE_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}\Z")
@@ -244,14 +244,9 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
 
 
 def _native_sites(panel_public):
-    rows = (panel_public.M("sites").order("id asc")
-            .limit("0," + str(PHP_IMPACT_SITE_LIMIT + 1))
-            .field("id,name").select())
-    if not isinstance(rows, list) or len(rows) > PHP_IMPACT_SITE_LIMIT:
-        raise CacheAuditError("Native website list unavailable or exceeds 100 sites")
     sites = []
     seen = set()
-    for row in rows:
+    for row in iter_native_site_rows(panel_public):
         if not isinstance(row, dict) or not re.fullmatch("[0-9]+", str(row.get("id", ""))):
             raise CacheAuditError("Invalid native site list")
         identity = int(row["id"])
@@ -382,8 +377,6 @@ def _known_global_cache(nginx_root, vhost_root):
         entries = list(Path(vhost_root).iterdir())
     except OSError as exc:
         raise CacheAuditError("Cannot enumerate native Nginx global sources") from exc
-    if len(entries) > PHP_IMPACT_SITE_LIMIT + 100:
-        raise CacheAuditError("Native Nginx source directory inventory is too large")
     for entry in entries:
         if (not entry.name.startswith("0.ach_customizer_cache_")
                 or not entry.name.endswith(".conf")):

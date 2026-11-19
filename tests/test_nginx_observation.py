@@ -260,7 +260,7 @@ class SelectedSiteEndpointTests(unittest.TestCase):
                 return self
 
             def limit(self, clause):
-                assert clause == "0,1001"
+                assert clause == "0,257"
                 return self
 
             def select(self):

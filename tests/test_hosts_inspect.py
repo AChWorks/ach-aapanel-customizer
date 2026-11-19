@@ -240,11 +240,17 @@ class LocalHostsTests(unittest.TestCase):
         with self.assertRaises(HostsInspectionError):
             self.inspect()
         self.write("127.0.0.1 example.test\n" * 101)
-        with self.assertRaises(HostsInspectionError):
-            self.inspect()
+        self.assertEqual(len(self.inspect()["entries"]), 101)
         self.write("x" * 65537)
         with self.assertRaises(HostsInspectionError):
             self.inspect()
+
+    def test_more_than_100_site_domains_can_be_inspected_without_cap(self):
+        domains = [f"alias{i}.example.test" for i in range(1, 142)]
+        self.write("127.0.0.1 alias141.example.test\n")
+        observed = self.inspect(domains)
+        self.assertEqual(len(observed["domains"]), 141)
+        self.assertEqual(observed["entries"][0]["domain"], "alias141.example.test")
 
     def test_matches_only_requested_domains_preserves_other_file_text(self):
         self.write("127.0.0.1 localhost internal-only.test\n"
@@ -305,7 +311,7 @@ class NativeEndpointTests(unittest.TestCase):
                 assert expression == "pid asc, id asc"
                 return self
             def limit(self, expression):
-                assert expression == "0,1001"
+                assert expression == "0,257"
                 return self
             def field(self, fields):
                 assert fields == "id,pid,name,port"

@@ -50,9 +50,9 @@ function loadUi() {
   for (const name of [
     '#ach-message', '#ach-worker-version-status', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
-    '#ach-site-changes-compare', '#ach-site-changes-approve', '#ach-site-changes-why',
+    '#ach-site-changes-compare', '#ach-site-changes-why',
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-summary', '#ach-site-changes-rows',
-    '#ach-site-changes-selected-evidence', '#ach-site-changes-selected-reviewed',
+    '#ach-site-changes-selected-evidence',
     '#ach-site-changes-selected-why', '#ach-site-changes-save-selected',
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-hosts-removal-domain', '#ach-hosts-removal-why', '#ach-hosts-removal-reviewed',
@@ -117,7 +117,7 @@ function loadUi() {
     '#ach-status-workflow-note',
     '#ach-status-manage-section', '#ach-status-default-section',
     '#ach-status-unbound-section', '#ach-status-stopped-section',
-    '#ach-status-save', '#ach-status-reset', '#ach-status-reset-approve',
+    '#ach-status-save', '#ach-status-reset',
     '#ach-status-reset-why', '#ach-status-site-apply-why', '#ach-status-site-restore-why',
     '#ach-status-default-apply-why', '#ach-status-default-restore-why',
     '#ach-status-unbound-apply-why', '#ach-status-unbound-restore-why',
@@ -428,9 +428,7 @@ function loadUi() {
       siteChangesStatus: elements.get('#ach-site-changes-status').textContent,
       siteChangesSaveDisabled: elements.get('#ach-site-changes-save').props.disabled,
       selectedBaselineSaveDisabled: elements.get('#ach-site-changes-save-selected').props.disabled,
-      selectedBaselineReviewedDisabled: elements.get('#ach-site-changes-selected-reviewed').props.disabled,
       selectedBaselineEvidence: elements.get('#ach-site-changes-selected-evidence').textContent,
-      siteChangesApproveDisabled: elements.get('#ach-site-changes-approve').props.disabled,
       siteChangesRows: elements.get('#ach-site-changes-rows').children.map(tr =>
         tr.children.map(td => td.textContent)),
       sitesSkeletonHidden: elements.get('#ach-sites-loading').props.hidden,
@@ -638,15 +636,7 @@ function loadUi() {
     activityRefresh: () => { trigger(elements.get('#ach-activity-refresh'), 'click'); return requests.at(-1); },
     respond, respondOverview, toggleMonitor, submitPhp,
     siteChangesCompare: () => { trigger(elements.get('#ach-site-changes-compare'), 'click'); return requests.at(-1); },
-    siteChangesApprove: checked => {
-      elements.get('#ach-site-changes-approve').props.checked = checked;
-      trigger(elements.get('#ach-site-changes-approve'), 'change');
-    },
     siteChangesSave: () => { trigger(elements.get('#ach-site-changes-save'), 'click'); return requests.at(-1); },
-    siteChangesSelectedApprove: checked => {
-      elements.get('#ach-site-changes-selected-reviewed').props.checked=checked;
-      trigger(elements.get('#ach-site-changes-selected-reviewed'),'change');
-    },
     siteChangesSelectedSave: () => {
       trigger(elements.get('#ach-site-changes-save-selected'),'click');
       return requests.at(-1);
@@ -789,11 +779,18 @@ invalidCase('Incorrect page_size value is rejected',
   r => { r.page_size = 100; });
 invalidCase('Inconsistent has_more metadata is rejected',
   r => { r.has_more = true; });
-invalidCase('Domain result count above contract bound is rejected',
-  r => {
-    r.sites[0].bound_domains = Array.from({length:1001}, (_,i) =>
-      ({name:i === 0 ? 'site.example.test' : 'x'+i+'.test',port:80}));
-  });
+test('Valid inventory with over 1000 domains renders instead of rejecting a fixed count', () => {
+  const ui = loadUi();
+  ui.openSites();
+  const inventory = page();
+  inventory.sites[0].bound_domains = Array.from({length:1001}, (_,i) =>
+    ({name:i === 0 ? 'site.example.test' : 'x'+i+'.test',port:80}));
+  ui.respond(inventory);
+  const result = ui.state();
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0][2].split(', ').length, 1001);
+  assert.equal(result.error, '');
+});
 
 test('Valid empty inventory renders an empty page without error or pagination', () => {
   const ui = loadUi();
@@ -3353,7 +3350,7 @@ test('Hosts optimistic snapshot binds domains, ports, root and native status', (
   reload.respond(hostsInventory());
 });
 
-test('Oversized website binding snapshots never create an inspectable option', () => {
+test('More than 100 website bindings retain a selectable site', () => {
   const ui=loadUi();
   const inventory=hostsInventory();
   inventory.sites[0].bound_domains=Array.from({length:101},(_,n)=>({
@@ -3361,8 +3358,8 @@ test('Oversized website binding snapshots never create an inspectable option', (
   }));
   inventory.sites[0].canonical_domain_bound=false;
   ui.openSites();ui.respond(inventory);
-  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['','8']);
-  assert.equal(ui.state().hostsInspectDisabled,true);
+  assert.deepEqual(ui.state().hostsChoices.map(x=>x.id),['','7','8']);
+  assert.equal(ui.state().hostsInspectDisabled,true); // Requires a site selection.
 });
 
 test('Inventory reload invalidates pending hosts inspection and stale site selection', () => {
@@ -3482,7 +3479,7 @@ test('Status Pages save is revision-bound and failed response requires recheck',
   assert.match(ui.state().error,/Branding was changed elsewhere/);
 });
 
-test('Status Pages site override is explicit and reset needs confirmation', () => {
+test('Status Pages site override is explicit and Reset works without a duplicate checkbox', () => {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
   ui.statusSetValue('#ach-status-scope','site','change');
@@ -3495,8 +3492,6 @@ test('Status Pages site override is explicit and reset needs confirmation', () =
     ...brand(),brand_name:'Site Seven',brand_url:'https://site7.example'
   }));
   assert.equal(ui.state().statusSaveDisabled,false);
-  assert.equal(ui.state().statusResetDisabled,true);
-  ui.statusSetChecked('#ach-status-reset-approve',true);
   assert.equal(ui.state().statusResetDisabled,false);
   const reset=ui.statusClick('#ach-status-reset');
   assert.equal(reset.options.url,'/plugin?action=a&name=ach_customizer&s=status_save');
@@ -3510,7 +3505,7 @@ test('Status Pages site override is explicit and reset needs confirmation', () =
     status:true,schema:1,revision:6,changed:true,
     scope:'site',site_id:7,source:'Global default',effective:brand()
   });
-  assert.equal(ui.state().statusResetDisabled,true);
+  assert.equal(ui.state().statusResetDisabled,false);
   assert.match(ui.state().statusResult,/reset for this scope only/);
 });
 
@@ -3529,7 +3524,7 @@ test('All tabs place routine feedback by its operation rather than below long co
   ordered('ach-sites-status','ach-sites-refresh','ach-hosts-inspect-button','ach-hosts-result');
   ordered('ach-fpm-prepare','ach-fpm-plan','ach-fpm-operation-notice','ach-fpm-commit');
   ordered('ach-fpm-check-recovery','ach-fpm-recovery-status','ach-fpm-rollback');
-  ordered('ach-status-save','ach-status-result','ach-status-reset-approve','ach-status-inspect-button');
+  ordered('ach-status-save','ach-status-result','ach-status-reset','ach-status-inspect-button');
   ordered('ach-activity-result','ach-activity-rows');
   assert.equal((html.match(/id="ach-status-result"/g) || []).length,1);
   assert.match(html,/id="ach-status-result"[^>]*aria-live="polite"/);
@@ -3566,18 +3561,32 @@ test('Status Pages Save visibly distinguishes changed, no-op, in-flight, unsaved
   assert.equal(ui.state().statusSaveDisabled,true);
 });
 
+test('Low-contrast branding advice is visible but does not block Save', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(1));
+  ui.statusSetValue('#ach-status-foreground','#ffffff','input change');
+  assert.equal(ui.state().statusSaveDisabled,false);
+  const req=ui.statusClick('#ach-status-save');
+  assert.match(req.options.url,/s=status_save$/);
+  req.respond({status:true,schema:1,revision:2,changed:true,scope:'global',
+    site_id:null,source:'Global default',
+    effective:{...brand(),foreground:'#ffffff'},
+    advisories:['Text/background contrast is below 4.5:1; check readability before publishing.']});
+  assert.equal(ui.state().statusFeedbackState,'saved');
+  assert.match(ui.state().statusResult,/Accessibility notes: Text\/background contrast/);
+  assert.equal(ui.state().statusSaveDisabled,false);
+});
+
 test('Status Pages Reset distinguishes no-op and refuses mismatched acknowledgement', () => {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs(2));
-  ui.statusSetChecked('#ach-status-reset-approve',true);
   const noop=ui.statusClick('#ach-status-reset');
   assert.match(ui.state().statusResult,/Resetting global branding preferences/);
   noop.respond({status:true,schema:1,revision:2,changed:false,scope:'global',
     site_id:null,source:'Global default',effective:brand()});
   assert.match(ui.state().statusResult,/No changes needed.*Revision 2/);
   assert.equal(ui.state().statusFeedbackState,'saved');
-  assert.equal(ui.state().statusResetDisabled,true);
-  ui.statusSetChecked('#ach-status-reset-approve',true);
+  assert.equal(ui.state().statusResetDisabled,false);
   const bad=ui.statusClick('#ach-status-reset');
   bad.respond({status:true,schema:1,revision:3,changed:true,scope:'site',
     site_id:7,source:'Global default',effective:brand()});
@@ -6638,8 +6647,7 @@ test('Review R3: Status Pages reset and failed save each invalidate prior Activi
     ui.openStatus().respond(statusPrefs());
     let operation;
     if (action==='reset') {
-      ui.statusSetChecked('#ach-status-reset-approve',true);
-      operation=ui.statusClick('#ach-status-reset');
+          operation=ui.statusClick('#ach-status-reset');
       operation.respond({status:true,schema:1,revision:3,effective:brand(),source:'Global'});
     } else {
       operation=ui.statusClick('#ach-status-save');
@@ -6857,9 +6865,7 @@ test('Selected website acceptance preserves unrelated pending baselines', () => 
   }));
   assert.match(ui.state().selectedBaselineEvidence,/Selected #7 \(Added\)/);
   assert.match(ui.state().selectedBaselineEvidence,/Other site records will not be accepted/);
-  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
-  assert.equal(ui.state().selectedBaselineReviewedDisabled,false);
-  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
   assert.equal(ui.state().selectedBaselineSaveDisabled,false);
   const accepted=ui.siteChangesSelectedSave();
   assert.match(accepted.options.url,/s=save_selected_site_baseline$/);
@@ -6887,7 +6893,7 @@ test('Selected website acceptance preserves unrelated pending baselines', () => 
   assert.match(ui.siteChangesCompare().options.url,/s=compare_site_changes$/);
 });
 
-test('Scoped baseline approval cannot transfer to a different site or stale source', () => {
+test('Scoped baseline follows the selected site and rejects stale source', () => {
   const ui=loadUi();
   selectHostsSite(ui);
   const first = {
@@ -6906,18 +6912,14 @@ test('Scoped baseline approval cannot transfer to a different site or stale sour
     ]
   });
   ui.siteChangesCompare().respond(payload);
-  ui.siteChangesSelectedApprove(true);
   assert.equal(ui.state().selectedBaselineSaveDisabled,false);
   ui.statusSetValue('#ach-hosts-site-id','8','input change');
-  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
   assert.match(ui.state().selectedBaselineEvidence,/Selected #8 \(Added\)/);
-  ui.siteChangesSelectedApprove(true);
   assert.equal(ui.state().selectedBaselineSaveDisabled,false);
   ui.statusSetValue('#ach-hosts-site-id','7','input change');
-  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
-  const count=ui.requests.length;
-  ui.siteChangesSelectedSave();
-  assert.equal(ui.requests.length,count);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false);
+
   ui.siteChangesCompare().respond(siteChangesPayload({
     ...payload,
     changes:[
@@ -6932,7 +6934,7 @@ test('Scoped baseline approval cannot transfer to a different site or stale sour
   assert.equal(ui.state().selectedBaselineSaveDisabled,true);
 });
 
-test('Selected-site typed CAS errors show the cause and require a fresh comparison and approval', () => {
+test('Selected-site typed CAS errors show the cause and require a fresh comparison', () => {
   const ui=loadUi();selectHostsSite(ui);
   const site={
     id:7,name:'site.test',document_root:'/www/site.test',
@@ -6943,7 +6945,6 @@ test('Selected-site typed CAS errors show the cause and require a fresh comparis
     site_count:1,changes:[{id:7,kind:'Added',fields:[],before:null,after:site}]
   });
   ui.siteChangesCompare().respond(payload);
-  ui.siteChangesSelectedApprove(true);
   const save=ui.siteChangesSelectedSave();
   save.respond({
     status:false,stage:'website_selected_baseline_save',
@@ -6954,13 +6955,11 @@ test('Selected-site typed CAS errors show the cause and require a fresh comparis
   assert.match(ui.state().siteChangesStatus,/d{32}/);
   assert.equal(ui.state().selectedBaselineSaveDisabled,true);
   const afterFailure=ui.requests.length;
-  ui.siteChangesSelectedApprove(true);
   ui.siteChangesSelectedSave();
   assert.equal(ui.requests.length,afterFailure,'No retry using stale review token');
   ui.siteChangesCompare().respond({...payload,baseline_revision:2});
-  assert.equal(ui.state().selectedBaselineSaveDisabled,true,
-    'Fresh compare still requires new explicit operator review');
-  ui.siteChangesSelectedApprove(true);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,false,
+    'A fresh comparison authorizes the explicit Save click without a duplicate checkbox');
   assert.equal(ui.state().selectedBaselineSaveDisabled,false);
 });
 
@@ -6993,7 +6992,6 @@ test('Scoped baseline uncertain backend outcome requires re-Compare, never retry
       }}
     ]
   }));
-  ui.siteChangesSelectedApprove(true);
   const save=ui.siteChangesSelectedSave();
   save.respond({status:true,schema:1,scope:'selected_site_only',
     state:'Selected Site Baseline Saved',site_id:8,site_key:'site.test',
@@ -7006,7 +7004,7 @@ test('Scoped baseline uncertain backend outcome requires re-Compare, never retry
   assert.equal(ui.requests.length,count);
 });
 
-test('Site lifecycle comparison requires reviewed baseline and refuses blind retry', () => {
+test('Site lifecycle comparison uses direct Save and refuses blind retry', () => {
   const ui=loadUi();
   ui.openSites().respond(page());
   const compare=ui.siteChangesCompare();
@@ -7016,8 +7014,6 @@ test('Site lifecycle comparison requires reviewed baseline and refuses blind ret
   assert.deepEqual(ui.state().siteChangesRows,[
     ['3','Initial','initial.test',
      'Name: initial.test; root: /srv/3; status: 1; domains/ports: initial.test:80']]);
-  assert.equal(ui.state().siteChangesSaveDisabled,true);
-  ui.siteChangesApprove(true);
   assert.equal(ui.state().siteChangesSaveDisabled,false);
   const save=ui.siteChangesSave();
   assert.match(save.options.url,/s=save_site_baseline$/);
@@ -7034,7 +7030,7 @@ test('Site lifecycle comparison requires reviewed baseline and refuses blind ret
   assert.equal(ui.state().siteChangesSaveDisabled,true);
 });
 
-test('Website lifecycle Monitor renders HTML as text and invalidates old approval on Refresh', () => {
+test('Website lifecycle Monitor renders HTML as text and invalidates the old comparison on Refresh', () => {
   const ui=loadUi();
   ui.openSites().respond(page());
   const before=nativeSiteForDrift(3,'old.example.test');
@@ -7046,7 +7042,6 @@ test('Website lifecycle Monitor renders HTML as text and invalidates old approva
   assert.deepEqual(ui.state().siteChangesRows,[
     ['3','Changed','<svg onload=alert(1)>',
      'name: old.example.test -> <svg onload=alert(1)>; bound_domains: old.example.test:80 -> <svg onload=alert(1)>:80']]);
-  ui.siteChangesApprove(true);
   assert.equal(ui.state().siteChangesSaveDisabled,false);
   ui.refreshSites();
   assert.equal(ui.state().siteChangesSaveDisabled,true);
@@ -7069,7 +7064,6 @@ test('Site lifecycle review exposes actual before/after roots, statuses and bind
     ['3','Changed','old.test',
      'document_root: /srv/3 -> /srv/new-root; panel_status: 1 -> 0; '+
      'bound_domains: old.test:80 -> private.test:443, alias.test:80']]);
-  ui.siteChangesApprove(true);
   const save=ui.siteChangesSave();
   assert.equal(save.options.data.expected_monitor_revision,0);
 });
@@ -7097,8 +7091,6 @@ test('Initial baseline payload must carry validated actual site records', () => 
     initial_sites:[nativeSiteForDrift(3,'<img src=x onerror=alert(1)>')]
   }));
   assert.match(ui.state().siteChangesRows[0][3],/<img src=x onerror=alert\(1\)>/);
-  assert.equal(ui.state().siteChangesSaveDisabled,true);
-  ui.siteChangesApprove(true);
   assert.equal(ui.state().siteChangesSaveDisabled,false);
   ui.refreshSites();
   assert.equal(ui.state().siteChangesSaveDisabled,true);
@@ -7127,12 +7119,10 @@ test('Malformed website lifecycle payload and uncertain save outcome fail closed
   const ui=loadUi();
   ui.openSites().respond(page());
   ui.siteChangesCompare().respond(siteChangesPayload());
-  ui.siteChangesApprove(true);
   ui.siteChangesSave().respond({status:true,schema:1,state:'Baseline Saved',
     changed:true,baseline_revision:9,source_sha256:'a'.repeat(64)});
   assert.match(ui.state().siteChangesStatus,/outcome unconfirmed/);
   assert.equal(ui.state().siteChangesSaveDisabled,true);
-  assert.equal(ui.state().siteChangesApproveDisabled,true);
   assert.match(ui.siteChangesCompare().options.url,/s=compare_site_changes$/);
 });
 
@@ -8034,11 +8024,9 @@ test('Read-only inspection result colors depend on evidence, not generic success
 
 test('Every gated approval has nearby visible cause and action guidance, not title-only help', () => {
   const pairs=[
-    ['ach-site-changes-approve','ach-site-changes-why'],
     ['ach-cache-activation-reviewed','ach-cache-apply-why'],
     ['ach-cache-restore-reviewed','ach-cache-restore-why'],
     ['ach-fpm-policy-reviewed','ach-fpm-policy-why'],
-    ['ach-status-reset-approve','ach-status-reset-why'],
     ['ach-status-manage-apply-approve','ach-status-site-apply-why'],
     ['ach-status-manage-restore-approve','ach-status-site-restore-why'],
     ['ach-status-default-apply-approve','ach-status-default-apply-why'],
@@ -8063,22 +8051,21 @@ test('Every gated approval has nearby visible cause and action guidance, not tit
   assert.match(html,/How to read these records/);
 });
 
-test('Website comparison explains its missing approval and updates guidance when evidence arrives', () => {
+test('Website comparison guides direct Save after valid evidence arrives', () => {
   const ui=loadUi();
   ui.openSites().respond(page());
-  assert.equal(ui.state().siteChangesApproveDisabled,true);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
   assert.match(ui.gate('ach-site-changes-why').text,/Compare website records/);
   const req=ui.siteChangesCompare();
   assert.match(ui.gate('ach-site-changes-summary').text,/Comparing/);
   req.respond(siteChangesPayload());
-  assert.equal(ui.state().siteChangesApproveDisabled,false);
-  assert.match(ui.gate('ach-site-changes-why').text,/Review.*site records/);
+  assert.equal(ui.state().siteChangesSaveDisabled,false);
+  assert.match(ui.gate('ach-site-changes-why').text,/Review.*listed records/);
   assert.equal(ui.gate('ach-site-changes-why').state,'ready');
   assert.match(ui.gate('ach-site-changes-summary').text,/No saved comparison baseline/);
-  ui.siteChangesApprove(true);
-  assert.match(ui.gate('ach-site-changes-why').text,/plugin-owned comparison snapshot/);
+  assert.match(ui.gate('ach-site-changes-why').text,/plugin-owned baseline/);
   ui.refreshSites().respond(page());
-  assert.equal(ui.state().siteChangesApproveDisabled,true);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
   assert.match(ui.gate('ach-site-changes-why').text,/Compare website records/);
 });
 

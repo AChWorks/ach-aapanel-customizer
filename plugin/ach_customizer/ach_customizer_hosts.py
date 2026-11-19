@@ -15,8 +15,6 @@ import stat
 HOSTS_PATH = "/etc/hosts"
 MAX_BYTES = 65536
 MAX_LINES = 2048
-MAX_DOMAINS = 100
-MAX_MATCHES = 100
 MAX_ALIASES_PER_LINE = 128
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
@@ -49,8 +47,8 @@ def _hostname(value):
 
 
 def _site_domains(domains):
-    if not isinstance(domains, list) or not 1 <= len(domains) <= MAX_DOMAINS:
-        raise HostsInspectionError("Bounded native website domain inventory is required")
+    if not isinstance(domains, list) or not domains:
+        raise HostsInspectionError("Native website domain inventory is required")
     resolved, unsupported = [], []
     for entry in domains:
         if not isinstance(entry, str):
@@ -179,8 +177,6 @@ def inspect_local_hosts(domains, *, source_path=HOSTS_PATH):
             if canonical not in selected or canonical in seen_line:
                 continue
             seen_line.add(canonical)
-            if len(matches) >= MAX_MATCHES:
-                raise HostsInspectionError("Too many local hosts entries for selected site")
             matches.append({
                 "domain": canonical, "address": str(address),
                 "line": line_number, "loopback": bool(is_loopback),

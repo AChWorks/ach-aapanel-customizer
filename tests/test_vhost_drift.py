@@ -267,7 +267,7 @@ class VhostEndpointTests(unittest.TestCase):
                 assert value == "pid asc, id asc"
                 return self
             def limit(self, value):
-                assert value == "0,1001"
+                assert value == "0,257"
                 return self
             def select(self):
                 return [{"id": 25, "pid": 7, "port": 80, "name": "alpha.test"}]

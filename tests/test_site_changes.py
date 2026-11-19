@@ -1,4 +1,4 @@
-"""Native site lifecycle baseline: bounded source-only regressions."""
+"""Native site lifecycle baseline: paginated source-only regressions."""
 import json
 import os
 import sys
@@ -42,8 +42,9 @@ class Query:
             if self.panel.on_site_scan:
                 self.panel.on_site_scan(self.panel.site_queries)
             return [dict(v) for v in self.panel.sites[self.start:self.start + self.count]]
-        return [dict(v) for v in self.panel.domains if v["pid"] in self.pids][
-            self.start:self.start + self.count]
+        return [dict(v) for v in sorted(
+            self.panel.domains, key=lambda item: (item["pid"], item["id"]))
+            if v["pid"] in self.pids][self.start:self.start + self.count]
 
 
 class Panel:
@@ -277,12 +278,11 @@ class SiteChangesTests(unittest.TestCase):
             self.save(initial)
         self.assertFalse(Path(self.directory.name, BASELINE_FILE).exists())
 
-    def test_too_many_duplicate_and_invalid_domains(self):
+    def test_more_than_100_sites_duplicate_and_invalid_domains(self):
         self.panel.sites = [
             {"id": i, "name": f"site{i}.test", "path": "/srv/x", "status": 1}
             for i in range(1, 102)]
-        with self.assertRaisesRegex(SiteChangesError, "More than 100"):
-            self.preview()
+        self.assertEqual(self.preview()["site_count"], 101)
         self.panel.sites = self.panel.sites[:2]
         self.panel.sites[1]["id"] = 1
         with self.assertRaisesRegex((SiteChangesError, RuntimeError), "Duplicate|Unsorted|duplicate"):
@@ -317,31 +317,30 @@ class SiteChangesTests(unittest.TestCase):
         self.assertEqual(changed["state"], "Changes Observed")
         self.assertIn("panel_status", changed["changes"][0]["fields"])
 
-    def test_bounded_domain_pagination_preserves_100_by_24_capacity(self):
+    def test_paginated_site_and_domain_baseline_has_no_100_site_or_24_binding_cap(self):
         self.panel.sites = [
             {"id": i, "name": f"site{i}.test", "path": f"/srv/{i}", "status": 1}
-            for i in range(1, 101)
+            for i in range(1, 138)
         ]
-        for count in (10, 11, 24):
+        for count in (10, 11, 24, 40):
             with self.subTest(bindings_per_site=count):
                 self.panel.domains = [
                     {"id": i * 100 + j, "pid": i,
                      "name": f"alias{j}.site{i}.test", "port": 80 + j}
-                    for i in range(1, 101) for j in range(count)
+                    for i in range(1, 138) for j in range(count)
                 ]
                 observed = self.preview()
-                self.assertEqual(observed["site_count"], 100)
+                self.assertEqual(observed["site_count"], 137)
                 records = (observed["initial_sites"] if count == 10 else
                            [item["after"] for item in observed["changes"]])
-                self.assertEqual(len(records), 100)
+                self.assertEqual(len(records), 137)
                 self.assertEqual(len(records[30]["bound_domains"]), count)
                 self.assertEqual(self.save(observed)["state"], "Baseline Saved")
                 self.assertEqual(self.preview()["state"], "No Changes")
         self.panel.sites.append(
-            {"id": 101, "name": "overflow.test", "path": "/srv/overflow", "status": 1}
+            {"id": 138, "name": "more.test", "path": "/srv/more", "status": 1}
         )
-        with self.assertRaisesRegex(SiteChangesError, "More than 100"):
-            self.preview()
+        self.assertEqual(self.preview()["site_count"], 138)
 
     def test_domain_id_reused_across_batches_and_midpage_drift_fail_closed(self):
         self.panel.sites = [
