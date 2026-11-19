@@ -37,6 +37,9 @@ NATIVE_SOURCE_SHA = "7578c279424f0b653c0f65ca2f22fbf0b86ce873673b05939e4b4b16c67
 NATIVE_SITE_SOURCE = "/www/server/panel/class_v2/panel_site_v2.py"
 NATIVE_SITE_SHA = "b75a5a0b45c319df7eb49381363d3c3e90208157ebfd88de6f9b173d013d98fb"
 NATIVE_META = "/www/server/panel/class/common.py"
+# Advertise the loaded Python module's actual safety/diagnostic contract,
+# not a fresh on-disk version which may hide stale aaPanel worker imports.
+MANUAL_REVIEW_CONTRACT = "durable-manual-review-v1"
 STATE_FILE = "ach_customizer.wp-terminal.json"
 MANUAL_REVIEW_PREFIX = "ach_customizer.wp-terminal."
 MANUAL_REVIEW_SUFFIX = ".manual-review.json"

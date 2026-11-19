@@ -867,7 +867,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.56'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.57'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -5841,17 +5841,33 @@
     }, fresh);
   });
   var wpTerminalBusy = false, wpTerminalRecovery = null, wpTerminalKnown = false;
+  var wpTerminalHelperStale = false;
   function wpTerminalControl() {
     root.find('#ach-wp-terminal-abandon').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
       root.find('#ach-wp-terminal-abandon-reviewed').prop('checked') !== true);
     root.find('#ach-wp-terminal-enable').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
       root.find('#ach-wp-terminal-reviewed').prop('checked') !== true);
-    root.find('#ach-wp-terminal-disable, #ach-wp-terminal-recheck').prop('disabled', wpTerminalBusy || !wpTerminalKnown);
+    // Emergency disable is safe even when a verified resident helper mismatch
+    // prevents ordinary policy inspection. Never enable or restore in this state.
+    root.find('#ach-wp-terminal-disable').prop('disabled', wpTerminalBusy ||
+      (!wpTerminalKnown && !wpTerminalHelperStale));
+    root.find('#ach-wp-terminal-recheck').prop('disabled', wpTerminalBusy || !wpTerminalKnown);
     root.find('#ach-wp-terminal-refresh').prop('disabled', wpTerminalBusy);
     root.find('#ach-wp-terminal-restore').prop('disabled', wpTerminalBusy ||
       !wpTerminalKnown || !wpTerminalRecovery || root.find('#ach-wp-terminal-restore-reviewed').prop('checked') !== true);
   }
   function wpTerminalRender(r) {
+    if (r && r.status === false && r.reason_code === 'resident_wp_helper_stale' &&
+        typeof r.msg === 'string' && r.msg.length <= 300) {
+      wpTerminalRecovery = null;
+      wpTerminalKnown = false;
+      wpTerminalHelperStale = true;
+      root.find('#ach-wp-terminal-status').text(
+        'Resident helper mismatch: ' + r.msg + ' Only Emergency disable is available until reviewed recovery.');
+      wpTerminalControl();
+      return;
+    }
+    wpTerminalHelperStale = false;
     if (!r || r.schema !== 1 || typeof r.enabled !== 'boolean' ||
         !Number.isSafeInteger(r.revision) || r.revision < 0 ||
         !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 || r.recoveries > 64 ||
@@ -5898,7 +5914,7 @@
       ' · Revision ' + r.revision + ' · Policy: ' + r.last_reason +
       (r.active_domain ? ' · Observed active site: ' + r.active_domain : '') +
       (r.manual_review ?
-        ' · Latest unresolved Hosts report: ' + r.manual_review.domain +
+        ' · Latest recorded Hosts manual-review report: ' + r.manual_review.domain +
         ' (Operation: ' + r.manual_review.operation_id + ')' +
         (r.manual_review.activity_delivered ?
          ' · Activity confirmed; durable evidence retained.' :
@@ -5915,9 +5931,9 @@
     if (wpTerminalBusy) return;
     wpTerminalBusy = true; wpTerminalControl();
     root.find('#ach-wp-terminal-status').text('Inspecting native WordPress read-only witness policy...');
-    request('wp_terminal_manage', {terminal_action:'inspect'}, function (r) {
+    request('wp_terminal_manage', {terminal_action:'inspect'}, function (r, failure) {
       wpTerminalBusy = false;
-      wpTerminalRender(r);
+      wpTerminalRender(r || failure);
     });
   }
   function updateWpTerminal(action) {
@@ -5946,6 +5962,11 @@
           action + ': ' + (typeof r.state === 'string' ? r.state : 'Unconfirmed') +
           (typeof r.reason === 'string' ? ' — ' + r.reason : ''));
         loadWpTerminal();
+      } else if (action === 'disable' && wpTerminalHelperStale && r.status === true) {
+        root.find('#ach-wp-terminal-status').text(
+          'Emergency disable acknowledged. Resident native WP helper remains stale; '
+          + 'verify saved policy after an authorized panel reload.');
+        wpTerminalControl();
       } else wpTerminalRender(r);
     });
   }

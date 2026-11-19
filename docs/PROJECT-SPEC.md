@@ -101,7 +101,7 @@ Fail2ban compatibility. Site-level `.well-known`/OAuth/hotlink exceptions
 and authorized WordPress HTTPS URL, debugging, Cron and XML-RPC corrections
 are also required operational outcomes, not simply a list of diagnostics.
 
-Keep native plugin installation observation-only. **Unpublished 0.1.56**
+Keep native plugin installation observation-only. **Unpublished 0.1.57**
 implements an opt-in, source-pinned **observation-only witness** of actual
 failed, single-site WP Toolkit installs: it captures a previously alias-free
 Hosts baseline during native setup, verifies the terminal failure and exact
@@ -113,8 +113,12 @@ the terminal token. Activity delivery must recover from restart, fsync-to-
 receipt crash, verbosity suppression and log rotation without duplicate
 operator-visible records. The native Routing panel must display the latest
 durable report even if last_worker is overwritten or Activity is unavailable.
-No new unattended Hosts mutation is permitted. The originally requested
-**automatic post-terminal Hosts cleanup**
+No new unattended Hosts mutation is permitted. A matching installed
+manifest or resident entrypoint version cannot prove Python helper freshness:
+non-emergency watcher controls must verify the **loaded helper** contract
+and fail closed if stale, while keeping Emergency disable accessible.
+A panel reload is separately authorized, never triggered by import. The
+originally requested **automatic post-terminal Hosts cleanup**
 and shared PHP-FPM desired-policy reconciliation both remain outstanding P0
 work; do not advertise this witness as recurrence prevention. An exact
 no-loss removal cannot rely on Linux F_SETLEASE alone: a lease can be forcibly

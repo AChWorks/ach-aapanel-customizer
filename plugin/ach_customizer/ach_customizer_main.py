@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.56'
+WORKER_SOURCE_VERSION = '0.1.57'
 
 _STATE_DIR = DATA_DIR
 
@@ -180,16 +180,21 @@ class ach_customizer_main:
             # source, not an optional JSONL message. This primary-admin-only
             # projection keeps actionable identities visible during JSONL
             # persistence failures, ERROR verbosity and log rotation.
-            from ach_customizer_wp_terminal import manual_review_activity
+            import ach_customizer_wp_terminal as terminal
+            stale_helper = getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v1"
             from ach_customizer_activity import MAX_RESULTS
             if (type(limit) is not int or not 1 <= limit <= MAX_RESULTS
                     or level not in ("", "DEBUG", "INFO", "WARNING", "ERROR")
                     or module not in ("", "monitor", "websites", "php_fpm",
                                       "status_pages", "diagnostics", "lifecycle")):
                 raise ActivityError("Invalid activity filters or page size")
-            durable_manual = manual_review_activity(
-                data_dir=_STATE_DIR, level=level, module=module)
-            log_warning = None
+            # Preserve unrelated Activity when aaPanel has retained an old
+            # helper import after ZIP upgrade. Do not claim to have read the
+            # private WP outbox until an operator-approved panel reload.
+            durable_manual = ([] if stale_helper else terminal.manual_review_activity(
+                data_dir=_STATE_DIR, level=level, module=module))
+            log_warning = ("Resident WP helper stale; durable manual-review evidence "
+                           "unavailable until an approved panel reload" if stale_helper else None)
             try:
                 generic = read_activity(
                     _STATE_DIR, level=level, module=module, limit=MAX_RESULTS)
@@ -677,7 +682,17 @@ class ach_customizer_main:
         try:
             self._status_primary_admin_post()
             action = self._argument(args, "terminal_action")
-            from ach_customizer_wp_terminal import inspect, restore, recheck_recovery, abandon_witness
+            import ach_customizer_wp_terminal as terminal
+            if (action != "disable" and
+                    getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v1"):
+                response = self._fail(
+                    "wp_terminal_management", MonitorInputError(
+                        "Resident native WP helper is stale. Emergency disable remains available; "
+                        "a controlled aaPanel reload requires operator approval."), request_id)
+                response["reason_code"] = "resident_wp_helper_stale"
+                return response
+            inspect, restore = terminal.inspect, terminal.restore
+            recheck_recovery, abandon_witness = terminal.recheck_recovery, terminal.abandon_witness
             if action == "inspect":
                 result = inspect(data_dir=_STATE_DIR)
                 level = "DEBUG"

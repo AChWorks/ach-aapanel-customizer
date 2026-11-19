@@ -108,6 +108,24 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
         self.assertNotIn("entries",denied)
         self.assertNotIn("manual-review.example",str(denied))
 
+    def test_resident_old_helper_blocks_enable_but_preserves_emergency_disable(self):
+        import ach_customizer_wp_terminal as terminal
+        with patch.object(terminal,"MANUAL_REVIEW_CONTRACT",None):
+            with patch("ach_customizer_wp_watcher.enable") as enable, patch(
+                    "ach_customizer_wp_watcher.disable",return_value={"enabled":False}) as disable:
+                for action in ("inspect","enable","recheck","abandon","restore"):
+                    outcome=self.plugin.wp_terminal_manage(
+                        {"terminal_action":action,"reviewed":"true","recovery_id":"a"*32})
+                    self.assertFalse(outcome["status"],outcome)
+                    self.assertEqual(outcome["reason_code"],"resident_wp_helper_stale")
+                enable.assert_not_called()
+                safe=self.plugin.wp_terminal_manage({"terminal_action":"disable"})
+                self.assertTrue(safe["status"],safe)
+                disable.assert_called_once()
+            read=self.plugin.get_activity({})
+            self.assertTrue(read["status"],read)
+            self.assertIn("Resident WP helper stale",read["activity_warning"])
+
     def test_authorization_failure_precedes_policy_access(self):
         with patch.object(MODULE.ach_customizer_main,"_status_primary_admin_post",side_effect=PermissionError("admin")), \
                 patch("ach_customizer_wp_watcher.enable") as enable:

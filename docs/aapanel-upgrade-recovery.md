@@ -47,6 +47,21 @@ all aaPanel versions or a blanket reason to restart after every install.
    writes. A matching entrypoint version **does not prove** its imported
    Python helpers are fresh or running Nginx worker configuration.
 
+   **Observed again during isolated QA v0.1.55 -> v0.1.56:** the official
+   native ZIP importer installed 61/61 exact candidate file bytes, App
+   Store reported v0.1.56, and the resident Python entrypoint matched the
+   UI v0.1.56, but the resident `ach_customizer_wp_terminal` helper still
+   returned the old response without the mandatory manual-review fields.
+   The UI correctly refused that incompatible response. Candidate v0.1.57
+   adds a **loaded-helper contract check** to the authenticated WP observer
+   endpoint. When the helper is stale, Enable/Inspect/Recheck/Restore/
+   Discard are refused with a specific reason; Emergency disable remains
+   available. Generic Activity stays readable with a warning that private
+   manual-review outbox projection cannot be verified. This does not reload
+   aaPanel, imply automatically refreshed imports, or certify a running
+   watcher. Follow the controlled recovery procedure below **only after
+   explicit target-specific authorization**.
+
 ## Controlled recovery only with operator authorization
 
 If the installed files are confirmed, the new functionality is blocked by

@@ -8416,7 +8416,7 @@ test('Native WP durable manual-review identity survives Activity failure and old
     manual_review:{operation_id:'c'.repeat(32),domain:'failed.test',activity_delivered:false},
     manual_review_count:1
   }));
-  assert.match(ui.state().wpTerminalStatus,/Latest unresolved Hosts report: failed\.test/);
+  assert.match(ui.state().wpTerminalStatus,/Latest recorded Hosts manual-review report: failed\.test/);
   assert.match(ui.state().wpTerminalStatus,/Activity delivery pending/);
   assert.match(ui.state().wpTerminalStatus,/c{32}/);
   const again=ui.statusClick('#ach-wp-terminal-refresh');
@@ -8432,6 +8432,24 @@ test('Native WP durable manual-review identity survives Activity failure and old
   }));
   assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
   assert.equal(ui.state().wpTerminalEnableDisabled,true);
+});
+
+test('Native WP stale resident helper refuses unsafe operations and permits emergency disable',()=>{
+  const ui=loadUi();
+  const pending=ui.statusClick('#ach-wp-terminal-refresh');
+  pending.respond({status:false,stage:'wp_terminal_management',
+    reason_code:'resident_wp_helper_stale',
+    msg:'Resident native WP helper is stale. Emergency disable remains available.'});
+  assert.match(ui.state().wpTerminalStatus,/Resident helper mismatch/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalRestoreDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,false);
+  const emergency=ui.statusClick('#ach-wp-terminal-disable');
+  assert.equal(emergency.options.data.terminal_action,'disable');
+  emergency.respond({status:true,schema:1,enabled:false,revision:1});
+  assert.match(ui.state().wpTerminalStatus,/Emergency disable acknowledged/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,false);
 });
 
 test('Native WP recovery Restore requires independently reviewed saved recovery',()=>{

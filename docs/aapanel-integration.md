@@ -160,7 +160,7 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.56 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
+Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.57 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -255,7 +255,7 @@ recreates an alias, a new separately reviewed removal retains previous
 recovery material for forensics rather than overwriting it invisibly.
 
 The manual tool alone cannot identify the writer, guarantee external
-DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.56**
+DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.57**
 adds a **separate, expressly approved, narrow native WP Toolkit failure
 reconciler** described immediately below. The manual 0.1.52 capability is
 **not** available in published native 0.1.51. Installed-package/native
@@ -265,7 +265,7 @@ If a stale Python helper prevents inspection after an upgrade,
 use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
 not a blind server restart.
 
-## Native WordPress Toolkit failed-install witness (unpublished 0.1.56)
+## Native WordPress Toolkit failed-install witness (unpublished 0.1.57)
 
 The primary admin can explicitly enable **Routing & Nginx → Native WordPress
 failed-install witness**. Native ZIP installation/reinstallation does not enable
@@ -334,6 +334,16 @@ a bounded warning. Routing Inspect shows the latest domain, Operation ID
 and delivery state after subsequent worker updates. Records remain private
 and retained; a separate future retention policy must not silently discard
 actionable manual-review evidence.
+
+After ZIP upgrades, the resident aaPanel Python process may retain a
+previous `ach_customizer_wp_terminal` module despite exact installed bytes
+and a matching entrypoint version. The v0.1.57 endpoint checks the
+**loaded helper's** durable-review contract before non-emergency actions,
+refuses stale helpers with `resident_wp_helper_stale`, and leaves Emergency
+disable available. Ordinary general Activity remains readable with a
+bounded warning if outbox projection cannot be verified. A controlled
+panel-only reload requires separate target-specific operator approval; see
+[upgrade/recovery runbook](aapanel-upgrade-recovery.md).
 
 The status UI distinguishes policy **Enabled** from watcher **Ready** and
 explicitly says **Unattended Hosts edits: OFF**. Unsupported sources,
