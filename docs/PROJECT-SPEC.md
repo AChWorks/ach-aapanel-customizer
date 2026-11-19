@@ -101,7 +101,7 @@ Fail2ban compatibility. Site-level `.well-known`/OAuth/hotlink exceptions
 and authorized WordPress HTTPS URL, debugging, Cron and XML-RPC corrections
 are also required operational outcomes, not simply a list of diagnostics.
 
-Keep native plugin installation observation-only. **Unpublished 0.1.54**
+Keep native plugin installation observation-only. **Unpublished 0.1.55**
 implements an opt-in, source-pinned **observation-only witness** of actual
 failed, single-site WP Toolkit installs: it captures a previously alias-free
 Hosts baseline during native setup, verifies the terminal failure and exact

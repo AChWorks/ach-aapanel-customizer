@@ -21,7 +21,7 @@ compatibility certification. For source-tree version details, inspect
 | --- | --- |
 | **Overview / Monitor** | Enable/disable monitoring, observe packaged vs resident entrypoint versions, see availability and diagnostics. |
 | **Website list** | Refresh native website inventory, compare changes, and save either **one reviewed site's** baseline or a separately reviewed **all-sites** baseline. Saving a baseline does not reconfigure a website. |
-| **Routing & Nginx** | Inspect generated VHosts, selected-site `/etc/hosts`, local HTTP and recovery context. **Unpublished source 0.1.54** includes opt-in site-owned Nginx sensitive-file guards and a separately opt-in, **read-only failed WP Toolkit Hosts witness** for the verified aaPanel 8.0.7/Nginx source. No unattended alias cleanup is promised; an authorized OS operator must coordinate manual corrections. **Published 0.1.51 lacks these features**. PHP-FPM reconciliation remains manual. |
+| **Routing & Nginx** | Inspect generated VHosts, selected-site `/etc/hosts`, local HTTP and recovery context. **Unpublished source 0.1.55** includes opt-in site-owned Nginx sensitive-file guards and a separately opt-in, **read-only failed WP Toolkit Hosts witness** for the verified aaPanel 8.0.7/Nginx source. No unattended alias cleanup is promised; an authorized OS operator must coordinate manual corrections. **Published 0.1.51 lacks these features**. PHP-FPM reconciliation remains manual. |
 | **PHP-FPM** | Discover installed PHP and site/socket relationships; compare version-scoped desired policies. Guarded shared-pool Apply/Restore is available only for **verified native PHP 8.1/8.5 shapes** with fresh authorization and recovery evidence. |
 | **Status Pages** | Offline EN/FA templates and branding; guarded per-site 404/502 and Nginx-generated 50x delivery, future-site defaults, stopped-site HTTP503 and global unknown-Host **HTTP/80** paths where compatible. Each has its **own** approval and Restore. |
 | **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. |
@@ -47,7 +47,7 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
 - **Nginx Helper `Purge All` is not certified** for shared or ambiguous physical
   Cache roots. Native **site-owned full-tree Clear** is a different, independently
   guarded operation. Neither should be confused with Bridge's per-URL filtering.
-- **New unpublished 0.1.54 narrow observer:** native WP Toolkit failed-install
+- **New unpublished 0.1.55 narrow observer:** native WP Toolkit failed-install
   `/etc/hosts` alias detection is opt-in, source-pinned to aaPanel **8.0.7 + Nginx**,
   and relies on a **pre-terminal witnessed** single-site operation plus an exact
   vendor-appended `127.0.0.1` line. **The watcher never writes to Hosts.**
