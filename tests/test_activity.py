@@ -1,4 +1,5 @@
 """Plugin-owned, bounded, structured activity and native authorization."""
+import errno
 import json
 import os
 import sys
@@ -61,6 +62,73 @@ class ActivityTests(unittest.TestCase):
         with self.assertRaises(activity.ActivityError):
             activity.append_activity(self.directory, {**self.event(), "secret": "never"})
         self.assertFalse((Path(self.directory) / activity.LOG_NAME).exists())
+
+    def test_critical_manual_review_bypasses_verbosity_and_deduplicates_after_crash(self):
+        candidate=self.event(16,level="WARNING",module="lifecycle",
+            action="wp_terminal_manual_review",stage="native_terminal",
+            outcome="Manual Review Required",target="failed.test",detail=
+            "Exact native WP failed-install alias observed; Hosts unchanged; inspect Activity and remove manually",
+            recovery_id="")
+        with patch.dict(os.environ,{"ACH_CUSTOMIZER_ACTIVITY_LEVEL":"ERROR"}):
+            self.assertTrue(activity.append_activity(self.directory,candidate,
+                          mandatory_manual_review=True))
+            self.assertTrue(activity.append_activity(self.directory,candidate,
+                          mandatory_manual_review=True))
+            self.assertEqual(len(activity.read_activity(self.directory)),1)
+            with self.assertRaises(activity.ActivityError):
+                activity.append_activity(
+                    self.directory,{**candidate,"target":"different.test"},
+                    mandatory_manual_review=True)
+            with self.assertRaisesRegex(activity.ActivityError,"Only immutable"):
+                activity.append_activity(self.directory,self.event(17),
+                                         mandatory_manual_review=True)
+        self.assertEqual(len(activity.read_activity(self.directory)),1)
+
+    def test_full_canonical_wp_domain_activity_retains_253_characters(self):
+        domain=".".join(("a"*63,"b"*63,"c"*63,"d"*61))
+        self.assertEqual(len(domain),253)
+        entry=self.event(20,level="WARNING",module="lifecycle",
+            action="wp_terminal_manual_review",stage="native_terminal",
+            outcome="Manual Review Required",target=domain,recovery_id="")
+        self.assertEqual(entry["target"],domain)
+        self.assertTrue(activity.append_activity(self.directory,entry,mandatory_manual_review=True))
+        self.assertEqual(activity.read_activity(self.directory)[0]["target"],domain)
+        self.assertEqual(self.event(22,target=domain)["target"],domain[:120],
+            "Unrelated Activity targets keep their previous bounded schema")
+        for value in (domain.upper(),domain[:95]+"\n"+domain[96:],domain+"x"):
+            with self.assertRaises(activity.ActivityError):
+                self.event(24,module="lifecycle",action="wp_terminal_manual_review",
+                           target=value)
+
+    def test_read_normalizes_raw_filesystem_faults(self):
+        entry = self.event(6)
+        activity.append_activity(self.directory, entry)
+        original_open, original_read = os.open, os.read
+        fingerprint = (Path(self.directory) / activity.LOG_NAME).stat()
+        def interrupted_read(fd, length):
+            current = os.fstat(fd)
+            if (current.st_dev, current.st_ino) == (fingerprint.st_dev, fingerprint.st_ino):
+                raise OSError(errno.EIO, "synthetic-private-file-detail")
+            return original_read(fd, length)
+        with patch.object(activity.os, "read", side_effect=interrupted_read):
+            with self.assertRaises(activity.ActivityError) as caught:
+                activity.read_activity(self.directory)
+        self.assertIsInstance(caught.exception.__cause__, OSError)
+        self.assertNotIn("synthetic-private-file-detail", str(caught.exception))
+
+        for code in (errno.EACCES, errno.ELOOP):
+            with self.subTest(errno=code):
+                def interrupted_open(path, flags, *args, **kwargs):
+                    if path == activity.LOG_NAME:
+                        raise (PermissionError if code == errno.EACCES else OSError)(
+                            code, "synthetic-private-file-detail")
+                    return original_open(path, flags, *args, **kwargs)
+                with patch.object(activity.os, "open", side_effect=interrupted_open):
+                    with self.assertRaises(activity.ActivityError) as caught:
+                        activity.read_activity(self.directory)
+                self.assertIsInstance(caught.exception.__cause__, OSError)
+                self.assertNotIn("synthetic-private-file-detail", str(caught.exception))
+        self.assertEqual(activity.read_activity(self.directory), [entry])
 
     def test_rotation_is_bounded_and_recent_first(self):
         with patch.object(activity, "MAX_LOG_BYTES", 4096):

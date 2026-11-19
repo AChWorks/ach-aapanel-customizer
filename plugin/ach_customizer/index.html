@@ -486,6 +486,30 @@
         <label><input type="checkbox" id="ach-hosts-restore-reviewed" disabled /> I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</label>
         <div class="ach-controls"><button id="ach-hosts-restore-button" type="button" class="btn btn-warning" disabled>Restore saved local hosts file</button></div>
       </details>
+      <div class="ach-note" aria-label="Native WordPress failed-install read-only witness">
+        <strong>Native WordPress failed-install witness — opt-in, observation only</strong>
+        <p>For the verified aaPanel 8.0.7 Nginx single-site WP Toolkit writer only. This watcher records a pre-terminal, alias-free Hosts baseline and detects an exact vendor-added <code>127.0.0.1</code> alias after a terminal failure. <strong>No unattended Hosts modification occurs.</strong> Linux file leases can expire, so removing a line safely against uncoordinated writers is not proved. If a failed installation is reported, find <code>wp_terminal_manual_review</code> in Activity &amp; Logs for the exact affected domain, confirm the native install is finished, then have an authorized OS operator independently review and edit <code>/etc/hosts</code>. Failed site records may no longer exist, so the selected-site Hosts editor might not apply. No automatic PHP-FPM changes.</p>
+        <p id="ach-wp-terminal-status" role="status" aria-live="polite">Inspect the optional read-only witness policy before enabling.</p>
+        <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> I approve a read-only, event-driven failed-install watcher; it will log candidates for manual OS review, never edit /etc/hosts automatically.</label>
+        <div class="ach-controls">
+          <button type="button" id="ach-wp-terminal-refresh">Inspect witness policy</button>
+          <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck historical recovery</button>
+          <button type="button" id="ach-wp-terminal-enable" class="btn btn-warning" disabled>Enable failed-install witness</button>
+          <button type="button" id="ach-wp-terminal-disable" disabled>Emergency disable</button>
+        </div>
+        <p id="ach-wp-terminal-recheck-result" role="status" aria-live="polite"></p>
+        <details class="ach-help"><summary>Resolve an irrecoverable stale witness</summary>
+          <p>Only after Emergency disable and a failed Recheck, you may discard a witness of a previous operation that no longer has a verifiable native progress record. This does not edit /etc/hosts or override any prepared recovery journal. Never discard a witness while native WordPress setup is active.</p>
+          <label><input id="ach-wp-terminal-abandon-reviewed" type="checkbox" /> I verified that setup is no longer active and accept discarding this unverified witness without editing Hosts.</label>
+          <button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" disabled>Discard stale witness</button>
+        </details>
+        <details class="ach-help"><summary>Restore a historical applied cleanup</summary>
+          <p>Legacy, separately approved Restore deliberately re-adds the old exact alias. An append-only guarded write is attempted only when the saved post-cleanup file still matches; independent writers can make the outcome uncertain, requiring Recheck. No new automatic cleanup recovery is created in this read-only witness mode.</p>
+          <p id="ach-wp-terminal-recovery">No historical recovery inspected.</p>
+          <label><input id="ach-wp-terminal-restore-reviewed" type="checkbox" disabled /> I reviewed the saved Recovery ID and want to restore the exact original Hosts bytes.</label>
+          <div class="ach-controls"><button type="button" id="ach-wp-terminal-restore" class="btn btn-warning" disabled>Restore historical Hosts cleanup</button></div>
+        </details>
+      </div>
       <hr />
       <div class="ach-note" aria-label="Selected website onboarding and recovery">
         <strong>Site onboarding, drift &amp; guided recovery (read-only)</strong>
@@ -843,7 +867,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.53'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.60'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1032,10 +1056,10 @@
       method === 'manage_local_hosts' ||
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
-      method === 'manage_nginx_protection' || method === 'status_manage' || method === 'status_defaults' ||
+      method === 'manage_nginx_protection' || method === 'wp_terminal_manage' || method === 'status_manage' || method === 'status_defaults' ||
       method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
-      method === 'fpm_policy_save' || method === 'manage_cache_policy' || method === 'manage_nginx_protection';
+      method === 'fpm_policy_save' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection';
   }
   function validInventoryPage(r, expectedPage) {
     if (!r || typeof r !== 'object' || Array.isArray(r) ||
@@ -4873,7 +4897,9 @@
             typeof item.level === 'string' && ['DEBUG','INFO','WARNING','ERROR'].indexOf(item.level) >= 0 &&
             typeof item.operation_id === 'string' && /^[0-9a-f]{32}$/.test(item.operation_id) &&
             typeof item.outcome === 'string' && item.outcome.length <= 40 &&
-            typeof item.target === 'string' && item.target.length <= 120 &&
+            typeof item.target === 'string' &&
+            item.target.length <= (item.module === 'lifecycle' &&
+              item.action === 'wp_terminal_manual_review' ? 253 : 120) &&
             typeof item.detail === 'string' && item.detail.length <= 240 &&
             typeof item.recovery_id === 'string' &&
               (item.recovery_id === '' || /^[0-9a-f]{32}$/.test(item.recovery_id)) &&
@@ -4894,7 +4920,8 @@
         rows.append(tr);
       });
       if (!r.entries.length) rows.append($('<tr>').append($('<td colspan="5">').text('No matching activity records.')));
-      root.find('#ach-activity-result').text(r.entries.length + ' record(s). Logging threshold: ' + r.configured_level + '; maximum retention: 512 KiB.');
+      root.find('#ach-activity-result').text(r.entries.length + ' record(s). Logging threshold: ' + r.configured_level + '; general JSONL retention: 512 KiB.' +
+        (r.activity_warning ? ' ' + String(r.activity_warning).slice(0,240) : ''));
     });
   }
   root.find('#ach-activity-refresh').on('click', loadActivity);
@@ -5815,6 +5842,159 @@
         'Unsupported or unresolved: manual Apply unavailable.');
     }, fresh);
   });
+  var wpTerminalBusy = false, wpTerminalRecovery = null, wpTerminalKnown = false;
+  var wpTerminalHelperStale = false;
+  function wpTerminalControl() {
+    root.find('#ach-wp-terminal-abandon').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
+      root.find('#ach-wp-terminal-abandon-reviewed').prop('checked') !== true);
+    root.find('#ach-wp-terminal-enable').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
+      root.find('#ach-wp-terminal-reviewed').prop('checked') !== true);
+    // Emergency disable is safe even when a verified resident helper mismatch
+    // prevents ordinary policy inspection. Never enable or restore in this state.
+    root.find('#ach-wp-terminal-disable').prop('disabled', wpTerminalBusy ||
+      (!wpTerminalKnown && !wpTerminalHelperStale));
+    root.find('#ach-wp-terminal-recheck').prop('disabled', wpTerminalBusy || !wpTerminalKnown);
+    root.find('#ach-wp-terminal-refresh').prop('disabled', wpTerminalBusy);
+    root.find('#ach-wp-terminal-restore').prop('disabled', wpTerminalBusy ||
+      !wpTerminalKnown || !wpTerminalRecovery || root.find('#ach-wp-terminal-restore-reviewed').prop('checked') !== true);
+  }
+  function wpTerminalRender(r) {
+    if (r && r.status === false && r.reason_code === 'resident_wp_helper_stale' &&
+        typeof r.msg === 'string' && r.msg.length <= 300) {
+      wpTerminalRecovery = null;
+      wpTerminalKnown = false;
+      wpTerminalHelperStale = true;
+      root.find('#ach-wp-terminal-status').text(
+        'Resident helper mismatch: ' + r.msg + ' Only Emergency disable is available until reviewed recovery.');
+      wpTerminalControl();
+      return;
+    }
+    wpTerminalHelperStale = false;
+    if (!r || r.schema !== 1 || typeof r.enabled !== 'boolean' ||
+        !Number.isSafeInteger(r.revision) || r.revision < 0 ||
+        !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 || r.recoveries > 64 ||
+        r.auto_hosts !== false || r.auto_fpm !== false ||
+        r.scope !== 'failed_native_single_site_wp_toolkit' ||
+        typeof r.last_reason !== 'string' || r.last_reason.length > 240 ||
+        typeof r.watcher_ready !== 'boolean' ||
+        typeof r.watcher_source_verified !== 'boolean' ||
+        typeof r.watcher_status !== 'string' || r.watcher_status.length > 140 ||
+        !r.last_worker || typeof r.last_worker.state !== 'string' ||
+        typeof r.last_worker.stage !== 'string' ||
+        typeof r.last_worker.reason !== 'string' ||
+        r.last_worker.state.length > 40 || r.last_worker.stage.length > 64 ||
+        r.last_worker.reason.length > 240 ||
+        !r.manual_review_integrity ||
+        !['Complete','Needs Review'].includes(r.manual_review_integrity.state) ||
+        !Number.isSafeInteger(r.manual_review_integrity.incomplete_count) ||
+        r.manual_review_integrity.incomplete_count < 0 ||
+        (r.manual_review_integrity.incomplete_count === 0) !==
+          (r.manual_review_integrity.state === 'Complete') ||
+        (r.manual_review_integrity.first_operation_id !== null &&
+         !/^[0-9a-f]{32}$/.test(r.manual_review_integrity.first_operation_id || '')) ||
+        (r.manual_review_integrity.incomplete_count === 0) !==
+          (r.manual_review_integrity.first_operation_id === null) ||
+        !Number.isSafeInteger(r.manual_review_count) || r.manual_review_count < 0 ||
+        ((r.manual_review_count === 0) !== (r.manual_review === null)) ||
+        (r.manual_review !== null &&
+         (!r.manual_review || typeof r.manual_review !== 'object' ||
+          !/^[0-9a-f]{32}$/.test(r.manual_review.operation_id || '') ||
+          typeof r.manual_review.domain !== 'string' ||
+          r.manual_review.domain.length > 253 ||
+          !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(r.manual_review.domain) ||
+          typeof r.manual_review.activity_delivered !== 'boolean')) ||
+        (r.last_worker.operation_id !== null &&
+         !/^[0-9a-f]{32}$/.test(r.last_worker.operation_id || '')) ||
+        (r.last_recovery !== null && !/^[0-9a-f]{32}$/.test(r.last_recovery || ''))) {
+      wpTerminalRecovery = null;
+      wpTerminalKnown = false;
+      root.find('#ach-wp-terminal-status').text('Unknown policy response. Inspect Activity before acting.');
+      wpTerminalControl();
+      return;
+    }
+    wpTerminalKnown = true;
+    wpTerminalRecovery = r.last_recovery_state === 'applied' ? r.last_recovery : null;
+    root.find('#ach-wp-terminal-restore-reviewed, #ach-wp-terminal-reviewed, #ach-wp-terminal-abandon-reviewed').prop('checked', false);
+    root.find('#ach-wp-terminal-restore-reviewed').prop('disabled', !wpTerminalRecovery);
+    root.find('#ach-wp-terminal-status').text('Native WP observer: ' + (r.enabled ? 'Enabled' : 'Disabled') +
+      ' · Unattended Hosts edits: OFF (manual OS review only)' +
+      ' · Watcher: ' + (r.watcher_ready ? 'Active' : 'Not ready') +
+      ' (' + r.watcher_status + ')' +
+      ' · Last worker: ' + r.last_worker.state + ' / ' + r.last_worker.stage +
+      ' — ' + r.last_worker.reason +
+      (r.last_worker.operation_id ? ' · Operation: ' + r.last_worker.operation_id : '') +
+      ' · Revision ' + r.revision + ' · Policy: ' + r.last_reason +
+      (r.active_domain ? ' · Observed active site: ' + r.active_domain : '') +
+      (r.manual_review ?
+        ' · Latest recorded Hosts manual-review report: ' + r.manual_review.domain +
+        ' (Operation: ' + r.manual_review.operation_id + ')' +
+        (r.manual_review.activity_delivered ?
+         ' · Activity confirmed; durable evidence retained.' :
+         ' · Activity delivery pending; durable evidence retained in private state.') :
+        ' · No observed manual-review candidates.') +
+      (r.manual_review_integrity.state === 'Needs Review' ?
+        ' · Incomplete private manual-review evidence: ' +
+        r.manual_review_integrity.incomplete_count +
+        ' (first Operation: ' + r.manual_review_integrity.first_operation_id +
+        '). Preserve for OS review; do not delete automatically.' : '') +
+      ' · Manual-review reports: ' + r.manual_review_count +
+      ' · Historical auto repairs: ' + r.recoveries + '. PHP-FPM auto enforcement: Off.');
+    root.find('#ach-wp-terminal-recovery').text(r.last_recovery ?
+      'Recovery ID: ' + r.last_recovery + ' · ' + (r.last_recovery_state || 'Needs Review') +
+      '. Historical Restore requires an unchanged file.' : 'No saved legacy Hosts recovery.');
+    wpTerminalControl();
+  }
+  function loadWpTerminal() {
+    if (wpTerminalBusy) return;
+    wpTerminalBusy = true; wpTerminalControl();
+    root.find('#ach-wp-terminal-status').text('Inspecting native WordPress read-only witness policy...');
+    request('wp_terminal_manage', {terminal_action:'inspect'}, function (r, failure) {
+      wpTerminalBusy = false;
+      wpTerminalRender(r || failure);
+    });
+  }
+  function updateWpTerminal(action) {
+    if (wpTerminalBusy) return;
+    if ((action === 'enable' && !root.find('#ach-wp-terminal-reviewed').prop('checked')) ||
+        (action === 'abandon' && !root.find('#ach-wp-terminal-abandon-reviewed').prop('checked')) ||
+        (action === 'restore' && (!wpTerminalRecovery ||
+          !root.find('#ach-wp-terminal-restore-reviewed').prop('checked')))) return;
+    var data = {terminal_action: action};
+    if (action === 'enable' || action === 'restore' || action === 'abandon') data.reviewed = 'true';
+    if (action === 'restore') data.recovery_id = wpTerminalRecovery;
+    wpTerminalBusy = true; wpTerminalControl();
+    root.find('#ach-wp-terminal-status').text('Operation requested; do not retry before inspecting saved state.');
+    request('wp_terminal_manage', data, function (r) {
+      wpTerminalBusy = false;
+      if (!r) {
+        wpTerminalRecovery = null;
+        wpTerminalKnown = false;
+        root.find('#ach-wp-terminal-status').text('Outcome unconfirmed. Inspect saved policy and Activity before retrying.');
+        wpTerminalControl();
+        return;
+      }
+      // Restore and Recheck return operation outcomes, not policy snapshots.
+      if (action === 'restore' || action === 'recheck' || action === 'abandon') {
+        root.find('#ach-wp-terminal-recheck-result').text(
+          action + ': ' + (typeof r.state === 'string' ? r.state : 'Unconfirmed') +
+          (typeof r.reason === 'string' ? ' — ' + r.reason : ''));
+        loadWpTerminal();
+      } else if (action === 'disable' && wpTerminalHelperStale && r.status === true) {
+        root.find('#ach-wp-terminal-status').text(
+          'Emergency disable acknowledged. Resident native WP helper remains stale; '
+          + 'verify saved policy after an authorized panel reload.');
+        wpTerminalControl();
+      } else wpTerminalRender(r);
+    });
+  }
+  root.find('#ach-wp-terminal-reviewed, #ach-wp-terminal-restore-reviewed, #ach-wp-terminal-abandon-reviewed').on('change', wpTerminalControl);
+  root.find('#ach-wp-terminal-refresh').on('click', loadWpTerminal);
+  root.find('#ach-wp-terminal-recheck').on('click', function () { updateWpTerminal('recheck'); });
+  root.find('#ach-wp-terminal-abandon').on('click', function () { updateWpTerminal('abandon'); });
+  root.find('#ach-wp-terminal-enable').on('click', function () { updateWpTerminal('enable'); });
+  root.find('#ach-wp-terminal-disable').on('click', function () { updateWpTerminal('disable'); });
+  root.find('#ach-wp-terminal-restore').on('click', function () { updateWpTerminal('restore'); });
+
   overview();
 })();
 </script>

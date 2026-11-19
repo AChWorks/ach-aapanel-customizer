@@ -58,6 +58,12 @@ function loadUi() {
     '#ach-hosts-removal-domain', '#ach-hosts-removal-why', '#ach-hosts-removal-reviewed',
     '#ach-hosts-removal-button', '#ach-hosts-recovery-why',
     '#ach-hosts-restore-reviewed', '#ach-hosts-restore-button',
+    '#ach-wp-terminal-reviewed', '#ach-wp-terminal-restore-reviewed',
+    '#ach-wp-terminal-status', '#ach-wp-terminal-recovery',
+    '#ach-wp-terminal-refresh', '#ach-wp-terminal-enable',
+    '#ach-wp-terminal-disable', '#ach-wp-terminal-restore', '#ach-wp-terminal-recheck',
+    '#ach-wp-terminal-recheck-result',
+    '#ach-wp-terminal-abandon', '#ach-wp-terminal-abandon-reviewed',
     '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-reconcile-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
@@ -153,6 +159,10 @@ function loadUi() {
     elements.set(name, node);
     return node;
   });
+  for (const id of ['#ach-wp-terminal-enable','#ach-wp-terminal-disable',
+                    '#ach-wp-terminal-restore','#ach-wp-terminal-recheck','#ach-wp-terminal-abandon',
+                    '#ach-wp-terminal-restore-reviewed'])
+    elements.get(id).props.disabled = true;
   elements.get('#ach-cache-url-path').props.value = '/';
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
@@ -343,6 +353,11 @@ function loadUi() {
     return {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
+      wpTerminalStatus: elements.get('#ach-wp-terminal-status').textContent,
+      wpTerminalRecovery: elements.get('#ach-wp-terminal-recovery').textContent,
+      wpTerminalEnableDisabled: elements.get('#ach-wp-terminal-enable').props.disabled,
+      wpTerminalDisableDisabled: elements.get('#ach-wp-terminal-disable').props.disabled,
+      wpTerminalRestoreDisabled: elements.get('#ach-wp-terminal-restore').props.disabled,
       hostsRemovalDisabled: elements.get('#ach-hosts-removal-button').props.disabled,
       hostsRemovalSelectDisabled: elements.get('#ach-hosts-removal-domain').props.disabled,
       hostsRemovalChoices: elements.get('#ach-hosts-removal-domain').children.map(o => o.props.value),
@@ -8354,4 +8369,210 @@ test('Sensitive-file Nginx guard rejects malformed optimistic success and stale 
   ui.statusSetValue('#ach-hosts-site-id','8','input change');
   pending.respond(sensitiveGuardResponse());
   assert.equal(ui.state().guardApplyDisabled,true,'Stale async reply must not authorize new site');
+});
+
+function nativeWpPolicy(extra={}) {
+  return Object.assign({status:true, schema:1, request_id:'a'.repeat(32),
+    enabled:false, revision:0, last_reason:'Disabled', last_recovery:null,
+    last_recovery_state:null, active_domain:null, recoveries:0,
+    manual_review:null,manual_review_count:0,
+    manual_review_integrity:{state:'Complete',incomplete_count:0,first_operation_id:null},
+    auto_hosts:false, auto_fpm:false, read_only:true, scope:'failed_native_single_site_wp_toolkit',
+    watcher_ready:false, watcher_source_verified:false, watcher_status:'Watcher units not installed',
+    last_worker:{state:'Not Observed',stage:'idle',reason:'No event evaluated',operation_id:null}},extra);
+}
+
+test('Native WP observer stays disabled until a reviewed enable, and has emergency disable',()=>{
+  const ui=loadUi();
+  ui.openTab('routing');
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,true);
+  const inspected=ui.statusClick('#ach-wp-terminal-refresh');
+  assert.match(inspected.options.url,/s=wp_terminal_manage$/);
+  assert.equal(inspected.options.data.terminal_action,'inspect');
+  inspected.respond(nativeWpPolicy());
+  assert.match(ui.state().wpTerminalStatus,/Native WP observer: Disabled/);
+  assert.match(ui.state().wpTerminalStatus,/Unattended Hosts edits: OFF/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  ui.statusSetChecked('#ach-wp-terminal-reviewed',true);
+  assert.equal(ui.state().wpTerminalEnableDisabled,false);
+  const enabled=ui.statusClick('#ach-wp-terminal-enable');
+  assert.equal(enabled.options.data.terminal_action,'enable');
+  assert.equal(enabled.options.data.reviewed,'true');
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  enabled.respond(nativeWpPolicy({enabled:true,revision:1,last_reason:'Armed for future native WP Toolkit events'}));
+  assert.match(ui.state().wpTerminalStatus,/Enabled/);
+  assert.equal(ui.state().wpTerminalDisableDisabled,false);
+  const disable=ui.statusClick('#ach-wp-terminal-disable');
+  assert.equal(disable.options.data.terminal_action,'disable');
+  assert.equal(disable.options.data.reviewed,undefined);
+  disable.respond(nativeWpPolicy({enabled:false,revision:2}));
+  assert.match(ui.state().wpTerminalStatus,/Disabled/);
+});
+
+test('Native WP durable manual-review identity survives Activity failure and old last_worker',()=>{
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    last_worker:{state:'Idle',stage:'native_progress',reason:'Later timer tick',operation_id:null},
+    manual_review:{operation_id:'c'.repeat(32),domain:'failed.test',activity_delivered:false},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Latest recorded Hosts manual-review report: failed\.test/);
+  assert.match(ui.state().wpTerminalStatus,/Activity delivery pending/);
+  assert.match(ui.state().wpTerminalStatus,/c{32}/);
+  const again=ui.statusClick('#ach-wp-terminal-refresh');
+  again.respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain:'failed.test',activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Activity confirmed; durable evidence retained/);
+  const invalid=ui.statusClick('#ach-wp-terminal-refresh');
+  invalid.respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain:'unsafe/name',activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+});
+
+test('Native WP long canonical domain remains exact in Activity and Routing',()=>{
+  const domain=['a'.repeat(50),'b'.repeat(50),'c'.repeat(50),'d'.repeat(7)].join('.');
+  assert.equal(domain.length,160);
+  const ui=loadUi();
+  ui.openActivity().respond(reviewActivity([Object.assign(reviewActivityEntry(),{
+    level:'WARNING',module:'lifecycle',action:'wp_terminal_manual_review',
+    stage:'native_terminal',outcome:'Manual Review Required',target:domain
+  })]));
+  assert.match(JSON.stringify(ui.activityRows()),new RegExp(domain));
+  ui.openTab('routing');
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain,activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,new RegExp(domain));
+  const invalid=ui.statusClick('#ach-wp-terminal-refresh');
+  invalid.respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain:'x'.repeat(254),activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+});
+
+test('Incomplete private Outbox yields precise read-only review status without hiding valid reports',()=>{
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    manual_review:{operation_id:'a'.repeat(32),domain:'good.test',activity_delivered:true},
+    manual_review_count:1,
+    manual_review_integrity:{state:'Needs Review',incomplete_count:1,first_operation_id:'b'.repeat(32)}
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Incomplete private manual-review evidence: 1/);
+  assert.match(ui.state().wpTerminalStatus,/b{32}/);
+  assert.match(ui.state().wpTerminalStatus,/good.test/);
+  const bad=ui.statusClick('#ach-wp-terminal-refresh');
+  bad.respond(nativeWpPolicy({
+    manual_review_integrity:{state:'Complete',incomplete_count:1,first_operation_id:'b'.repeat(32)}
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+});
+
+test('Native WP stale resident helper refuses unsafe operations and permits emergency disable',()=>{
+  const ui=loadUi();
+  const pending=ui.statusClick('#ach-wp-terminal-refresh');
+  pending.respond({status:false,stage:'wp_terminal_management',
+    reason_code:'resident_wp_helper_stale',
+    msg:'Resident native WP helper is stale. Emergency disable remains available.'});
+  assert.match(ui.state().wpTerminalStatus,/Resident helper mismatch/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalRestoreDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,false);
+  const emergency=ui.statusClick('#ach-wp-terminal-disable');
+  assert.equal(emergency.options.data.terminal_action,'disable');
+  emergency.respond({status:true,schema:1,enabled:false,revision:1});
+  assert.match(ui.state().wpTerminalStatus,/Emergency disable acknowledged/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,false);
+});
+
+test('Native WP recovery Restore requires independently reviewed saved recovery',()=>{
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    last_recovery:'b'.repeat(32),last_recovery_state:'applied',recoveries:1}));
+  assert.match(ui.state().wpTerminalRecovery,/Recovery ID: b{32}/);
+  assert.equal(ui.state().wpTerminalRestoreDisabled,true);
+  ui.statusSetChecked('#ach-wp-terminal-restore-reviewed',true);
+  assert.equal(ui.state().wpTerminalRestoreDisabled,false);
+  const restored=ui.statusClick('#ach-wp-terminal-restore');
+  assert.equal(restored.options.data.terminal_action,'restore');
+  assert.equal(restored.options.data.recovery_id,'b'.repeat(32));
+  assert.equal(restored.options.data.reviewed,'true');
+  restored.respond({status:true,schema:1,state:'Restored',changed:true,recovery_id:'b'.repeat(32)});
+  const refresh=ui.statusClick('#ach-wp-terminal-refresh');
+  // A read-only recheck follows Restore; it does not silently claim completion.
+  assert.equal(refresh.options.data.terminal_action,'inspect');
+  refresh.respond(nativeWpPolicy({last_recovery:'b'.repeat(32),last_recovery_state:'restored'}));
+  assert.equal(ui.state().wpTerminalRestoreDisabled,true);
+});
+
+test('Native WP malformed or timed-out backend outcome prevents another unreviewed edit',()=>{
+  const ui=loadUi();
+  const bad=ui.statusClick('#ach-wp-terminal-refresh');
+  bad.respond(nativeWpPolicy({scope:'unknown_scope'}));
+  ui.statusSetChecked('#ach-wp-terminal-reviewed',true);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy());
+  ui.statusSetChecked('#ach-wp-terminal-reviewed',true);
+  const pending=ui.statusClick('#ach-wp-terminal-enable');
+  pending.reject(null,'timeout');
+  assert.match(ui.state().wpTerminalStatus,/Outcome unconfirmed/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,true);
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy());
+  assert.match(ui.state().wpTerminalStatus,/Native WP observer: Disabled/);
+});
+
+test('Native WP stale witness needs independent review and recheck never implies a Hosts edit',()=>{
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    enabled:false,active_domain:'failed.test',last_reason:'Unresolved'}));
+  const recheck=ui.statusClick('#ach-wp-terminal-recheck');
+  assert.equal(recheck.options.data.terminal_action,'recheck');
+  recheck.respond({status:true,schema:1,state:'Active or Unknown',changed:false});
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    enabled:false,active_domain:'failed.test',last_reason:'Unresolved'}));
+  ui.statusSetChecked('#ach-wp-terminal-abandon-reviewed',true);
+  const pending=ui.statusClick('#ach-wp-terminal-abandon');
+  assert.equal(pending.options.data.terminal_action,'abandon');
+  assert.equal(pending.options.data.reviewed,'true');
+  pending.respond({status:true,schema:1,state:'Witness Abandoned',changed:false});
+  const inspection=ui.statusClick('#ach-wp-terminal-refresh');
+  inspection.respond(nativeWpPolicy({enabled:false,active_domain:null,last_reason:'Operator abandoned'}));
+  assert.match(ui.state().wpTerminalStatus,/Operator abandoned/);
+});
+
+test('Native WP last worker refusal and watcher readiness remain visibly distinct from Enabled',()=>{
+  const ui=loadUi();
+  const policy=nativeWpPolicy({enabled:true,revision:2,
+    watcher_ready:false,watcher_source_verified:false,watcher_status:'Unsupported native source',
+    last_worker:{state:'Needs Review',stage:'native_source',
+      reason:'Pinned aaPanel WordPress source fingerprint/version mismatch or unreadable',
+      operation_id:'a'.repeat(32)}});
+  ui.statusClick('#ach-wp-terminal-refresh').respond(policy);
+  assert.match(ui.state().wpTerminalStatus,/Native WP observer: Enabled/);
+  assert.match(ui.state().wpTerminalStatus,/Watcher: Not ready/);
+  assert.match(ui.state().wpTerminalStatus,/Last worker: Needs Review \/ native_source/);
+  assert.match(ui.state().wpTerminalStatus,/fingerprint\/version/);
+  const malformed=ui.statusClick('#ach-wp-terminal-refresh');
+  malformed.respond(nativeWpPolicy({enabled:true,last_worker:{state:'Needs Review',stage:'x',
+    reason:null,operation_id:null}}));
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+});
+
+test('Native WP malformed policy may never silently re-enable unattended Hosts edits',()=>{
+  const ui=loadUi();
+  const req=ui.statusClick('#ach-wp-terminal-refresh');
+  req.respond(nativeWpPolicy({enabled:true,auto_hosts:true}));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,true);
 });

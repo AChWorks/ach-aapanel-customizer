@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.53'
+WORKER_SOURCE_VERSION = '0.1.60'
 
 _STATE_DIR = DATA_DIR
 
@@ -155,6 +155,7 @@ class ach_customizer_main:
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
                   "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_")) else
+                  "lifecycle" if stage.startswith("wp_terminal_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
             response, module, stage, target=target,
@@ -175,10 +176,58 @@ class ach_customizer_main:
                 limit = int(self._argument(args, "limit", 50))
             except (TypeError, ValueError) as exc:
                 raise ActivityError("Invalid activity page size") from exc
-            entries = read_activity(_STATE_DIR, level=level, module=module, limit=limit)
+            # Manual-review evidence is an immutable plugin-owned Activity
+            # source, not an optional JSONL message. This primary-admin-only
+            # projection keeps actionable identities visible during JSONL
+            # persistence failures, ERROR verbosity and log rotation.
+            import ach_customizer_wp_terminal as terminal
+            stale_helper = getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v3"
+            from ach_customizer_activity import MAX_RESULTS
+            if (type(limit) is not int or not 1 <= limit <= MAX_RESULTS
+                    or level not in ("", "DEBUG", "INFO", "WARNING", "ERROR")
+                    or module not in ("", "monitor", "websites", "php_fpm",
+                                      "status_pages", "diagnostics", "lifecycle")):
+                raise ActivityError("Invalid activity filters or page size")
+            # Preserve unrelated Activity when aaPanel has retained an old
+            # helper import after ZIP upgrade. Do not claim to have read the
+            # private WP outbox until an operator-approved panel reload.
+            durable_manual, incomplete = (([], []) if stale_helper else
+                terminal.manual_review_activity(
+                    data_dir=_STATE_DIR, level=level, module=module,
+                    with_integrity=True))
+            log_warning = ("Resident WP helper stale; durable manual-review evidence "
+                           "unavailable until an approved panel reload" if stale_helper else None)
+            if incomplete:
+                warning = ("Incomplete private native WP manual-review evidence for "
+                           + str(len(incomplete)) + " operation(s); first Operation ID: "
+                           + incomplete[0] + ". Preserve files for independent OS review.")
+                log_warning = (log_warning + " " + warning) if log_warning else warning
+            try:
+                generic = read_activity(
+                    _STATE_DIR, level=level, module=module, limit=MAX_RESULTS)
+            except ActivityError:
+                if not durable_manual and not incomplete:
+                    raise
+                # Do not hide valid reports or the precise incomplete Outbox
+                # operation identity merely because rolling JSONL is damaged.
+                generic = []
+                warning = ("General Activity log unavailable; "
+                           + ("durable WordPress manual-review evidence shown" if durable_manual
+                              else "incomplete manual-review evidence metadata shown"))
+                log_warning = (log_warning + " " + warning) if log_warning else warning
+            seen = set()
+            entries = []
+            for event in durable_manual + generic:
+                key = (event["action"], event["operation_id"])
+                if key in seen and event["action"] == "wp_terminal_manual_review":
+                    continue
+                seen.add(key)
+                entries.append(event)
+            entries.sort(key=lambda item: (item["time_utc"], item["operation_id"]), reverse=True)
             return {"status": True, "request_id": request_id, "schema": 1,
-                    "entries": entries, "configured_level": configured_level(),
-                    "retention_max_bytes": 524288, "read_only": True}
+                    "entries": entries[:limit], "configured_level": configured_level(),
+                    "retention_max_bytes": 524288, "read_only": True,
+                    **({"activity_warning": log_warning} if log_warning else {})}
         except PermissionError as exc:
             return self._fail("activity_authorization", exc, request_id)
         except Exception as exc:
@@ -632,6 +681,75 @@ class ach_customizer_main:
         except Exception as exc:
             return self._fail("hosts_management", exc, request_id,
                               target=trusted_site_id)
+
+    def wp_terminal_manage(self, args):
+        """Primary-admin control of read-only WP failure observation.
+
+        New events never edit Hosts or PHP-FPM; historical journal Recheck
+        and separately approved legacy Restore remain distinct paths.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            action = self._argument(args, "terminal_action")
+            import ach_customizer_wp_terminal as terminal
+            if (action != "disable" and
+                    getattr(terminal, "MANUAL_REVIEW_CONTRACT", None) != "durable-manual-review-v3"):
+                response = self._fail(
+                    "wp_terminal_management", MonitorInputError(
+                        "Resident native WP helper is stale. Emergency disable remains available; "
+                        "a controlled aaPanel reload requires operator approval."), request_id)
+                response["reason_code"] = "resident_wp_helper_stale"
+                return response
+            inspect, restore = terminal.inspect, terminal.restore
+            recheck_recovery, abandon_witness = terminal.recheck_recovery, terminal.abandon_witness
+            if action == "inspect":
+                result = inspect(data_dir=_STATE_DIR)
+                level = "DEBUG"
+            elif action == "enable":
+                if self._argument(args, "reviewed") != "true":
+                    raise MonitorInputError("Explicit native WP read-only witness approval is required")
+                import public
+                if public.get_panel_version() != "8.0.7" or public.get_webserver() != "nginx":
+                    raise MonitorInputError("Native WP witness is verified only for aaPanel 8.0.7 Nginx")
+                from ach_customizer_wp_watcher import enable
+                result = enable(data_dir=_STATE_DIR)
+                level = "WARNING"
+            elif action == "disable":
+                from ach_customizer_wp_watcher import disable
+                result = disable(data_dir=_STATE_DIR)
+                level = "WARNING"
+            elif action == "recheck":
+                result = recheck_recovery(data_dir=_STATE_DIR)
+                level = "INFO" if result["state"] not in ("Needs Review", "Active or Unknown") else "WARNING"
+            elif action == "abandon":
+                if self._argument(args, "reviewed") != "true":
+                    raise MonitorInputError("Explicit stale WP witness abandonment approval is required")
+                result = abandon_witness(data_dir=_STATE_DIR)
+                level = "WARNING"
+            elif action == "restore":
+                if self._argument(args, "reviewed") != "true":
+                    raise MonitorInputError("Explicit recovery approval is required")
+                result = restore(self._argument(args, "recovery_id"), data_dir=_STATE_DIR)
+                level = "WARNING"
+            else:
+                raise MonitorInputError("Unsupported native WordPress terminal operation")
+            if action in ("inspect", "enable", "disable"):
+                from ach_customizer_wp_watcher import health
+                result = {**result, **health()}
+            return self._activity_result(
+                {"status": True, "schema": 1, "request_id": request_id, **result},
+                "lifecycle", "wp_terminal_" + action, level=level)
+        except PermissionError as exc:
+            return self._fail("wp_terminal_authorization", exc, request_id)
+        except Exception as exc:
+            # Only our own exception messages are suitable for the native UI.
+            from ach_customizer_wp_terminal import TerminalError
+            from ach_customizer_wp_watcher import WatcherError
+            if isinstance(exc, (TerminalError, WatcherError)):
+                return self._fail("wp_terminal_management", str(exc), request_id,
+                                  diagnostic_error=exc)
+            return self._fail("wp_terminal_management", exc, request_id)
 
     def _selected_native_website(self, args):
         """Revalidate a browser site snapshot using aaPanel's own site IDs.

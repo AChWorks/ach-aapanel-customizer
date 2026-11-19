@@ -37,6 +37,18 @@ def configured_level():
     return value if value in LEVELS else "INFO"
 
 
+def _exact_manual_review_target(target):
+    from ach_customizer_hosts import HostsInspectionError, _hostname
+    if not isinstance(target, str) or "." not in target:
+        raise ActivityError("Native WP manual-review domain is not canonical")
+    try:
+        if _hostname(target) != target:
+            raise ActivityError("Native WP manual-review domain is not canonical")
+    except HostsInspectionError as exc:
+        raise ActivityError("Invalid native WP manual-review hostname") from exc
+    return target
+
+
 def record(*, level, module, action, operation_id, stage, outcome,
            target="", error_class="", detail="", recovery_id=""):
     if level not in LEVELS or module not in MODULES:
@@ -52,7 +64,12 @@ def record(*, level, module, action, operation_id, stage, outcome,
         "stage": str(stage)[:72],
         "outcome": str(outcome)[:40],
         "operation_id": operation_id,
-        "target": str(target)[:120],
+        # Domain identity is not descriptive log text. The native WP
+        # manual-review event must preserve the *entire* canonical name.
+        # Other Activity targets retain their existing 120-character bound.
+        "target": _exact_manual_review_target(target) if (
+            module == "lifecycle" and action == "wp_terminal_manual_review"
+        ) else str(target)[:120],
         "error_class": str(error_class)[:64],
         "detail": str(detail)[:240],
         "recovery_id": str(recovery_id)[:64],
@@ -124,13 +141,58 @@ def _append_bytes(fd, data):
         view = view[count:]
 
 
-def append_activity(directory, event):
+def _manual_review_in_log(fd_dir, event):
+    """Confirm exact already-appended event under the Activity exclusive lock.
+
+    A crash after the log's fsync but before the durable outbox acknowledgement
+    must not append a duplicate on the next worker tick. Check both retained
+    Activity generations before any rotation or append.
+    """
+    for name in (LOG_NAME, LOG_NAME + ".1"):
+        fd = _open_optional(fd_dir, name)
+        if fd is None:
+            continue
+        try:
+            data = bytearray()
+            while len(data) <= MAX_LOG_BYTES:
+                part = os.read(fd, MAX_LOG_BYTES + 1 - len(data))
+                if not part:
+                    break
+                data.extend(part)
+            if len(data) > MAX_LOG_BYTES:
+                raise ActivityError("Activity deduplication source exceeded size limit")
+        finally:
+            os.close(fd)
+        for line in bytes(data).splitlines():
+            try:
+                previous = json.loads(line)
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise ActivityError("Unreadable Activity event during deduplication") from exc
+            if (isinstance(previous, dict) and
+                    previous.get("operation_id") == event["operation_id"] and
+                    previous.get("action") == "wp_terminal_manual_review"):
+                if previous != event:
+                    raise ActivityError("Conflicting manual-review event identity")
+                return True
+    return False
+
+
+def append_activity(directory, event, *, mandatory_manual_review=False):
     if (not isinstance(event, dict) or set(event) != _FIELDS
             or event.get("schema") != 1 or event.get("level") not in LEVELS
             or event.get("module") not in MODULES):
         raise ActivityError("Invalid activity record")
-    if LEVELS[event["level"]] < LEVELS[configured_level()]:
-        # Skipped by explicit verbosity policy, not a persisted log.
+    if mandatory_manual_review and not (
+            event["level"] == "WARNING" and event["module"] == "lifecycle"
+            and event["action"] == "wp_terminal_manual_review"
+            and event["stage"] == "native_terminal"
+            and event["outcome"] == "Manual Review Required"
+            and event["recovery_id"] == ""
+            and event["target"] == _exact_manual_review_target(event["target"])):
+        raise ActivityError("Only immutable native WP manual-review events bypass verbosity")
+    if not mandatory_manual_review and LEVELS[event["level"]] < LEVELS[configured_level()]:
+        # Ordinary debug/info/warning events honor the operator's log policy.
+        # Mandatory manual-review events remain visible at ERROR verbosity.
         return None
     body = (json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             + "\n").encode("utf-8")
@@ -143,6 +205,8 @@ def append_activity(directory, event):
         try:
             _check_file(fd_lock)
             fcntl.flock(fd_lock, fcntl.LOCK_EX)
+            if mandatory_manual_review and _manual_review_in_log(fd_dir, event):
+                return True
             fd = os.open(LOG_NAME, _WRITE_FLAGS, 0o600, dir_fd=fd_dir)
             try:
                 size = _check_file(fd)
@@ -180,53 +244,57 @@ def read_activity(directory, *, level="", module="", limit=50):
         raise ActivityError("Invalid module filter")
     if type(limit) is not int or not 1 <= limit <= MAX_RESULTS:
         raise ActivityError("Invalid activity page size")
-    fd_dir = _directory(directory)
     try:
+        fd_dir = _directory(directory)
         try:
-            fd_lock = os.open(LOCK_NAME, _READ_FLAGS, dir_fd=fd_dir)
-        except FileNotFoundError:
-            # Reading a fresh install must not create any persistent state.
-            for name in (LOG_NAME, LOG_NAME + ".1"):
-                try:
-                    os.stat(name, dir_fd=fd_dir, follow_symlinks=False)
-                except FileNotFoundError:
-                    continue
-                raise ActivityError("Activity history exists without its lock")
-            return []
-        try:
-            _check_file(fd_lock)
-            fcntl.flock(fd_lock, fcntl.LOCK_SH)
-            items = []
-            for filename in (LOG_NAME + ".1", LOG_NAME):
-                fd = _open_optional(fd_dir, filename)
-                if fd is None:
-                    continue
-                try:
-                    data = bytearray()
-                    while True:
-                        part = os.read(fd, 32768)
-                        if not part:
-                            break
-                        data.extend(part)
-                        if len(data) > MAX_LOG_BYTES:
-                            raise ActivityError("Activity read exceeded size limit")
-                finally:
-                    os.close(fd)
-                for line in bytes(data).splitlines():
+            try:
+                fd_lock = os.open(LOCK_NAME, _READ_FLAGS, dir_fd=fd_dir)
+            except FileNotFoundError:
+                # Reading a fresh install must not create any persistent state.
+                for name in (LOG_NAME, LOG_NAME + ".1"):
                     try:
-                        item = json.loads(line)
-                    except (ValueError, UnicodeDecodeError) as exc:
-                        raise ActivityError("Unreadable activity history") from exc
-                    if (not isinstance(item, dict) or set(item) != _FIELDS
-                            or item.get("schema") != 1
-                            or item.get("level") not in LEVELS
-                            or item.get("module") not in MODULES):
-                        raise ActivityError("Unsupported activity record")
-                    if (level and item["level"] != level) or (module and item["module"] != module):
+                        os.stat(name, dir_fd=fd_dir, follow_symlinks=False)
+                    except FileNotFoundError:
                         continue
-                    items.append(item)
-            return list(reversed(items[-limit:]))
+                    raise ActivityError("Activity history exists without its lock")
+                return []
+            try:
+                _check_file(fd_lock)
+                fcntl.flock(fd_lock, fcntl.LOCK_SH)
+                items = []
+                for filename in (LOG_NAME + ".1", LOG_NAME):
+                    fd = _open_optional(fd_dir, filename)
+                    if fd is None:
+                        continue
+                    try:
+                        data = bytearray()
+                        while True:
+                            part = os.read(fd, 32768)
+                            if not part:
+                                break
+                            data.extend(part)
+                            if len(data) > MAX_LOG_BYTES:
+                                raise ActivityError("Activity read exceeded size limit")
+                    finally:
+                        os.close(fd)
+                    for line in bytes(data).splitlines():
+                        try:
+                            item = json.loads(line)
+                        except (ValueError, UnicodeDecodeError) as exc:
+                            raise ActivityError("Unreadable activity history") from exc
+                        if (not isinstance(item, dict) or set(item) != _FIELDS
+                                or item.get("schema") != 1
+                                or item.get("level") not in LEVELS
+                                or item.get("module") not in MODULES):
+                            raise ActivityError("Unsupported activity record")
+                        if (level and item["level"] != level) or (module and item["module"] != module):
+                            continue
+                        items.append(item)
+                return list(reversed(items[-limit:]))
+            finally:
+                os.close(fd_lock)
         finally:
-            os.close(fd_lock)
-    finally:
-        os.close(fd_dir)
+            os.close(fd_dir)
+
+    except OSError as exc:
+        raise ActivityError("Activity history read unavailable: " + type(exc).__name__) from exc

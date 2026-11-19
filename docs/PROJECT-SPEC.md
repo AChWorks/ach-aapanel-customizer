@@ -101,9 +101,54 @@ Fail2ban compatibility. Site-level `.well-known`/OAuth/hotlink exceptions
 and authorized WordPress HTTPS URL, debugging, Cron and XML-RPC corrections
 are also required operational outcomes, not simply a list of diagnostics.
 
-Keep installation itself observation-only; automatic remediation begins
-only after explicit primary-admin approval of the particular compatible
-site/service policy. Unknown vendor layouts, IP trust assumptions, external
+Keep native plugin installation observation-only. **Unpublished 0.1.60**
+implements an opt-in, source-pinned **observation-only witness** of actual
+failed, single-site WP Toolkit installs: it captures a previously alias-free
+Hosts baseline during native setup, verifies the terminal failure and exact
+vendor-appended loopback alias, then reports **Manual Review Required** with
+its operation/domain through Activity. This expected outcome is not a failed
+systemd execution. The verified domain/Operation ID and immutable Activity
+event must be persisted in a bounded, private per-operation outbox *before*
+the terminal token. Preserve the entire canonical native domain (up to
+253 ASCII characters) in manual-review Activity; unrelated descriptive
+targets keep their existing bound. Atomically publish the initial Outbox
+record by fsyncing a private staging inode, atomic no-clobber rename, and directory
+fsync. Incomplete stages are non-authoritative. If older canonical evidence
+is malformed, retain it intact, identify the affected Operation ID in
+Routing/Activity while retaining other valid reports, and require explicit
+OS-operator review before private quarantine. Activity delivery must recover
+from restart, fsync-to-
+receipt crash, verbosity suppression and log rotation without duplicate
+operator-visible records. The native Routing panel must display the latest
+durable report even if last_worker is overwritten or Activity is unavailable.
+No new unattended Hosts mutation is permitted. A matching installed
+manifest or resident entrypoint version cannot prove Python helper freshness:
+non-emergency watcher controls must verify the **loaded helper** contract
+and fail closed if stale, while keeping Emergency disable accessible.
+A panel reload is separately authorized, never triggered by import. The
+originally requested **automatic post-terminal Hosts cleanup**
+and shared PHP-FPM desired-policy reconciliation both remain outstanding P0
+work; do not advertise this witness as recurrence prevention. An exact
+no-loss removal cannot rely on Linux F_SETLEASE alone: a lease can be forcibly
+revoked after the timeout while the holder is suspended, and an intervening
+uncoordinated writer can append data before ftruncate. Extra userland
+hash/stat/lease checks do not make that truncation atomic. Only an independently
+verified transactional writer-coordination design and subsequent Owner
+approval could reauthorize automatic deletion.
+
+Historical applied/prepared recovery journals remain supported: read-only,
+idempotent Recheck differentiates a true prepared Restore from an exact alias
+reappend by an unrelated actor; the latter must say Needs Review without
+claiming a successful Restore. Separately approved legacy Restore uses
+O_APPEND write semantics, so forced lease expiry cannot cause an offset-based
+overwrite of competing appended lines; uncertain results retain the recovery
+journal and require Recheck. Distinguish Enabled observation policy, actual
+watcher readiness and typed last worker result in UI and Activity. The feature
+does **not** authorize generic Hosts alias cleanup, batch WP install mutation,
+or shared PHP-FPM auto-enforcement. An aaPanel source update, active native
+operation, missed start or concurrent editor must produce actionable refusal
+evidence; sources are not patched in place.
+Unknown vendor layouts, IP trust assumptions, external
 WordPress integrations and Production deployments require their respective
 review/approval and working rollback. Issue #2 holds the exact current
 acceptance matrix; #21 holds installed/negative/recovery verification.

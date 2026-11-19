@@ -11,9 +11,11 @@ unfinished compatibility and acceptance live in
 
 ## Evidence versus support
 
-The verified installed nonproduction reference is **aaPanel 8.0.7 / Nginx
-1.28.3 / PHP-FPM 8.1 and 8.5**, with specific site, native ZIP and recovery
-tests recorded under #21. A reported source-file match, permitted read-only
+The verified installed nonproduction reference is **aaPanel 8.0.7 / Nginx /
+PHP-FPM 8.1 and 8.5**, with specific site, native ZIP and recovery
+tests recorded under #21. The guest currently reports **Nginx 1.30.6**
+(2026-11-19); earlier QA receipts used Nginx 1.28.3. These are observations,
+not a general Nginx-version support guarantee. A reported source-file match, permitted read-only
 inventory, synthetic HTTP probe or matching entrypoint version proves only
 its named observation. It does **not** certify every runtime worker, another
 PHP layout, real customer/private-data safety, DNS/TLS, aaPanel version or
@@ -158,7 +160,7 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal Hosts/FPM reconciliation remains a separate P0 requirement.
+Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.60 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -252,15 +254,142 @@ requires recovery inspection; do not blindly retry. If a provisioning tool
 recreates an alias, a new separately reviewed removal retains previous
 recovery material for forensics rather than overwriting it invisibly.
 
-**Not yet solved:** this manual step neither identifies WordPress Toolkit as
-the writer, guarantees external DNS/Gateway health, nor prevents repeated
-insertion. An event/lifecycle-level origin fix or compatible reconciliation
-still requires reproduction and isolated installed QA. This 0.1.52 source
-feature is **not** available in published native 0.1.51 and is not Production
-installation authorization.
+The manual tool alone cannot identify the writer, guarantee external
+DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.60**
+adds a **separate, opt-in, observer-only native WP Toolkit failed-install
+witness** described immediately below. Owner acceptance of the reduced
+observer scope is pending; automatic no-loss Hosts cleanup and shared PHP-FPM
+reconciliation remain OPEN P0. The manual 0.1.52 capability is **not**
+available in published native 0.1.51. Installed-package fixture QA has
+passed, but authenticated resident-watcher/end-to-end acceptance remains
+incomplete; this is not Production authorization.
 If a stale Python helper prevents inspection after an upgrade,
 use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
 not a blind server restart.
+
+## Native WordPress Toolkit failed-install witness (unpublished 0.1.60)
+
+The primary admin can explicitly enable **Routing & Nginx → Native WordPress
+failed-install witness**. Native ZIP installation/reinstallation does not enable
+it. Supported source: the verified **aaPanel 8.0.7 / Nginx** asynchronous
+`AddWPSite → add_sites → deploy_wp` lifecycle, pinned to the actual SHA-256
+fingerprints of `one_key_wp_v2.py`, `panel_site_v2.py` and panel version.
+An upgraded/mismatched native writer fails closed. Vendor source is never patched.
+
+A plugin-owned systemd `.path` and `.timer` schedule a bounded `.service`
+run on native progress changes, plus a 30-second lock-release fallback. Only
+an **active, pre-terminal** single-site progress event with a clean Hosts
+baseline can establish a root-owned witness. When the same native operation
+finishes with `status=1`, `initialize_wp_website.status=-1` and no native
+setup/batch lock, the worker compares current Hosts with the exact witnessed
+bytes plus `\n127.0.0.1 domain`. If the old alias was intentional or the file
+was changed independently, it reports a guarded refusal; for an exact new
+orphan alias it reports **Manual Review Required** with typed stage, operation ID and
+safe reason in the `wp_terminal_manual_review` Activity event. **It never edits /etc/hosts automatically**, never
+modifies shared PHP-FPM and never infers a missed pre-terminal event as safe.
+An OS operator must inspect the exact domain recorded in Activity and verify
+that the native setup is no longer active before making a manual Hosts change.
+Because aaPanel may delete failed-site records, the selected-site manual Hosts
+editor is not necessarily available for this case.
+
+**Why observation only:** Linux `F_SETLEASE/F_WRLCK` may be forcibly broken
+(`/proc/sys/fs/lease-break-time`). A worker suspended after its last
+`F_GETLEASE` check can resume after a foreign writer appends to the same
+inode. In-place `ftruncate` would then erase that foreign data, even if a
+later hash or journal identifies a conflict. Another pre-write check, process
+`flock` or optimistic file `rename` does not prove a no-loss invariant against
+uncoordinated writers. The old automatic deletion path is removed from the
+candidate; a safe, owner-approved transaction design remains a P0 future
+requirement. Do not describe prior successful 0.1.54 QA cleanup from the older
+candidate as evidence that this revised witness continues to delete aliases.
+
+**Historical recovery compatibility:** root-owned applied/prepared cleanup
+journals created by earlier QA candidates are retained through uninstall
+and reinstall. `Recheck historical recovery` is **read-only for Hosts** and
+reconciles an interrupted applied/policy write or `restore_prepared` crash
+using journal phase and verified before/after digests. An exact alias
+reappearing after phase `applied` **without `restore_prepared`** is external
+activity and returns Needs Review; it is not labelled a completed Restore.
+A separate primary-admin-approved legacy `Restore` requires an unchanged
+post-cleanup source and uses `O_APPEND` with a write lease; even if the
+lease expires and a competing writer appends first, the legacy Restore never
+writes over that writer's bytes at a stale file offset. Such an uncertain
+result retains `restore_prepared` and needs explicit Recheck. No new
+recovery journal is created by the read-only witness, and existing journals
+are not discarded by clearing the observation policy.
+
+**Durable manual-review delivery:** a detected exact terminal alias first
+creates a private, root-owned, bounded `*.manual-review.json` event with
+the canonical hostname, stable operation ID, timestamp, classification and
+delivery receipt. File and directory are synced *before* the terminal token
+is committed. This source-of-truth survives a crash between token and JSONL
+delivery, a failed Activity append, a disabled watcher and log rotation.
+Pending delivery retries on subsequent worker invocations without replaying
+Hosts edits. The Activity writer bypasses
+`ACH_CUSTOMIZER_ACTIVITY_LEVEL=ERROR` for this one essential WARNING and
+checks both retained JSONL generations under its lock before appending,
+preventing duplicate delivery after a crash between log fsync and receipt.
+The primary-admin Activity endpoint projects the private records exactly
+once, independently of rolling JSONL. General Activity filesystem read
+failures are reported as unavailable history (not admin authorization
+failure), preserving valid private Outbox events with an Activity warning.
+A verified canonical hostname is preserved in full (up to 253 ASCII characters after IDNA normalization),
+without the descriptive Activity target's 120-character shortening.
+Initial Outbox publication is atomic: a private fsynced staging file is
+atomically renamed to the canonical name using Linux RENAME_NOREPLACE without replacing any existing report or leaving a second hard link,
+then the directory is synced. An incomplete staging file is never an
+authoritative record. If the general log is corrupted or
+unavailable, the endpoint still shows durable manual-review evidence with
+a bounded warning. Routing Inspect shows the latest domain, Operation ID
+and delivery state after subsequent worker updates. An older malformed
+canonical record is preserved, not replaced. Other valid reports still
+appear, while Routing and primary-admin Activity report the first affected
+Operation ID and a `Needs Review` warning. Processing the matching active
+witness is blocked until separately reviewed recovery. Records remain
+private and retained; a separate future retention policy must not silently
+discard actionable manual-review evidence.
+
+**Recovery of malformed canonical evidence — OS-operator procedure only:**
+1. Disable the watcher, check native WP task and lock state, and identify
+   the exact affected Operation ID and the matching saved witness.
+2. Under separately authorized root maintenance, confirm regular-file
+   ownership and mode, inspect the exact file
+   `/www/server/panel/data/ach_customizer.wp-terminal.<operation-id>.manual-review.json`,
+   and preserve a verified protected byte-for-byte copy.
+3. After establishing that this **canonical** file is malformed, move that
+   exact file to a distinct private quarantine filename without overwriting
+   another file; sync the directory. Never delete the forensic copy, another
+   operation's report, or a historical recovery journal.
+4. Reinspect policy and original native progress. Resume the watcher only
+   through its separately authorized controls, and only when all normal
+   source/lock/timing guards remain satisfied. If stale, retain evidence and
+   arrange manual OS remediation instead of forcing replay.
+
+After ZIP upgrades, the resident aaPanel Python process may retain a
+previous `ach_customizer_wp_terminal` module despite exact installed bytes
+and a matching entrypoint version. The v0.1.60 endpoint checks the
+**loaded helper's** durable-review contract before non-emergency actions,
+refuses stale helpers with `resident_wp_helper_stale`, and leaves Emergency
+disable available. Ordinary general Activity remains readable with a
+bounded warning if outbox projection cannot be verified. A controlled
+panel-only reload requires separate target-specific operator approval; see
+[upgrade/recovery runbook](aapanel-upgrade-recovery.md).
+
+The status UI distinguishes policy **Enabled** from watcher **Ready** and
+explicitly says **Unattended Hosts edits: OFF**. Unsupported sources,
+malformed progress and external Hosts mismatches produce bounded,
+deduplicated lifecycle Activity; sensitive WordPress progress and credentials
+are not logged. `Emergency disable` persists the disabled policy before
+stopping plugin-owned systemd units. A stale witness is discarded only after
+Disable, Recheck, separately reviewed `Discard stale witness`, no native
+locks and no prepared recovery. Uninstall removes only verified owned units
+and retains root-owned recovery state. The former 64-recovery lifetime cap
+applies only to historical repair journal accounting, not to observation.
+
+Independent native QA previously established watcher timing, authentic
+WordPress success/failure and recovery on the old automatic candidate.
+Revised observation-only behavior requires fresh exact-source validation;
+previous native QA is not a source of approval for unattended writes.
 
 ## PHP-FPM scope and guarded change
 
