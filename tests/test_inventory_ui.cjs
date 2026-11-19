@@ -1754,6 +1754,40 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
   ui.statusSetValue('#ach-hosts-site-id',id,'input change');
 }
 
+test('101, 135 and 1001 native domains stay selectable and reach complete read-only tools', () => {
+  for (const count of [101,135,1001]) {
+    const ui=loadUi();
+    const inventory=hostsInventory();
+    inventory.sites[0].bound_domains=Array.from({length:count},(_,i)=>({
+      name:i===0 ? 'site.test' : 'alias'+String(i).padStart(4,'0')+'-'+
+        'a'.repeat(117)+'.test',port:80
+    }));
+    selectHostsSite(ui,'7',inventory);
+    assert.equal(ui.state().hostsInspectDisabled,false,'Site must be selectable: '+count);
+    const hostReq=ui.statusClick('#ach-hosts-inspect-button');
+    assert.match(hostReq.options.url,/s=inspect_local_hosts$/);
+    const snapshot=hostReq.options.data.expected_site_snapshot;
+    const native=JSON.parse(snapshot);
+    assert.equal(native[4].length,count);
+    if (count===1001) assert.ok(snapshot.length>110000);
+    const names=native[4].map(x=>x[0]);
+    hostReq.respond(hostsInspection({
+      domains:names,
+      entries:[{domain:'site.test',address:'127.0.0.2',line:3,loopback:true}]
+    }));
+    assert.match(ui.state().hostsResult,/State: Local Loopback Entry/);
+    assert.doesNotMatch(ui.state().hostsResult,/unconfirmed|incompatible/);
+    const vhost=ui.statusClick('#ach-vhost-inspect-button');
+    assert.equal(vhost.options.data.expected_site_snapshot,snapshot);
+    vhost.respond(vhostInspection({native_names:names,vhost_names:names}));
+    assert.match(ui.state().vhostResult,/Generated VHost: File Match/);
+    const cache=ui.statusClick('#ach-cache-inspect-button');
+    assert.equal(cache.options.data.expected_site_snapshot,snapshot);
+    cache.respond(cacheInspection());
+    assert.doesNotMatch(ui.state().cacheResult,/unavailable or incompatible/);
+  }
+});
+
 test('Valid website inventory unlocks initial site selection without authorizing any write', () => {
   const ui = loadUi();
   // The fake DOM does not reflect markup's initial disabled attribute.

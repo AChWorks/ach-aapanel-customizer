@@ -261,6 +261,25 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.assertTrue(worker.inspect("85",data_dir=str(self.state))["enabled"])
         self.assertEqual(self._run()["changed"],False)
 
+    def test_complete_138_site_mapping_can_enable_auto_without_any_host_write(self):
+        self.impact["matched_sites"]=[
+            {"id":i+3,"site_key":f"site-{i:04d}.example.test"}
+            for i in range(138)]
+        self.impact["site_count"]=138
+        before=self.config.read_bytes()
+        result=self._enable()
+        self.assertTrue(result["enabled"],result)
+        self.assertEqual(self.config.read_bytes(),before)
+        self.assertFalse((self.state/recovery.JOURNAL).exists())
+        self.assertEqual(self.calls,[])
+        saved=worker.inspect("85",data_dir=str(self.state))
+        self.assertTrue(saved["enabled"])
+        disabled=worker.set_enabled(
+            "85",False,data_dir=str(self.state),
+            expected_auto_revision=saved["state_revision"])
+        self.assertFalse(disabled["enabled"])
+        self.assertEqual(self.config.read_bytes(),before)
+
     def test_reviewed_impact_identity_rejects_all_stale_site_owners(self):
         from ach_customizer_state import set_enabled as monitor_toggle
         args = worker._args("85", DESIRED)

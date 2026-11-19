@@ -1971,13 +1971,12 @@
       var id = String(site.id);
       // A snapshot is an optimistic *comparison only*, not a domain/path source.
       var snapshot = nativeHostsSnapshot(site);
-      if (snapshot.length > 110000) return;
       hostsPageSites.set(id, {name:site.name, snapshot:snapshot});
       $('<option>').val(id).text(site.name + ' (#' + id + ')').appendTo(select);
     });
     root.find('#ach-hosts-result').text(
       hostsPageSites.size ? 'Select a website to inspect its origin-local /etc/hosts entries.' :
-      'No supported website selection on this page (domain inventory may be too large).');
+      'No website available for selection on this inventory page.');
     inspectionSummary('hosts', hostsPageSites.size ?
       'Website list ready. Select a website to check its local hosts entries.' :
       'No eligible websites on this inventory page.', hostsPageSites.size ? 'neutral' : 'review');

@@ -432,6 +432,21 @@ The saved shared PHP-FPM Monitor policy also uses the current Preview and
 direct Save click without requiring an additional checkbox. This only writes
 plugin-owned desired values, not shared service configuration.
 
+**Independent-review F1-F3 remediation (PR #103, pending new review):**
+the PHP-FPM Manual/Auto shared-impact consumer now accepts complete native
+mappings with 101+ sites rather than stopping at a fixed count. The
+selected-site Hosts, VHost, Cache and Status Pages endpoints also accept
+complete binding snapshots with 101, 135 and 1001 domains instead of the
+old 100-binding or 110000-character restrictions. The website is always
+re-read from aaPanel by native ID; stale names, roots and domain bindings
+remain rejection conditions, and supplied client paths/domains are never
+authoritative. The read-only Nginx candidate observer evaluates the actual
+Nginx source and retains a stable panel-version/webserver observation rather
+than rejecting recognizable sources solely by aaPanel version string.
+These changes do **not** extend Nginx/PHP-FPM/Cache writer eligibility.
+Full candidate CI, fresh independent approval, installed native QA and
+separate Owner Merge/Release permission must be checked for the new HEAD.
+
 ## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 
 The 0.1.62 candidate fixes the standalone systemd worker's missing

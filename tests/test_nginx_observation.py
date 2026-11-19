@@ -158,16 +158,43 @@ class CandidateConfigurationTests(unittest.TestCase):
         self.assertFalse(result["candidate_config_test_passed"])
         self.assertEqual(self.calls, [])
 
-    def test_unsupported_panel_and_unsafe_target_never_run_nginx(self):
+    def test_unsafe_selected_target_or_non_nginx_engine_never_runs_nginx(self):
         for name in ("../../etc/passwd", "*.example.test", "foo/bar"):
             self.site["name"] = name
-            with patch.object(nginx, "_run_bounded_dump", side_effect=AssertionError):
-                result = self.inspect(dump=lambda *a: self.fail("unexpected execution"))
+            result = self.inspect(dump=lambda *a: self.fail("unexpected execution"))
             self.assertEqual(result["state"], "Needs Review")
         self.site["name"] = "site.test"
-        self.panel.get_panel_version = lambda: "8.0.8"
+        self.panel.get_webserver = lambda: "apache"
         result = self.inspect(dump=lambda *a: self.fail("unexpected nginx"))
         self.assertEqual(result["state"], "Needs Review")
+
+    def test_recognized_newer_native_panel_and_135_bindings_are_observable(self):
+        self.panel.get_panel_version = lambda: "8.1.2"
+        self.site["bound_domains"] = [
+            {"name":f"alias{i:03d}.test","port":80} for i in range(135)]
+        observed = self.inspect()
+        self.assertEqual(observed["state"],"Candidate Included",observed)
+        self.assertEqual(self.calls,["alias000.test"])
+        self.assertFalse(observed["fix_supported"])
+        self.assertFalse(observed["runtime_verified"])
+
+    def test_panel_version_or_engine_drift_during_dump_refuses_local_http(self):
+        for kind in ("version","engine"):
+            with self.subTest(kind=kind):
+                self.calls.clear()
+                self.panel.get_panel_version=lambda:"8.1.2"
+                self.panel.get_webserver=lambda:"nginx"
+                def change_panel(*args):
+                    if kind == "version":
+                        self.panel.get_panel_version=lambda:"8.1.3"
+                    else:
+                        self.panel.get_webserver=lambda:"apache"
+                    return self.dump()
+                result = self.inspect(dump=change_panel)
+                self.assertEqual(result["state"],"Needs Review",result)
+                self.assertFalse(result["candidate_config_test_passed"])
+                self.assertEqual(result["origin_http"]["state"],"Not Attempted")
+                self.assertEqual(self.calls,[])
 
     def test_selected_symlink_source_refused(self):
         saved = self.dir / "saved.conf"
