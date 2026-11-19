@@ -155,6 +155,7 @@ class ach_customizer_main:
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
                   "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_")) else
+                  "lifecycle" if stage.startswith("wp_terminal_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
             response, module, stage, target=target,
@@ -675,6 +676,9 @@ class ach_customizer_main:
                 level = "WARNING"
             else:
                 raise MonitorInputError("Unsupported native WordPress terminal operation")
+            if action in ("inspect", "enable", "disable"):
+                from ach_customizer_wp_watcher import health
+                result = {**result, **health()}
             return self._activity_result(
                 {"status": True, "schema": 1, "request_id": request_id, **result},
                 "lifecycle", "wp_terminal_" + action, level=level)

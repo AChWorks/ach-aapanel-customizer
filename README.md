@@ -50,7 +50,9 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
 - **New unpublished 0.1.54 narrow exception:** native WP Toolkit failed-install
   `/etc/hosts` alias cleanup is opt-in, source-pinned to aaPanel **8.0.7 + Nginx**,
   and relies on a **pre-terminal witnessed** single-site operation plus an exact
-  vendor-appended `127.0.0.1` line. Missed, ambiguous, bulk, restarted, stale,
+  vendor-appended `127.0.0.1` line. Automatic edits require an enforceable
+  kernel write lease and suffix-only in-place change, otherwise they stop.
+  Missed, ambiguous, bulk, restarted, stale,
   foreign-edited and unsupported operations stop without automatic changes;
   the separate manual Hosts tool remains available. There is **no automatic
   shared PHP-FPM drift reconciliation**, general shared-cache purge, unsupported

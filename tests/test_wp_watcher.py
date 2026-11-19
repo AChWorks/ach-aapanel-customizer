@@ -29,6 +29,24 @@ class WatcherTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_health_discriminates_active_units_unsupported_source_and_missing_unit(self):
+        from unittest.mock import Mock
+        with patch.object(worker,"_native_supported"), patch.object(watcher,"_run"):
+            self.assertFalse(watcher.health(unit_root=self.units)["watcher_ready"])
+            watcher._ensure_units(self.units)
+            with patch.object(watcher.subprocess,"run",return_value=Mock(returncode=0)):
+                result=watcher.health(unit_root=self.units)
+                self.assertTrue(result["watcher_ready"])
+                self.assertTrue(result["watcher_source_verified"])
+            with patch.object(watcher.subprocess,"run",return_value=Mock(returncode=3)):
+                result=watcher.health(unit_root=self.units)
+                self.assertFalse(result["watcher_ready"])
+                self.assertEqual(result["watcher_status"],"Watcher units inactive")
+        with patch.object(worker,"_native_supported",side_effect=worker.TerminalError("Changed source")):
+            result=watcher.health(unit_root=self.units)
+            self.assertFalse(result["watcher_source_verified"])
+            self.assertEqual(result["watcher_status"],"Unsupported native source")
+
     def test_disabled_by_default_no_systemd_units_created(self):
         self.assertFalse(worker.inspect(data_dir=str(self.data))["enabled"])
         self.assertEqual(list(self.units.iterdir()), [])

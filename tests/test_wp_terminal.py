@@ -1,5 +1,9 @@
 """Real filesystem tests for the constrained native WP failure witness."""
+import fcntl
 import hashlib
+import os
+import errno
+import subprocess
 import json
 import sys
 import tempfile
@@ -88,7 +92,7 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertEqual(self.hosts.read_bytes(),self.before)
         self.assertRegex(result["recovery_id"],r"^[0-9a-f]{32}$")
-        self.assertEqual(self.tick()["state"],"No Witness")
+        self.assertEqual(self.tick()["state"],"Already Observed")
         self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],1)
         restored=worker.restore(result["recovery_id"],data_dir=str(self.data),hosts_path=str(self.hosts))
         self.assertEqual(restored["state"],"Restored")
@@ -154,7 +158,7 @@ class TestNativeWpWitness(unittest.TestCase):
         self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
         self.lock.unlink()
         self.progress_write(status=1,stages=(1,1,1,-1),domain="another.test")
-        self.assertEqual(self.tick()["state"],"Active or Unknown")
+        self.assertEqual(self.tick()["state"],"Needs Review")
         self.progress.unlink()
         self.progress.symlink_to(self.native)
         self.assertEqual(self.tick()["state"],"Needs Review")
@@ -267,6 +271,163 @@ class TestNativeWpWitness(unittest.TestCase):
         with self.assertRaisesRegex(worker.TerminalError,"Prepared"):
             worker.abandon_witness(data_dir=str(self.data))
         self.assertIsNotNone(worker.inspect(data_dir=str(self.data))["last_recovery"])
+
+    def test_crash_after_applied_journal_before_policy_save_rechecks_idempotently(self):
+        self.arm()
+        op=self.prepared_record()
+        with worker._locked_state(str(self.data)) as fd:
+            record=worker._read_recovery(fd,op)
+            record["phase"]="applied"
+            worker._save_recovery(fd,record)
+        self.lock.unlink()
+        self.progress_write(status=1,stages=(1,1,1,-1))
+        self.assertEqual(self.tick()["state"],"Recovery Required")
+        first=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
+        self.assertEqual(first["state"],"applied")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],1)
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery"],op)
+        second=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
+        self.assertEqual(second["state"],"applied")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],1)
+        restored=worker.restore(op,data_dir=str(self.data),hosts_path=str(self.hosts))
+        self.assertEqual(restored["state"],"Restored")
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
+
+    def test_crash_after_restore_write_before_journal_persist_rechecks_idempotently(self):
+        self.arm()
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        result=self.finish()
+        operation=result["recovery_id"]
+        with worker._locked_state(str(self.data)) as fd:
+            record=worker._read_recovery(fd,operation)
+            record["phase"]="restore_prepared"
+            worker._save_recovery(fd,record)
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        outcome=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
+        self.assertEqual(outcome["state"],"restored")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery_state"],"restored")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery"],operation)
+        self.assertEqual(worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))["state"],"restored")
+        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],1)
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
+        with self.assertRaises(worker.TerminalError):
+            worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
+
+    def test_existing_uncoordinated_writer_prevents_kernel_lease(self):
+        self.arm()
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        held=os.open(self.hosts,os.O_RDWR)
+        try:
+            result=self.finish()
+            self.assertEqual(result["state"],"Needs Review")
+            self.assertIn("lease unavailable",result["reason"])
+        finally:
+            os.close(held)
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
+        with worker._locked_state(str(self.data)) as fd:
+            active=worker._load(fd)["active"]
+            self.assertIsNone(worker._read_owned(fd,worker._recovery_name(active["operation"])))
+
+    def test_unsupported_kernel_lease_fails_closed_without_source_mutation(self):
+        self.arm()
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        original=fcntl.fcntl
+        def unsupported(fd,command,arg=0):
+            if command==fcntl.F_SETLEASE and arg==fcntl.F_WRLCK:
+                raise OSError(errno.EINVAL,"unsupported")
+            return original(fd,command,arg)
+        with patch.object(worker.fcntl,'fcntl',side_effect=unsupported):
+            result=self.finish()
+            self.assertEqual(result["state"],"Needs Review")
+            self.assertIn("lease unavailable",result["reason"])
+        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
+
+    def test_final_window_independent_rename_preserves_all_foreign_bytes(self):
+        self.arm()
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        outsider=self.orig/"external"
+        foreign=self.before+b"192.0.2.55 added-by-other-writer.test\n"
+        outsider.write_bytes(foreign)
+        outsider.chmod(0o644)
+        original=os.ftruncate
+        actions=[]
+        def race(fd,size):
+            # Noncooperating writer atomically publishes a new inode exactly
+            # after the leased worker's final check and before its truncate.
+            os.replace(outsider,self.hosts)
+            actions.append("renamed")
+            original(fd,size)
+        with patch.object(worker.os,'ftruncate',side_effect=race):
+            result=self.finish()
+            self.assertEqual(result["state"],"Needs Review")
+            self.assertIn("changed during guarded transaction",result["reason"])
+        self.assertEqual(actions,["renamed"])
+        self.assertEqual(self.hosts.read_bytes(),foreign)
+        self.assertEqual(worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))["state"],"Needs Review")
+        self.assertIn(b"added-by-other-writer",self.hosts.read_bytes())
+        with worker._locked_state(str(self.data)) as fd:
+            op=worker._load(fd)["active"]["operation"]
+            self.assertEqual(worker._read_recovery(fd,op)["phase"],"prepared")
+
+    def test_vendor_source_refusal_is_persisted_and_activity_deduplicated(self):
+        self.arm()
+        self.native.write_bytes(b"new vendor writer")
+        first=self.tick()
+        self.assertEqual(first["state"],"Needs Review")
+        status=worker.inspect(data_dir=str(self.data))
+        self.assertTrue(status["enabled"])
+        self.assertEqual(status["last_worker"]["state"],"Needs Review")
+        self.assertEqual(status["last_worker"]["stage"],"native_source")
+        self.assertIn("fingerprint",status["last_worker"]["reason"])
+        self.assertIn("fingerprint",status["last_reason"])
+        from ach_customizer_activity import LOG_NAME
+        log=self.data/LOG_NAME
+        records=[json.loads(x) for x in log.read_text().splitlines()]
+        self.assertEqual(len([x for x in records if x["action"]=="wp_terminal_refused"]),1)
+        for _ in range(4):
+            self.assertEqual(self.tick()["state"],"Needs Review")
+        self.assertEqual(log.read_text().count('"wp_terminal_refused"'),1)
+        self.assertEqual(self.hosts.read_bytes(),self.before)
+
+    def test_untrusted_progress_never_leaks_secrets_to_policy_or_activity(self):
+        self.arm()
+        self.progress.write_text('{"status":"secret-token-abc","admin_password":"secret-token-abc"}')
+        self.progress.chmod(0o644)
+        response=self.tick()
+        self.assertEqual(response["state"],"Needs Review")
+        status=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(status["last_worker"]["stage"],"native_progress")
+        self.assertNotIn("secret-token-abc",json.dumps(status))
+        for file in self.data.iterdir():
+            if file.suffix in (".json", ".jsonl"):
+                self.assertNotIn("secret-token-abc",file.read_text())
+
+    def test_noncooperating_new_open_is_blocked_in_final_window(self):
+        self.arm()
+        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
+        attempted=[]
+        actual=os.ftruncate
+        def attempt(fd,size):
+            code=("import os,sys; "
+                  "p=sys.argv[1]; "
+                  "fd=os.open(p,os.O_WRONLY|os.O_NONBLOCK); "
+                  "os.write(fd,b'\\n192.0.2.55 foreign.test');os.close(fd)")
+            result=subprocess.run([sys.executable,'-c',code,str(self.hosts)],
+                                  capture_output=True,text=True,timeout=3)
+            attempted.append(result.returncode)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('BlockingIOError',result.stderr)
+            actual(fd,size)
+        with patch.object(worker.os,'ftruncate',side_effect=attempt):
+            result=self.finish()
+        self.assertEqual(attempted,[1])
+        # Competing open was denied by the kernel, not an application flock.
+        # A requested lease break may mark the operation uncertain; the source
+        # must never contain an incomplete independent writer's record.
+        self.assertIn(result["state"],("Alias Removed","Needs Review"))
+        with open(self.hosts,'ab') as handle:
+            handle.write(b"\n192.0.2.55 foreign.test")
+        self.assertIn(b"192.0.2.55 foreign.test",self.hosts.read_bytes())
 
     def test_stale_foreign_change_rejects_restore(self):
         self.arm()

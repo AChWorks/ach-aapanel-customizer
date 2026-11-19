@@ -285,9 +285,16 @@ current `/etc/hosts` bytes **only when the intended domain has no prior
 Hosts alias**. When the same native progress inode/domain reaches terminal
 `status=1`, `initialize_wp_website.status=-1`, and no WP/batch lock exists,
 the worker checks that `/etc/hosts` equals the witness **plus exactly**
-`\n127.0.0.1 domain`. A prepared journal and recovery backup precede the
-existing descriptor-anchored, same-directory atomic CAS replacement.
-Successful installs and unrelated or changed Hosts never trigger a write.
+`\n127.0.0.1 domain`. A prepared journal and recovery backup precede any edit. The final
+edit is **not** an optimistic read/hash-then-rename: an enforceable Linux
+kernel **write lease** must first protect the original Hosts inode. The
+worker revalidates its identity and bytes under that lease and trims only
+the exact vendor-appended EOF suffix; a concurrent independent `rename`
+publishes another inode, which it never overwrites. An existing writer's
+open descriptor prevents lease acquisition, while conflicting new opens
+are blocked by the kernel. Unsupported leases, break notifications and
+changed file identities **fail closed** with recovery evidence. Explicit
+Restore uses the same lease boundary to reappend only the saved suffix.
 
 If the watcher misses setup before terminality, the native progress file is
 replaced, aaPanel source changes, the domain already had any alias, a bulk
@@ -297,15 +304,25 @@ third-party mappings, general loopback aliases, or unobserved operations.
 No network, DNS or HTTPS health is inferred. `Emergency disable` stores
 **disabled** before attempting to stop the plugin-owned units; an
 interrupted `prepared` journal refuses automatic retry. `Recheck interrupted
-recovery` is read-only for `/etc/hosts` and reconciles only verified
-before/after digests, then a separately consented **Restore** can restore
-exact original bytes if the file still matches the saved after-state.
+recovery` is read-only for `/etc/hosts`. It reconciles independently
+verified source digests after a persisted `applied` journal but interrupted
+policy save, or after a completed Restore with an interrupted journal update.
+Repeated Recheck is idempotent and never retries a filesystem edit. A
+separately consented **Restore** is allowed only if Hosts still matches
+the saved after-state.
 A stale witness whose original progress was overwritten can be discarded only
 by an explicit **Disable → Recheck → Discard stale witness** sequence with an
 additional operator checkbox, no active native lock and **no** prepared
 journal; no Hosts edit occurs. The initial implementation intentionally
 limits automatic recoveries to 64 per retained policy for bounded evidence;
 a later policy/journal-retention design is required before that threshold.
+
+Enabled policy and **watcher readiness** are separate observations. Native
+Inspect reports real systemd path/timer health, native source validity and
+the last persisted worker state, typed stage, safe cause and operation ID.
+Material refusals (source upgrade, unreadable progress, unsafe Hosts) are
+recorded once per distinct outcome in the bounded lifecycle Activity log;
+the same timer refusal does not flood diagnostics or expose credentials.
 
 The worker stores state/recovery under aaPanel's private plugin state
 directory, bounded Activity records and root-owned systemd unit files.

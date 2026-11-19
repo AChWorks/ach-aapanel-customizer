@@ -112,6 +112,31 @@ def _disable_services():
         _run("disable", "--now", UNIT + "." + extension)
 
 
+def health(*, unit_root=UNIT_ROOT):
+    """Read-only unit/source readiness; never infer real event timing."""
+    try:
+        worker._native_supported()
+    except (OSError, worker.TerminalError):
+        return {"watcher_ready": False, "watcher_status": "Unsupported native source",
+                "watcher_source_verified": False}
+    try:
+        for ext in ("path", "timer", "service"):
+            if not _trusted_unit(unit_root / (UNIT + "." + ext), UNITS[ext]):
+                return {"watcher_ready": False, "watcher_status": "Watcher units not installed",
+                        "watcher_source_verified": True}
+        for ext in ("path", "timer"):
+            proc = subprocess.run(["systemctl", "is-active", "--quiet", UNIT + "." + ext],
+                                  capture_output=True, timeout=4)
+            if proc.returncode:
+                return {"watcher_ready": False, "watcher_status": "Watcher units inactive",
+                        "watcher_source_verified": True}
+        return {"watcher_ready": True, "watcher_status": "Units active; native event timing not yet certified",
+                "watcher_source_verified": True}
+    except (OSError, subprocess.TimeoutExpired, WatcherError):
+        return {"watcher_ready": False, "watcher_status": "Watcher service state unverified",
+                "watcher_source_verified": True}
+
+
 def enable(*, data_dir=worker.DATA_DIR, unit_root=UNIT_ROOT):
     worker._native_supported()
     if not Path(PANEL_PYTHON).exists() or not Path(PLUGIN_WORKER).is_file():

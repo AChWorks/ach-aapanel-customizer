@@ -110,6 +110,11 @@ active, verify actual terminal failure and unique vendor source fingerprints,
 then accept only an exact new temporary loopback append to a previously
 clean `/etc/hosts` file. A prepared write journal, root-owned backup,
 read-only crash-window Recheck and separately reviewed Restore are mandatory.
+Autonomous changes must not lose independent concurrent Hosts writes:
+require a kernel-enforced write lease, exact same-inode suffix change and
+fail-closed unsupported mode. Recheck must reconcile applied and restored
+crash windows without replaying edits. Distinguish Enabled policy, systemd
+watcher readiness and the last typed, bounded operational refusal in UI/Activity.
 The feature does **not** authorize generic Hosts alias cleanup, batch WP
 install mutation or shared PHP-FPM auto-enforcement. An aaPanel source update,
 active operation, missed start or concurrent editor must fail closed and

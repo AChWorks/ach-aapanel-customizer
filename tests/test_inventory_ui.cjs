@@ -8375,7 +8375,9 @@ function nativeWpPolicy(extra={}) {
   return Object.assign({status:true, schema:1, request_id:'a'.repeat(32),
     enabled:false, revision:0, last_reason:'Disabled', last_recovery:null,
     last_recovery_state:null, active_domain:null, recoveries:0,
-    auto_fpm:false, read_only:true, scope:'failed_native_single_site_wp_toolkit'},extra);
+    auto_fpm:false, read_only:true, scope:'failed_native_single_site_wp_toolkit',
+    watcher_ready:false, watcher_source_verified:false, watcher_status:'Watcher units not installed',
+    last_worker:{state:'Not Observed',stage:'idle',reason:'No event evaluated',operation_id:null}},extra);
 }
 
 test('Native WP failure cleanup stays disabled until a reviewed enable, and has emergency disable',()=>{
@@ -8459,4 +8461,23 @@ test('Native WP stale witness needs independent review and recheck never implies
   const inspection=ui.statusClick('#ach-wp-terminal-refresh');
   inspection.respond(nativeWpPolicy({enabled:false,active_domain:null,last_reason:'Operator abandoned'}));
   assert.match(ui.state().wpTerminalStatus,/Operator abandoned/);
+});
+
+test('Native WP last worker refusal and watcher readiness remain visibly distinct from Enabled',()=>{
+  const ui=loadUi();
+  const policy=nativeWpPolicy({enabled:true,revision:2,
+    watcher_ready:false,watcher_source_verified:false,watcher_status:'Unsupported native source',
+    last_worker:{state:'Needs Review',stage:'native_source',
+      reason:'Pinned aaPanel WordPress source fingerprint/version mismatch or unreadable',
+      operation_id:'a'.repeat(32)}});
+  ui.statusClick('#ach-wp-terminal-refresh').respond(policy);
+  assert.match(ui.state().wpTerminalStatus,/Auto Hosts: Enabled/);
+  assert.match(ui.state().wpTerminalStatus,/Watcher: Not ready/);
+  assert.match(ui.state().wpTerminalStatus,/Last worker: Needs Review \/ native_source/);
+  assert.match(ui.state().wpTerminalStatus,/fingerprint\/version/);
+  const malformed=ui.statusClick('#ach-wp-terminal-refresh');
+  malformed.respond(nativeWpPolicy({enabled:true,last_worker:{state:'Needs Review',stage:'x',
+    reason:null,operation_id:null}}));
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
 });

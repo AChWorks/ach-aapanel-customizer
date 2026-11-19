@@ -76,6 +76,18 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
             self.assertTrue(response["status"],response)
             abandon.assert_called_once()
 
+    def test_wp_terminal_error_activity_uses_lifecycle_not_monitor(self):
+        import json
+        from ach_customizer_activity import LOG_NAME
+        response=self.plugin.wp_terminal_manage({"terminal_action":"enable"})
+        self.assertFalse(response["status"])
+        events=[json.loads(x) for x in (Path(MODULE._STATE_DIR)/LOG_NAME).read_text().splitlines()]
+        event=events[-1]
+        self.assertEqual(event["module"],"lifecycle")
+        self.assertEqual(event["action"],"wp_terminal_management")
+        self.assertEqual(event["stage"],"wp_terminal_management")
+        self.assertNotIn("password",json.dumps(event))
+
     def test_authorization_failure_precedes_policy_access(self):
         with patch.object(MODULE.ach_customizer_main,"_status_primary_admin_post",side_effect=PermissionError("admin")), \
                 patch("ach_customizer_wp_watcher.enable") as enable:
