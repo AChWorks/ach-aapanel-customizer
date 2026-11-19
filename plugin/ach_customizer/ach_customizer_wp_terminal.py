@@ -1,9 +1,11 @@
-"""Opt-in, fail-closed native WP Toolkit terminal witness and exact Hosts repair.
+"""Opt-in, fail-closed native WP Toolkit terminal witness and manual Hosts review.
 
 Only aaPanel 8.0.7's verified asynchronous single-site WP2 writer is supported.
-The event-driven worker must observe an *active* progress record and an absent
-alias before it will consider an exact, newly appended vendor record on failure.
-No general-purpose /etc/hosts cleanup, foreign site recovery or polling exists.
+The event-driven worker observes an *active* progress record and an absent
+alias before it may report an exact, newly appended vendor record on failure.
+It never automatically edits /etc/hosts: Linux write leases can be forcibly
+broken even after a successful final check, making unattended truncation unsafe.
+Older applied journals remain inspectable and explicitly restorable.
 """
 from __future__ import annotations
 
@@ -202,7 +204,7 @@ def inspect(*, data_dir=DATA_DIR):
             "last_recovery": recovery_id,
             "active_domain": value["active"]["domain"] if value["active"] else None,
             "last_recovery_state": recovery_state,
-            "scope": "failed_native_single_site_wp_toolkit", "auto_hosts": value["enabled"],
+            "scope": "failed_native_single_site_wp_toolkit", "auto_hosts": False,
             "auto_fpm": False, "read_only": True}
     finally:
         os.close(fd)
@@ -237,18 +239,21 @@ def _worker_outcome(fd, policy, state, stage, reason, *, data_dir, operation=Non
         operation = policy["active"]["operation"]
     observed = {"state": state, "stage": stage, "reason": reason,
                 "operation_id": operation}
+    review_states = ("Needs Review", "Recovery Required", "Manual Review Required")
     if policy["last_worker"] != observed:
         policy["last_worker"] = observed
-        if state in ("Needs Review", "Recovery Required"):
+        if state in review_states:
             policy["last_reason"] = reason
         _save(fd, policy)
-        if state in ("Needs Review", "Recovery Required"):
+        if state in review_states:
             try:
                 from ach_customizer_activity import append_activity, record
                 durable_recovery = (operation if operation and
                     _read_owned(fd, _recovery_name(operation), max_bytes=4096) is not None else "")
                 entry = record(
-                    level="WARNING", module="lifecycle", action="wp_terminal_refused",
+                    level="WARNING", module="lifecycle",
+                    action="wp_terminal_manual_review" if state == "Manual Review Required"
+                           else "wp_terminal_refused",
                     operation_id=operation or uuid4().hex,
                     stage=stage, outcome=state, target=domain,
                     detail=reason, recovery_id=durable_recovery)
@@ -258,7 +263,7 @@ def _worker_outcome(fd, policy, state, stage, reason, *, data_dir, operation=Non
                 logging.getLogger("ach_customizer").exception(
                     "Native WP operational refusal Activity persistence failed")
     return {"state": state, "changed": False,
-            **({"reason": reason} if state in ("Needs Review", "Recovery Required") else {}),
+            **({"reason": reason} if state in review_states else {}),
             **({"recovery_id": operation} if state == "Recovery Required" and operation and
                 _read_owned(fd, _recovery_name(operation), max_bytes=4096) is not None else {})}
 
@@ -314,28 +319,26 @@ def _read_recovery(fd, operation):
     return row
 
 
-def _edit_hosts_with_kernel_lease(parent, *, expected, desired, baseline, operation,
-                                  prepare):
-    """Edit only the witnessed EOF suffix with Linux's enforced write lease.
+def _append_hosts_with_kernel_lease(parent, *, expected, desired, baseline, operation,
+                                    prepare):
+    """Append a *reviewed legacy Restore* suffix without overwriting other data.
 
-    F_WRLCK rejects *existing* opens and blocks new opens/truncates by
-    noncooperating processes. The operation modifies the leased inode, NOT a
-    staged os.replace: a concurrent rename publishes an independent new inode,
-    which remains untouched. After the edit the pathname must still resolve
-    to our inode or the journal is left for explicit Recheck.
+    This is NEVER used for unattended removal. Even a successfully acquired
+    Linux write lease can be forcibly broken after lease-break-time. The
+    explicitly reviewed legacy Restore therefore uses O_APPEND + write(2),
+    not pwrite at a stale offset: a competing append that wins before ours
+    survives unchanged, followed by a Needs Review journal outcome.
 
-    A plugin flock, a stat/hash followed by rename, and write leases without
-    checking the active inode would NOT close the reviewer-identified race.
-    Unsupported leases, interruption or owner/source drift fail closed.
+    This does not assert exclusion of arbitrary third-party file writers or
+    guarantee a successful Restore when external changes occur. No truncate,
+    rename of Hosts or other destructive syscall is permitted here.
     """
     if (not isinstance(operation, str) or not OP.fullmatch(operation)
             or not isinstance(expected, bytes) or not isinstance(desired, bytes)
-            or not (expected.startswith(desired) or desired.startswith(expected))
-            or expected == desired):
-        raise TerminalError("Unsupported native WP Hosts suffix transaction")
-    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+            or not desired.startswith(expected) or expected == desired):
+        raise TerminalError("Only guarded append-only legacy Restore is available")
+    flags = os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
     source = os.open("hosts", flags, dir_fd=parent)
-    leased = False
     previous_signal = None
     breaking = False
 
@@ -348,10 +351,8 @@ def _edit_hosts_with_kernel_lease(parent, *, expected, desired, baseline, operat
         signal.signal(signal.SIGIO, lease_break)
         try:
             fcntl.fcntl(source, fcntl.F_SETLEASE, fcntl.F_WRLCK)
-            leased = True
         except OSError as exc:
-            raise TerminalError("Kernel write lease unavailable for Hosts; use manual review") from exc
-
+            raise TerminalError("Kernel write lease unavailable for legacy Restore; use manual review") from exc
         before = os.fstat(source)
         pathname = os.stat("hosts", dir_fd=parent, follow_symlinks=False)
         if (not _same_identity(baseline, before) or not _same_identity(before, pathname)
@@ -360,40 +361,40 @@ def _edit_hosts_with_kernel_lease(parent, *, expected, desired, baseline, operat
                 or os.listxattr(source)):
             raise TerminalError("Hosts source changed or has unsupported metadata under write lease")
         if os.lseek(source, 0, os.SEEK_SET) != 0 or os.read(source, len(expected) + 1) != expected:
-            raise TerminalError("Hosts source changed before guarded edit")
+            raise TerminalError("Hosts source changed before guarded legacy Restore")
         if breaking or fcntl.fcntl(source, fcntl.F_GETLEASE) != fcntl.F_WRLCK:
-            raise TerminalError("Hosts writer requested access during guarded edit")
+            raise TerminalError("Hosts writer requested access during guarded legacy Restore")
 
-        # No external file rewrite occurs before the prepared journal is
-        # durable. A failure from this point onward requires explicit Recheck.
+        # The pre-append recovery phase is durable before touching Hosts.
         prepare()
         if (breaking or fcntl.fcntl(source, fcntl.F_GETLEASE) != fcntl.F_WRLCK
                 or os.path.lexists(LOCK) or os.path.lexists(BATCH_LOCK)):
             raise TerminalError("Hosts lease changed or native task restarted; Recheck recovery")
-        if (os.stat("hosts", dir_fd=parent, follow_symlinks=False).st_ino != before.st_ino
-                or os.stat("hosts", dir_fd=parent, follow_symlinks=False).st_dev != before.st_dev):
+        identity = os.stat("hosts", dir_fd=parent, follow_symlinks=False)
+        if identity.st_ino != before.st_ino or identity.st_dev != before.st_dev:
             raise TerminalError("Hosts pathname changed; Recheck recovery")
-        if len(desired) < len(expected):
-            os.ftruncate(source, len(desired))
-        else:
-            suffix = desired[len(expected):]
-            if os.pwrite(source, suffix, len(expected)) != len(suffix):
-                raise TerminalError("Partial Hosts suffix append; Recheck recovery")
+
+        # Atomic EOF assignment by the kernel. Even if an uncoordinated writer
+        # is admitted after forced lease expiration, never overwrite its bytes.
+        suffix = desired[len(expected):]
+        if os.write(source, suffix) != len(suffix):
+            raise TerminalError("Partial legacy Restore append; Recheck recovery")
         os.fsync(source)
         after = os.fstat(source)
         if (after.st_size != len(desired) or os.lseek(source, 0, os.SEEK_SET) != 0
                 or os.read(source, len(desired) + 1) != desired):
-            raise TerminalError("Hosts write outcome uncertain; Recheck recovery")
+            raise TerminalError("Legacy Restore changed or source diverged; Recheck recovery")
         identity = os.stat("hosts", dir_fd=parent, follow_symlinks=False)
         if (identity.st_ino != after.st_ino or identity.st_dev != after.st_dev
                 or breaking or fcntl.fcntl(source, fcntl.F_GETLEASE) != fcntl.F_WRLCK):
-            raise TerminalError("Hosts changed during guarded transaction; Recheck recovery")
+            raise TerminalError("Hosts changed during guarded legacy Restore; Recheck recovery")
     finally:
+        # Closing our sole open-file description releases the lease even if
+        # the kernel already forcibly revoked it. F_UNLCK can return EAGAIN
+        # after such a break and must not conceal the actual write outcome.
         try:
-            if leased:
-                fcntl.fcntl(source, fcntl.F_SETLEASE, fcntl.F_UNLCK)
-        finally:
             os.close(source)
+        finally:
             if previous_signal is not None:
                 signal.signal(signal.SIGIO, previous_signal)
 
@@ -408,7 +409,7 @@ def _source_payload(path):
 
 def process_event(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGRESS,
                   native_source=NATIVE_SOURCE, now_ns=None):
-    """Handle one filesystem notification. No automatic retries of uncertain edits."""
+    """Handle one native filesystem notification without editing Hosts."""
     now_ns = time.time_ns() if now_ns is None else now_ns
     with _locked_state(data_dir) as fd:
         policy = _load(fd)
@@ -433,7 +434,7 @@ def process_event(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGRESS
                 fd, policy, "Needs Review", "native_progress",
                 "Native WordPress progress unreadable or malformed; inspect vendor task",
                 data_dir=data_dir)
-        # A completed task that was never witnessed is not a write authority.
+        # A completed task without pre-terminal context is not a trustworthy detection.
         if progress["status"] == 1 and policy["active"] is None:
             if policy["last_token"] == progress["token"]:
                 return {"state": "Already Observed", "changed": False}
@@ -459,7 +460,7 @@ def process_event(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGRESS
                     data_dir=data_dir, domain=active["domain"])
             if (not os.path.lexists(LOCK) or progress["mtime_ns"] + 1_000_000_000 < policy["enabled_ns"]
                     or abs(now_ns - progress["mtime_ns"]) > MAX_AGE_NS
-                    or progress["steps"][3] not in (0, 2) or policy["recoveries"] >= MAX_RECOVERIES):
+                    or progress["steps"][3] not in (0, 2)):
                 return _worker_outcome(
                     fd, policy, "Active or Unknown", "native_progress",
                     "Native task start, staleness, lock or lifetime guard not satisfied",
@@ -514,86 +515,50 @@ def process_event(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGRESS
             except (HostsManageError, OSError):
                 return _worker_outcome(
                     fd, policy, "Needs Review", "witness_backup",
-                    "Native WordPress witness backup unavailable; Recheck required",
+                    "Native WordPress witness backup unavailable; inspect manually",
                     data_dir=data_dir, domain=active["domain"])
             if _sha(old) != active["source_sha"]:
                 return _worker_outcome(
                     fd, policy, "Needs Review", "witness_backup",
-                    "Native WordPress witness backup fingerprint changed; Recheck required",
+                    "Native WordPress witness backup fingerprint changed; inspect manually",
                     data_dir=data_dir, domain=active["domain"])
-            marker = b"\n127.0.0.1 " + active["domain"].encode("ascii")
             if _read_owned(fd, _recovery_name(active["operation"]), max_bytes=4096) is not None:
                 return _worker_outcome(
                     fd, policy, "Recovery Required", "recovery_journal",
-                    "Native WordPress recovery journal exists; Recheck before another edit",
+                    "Prior native WP recovery journal exists; Recheck before another action",
                     data_dir=data_dir, domain=active["domain"])
             try:
-                parent = _open_parent(hosts_path)
+                current = _source_payload(hosts_path)
             except (HostsManageError, OSError):
                 return _worker_outcome(
-                    fd, policy, "Needs Review", "hosts_write_guard",
-                    "Trusted Hosts parent unavailable; no automatic write",
+                    fd, policy, "Needs Review", "hosts_observation",
+                    "Trusted Hosts source unavailable; inspect manually",
                     data_dir=data_dir, domain=active["domain"])
-            try:
-                try:
-                    current, meta = _read_source(parent)
-                except (HostsManageError, OSError):
-                    return _worker_outcome(
-                        fd, policy, "Needs Review", "hosts_write_guard",
-                        "Trusted Hosts source changed before guarded edit; no write",
-                        data_dir=data_dir, domain=active["domain"])
-                if current != old + marker:
-                    reason, state, changed = "Hosts no longer matches the exact vendor append; no rewrite", "Needs Review", False
-                else:
-                    # Guard the terminal and effective policy again before the CAS.
-                    if not _load(fd)["enabled"] or os.path.lexists(LOCK) or os.path.lexists(BATCH_LOCK):
-                        return {"state": "Active or Unknown", "changed": False}
-                    operation = active["operation"]
-                    record = {"schema": 1, "operation": operation, "domain": active["domain"],
-                              "phase": "prepared", "before_sha": _sha(current), "after_sha": _sha(old),
-                              "backup": _baseline_name(operation)}
-                    try:
-                        _edit_hosts_with_kernel_lease(
-                            parent, expected=current, desired=old,
-                            baseline=meta, operation=operation,
-                            prepare=lambda: _save_recovery(fd, record))
-                    except (OSError, TerminalError, HostsManageError) as exc:
-                        return _worker_outcome(
-                            fd, policy, "Needs Review", "hosts_write_guard",
-                            str(exc) if isinstance(exc, TerminalError) else
-                            "Guarded Hosts write failed; Recheck recovery evidence",
-                            data_dir=data_dir, domain=active["domain"])
-                    record["phase"] = "applied"
-                    _save_recovery(fd, record)
-                    policy["last_recovery"] = operation
-                    policy["recoveries"] += 1
-                    reason, state, changed = "Exact failed native WP temporary alias removed", "Alias Removed", True
-            finally:
-                os.close(parent)
+            if current == old + b"\n127.0.0.1 " + active["domain"].encode("ascii"):
+                # No linearizable conditional deletion syscall is available for
+                # uncoordinated writers. A Linux write lease is time-bounded;
+                # F_GETLEASE followed by ftruncate may erase a later append.
+                # Preserve the entire file, record a safe manual-review result,
+                # and retire this witnessed terminal token (no retry).
+                reason, state, changed = (
+                    "Exact native WP failed-install alias observed; Hosts unchanged; inspect Activity and remove manually",
+                    "Manual Review Required", False)
+            else:
+                reason, state, changed = (
+                    "Hosts differs from witnessed vendor append; no edit; inspect manually",
+                    "Needs Review", False)
         else:
             reason, state, changed = "Native WP result is not an eligible terminal install", "Needs Review", False
         policy["active"] = None
         policy["last_token"] = progress["token"]
         policy["last_reason"] = reason
-        _save(fd, policy)
-        if not changed:
-            _release_unused_baseline(fd, active["operation"])
+        # Commit terminal token AND the actionable last-worker state together.
+        # A crash between two separate policy writes would otherwise leave an
+        # Already Observed token without the manual-review Activity evidence.
         _worker_outcome(fd, policy, state, "native_terminal", reason,
                         data_dir=data_dir, operation=active["operation"], domain=active["domain"])
-        if changed:
-            try:
-                from ach_customizer_activity import append_activity, record
-                event = record(
-                    level="WARNING", module="lifecycle", action="wp_terminal_auto",
-                    operation_id=active["operation"], stage="native_wp_terminal",
-                    outcome=state, target=active["domain"],
-                    detail=reason, recovery_id=active["operation"] if changed else "")
-                append_activity(data_dir, event)
-            except Exception:
-                # Recovery and source outcome are already persisted: an Activity
-                # failure cannot justify a second edit or an automatic retry.
-                import logging
-                logging.getLogger("ach_customizer").exception("Native WP terminal Activity persistence failed")
+        if not changed:
+            _release_unused_baseline(fd, active["operation"])
         return {"state": state, "changed": changed, "domain": active["domain"],
                 "recovery_id": policy["last_recovery"] if changed else None,
                 "reason": reason}
@@ -653,9 +618,14 @@ def recheck_recovery(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGR
             return {"state": "Needs Review", "changed": False, "recovery_id": recovery_id,
                     "reason": "Hosts differs from both saved versions"}
 
-        # Phase and the actual source *together* establish the outcome. An
-        # already-persisted `applied` / `restored` journal may predate the final
-        # policy save; an interrupted Restore can leave `restore_prepared`.
+        # An exact marker reappearing after a completed historical applied journal is
+        # external activity, NOT evidence of an approved Restore. Only a
+        # persisted restore_prepared intent can reconcile a crashed Restore.
+        if record["phase"] == "applied" and current_hash == record["before_sha"]:
+            return {"state": "Needs Review", "changed": False, "recovery_id": recovery_id,
+                    "reason": "Exact native WP alias reappeared without a prepared Restore; investigate external writer"}
+
+        # Phase and the actual source together establish a verified outcome.
         if record["phase"] in ("prepared", "not_applied"):
             state = "applied" if current_hash == record["after_sha"] else "not_applied"
         elif record["phase"] in ("applied", "restore_prepared", "restored"):
@@ -693,7 +663,7 @@ def recheck_recovery(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGR
 
 
 def abandon_witness(*, data_dir=DATA_DIR):
-    """Operator-approved, no-Hosts-write recovery after missed/replaced progress.
+    """Operator-approved, no-Hosts-write witness discard after lost progress.
 
     A prepared journal must be Rechecked instead. First disable the policy;
     no active native WP task may be assumed terminal from absent progress.
@@ -743,7 +713,7 @@ def restore(operation, *, data_dir=DATA_DIR, hosts_path=HOSTS):
             if _sha(restored) != record["before_sha"]:
                 raise TerminalError("Native WordPress recovery candidate differs")
             record["phase"] = "restore_prepared"
-            _edit_hosts_with_kernel_lease(
+            _append_hosts_with_kernel_lease(
                 parent, expected=current, desired=restored,
                 baseline=meta, operation=operation,
                 prepare=lambda: _save_recovery(fd, record))

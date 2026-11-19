@@ -635,10 +635,10 @@ class ach_customizer_main:
                               target=trusted_site_id)
 
     def wp_terminal_manage(self, args):
-        """Primary-admin, opt-in control of a constrained native WP failure watcher.
+        """Primary-admin control of read-only WP failure observation.
 
-        This is independent of the selected native site's manual Hosts editor.
-        It NEVER changes the shared PHP-FPM policy or a successful WP install.
+        New events never edit Hosts or PHP-FPM; historical journal Recheck
+        and separately approved legacy Restore remain distinct paths.
         """
         request_id = uuid4().hex
         try:
@@ -650,10 +650,10 @@ class ach_customizer_main:
                 level = "DEBUG"
             elif action == "enable":
                 if self._argument(args, "reviewed") != "true":
-                    raise MonitorInputError("Explicit native WP Hosts auto-reconciliation approval is required")
+                    raise MonitorInputError("Explicit native WP read-only witness approval is required")
                 import public
                 if public.get_panel_version() != "8.0.7" or public.get_webserver() != "nginx":
-                    raise MonitorInputError("Native WP Hosts automation is verified only for aaPanel 8.0.7 Nginx")
+                    raise MonitorInputError("Native WP witness is verified only for aaPanel 8.0.7 Nginx")
                 from ach_customizer_wp_watcher import enable
                 result = enable(data_dir=_STATE_DIR)
                 level = "WARNING"

@@ -21,7 +21,7 @@ compatibility certification. For source-tree version details, inspect
 | --- | --- |
 | **Overview / Monitor** | Enable/disable monitoring, observe packaged vs resident entrypoint versions, see availability and diagnostics. |
 | **Website list** | Refresh native website inventory, compare changes, and save either **one reviewed site's** baseline or a separately reviewed **all-sites** baseline. Saving a baseline does not reconfigure a website. |
-| **Routing & Nginx** | Inspect generated VHosts, selected-site `/etc/hosts`, local HTTP and recovery context. **Unpublished source 0.1.54** includes opt-in, site-owned Nginx sensitive-file guards and separately opt-in **failed native WordPress Toolkit install Hosts cleanup** for exact verified aaPanel 8.0.7/Nginx source. Existing manual unwanted-alias removal remains guarded. **Published 0.1.51 does not include these features**. PHP-FPM remains manual and no generic Hosts cleanup is implied. |
+| **Routing & Nginx** | Inspect generated VHosts, selected-site `/etc/hosts`, local HTTP and recovery context. **Unpublished source 0.1.54** includes opt-in site-owned Nginx sensitive-file guards and a separately opt-in, **read-only failed WP Toolkit Hosts witness** for the verified aaPanel 8.0.7/Nginx source. No unattended alias cleanup is promised; an authorized OS operator must coordinate manual corrections. **Published 0.1.51 lacks these features**. PHP-FPM reconciliation remains manual. |
 | **PHP-FPM** | Discover installed PHP and site/socket relationships; compare version-scoped desired policies. Guarded shared-pool Apply/Restore is available only for **verified native PHP 8.1/8.5 shapes** with fresh authorization and recovery evidence. |
 | **Status Pages** | Offline EN/FA templates and branding; guarded per-site 404/502 and Nginx-generated 50x delivery, future-site defaults, stopped-site HTTP503 and global unknown-Host **HTTP/80** paths where compatible. Each has its **own** approval and Restore. |
 | **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. |
@@ -47,16 +47,20 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
 - **Nginx Helper `Purge All` is not certified** for shared or ambiguous physical
   Cache roots. Native **site-owned full-tree Clear** is a different, independently
   guarded operation. Neither should be confused with Bridge's per-URL filtering.
-- **New unpublished 0.1.54 narrow exception:** native WP Toolkit failed-install
-  `/etc/hosts` alias cleanup is opt-in, source-pinned to aaPanel **8.0.7 + Nginx**,
+- **New unpublished 0.1.54 narrow observer:** native WP Toolkit failed-install
+  `/etc/hosts` alias detection is opt-in, source-pinned to aaPanel **8.0.7 + Nginx**,
   and relies on a **pre-terminal witnessed** single-site operation plus an exact
-  vendor-appended `127.0.0.1` line. Automatic edits require an enforceable
-  kernel write lease and suffix-only in-place change, otherwise they stop.
-  Missed, ambiguous, bulk, restarted, stale,
-  foreign-edited and unsupported operations stop without automatic changes;
-  the separate manual Hosts tool remains available. There is **no automatic
-  shared PHP-FPM drift reconciliation**, general shared-cache purge, unsupported
-  PHP pool rewrite, silent VHost repair or blanket status-page deployment. Once explicitly activated, selected-site
+  vendor-appended `127.0.0.1` line. **The watcher never writes to Hosts.**
+  A Linux file lease may forcibly expire while the process is paused; no safe
+  no-loss automatic deletion protocol against uncoordinated writers has been
+  proved. Exact failures are reported in Activity for review by an OS operator.
+  The selected-site Hosts editor may be unavailable once aaPanel has deleted the
+  failed site record. Historical applied recovery journals remain inspectable
+  and separately approved legacy Restore uses append-only source writes.
+  **Automatic Hosts remediation and shared PHP-FPM drift reconciliation remain
+  unresolved P0 requirements.** The plugin also lacks general shared-cache
+  purge, unsupported PHP pool rewrites, silent VHost repair and blanket
+  status-page deployment. Once explicitly activated, selected-site
   Nginx guards enforce their fixed paths per request; they are not a global
   firewall, automatic scanner blocker or verified HTTP/3 edge protection.
   Native VHost regeneration and foreign Nginx rule conflicts require fresh
@@ -90,17 +94,20 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
    module and saved Recovery ID; never blindly retry an uncertain write.
 4. On a compatible, **authorized non-production** aaPanel 8.0.7/Nginx host
    running the *new source only*, navigate to **Routing & Nginx → Native WordPress
-   failed-install Hosts cleanup**. Click **Inspect automatic cleanup**, review
-   the limited operation and source support, check the consent box and choose
-   **Enable failed-install cleanup**. This installs plugin-owned systemd
-   `.path`/`.timer`/`.service` units and starts watching *future* WP Toolkit
-   single-site installations; **Emergency disable** turns the persisted policy
-   off before stopping watcher units. Use **Recheck interrupted recovery**
-   when an in-progress source operation or journal is uncertain, then approve
-   a saved **Restore** only after inspecting the Recovery ID and current file.
-   A missed pre-terminal event is never retroactively inferred as safe.
-   If the progress record was replaced, first disable, run Recheck, and use
-   **Discard stale witness** only with a distinct approval and no live native
+   failed-install witness**. Click **Inspect witness policy**, review the
+   observation-only scope, check its consent box and choose
+   **Enable failed-install witness**. The plugin-owned systemd
+   `.path`/`.timer`/`.service` units watch *future* single-site WP Toolkit
+   installations. They **never edit Hosts**, even when they identify an exact
+   orphan alias. Inspect **Activity & Logs** for the affected domain and have an
+   OS operator review `/etc/hosts` and the now-terminal installation before a
+   manual correction. **Emergency disable** stops future observation.
+   Use **Recheck historical recovery** when an older, already-applied recovery
+   is uncertain; any separate reviewed legacy Restore requires verifying the
+   Recovery ID and unchanged current file. A missed pre-terminal event is
+   never retroactively inferred as safe. If the progress record was replaced,
+   first disable, run Recheck, and use **Discard stale witness** only with a
+   distinct approval and no live native
    task or prepared recovery. This action does not edit Hosts.
 5. After upgrade/reinstall, verify installed source **and** resident panel
    helper behavior. aaPanel may keep older Python imports alive despite

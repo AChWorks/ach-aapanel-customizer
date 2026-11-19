@@ -8375,12 +8375,12 @@ function nativeWpPolicy(extra={}) {
   return Object.assign({status:true, schema:1, request_id:'a'.repeat(32),
     enabled:false, revision:0, last_reason:'Disabled', last_recovery:null,
     last_recovery_state:null, active_domain:null, recoveries:0,
-    auto_fpm:false, read_only:true, scope:'failed_native_single_site_wp_toolkit',
+    auto_hosts:false, auto_fpm:false, read_only:true, scope:'failed_native_single_site_wp_toolkit',
     watcher_ready:false, watcher_source_verified:false, watcher_status:'Watcher units not installed',
     last_worker:{state:'Not Observed',stage:'idle',reason:'No event evaluated',operation_id:null}},extra);
 }
 
-test('Native WP failure cleanup stays disabled until a reviewed enable, and has emergency disable',()=>{
+test('Native WP observer stays disabled until a reviewed enable, and has emergency disable',()=>{
   const ui=loadUi();
   ui.openTab('routing');
   assert.equal(ui.state().wpTerminalEnableDisabled,true);
@@ -8389,7 +8389,8 @@ test('Native WP failure cleanup stays disabled until a reviewed enable, and has 
   assert.match(inspected.options.url,/s=wp_terminal_manage$/);
   assert.equal(inspected.options.data.terminal_action,'inspect');
   inspected.respond(nativeWpPolicy());
-  assert.match(ui.state().wpTerminalStatus,/Auto Hosts: Disabled/);
+  assert.match(ui.state().wpTerminalStatus,/Native WP observer: Disabled/);
+  assert.match(ui.state().wpTerminalStatus,/Unattended Hosts edits: OFF/);
   assert.equal(ui.state().wpTerminalEnableDisabled,true);
   ui.statusSetChecked('#ach-wp-terminal-reviewed',true);
   assert.equal(ui.state().wpTerminalEnableDisabled,false);
@@ -8441,7 +8442,7 @@ test('Native WP malformed or timed-out backend outcome prevents another unreview
   assert.equal(ui.state().wpTerminalEnableDisabled,true);
   assert.equal(ui.state().wpTerminalDisableDisabled,true);
   ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy());
-  assert.match(ui.state().wpTerminalStatus,/Auto Hosts: Disabled/);
+  assert.match(ui.state().wpTerminalStatus,/Native WP observer: Disabled/);
 });
 
 test('Native WP stale witness needs independent review and recheck never implies a Hosts edit',()=>{
@@ -8471,7 +8472,7 @@ test('Native WP last worker refusal and watcher readiness remain visibly distinc
       reason:'Pinned aaPanel WordPress source fingerprint/version mismatch or unreadable',
       operation_id:'a'.repeat(32)}});
   ui.statusClick('#ach-wp-terminal-refresh').respond(policy);
-  assert.match(ui.state().wpTerminalStatus,/Auto Hosts: Enabled/);
+  assert.match(ui.state().wpTerminalStatus,/Native WP observer: Enabled/);
   assert.match(ui.state().wpTerminalStatus,/Watcher: Not ready/);
   assert.match(ui.state().wpTerminalStatus,/Last worker: Needs Review \/ native_source/);
   assert.match(ui.state().wpTerminalStatus,/fingerprint\/version/);
@@ -8480,4 +8481,13 @@ test('Native WP last worker refusal and watcher readiness remain visibly distinc
     reason:null,operation_id:null}}));
   assert.equal(ui.state().wpTerminalEnableDisabled,true);
   assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+});
+
+test('Native WP malformed policy may never silently re-enable unattended Hosts edits',()=>{
+  const ui=loadUi();
+  const req=ui.statusClick('#ach-wp-terminal-refresh');
+  req.respond(nativeWpPolicy({enabled:true,auto_hosts:true}));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,true);
 });

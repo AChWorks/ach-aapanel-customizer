@@ -160,7 +160,7 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal Hosts/FPM reconciliation remains a separate P0 requirement.
+Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.54 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -265,73 +265,72 @@ If a stale Python helper prevents inspection after an upgrade,
 use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
 not a blind server restart.
 
-## Native WordPress Toolkit failed-install Hosts cleanup (unpublished 0.1.54)
+## Native WordPress Toolkit failed-install witness (unpublished 0.1.54)
 
-A **primary-admin POST** exposes the independent **Routing & Nginx → Native
-WordPress failed-install Hosts cleanup** opt-in. Ordinary native plugin ZIP
-install/reinstall does **not** activate it. The single supported writer is the
-observed native **aaPanel 8.0.7 / Nginx** `AddWPSite → add_sites → deploy_wp`
-progress path, with exact version and source SHA-256 checks of the native
-`one_key_wp_v2.py`, `panel_site_v2.py` and panel version. These fixed-source
-checks deliberately fail closed after a vendor upgrade. Do not modify
-`/www/server/panel/class_v2` or deploy this candidate on Production.
+The primary admin can explicitly enable **Routing & Nginx → Native WordPress
+failed-install witness**. Native ZIP installation/reinstallation does not enable
+it. Supported source: the verified **aaPanel 8.0.7 / Nginx** asynchronous
+`AddWPSite → add_sites → deploy_wp` lifecycle, pinned to the actual SHA-256
+fingerprints of `one_key_wp_v2.py`, `panel_site_v2.py` and panel version.
+An upgraded/mismatched native writer fails closed. Vendor source is never patched.
 
-After explicit approval, plugin-owned systemd `.path` and `.timer` units run a
-bounded one-shot watcher on changes to `/tmp/wp_aapanel_deploy.log`, with a
-30-second fallback tick to detect native lock release. It is **not** a
-persistent polling daemon. While a **fresh single-site** progress record is
-active and its lock is present, the worker stores a root-owned witness of the
-current `/etc/hosts` bytes **only when the intended domain has no prior
-Hosts alias**. When the same native progress inode/domain reaches terminal
-`status=1`, `initialize_wp_website.status=-1`, and no WP/batch lock exists,
-the worker checks that `/etc/hosts` equals the witness **plus exactly**
-`\n127.0.0.1 domain`. A prepared journal and recovery backup precede any edit. The final
-edit is **not** an optimistic read/hash-then-rename: an enforceable Linux
-kernel **write lease** must first protect the original Hosts inode. The
-worker revalidates its identity and bytes under that lease and trims only
-the exact vendor-appended EOF suffix; a concurrent independent `rename`
-publishes another inode, which it never overwrites. An existing writer's
-open descriptor prevents lease acquisition, while conflicting new opens
-are blocked by the kernel. Unsupported leases, break notifications and
-changed file identities **fail closed** with recovery evidence. Explicit
-Restore uses the same lease boundary to reappend only the saved suffix.
+A plugin-owned systemd `.path` and `.timer` schedule a bounded `.service`
+run on native progress changes, plus a 30-second lock-release fallback. Only
+an **active, pre-terminal** single-site progress event with a clean Hosts
+baseline can establish a root-owned witness. When the same native operation
+finishes with `status=1`, `initialize_wp_website.status=-1` and no native
+setup/batch lock, the worker compares current Hosts with the exact witnessed
+bytes plus `\n127.0.0.1 domain`. If the old alias was intentional or the file
+was changed independently, it reports a guarded refusal; for an exact new
+orphan alias it reports **Manual Review Required** with typed stage, operation ID and
+safe reason in the `wp_terminal_manual_review` Activity event. **It never edits /etc/hosts automatically**, never
+modifies shared PHP-FPM and never infers a missed pre-terminal event as safe.
+An OS operator must inspect the exact domain recorded in Activity and verify
+that the native setup is no longer active before making a manual Hosts change.
+Because aaPanel may delete failed-site records, the selected-site manual Hosts
+editor is not necessarily available for this case.
 
-If the watcher misses setup before terminality, the native progress file is
-replaced, aaPanel source changes, the domain already had any alias, a bulk
-install runs, or the file is edited externally, **no automatic repair** occurs.
-The watcher never edits shared PHP-FPM settings, deleted site records,
-third-party mappings, general loopback aliases, or unobserved operations.
-No network, DNS or HTTPS health is inferred. `Emergency disable` stores
-**disabled** before attempting to stop the plugin-owned units; an
-interrupted `prepared` journal refuses automatic retry. `Recheck interrupted
-recovery` is read-only for `/etc/hosts`. It reconciles independently
-verified source digests after a persisted `applied` journal but interrupted
-policy save, or after a completed Restore with an interrupted journal update.
-Repeated Recheck is idempotent and never retries a filesystem edit. A
-separately consented **Restore** is allowed only if Hosts still matches
-the saved after-state.
-A stale witness whose original progress was overwritten can be discarded only
-by an explicit **Disable → Recheck → Discard stale witness** sequence with an
-additional operator checkbox, no active native lock and **no** prepared
-journal; no Hosts edit occurs. The initial implementation intentionally
-limits automatic recoveries to 64 per retained policy for bounded evidence;
-a later policy/journal-retention design is required before that threshold.
+**Why observation only:** Linux `F_SETLEASE/F_WRLCK` may be forcibly broken
+(`/proc/sys/fs/lease-break-time`). A worker suspended after its last
+`F_GETLEASE` check can resume after a foreign writer appends to the same
+inode. In-place `ftruncate` would then erase that foreign data, even if a
+later hash or journal identifies a conflict. Another pre-write check, process
+`flock` or optimistic file `rename` does not prove a no-loss invariant against
+uncoordinated writers. The old automatic deletion path is removed from the
+candidate; a safe, owner-approved transaction design remains a P0 future
+requirement. Do not describe prior successful 0.1.54 QA cleanup from the older
+candidate as evidence that this revised witness continues to delete aliases.
 
-Enabled policy and **watcher readiness** are separate observations. Native
-Inspect reports real systemd path/timer health, native source validity and
-the last persisted worker state, typed stage, safe cause and operation ID.
-Material refusals (source upgrade, unreadable progress, unsafe Hosts) are
-recorded once per distinct outcome in the bounded lifecycle Activity log;
-the same timer refusal does not flood diagnostics or expose credentials.
+**Historical recovery compatibility:** root-owned applied/prepared cleanup
+journals created by earlier QA candidates are retained through uninstall
+and reinstall. `Recheck historical recovery` is **read-only for Hosts** and
+reconciles an interrupted applied/policy write or `restore_prepared` crash
+using journal phase and verified before/after digests. An exact alias
+reappearing after phase `applied` **without `restore_prepared`** is external
+activity and returns Needs Review; it is not labelled a completed Restore.
+A separate primary-admin-approved legacy `Restore` requires an unchanged
+post-cleanup source and uses `O_APPEND` with a write lease; even if the
+lease expires and a competing writer appends first, the legacy Restore never
+writes over that writer's bytes at a stale file offset. Such an uncertain
+result retains `restore_prepared` and needs explicit Recheck. No new
+recovery journal is created by the read-only witness, and existing journals
+are not discarded by clearing the observation policy.
 
-The worker stores state/recovery under aaPanel's private plugin state
-directory, bounded Activity records and root-owned systemd unit files.
-Uninstall disables verified plugin-owned units but retains already-applied
-file changes and recovery material; never delete a foreign unit. Verify
-systemd unit readiness, active source writer fingerprint, worker logs,
-current site functionality and previously successful WP peers on isolated
-native QA before declaring operational acceptance. The initial source tests
-and simulated filesystem cases do **not** prove real native event timing.
+The status UI distinguishes policy **Enabled** from watcher **Ready** and
+explicitly says **Unattended Hosts edits: OFF**. Unsupported sources,
+malformed progress and external Hosts mismatches produce bounded,
+deduplicated lifecycle Activity; sensitive WordPress progress and credentials
+are not logged. `Emergency disable` persists the disabled policy before
+stopping plugin-owned systemd units. A stale witness is discarded only after
+Disable, Recheck, separately reviewed `Discard stale witness`, no native
+locks and no prepared recovery. Uninstall removes only verified owned units
+and retains root-owned recovery state. The former 64-recovery lifetime cap
+applies only to historical repair journal accounting, not to observation.
+
+Independent native QA previously established watcher timing, authentic
+WordPress success/failure and recovery on the old automatic candidate.
+Revised observation-only behavior requires fresh exact-source validation;
+previous native QA is not a source of approval for unattended writes.
 
 ## PHP-FPM scope and guarded change
 

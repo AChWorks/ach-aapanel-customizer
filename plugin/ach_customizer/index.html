@@ -486,15 +486,15 @@
         <label><input type="checkbox" id="ach-hosts-restore-reviewed" disabled /> I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</label>
         <div class="ach-controls"><button id="ach-hosts-restore-button" type="button" class="btn btn-warning" disabled>Restore saved local hosts file</button></div>
       </details>
-      <div class="ach-note" aria-label="Native WordPress failed-install automatic Hosts cleanup">
-        <strong>Native WordPress failed-install Hosts cleanup — opt-in</strong>
-        <p>For the verified aaPanel 8.0.7 Nginx single-site WP Toolkit writer only. A private watcher must see the installation <em>before</em> it adds an alias, then confirm a terminal failure and the exact new <code>127.0.0.1</code> entry. A pre-existing or externally changed Hosts entry is never removed. Unsupported native versions, missed events and uncertain operations require manual review. No automatic PHP-FPM changes.</p>
-        <p id="ach-wp-terminal-status" role="status" aria-live="polite">Inspect this optional policy before enabling.</p>
-        <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> I approve an event-driven, guarded /etc/hosts edit after a proven failed native WP install, with root-owned recovery records.</label>
+      <div class="ach-note" aria-label="Native WordPress failed-install read-only witness">
+        <strong>Native WordPress failed-install witness — opt-in, observation only</strong>
+        <p>For the verified aaPanel 8.0.7 Nginx single-site WP Toolkit writer only. This watcher records a pre-terminal, alias-free Hosts baseline and detects an exact vendor-added <code>127.0.0.1</code> alias after a terminal failure. <strong>No unattended Hosts modification occurs.</strong> Linux file leases can expire, so removing a line safely against uncoordinated writers is not proved. If a failed installation is reported, find <code>wp_terminal_manual_review</code> in Activity &amp; Logs for the exact affected domain, confirm the native install is finished, then have an authorized OS operator independently review and edit <code>/etc/hosts</code>. Failed site records may no longer exist, so the selected-site Hosts editor might not apply. No automatic PHP-FPM changes.</p>
+        <p id="ach-wp-terminal-status" role="status" aria-live="polite">Inspect the optional read-only witness policy before enabling.</p>
+        <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> I approve a read-only, event-driven failed-install watcher; it will log candidates for manual OS review, never edit /etc/hosts automatically.</label>
         <div class="ach-controls">
-          <button type="button" id="ach-wp-terminal-refresh">Inspect automatic cleanup</button>
-          <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck interrupted recovery</button>
-          <button type="button" id="ach-wp-terminal-enable" class="btn btn-warning" disabled>Enable failed-install cleanup</button>
+          <button type="button" id="ach-wp-terminal-refresh">Inspect witness policy</button>
+          <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck historical recovery</button>
+          <button type="button" id="ach-wp-terminal-enable" class="btn btn-warning" disabled>Enable failed-install witness</button>
           <button type="button" id="ach-wp-terminal-disable" disabled>Emergency disable</button>
         </div>
         <p id="ach-wp-terminal-recheck-result" role="status" aria-live="polite"></p>
@@ -503,11 +503,11 @@
           <label><input id="ach-wp-terminal-abandon-reviewed" type="checkbox" /> I verified that setup is no longer active and accept discarding this unverified witness without editing Hosts.</label>
           <button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" disabled>Discard stale witness</button>
         </details>
-        <details class="ach-help"><summary>Restore a saved automatic cleanup</summary>
-          <p>A restore deliberately re-adds the exact original alias, only when the file still matches the saved post-cleanup source. It does not repair DNS or change unrelated mappings.</p>
-          <p id="ach-wp-terminal-recovery">No automatic recovery inspected.</p>
+        <details class="ach-help"><summary>Restore a historical applied cleanup</summary>
+          <p>Legacy, separately approved Restore deliberately re-adds the old exact alias. An append-only guarded write is attempted only when the saved post-cleanup file still matches; independent writers can make the outcome uncertain, requiring Recheck. No new automatic cleanup recovery is created in this read-only witness mode.</p>
+          <p id="ach-wp-terminal-recovery">No historical recovery inspected.</p>
           <label><input id="ach-wp-terminal-restore-reviewed" type="checkbox" disabled /> I reviewed the saved Recovery ID and want to restore the exact original Hosts bytes.</label>
-          <div class="ach-controls"><button type="button" id="ach-wp-terminal-restore" class="btn btn-warning" disabled>Restore automatic Hosts cleanup</button></div>
+          <div class="ach-controls"><button type="button" id="ach-wp-terminal-restore" class="btn btn-warning" disabled>Restore historical Hosts cleanup</button></div>
         </details>
       </div>
       <hr />
@@ -5854,7 +5854,8 @@
     if (!r || r.schema !== 1 || typeof r.enabled !== 'boolean' ||
         !Number.isSafeInteger(r.revision) || r.revision < 0 ||
         !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 || r.recoveries > 64 ||
-        r.auto_fpm !== false || r.scope !== 'failed_native_single_site_wp_toolkit' ||
+        r.auto_hosts !== false || r.auto_fpm !== false ||
+        r.scope !== 'failed_native_single_site_wp_toolkit' ||
         typeof r.last_reason !== 'string' || r.last_reason.length > 240 ||
         typeof r.watcher_ready !== 'boolean' ||
         typeof r.watcher_source_verified !== 'boolean' ||
@@ -5877,7 +5878,8 @@
     wpTerminalRecovery = r.last_recovery_state === 'applied' ? r.last_recovery : null;
     root.find('#ach-wp-terminal-restore-reviewed, #ach-wp-terminal-reviewed, #ach-wp-terminal-abandon-reviewed').prop('checked', false);
     root.find('#ach-wp-terminal-restore-reviewed').prop('disabled', !wpTerminalRecovery);
-    root.find('#ach-wp-terminal-status').text('Auto Hosts: ' + (r.enabled ? 'Enabled' : 'Disabled') +
+    root.find('#ach-wp-terminal-status').text('Native WP observer: ' + (r.enabled ? 'Enabled' : 'Disabled') +
+      ' · Unattended Hosts edits: OFF (manual OS review only)' +
       ' · Watcher: ' + (r.watcher_ready ? 'Active' : 'Not ready') +
       ' (' + r.watcher_status + ')' +
       ' · Last worker: ' + r.last_worker.state + ' / ' + r.last_worker.stage +
@@ -5885,16 +5887,16 @@
       (r.last_worker.operation_id ? ' · Operation: ' + r.last_worker.operation_id : '') +
       ' · Revision ' + r.revision + ' · Policy: ' + r.last_reason +
       (r.active_domain ? ' · Observed active site: ' + r.active_domain : '') +
-      ' · Automatic repairs: ' + r.recoveries + '. PHP-FPM auto enforcement: Off.');
+      ' · Historical auto repairs: ' + r.recoveries + '. PHP-FPM auto enforcement: Off.');
     root.find('#ach-wp-terminal-recovery').text(r.last_recovery ?
       'Recovery ID: ' + r.last_recovery + ' · ' + (r.last_recovery_state || 'Needs Review') +
-      '. Restore requires an unchanged file.' : 'No saved automatic Hosts recovery.');
+      '. Historical Restore requires an unchanged file.' : 'No saved legacy Hosts recovery.');
     wpTerminalControl();
   }
   function loadWpTerminal() {
     if (wpTerminalBusy) return;
     wpTerminalBusy = true; wpTerminalControl();
-    root.find('#ach-wp-terminal-status').text('Inspecting native WordPress auto-cleanup policy...');
+    root.find('#ach-wp-terminal-status').text('Inspecting native WordPress read-only witness policy...');
     request('wp_terminal_manage', {terminal_action:'inspect'}, function (r) {
       wpTerminalBusy = false;
       wpTerminalRender(r);

@@ -32,6 +32,7 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
         result=self.plugin.wp_terminal_manage({"terminal_action":"inspect"})
         self.assertTrue(result["status"],result)
         self.assertFalse(result["enabled"])
+        self.assertIs(result["auto_hosts"],False)
         self.assertEqual(result["scope"],"failed_native_single_site_wp_toolkit")
         self.assertEqual(result["last_recovery"],None)
 
