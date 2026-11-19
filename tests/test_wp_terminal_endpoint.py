@@ -89,6 +89,25 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
         self.assertEqual(event["stage"],"wp_terminal_management")
         self.assertNotIn("password",json.dumps(event))
 
+    def test_activity_read_projects_manual_identity_only_to_primary_admin(self):
+        import ach_customizer_wp_terminal as worker
+        with worker._locked_state(MODULE._STATE_DIR) as fd:
+            worker._prepare_manual_review(fd,"c"*32,"manual-review.example")
+        response=self.plugin.get_activity({"module":"lifecycle","limit":50})
+        self.assertTrue(response["status"],response)
+        manual=[e for e in response["entries"]
+                if e["action"]=="wp_terminal_manual_review"]
+        self.assertEqual(len(manual),1)
+        self.assertEqual(manual[0]["target"],"manual-review.example")
+        self.assertEqual(manual[0]["operation_id"],"c"*32)
+        # A denied request must never disclose private journal contents.
+        with patch.object(MODULE.ach_customizer_main,"_status_primary_admin_post",
+                          side_effect=PermissionError("not primary")):
+            denied=self.plugin.get_activity({"module":"lifecycle"})
+        self.assertFalse(denied["status"])
+        self.assertNotIn("entries",denied)
+        self.assertNotIn("manual-review.example",str(denied))
+
     def test_authorization_failure_precedes_policy_access(self):
         with patch.object(MODULE.ach_customizer_main,"_status_primary_admin_post",side_effect=PermissionError("admin")), \
                 patch("ach_customizer_wp_watcher.enable") as enable:

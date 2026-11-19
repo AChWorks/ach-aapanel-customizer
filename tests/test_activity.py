@@ -62,6 +62,27 @@ class ActivityTests(unittest.TestCase):
             activity.append_activity(self.directory, {**self.event(), "secret": "never"})
         self.assertFalse((Path(self.directory) / activity.LOG_NAME).exists())
 
+    def test_critical_manual_review_bypasses_verbosity_and_deduplicates_after_crash(self):
+        candidate=self.event(16,level="WARNING",module="lifecycle",
+            action="wp_terminal_manual_review",stage="native_terminal",
+            outcome="Manual Review Required",target="failed.test",detail=
+            "Exact native WP failed-install alias observed; Hosts unchanged; inspect Activity and remove manually",
+            recovery_id="")
+        with patch.dict(os.environ,{"ACH_CUSTOMIZER_ACTIVITY_LEVEL":"ERROR"}):
+            self.assertTrue(activity.append_activity(self.directory,candidate,
+                          mandatory_manual_review=True))
+            self.assertTrue(activity.append_activity(self.directory,candidate,
+                          mandatory_manual_review=True))
+            self.assertEqual(len(activity.read_activity(self.directory)),1)
+            with self.assertRaises(activity.ActivityError):
+                activity.append_activity(
+                    self.directory,{**candidate,"target":"different.test"},
+                    mandatory_manual_review=True)
+            with self.assertRaisesRegex(activity.ActivityError,"Only immutable"):
+                activity.append_activity(self.directory,self.event(17),
+                                         mandatory_manual_review=True)
+        self.assertEqual(len(activity.read_activity(self.directory)),1)
+
     def test_rotation_is_bounded_and_recent_first(self):
         with patch.object(activity, "MAX_LOG_BYTES", 4096):
             for n in range(1, 37):

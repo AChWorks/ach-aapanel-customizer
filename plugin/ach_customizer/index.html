@@ -867,7 +867,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.55'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.56'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -4918,7 +4918,8 @@
         rows.append(tr);
       });
       if (!r.entries.length) rows.append($('<tr>').append($('<td colspan="5">').text('No matching activity records.')));
-      root.find('#ach-activity-result').text(r.entries.length + ' record(s). Logging threshold: ' + r.configured_level + '; maximum retention: 512 KiB.');
+      root.find('#ach-activity-result').text(r.entries.length + ' record(s). Logging threshold: ' + r.configured_level + '; general JSONL retention: 512 KiB.' +
+        (r.activity_warning ? ' ' + String(r.activity_warning).slice(0,240) : ''));
     });
   }
   root.find('#ach-activity-refresh').on('click', loadActivity);
@@ -5865,6 +5866,15 @@
         typeof r.last_worker.reason !== 'string' ||
         r.last_worker.state.length > 40 || r.last_worker.stage.length > 64 ||
         r.last_worker.reason.length > 240 ||
+        !Number.isSafeInteger(r.manual_review_count) || r.manual_review_count < 0 ||
+        ((r.manual_review_count === 0) !== (r.manual_review === null)) ||
+        (r.manual_review !== null &&
+         (!r.manual_review || typeof r.manual_review !== 'object' ||
+          !/^[0-9a-f]{32}$/.test(r.manual_review.operation_id || '') ||
+          typeof r.manual_review.domain !== 'string' ||
+          r.manual_review.domain.length > 253 ||
+          !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(r.manual_review.domain) ||
+          typeof r.manual_review.activity_delivered !== 'boolean')) ||
         (r.last_worker.operation_id !== null &&
          !/^[0-9a-f]{32}$/.test(r.last_worker.operation_id || '')) ||
         (r.last_recovery !== null && !/^[0-9a-f]{32}$/.test(r.last_recovery || ''))) {
@@ -5887,6 +5897,14 @@
       (r.last_worker.operation_id ? ' · Operation: ' + r.last_worker.operation_id : '') +
       ' · Revision ' + r.revision + ' · Policy: ' + r.last_reason +
       (r.active_domain ? ' · Observed active site: ' + r.active_domain : '') +
+      (r.manual_review ?
+        ' · Latest unresolved Hosts report: ' + r.manual_review.domain +
+        ' (Operation: ' + r.manual_review.operation_id + ')' +
+        (r.manual_review.activity_delivered ?
+         ' · Activity confirmed; durable evidence retained.' :
+         ' · Activity delivery pending; durable evidence retained in private state.') :
+        ' · No observed manual-review candidates.') +
+      ' · Manual-review reports: ' + r.manual_review_count +
       ' · Historical auto repairs: ' + r.recoveries + '. PHP-FPM auto enforcement: Off.');
     root.find('#ach-wp-terminal-recovery').text(r.last_recovery ?
       'Recovery ID: ' + r.last_recovery + ' · ' + (r.last_recovery_state || 'Needs Review') +

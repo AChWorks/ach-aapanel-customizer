@@ -124,13 +124,57 @@ def _append_bytes(fd, data):
         view = view[count:]
 
 
-def append_activity(directory, event):
+def _manual_review_in_log(fd_dir, event):
+    """Confirm exact already-appended event under the Activity exclusive lock.
+
+    A crash after the log's fsync but before the durable outbox acknowledgement
+    must not append a duplicate on the next worker tick. Check both retained
+    Activity generations before any rotation or append.
+    """
+    for name in (LOG_NAME, LOG_NAME + ".1"):
+        fd = _open_optional(fd_dir, name)
+        if fd is None:
+            continue
+        try:
+            data = bytearray()
+            while len(data) <= MAX_LOG_BYTES:
+                part = os.read(fd, MAX_LOG_BYTES + 1 - len(data))
+                if not part:
+                    break
+                data.extend(part)
+            if len(data) > MAX_LOG_BYTES:
+                raise ActivityError("Activity deduplication source exceeded size limit")
+        finally:
+            os.close(fd)
+        for line in bytes(data).splitlines():
+            try:
+                previous = json.loads(line)
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise ActivityError("Unreadable Activity event during deduplication") from exc
+            if (isinstance(previous, dict) and
+                    previous.get("operation_id") == event["operation_id"] and
+                    previous.get("action") == "wp_terminal_manual_review"):
+                if previous != event:
+                    raise ActivityError("Conflicting manual-review event identity")
+                return True
+    return False
+
+
+def append_activity(directory, event, *, mandatory_manual_review=False):
     if (not isinstance(event, dict) or set(event) != _FIELDS
             or event.get("schema") != 1 or event.get("level") not in LEVELS
             or event.get("module") not in MODULES):
         raise ActivityError("Invalid activity record")
-    if LEVELS[event["level"]] < LEVELS[configured_level()]:
-        # Skipped by explicit verbosity policy, not a persisted log.
+    if mandatory_manual_review and not (
+            event["level"] == "WARNING" and event["module"] == "lifecycle"
+            and event["action"] == "wp_terminal_manual_review"
+            and event["stage"] == "native_terminal"
+            and event["outcome"] == "Manual Review Required"
+            and event["recovery_id"] == "" and event["target"]):
+        raise ActivityError("Only immutable native WP manual-review events bypass verbosity")
+    if not mandatory_manual_review and LEVELS[event["level"]] < LEVELS[configured_level()]:
+        # Ordinary debug/info/warning events honor the operator's log policy.
+        # Mandatory manual-review events remain visible at ERROR verbosity.
         return None
     body = (json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             + "\n").encode("utf-8")
@@ -143,6 +187,8 @@ def append_activity(directory, event):
         try:
             _check_file(fd_lock)
             fcntl.flock(fd_lock, fcntl.LOCK_EX)
+            if mandatory_manual_review and _manual_review_in_log(fd_dir, event):
+                return True
             fd = os.open(LOG_NAME, _WRITE_FLAGS, 0o600, dir_fd=fd_dir)
             try:
                 size = _check_file(fd)

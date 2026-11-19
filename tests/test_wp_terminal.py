@@ -130,6 +130,235 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual((self.data / LOG_NAME).read_text().count('"wp_terminal_manual_review"'),1)
         self.assertEqual(self.hosts.read_bytes(), self.before + marker)
 
+    def test_manual_review_outbox_recovers_after_activity_disk_failure(self):
+        from ach_customizer_activity import ActivityError, LOG_NAME, append_activity, read_activity
+        from ach_customizer_main import ach_customizer_main
+        import ach_customizer_main as api
+        self.arm()
+        exact=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(exact)
+        original=append_activity
+        def fail_manual(directory,event,**kwargs):
+            if kwargs.get("mandatory_manual_review"):
+                raise ActivityError("injected Activity disk failure")
+            return original(directory,event,**kwargs)
+        with patch("ach_customizer_activity.append_activity",side_effect=fail_manual):
+            result=self.finish()
+            self.assertEqual(result["state"],"Manual Review Required")
+            saved=worker.inspect(data_dir=str(self.data))
+            self.assertEqual(saved["manual_review_count"],1)
+            manual=saved["manual_review"]
+            self.assertEqual(manual["domain"],"failed.test")
+            self.assertRegex(manual["operation_id"],r"^[0-9a-f]{32}$")
+            self.assertIs(manual["activity_delivered"],False)
+            # Even if JSONL delivery is broken, an authorized Activity read
+            # projects the durable event exactly once.
+            with patch.object(api,"_STATE_DIR",str(self.data)), patch.object(
+                    api.ach_customizer_main,"_status_primary_admin_post",return_value=None):
+                dashboard=ach_customizer_main().get_activity({"module":"lifecycle"})
+            self.assertTrue(dashboard["status"],dashboard)
+            matches=[e for e in dashboard["entries"]
+                     if e["action"]=="wp_terminal_manual_review"]
+            self.assertEqual(len(matches),1)
+            self.assertEqual(matches[0]["target"],"failed.test")
+        # The terminal token was already persisted. Recovery must NOT replay
+        # Hosts edits or fabricate a new operation/recovery journal.
+        second=self.tick()
+        self.assertEqual(second["state"],"Already Observed")
+        current=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(current["manual_review_count"],1)
+        self.assertEqual(current["manual_review"]["operation_id"],manual["operation_id"])
+        self.assertIs(current["manual_review"]["activity_delivered"],True)
+        self.assertEqual(current["recoveries"],0)
+        self.assertIsNone(current["last_recovery"])
+        logs=read_activity(str(self.data),module="lifecycle")
+        self.assertEqual(len([e for e in logs if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(self.hosts.read_bytes(),exact)
+        self.assertEqual((self.data/LOG_NAME).read_text().count('"wp_terminal_manual_review"'),1)
+
+    def test_manual_review_crash_after_token_commit_before_activity(self):
+        self.arm()
+        exact=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(exact)
+        real=worker._deliver_pending_manual_reviews
+        def crash_after_policy(fd,data_dir):
+            policy=worker._load(fd)
+            if policy["last_token"] is not None:
+                raise SystemExit("crash after terminal token before Activity")
+            return real(fd,data_dir)
+        with patch.object(worker,"_deliver_pending_manual_reviews",side_effect=crash_after_policy):
+            with self.assertRaisesRegex(SystemExit,"before Activity"):
+                self.finish()
+        evidence=worker.inspect(data_dir=str(self.data))
+        self.assertIsNone(evidence["active_domain"])
+        self.assertEqual(evidence["manual_review"]["domain"],"failed.test")
+        self.assertIs(evidence["manual_review"]["activity_delivered"],False)
+        self.assertEqual(self.hosts.read_bytes(),exact)
+        self.assertEqual(self.tick()["state"],"Already Observed")
+        self.assertIs(worker.inspect(data_dir=str(self.data))["manual_review"]["activity_delivered"],True)
+        from ach_customizer_activity import read_activity
+        events=[e for e in read_activity(str(self.data)) if e["action"]=="wp_terminal_manual_review"]
+        self.assertEqual(len(events),1)
+
+    def test_manual_review_crash_after_activity_fsync_before_delivery_receipt(self):
+        self.arm()
+        exact=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(exact)
+        real=worker._write_manual_review
+        def stop_before_receipt(fd,row,*,initial=False):
+            if not initial and row["delivered"]:
+                raise SystemExit("crash after Activity fsync")
+            return real(fd,row,initial=initial)
+        with patch.object(worker,"_write_manual_review",side_effect=stop_before_receipt):
+            with self.assertRaisesRegex(SystemExit,"after Activity fsync"):
+                self.finish()
+        evidence=worker.inspect(data_dir=str(self.data))
+        self.assertIs(evidence["manual_review"]["activity_delivered"],False)
+        from ach_customizer_activity import read_activity, LOG_NAME
+        self.assertEqual(len([e for e in read_activity(str(self.data))
+                              if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(self.tick()["state"],"Already Observed")
+        self.assertIs(worker.inspect(data_dir=str(self.data))["manual_review"]["activity_delivered"],True)
+        self.assertEqual((self.data/LOG_NAME).read_text().count('"wp_terminal_manual_review"'),1)
+        self.assertEqual(self.hosts.read_bytes(),exact)
+
+    def test_manual_review_crash_after_durable_outbox_before_policy_commit(self):
+        self.arm()
+        exact=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(exact)
+        original=worker._worker_outcome
+        def crash_before_policy(fd,policy,state,stage,reason,**kwargs):
+            if state=="Manual Review Required":
+                raise SystemExit("simulated crash before terminal policy commit")
+            return original(fd,policy,state,stage,reason,**kwargs)
+        with patch.object(worker,"_worker_outcome",side_effect=crash_before_policy):
+            with self.assertRaisesRegex(SystemExit,"before terminal"):
+                self.finish()
+        pending=worker.inspect(data_dir=str(self.data))
+        self.assertIsNotNone(pending["active_domain"])
+        self.assertEqual(pending["manual_review_count"],1)
+        first_op=pending["manual_review"]["operation_id"]
+        # A restarted worker may deliver the existing outbox first. Repeated
+        # native terminal observation must not create a second event.
+        result=self.tick()
+        self.assertEqual(result["state"],"Manual Review Required")
+        latest=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(latest["manual_review_count"],1)
+        self.assertEqual(latest["manual_review"]["operation_id"],first_op)
+        self.assertIsNone(latest["active_domain"])
+        self.assertIs(latest["manual_review"]["activity_delivered"],True)
+        from ach_customizer_activity import read_activity
+        self.assertEqual(len([e for e in read_activity(str(self.data))
+                              if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(self.hosts.read_bytes(),exact)
+
+    def test_disabled_worker_can_replay_pending_manual_review_without_restarting_watcher(self):
+        from ach_customizer_activity import ActivityError, read_activity
+        self.arm()
+        exact=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(exact)
+        with patch("ach_customizer_activity.append_activity",
+                   side_effect=ActivityError("disk unavailable")):
+            self.assertEqual(self.finish()["state"],"Manual Review Required")
+        worker.set_enabled(False,data_dir=str(self.data))
+        self.assertEqual(self.tick()["state"],"Disabled")
+        state=worker.inspect(data_dir=str(self.data))
+        self.assertFalse(state["enabled"])
+        self.assertTrue(state["manual_review"]["activity_delivered"])
+        self.assertEqual(len([e for e in read_activity(str(self.data))
+                              if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(self.hosts.read_bytes(),exact)
+
+    def test_rotated_activity_does_not_discard_private_manual_review_identity(self):
+        from ach_customizer_activity import MAX_LOG_BYTES, append_activity, read_activity
+        self.arm()
+        exact=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(exact)
+        self.assertEqual(self.finish()["state"],"Manual Review Required")
+        first_op=worker.inspect(data_dir=str(self.data))["manual_review"]["operation_id"]
+        # Force enough ordinary rows to rotate both JSONL generations.
+        from ach_customizer_activity import record
+        with patch("ach_customizer_activity.MAX_LOG_BYTES",4096):
+            for i in range(1,50):
+                append_activity(str(self.data),record(
+                    level="ERROR",module="lifecycle",action="other",
+                    stage="fixture",outcome="Observed",operation_id=f"{i:032x}",
+                    detail="x"*150))
+        raw=read_activity(str(self.data),module="lifecycle")
+        self.assertFalse(any(e["action"]=="wp_terminal_manual_review" for e in raw))
+        import ach_customizer_main as api
+        with patch.object(api,"_STATE_DIR",str(self.data)), patch.object(
+                api.ach_customizer_main,"_status_primary_admin_post",return_value=None):
+            result=api.ach_customizer_main().get_activity({"module":"lifecycle","limit":100})
+        self.assertTrue(result["status"],result)
+        canonical=[e for e in result["entries"] if e["action"]=="wp_terminal_manual_review"]
+        self.assertEqual(len(canonical),1)
+        self.assertEqual(canonical[0]["target"],"failed.test")
+        self.assertEqual(canonical[0]["operation_id"],first_op)
+        self.assertEqual(self.hosts.read_bytes(),exact)
+
+    def test_manual_review_bypasses_error_verbosity_but_other_warnings_do_not(self):
+        from ach_customizer_activity import read_activity
+        self.arm()
+        marker=b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(self.before+marker)
+        with patch.dict(os.environ,{"ACH_CUSTOMIZER_ACTIVITY_LEVEL":"ERROR"}):
+            response=self.finish()
+            self.assertEqual(response["state"],"Manual Review Required")
+            rows=[e for e in read_activity(str(self.data)) if e["action"]=="wp_terminal_manual_review"]
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]["level"],"WARNING")
+        self.assertEqual(rows[0]["target"],"failed.test")
+        self.assertIs(worker.inspect(data_dir=str(self.data))["manual_review"]["activity_delivered"],True)
+        self.assertEqual(self.hosts.read_bytes(),self.before+marker)
+
+    def test_multiple_manual_review_domains_persist_after_later_worker_state(self):
+        from ach_customizer_activity import read_activity
+        self.arm(domain="failed.test")
+        first=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(first)
+        self.assertEqual(self.finish()["state"],"Manual Review Required")
+        op1=worker.inspect(data_dir=str(self.data))["manual_review"]["operation_id"]
+        # A second independent failed installation must not erase the first.
+        self.arm(domain="second.test")
+        second=first+b"\n127.0.0.1 second.test"
+        self.hosts.write_bytes(second)
+        self.assertEqual(self.finish(domain="second.test")["state"],"Manual Review Required")
+        status=worker.inspect(data_dir=str(self.data))
+        self.assertEqual(status["manual_review_count"],2)
+        self.assertNotEqual(status["manual_review"]["operation_id"],op1)
+        self.assertEqual(status["manual_review"]["domain"],"second.test")
+        # Even after new timer observations replace last_worker, the durable
+        # domain-to-operation mappings survive and Activity is deduplicated.
+        self.assertEqual(self.tick()["state"],"Already Observed")
+        records=[e for e in worker.manual_review_activity(data_dir=str(self.data))
+                 if e["action"]=="wp_terminal_manual_review"]
+        self.assertEqual(len(records),2)
+        self.assertEqual({e["target"] for e in records},{"failed.test","second.test"})
+        self.assertEqual(len([e for e in read_activity(str(self.data))
+                              if e["action"]=="wp_terminal_manual_review"]),2)
+        self.assertEqual(self.hosts.read_bytes(),second)
+        self.assertEqual(status["recoveries"],0)
+
+    def test_activity_log_corruption_retains_privileged_manual_view(self):
+        import ach_customizer_main as api
+        from ach_customizer_activity import LOG_NAME
+        self.arm()
+        original=self.before+b"\n127.0.0.1 failed.test"
+        self.hosts.write_bytes(original)
+        self.assertEqual(self.finish()["state"],"Manual Review Required")
+        (self.data/LOG_NAME).write_text("corrupt general log\n")
+        (self.data/LOG_NAME).chmod(0o600)
+        with patch.object(api,"_STATE_DIR",str(self.data)), patch.object(
+                api.ach_customizer_main,"_status_primary_admin_post",return_value=None):
+            reply=api.ach_customizer_main().get_activity({})
+        self.assertTrue(reply["status"],reply)
+        self.assertIn("General Activity log unavailable",reply["activity_warning"])
+        self.assertEqual(len([e for e in reply["entries"]
+                              if e["action"]=="wp_terminal_manual_review"]),1)
+        self.assertEqual(reply["entries"][0]["target"],"failed.test")
+        self.assertEqual(self.hosts.read_bytes(),original)
+
     def test_uncoordinated_foreign_append_after_witness_read_survives(self):
         self.arm()
         marker = b"\n127.0.0.1 failed.test"

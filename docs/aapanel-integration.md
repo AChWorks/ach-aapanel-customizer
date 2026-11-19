@@ -160,7 +160,7 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.55 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
+Automatic post-terminal Hosts **and** shared FPM reconciliation remain a separate, open P0 requirement. The opt-in unpublished 0.1.56 WP Toolkit witness below observes exact failed-installer aliases for OS-admin manual review; it intentionally does not perform autonomous Hosts cleanup.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -255,7 +255,7 @@ recreates an alias, a new separately reviewed removal retains previous
 recovery material for forensics rather than overwriting it invisibly.
 
 The manual tool alone cannot identify the writer, guarantee external
-DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.55**
+DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.56**
 adds a **separate, expressly approved, narrow native WP Toolkit failure
 reconciler** described immediately below. The manual 0.1.52 capability is
 **not** available in published native 0.1.51. Installed-package/native
@@ -265,7 +265,7 @@ If a stale Python helper prevents inspection after an upgrade,
 use the [controlled worker recovery flow](aapanel-upgrade-recovery.md),
 not a blind server restart.
 
-## Native WordPress Toolkit failed-install witness (unpublished 0.1.55)
+## Native WordPress Toolkit failed-install witness (unpublished 0.1.56)
 
 The primary admin can explicitly enable **Routing & Nginx → Native WordPress
 failed-install witness**. Native ZIP installation/reinstallation does not enable
@@ -315,6 +315,25 @@ writes over that writer's bytes at a stale file offset. Such an uncertain
 result retains `restore_prepared` and needs explicit Recheck. No new
 recovery journal is created by the read-only witness, and existing journals
 are not discarded by clearing the observation policy.
+
+**Durable manual-review delivery:** a detected exact terminal alias first
+creates a private, root-owned, bounded `*.manual-review.json` event with
+the canonical hostname, stable operation ID, timestamp, classification and
+delivery receipt. File and directory are synced *before* the terminal token
+is committed. This source-of-truth survives a crash between token and JSONL
+delivery, a failed Activity append, a disabled watcher and log rotation.
+Pending delivery retries on subsequent worker invocations without replaying
+Hosts edits. The Activity writer bypasses
+`ACH_CUSTOMIZER_ACTIVITY_LEVEL=ERROR` for this one essential WARNING and
+checks both retained JSONL generations under its lock before appending,
+preventing duplicate delivery after a crash between log fsync and receipt.
+The primary-admin Activity endpoint projects the private records exactly
+once, independently of rolling JSONL. If the general log is corrupted or
+unavailable, the endpoint still shows durable manual-review evidence with
+a bounded warning. Routing Inspect shows the latest domain, Operation ID
+and delivery state after subsequent worker updates. Records remain private
+and retained; a separate future retention policy must not silently discard
+actionable manual-review evidence.
 
 The status UI distinguishes policy **Enabled** from watcher **Ready** and
 explicitly says **Unattended Hosts edits: OFF**. Unsupported sources,

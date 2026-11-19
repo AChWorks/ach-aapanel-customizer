@@ -8375,6 +8375,7 @@ function nativeWpPolicy(extra={}) {
   return Object.assign({status:true, schema:1, request_id:'a'.repeat(32),
     enabled:false, revision:0, last_reason:'Disabled', last_recovery:null,
     last_recovery_state:null, active_domain:null, recoveries:0,
+    manual_review:null,manual_review_count:0,
     auto_hosts:false, auto_fpm:false, read_only:true, scope:'failed_native_single_site_wp_toolkit',
     watcher_ready:false, watcher_source_verified:false, watcher_status:'Watcher units not installed',
     last_worker:{state:'Not Observed',stage:'idle',reason:'No event evaluated',operation_id:null}},extra);
@@ -8406,6 +8407,31 @@ test('Native WP observer stays disabled until a reviewed enable, and has emergen
   assert.equal(disable.options.data.reviewed,undefined);
   disable.respond(nativeWpPolicy({enabled:false,revision:2}));
   assert.match(ui.state().wpTerminalStatus,/Disabled/);
+});
+
+test('Native WP durable manual-review identity survives Activity failure and old last_worker',()=>{
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    last_worker:{state:'Idle',stage:'native_progress',reason:'Later timer tick',operation_id:null},
+    manual_review:{operation_id:'c'.repeat(32),domain:'failed.test',activity_delivered:false},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Latest unresolved Hosts report: failed\.test/);
+  assert.match(ui.state().wpTerminalStatus,/Activity delivery pending/);
+  assert.match(ui.state().wpTerminalStatus,/c{32}/);
+  const again=ui.statusClick('#ach-wp-terminal-refresh');
+  again.respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain:'failed.test',activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Activity confirmed; durable evidence retained/);
+  const invalid=ui.statusClick('#ach-wp-terminal-refresh');
+  invalid.respond(nativeWpPolicy({
+    manual_review:{operation_id:'c'.repeat(32),domain:'unsafe/name',activity_delivered:true},
+    manual_review_count:1
+  }));
+  assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
 });
 
 test('Native WP recovery Restore requires independently reviewed saved recovery',()=>{

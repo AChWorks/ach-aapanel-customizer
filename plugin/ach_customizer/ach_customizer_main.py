@@ -39,7 +39,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.55'
+WORKER_SOURCE_VERSION = '0.1.56'
 
 _STATE_DIR = DATA_DIR
 
@@ -176,10 +176,43 @@ class ach_customizer_main:
                 limit = int(self._argument(args, "limit", 50))
             except (TypeError, ValueError) as exc:
                 raise ActivityError("Invalid activity page size") from exc
-            entries = read_activity(_STATE_DIR, level=level, module=module, limit=limit)
+            # Manual-review evidence is an immutable plugin-owned Activity
+            # source, not an optional JSONL message. This primary-admin-only
+            # projection keeps actionable identities visible during JSONL
+            # persistence failures, ERROR verbosity and log rotation.
+            from ach_customizer_wp_terminal import manual_review_activity
+            from ach_customizer_activity import MAX_RESULTS
+            if (type(limit) is not int or not 1 <= limit <= MAX_RESULTS
+                    or level not in ("", "DEBUG", "INFO", "WARNING", "ERROR")
+                    or module not in ("", "monitor", "websites", "php_fpm",
+                                      "status_pages", "diagnostics", "lifecycle")):
+                raise ActivityError("Invalid activity filters or page size")
+            durable_manual = manual_review_activity(
+                data_dir=_STATE_DIR, level=level, module=module)
+            log_warning = None
+            try:
+                generic = read_activity(
+                    _STATE_DIR, level=level, module=module, limit=MAX_RESULTS)
+            except ActivityError:
+                if not durable_manual:
+                    raise
+                # Never hide the primary manual-review identity merely because
+                # the optional rolling JSONL history is currently unavailable.
+                generic = []
+                log_warning = "General Activity log unavailable; durable WordPress manual-review evidence shown"
+            seen = set()
+            entries = []
+            for event in durable_manual + generic:
+                key = (event["action"], event["operation_id"])
+                if key in seen and event["action"] == "wp_terminal_manual_review":
+                    continue
+                seen.add(key)
+                entries.append(event)
+            entries.sort(key=lambda item: (item["time_utc"], item["operation_id"]), reverse=True)
             return {"status": True, "request_id": request_id, "schema": 1,
-                    "entries": entries, "configured_level": configured_level(),
-                    "retention_max_bytes": 524288, "read_only": True}
+                    "entries": entries[:limit], "configured_level": configured_level(),
+                    "retention_max_bytes": 524288, "read_only": True,
+                    **({"activity_warning": log_warning} if log_warning else {})}
         except PermissionError as exc:
             return self._fail("activity_authorization", exc, request_id)
         except Exception as exc:

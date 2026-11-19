@@ -38,6 +38,13 @@ NATIVE_SITE_SOURCE = "/www/server/panel/class_v2/panel_site_v2.py"
 NATIVE_SITE_SHA = "b75a5a0b45c319df7eb49381363d3c3e90208157ebfd88de6f9b173d013d98fb"
 NATIVE_META = "/www/server/panel/class/common.py"
 STATE_FILE = "ach_customizer.wp-terminal.json"
+MANUAL_REVIEW_PREFIX = "ach_customizer.wp-terminal."
+MANUAL_REVIEW_SUFFIX = ".manual-review.json"
+MANUAL_REVIEW_FILE = re.compile(
+    r"ach_customizer\.wp-terminal\.([0-9a-f]{32})\.manual-review\.json\Z")
+MANUAL_REVIEW_REASON = (
+    "Exact native WP failed-install alias observed; Hosts unchanged; inspect Activity and remove manually")
+MAX_MANUAL_REVIEW_BYTES = 2048
 MAX_STATE_BYTES = 8192
 MAX_PROGRESS_BYTES = 32768
 MAX_AGE_NS = 15 * 60 * 1_000_000_000
@@ -186,6 +193,143 @@ def _save(state_fd, row):
             pass
 
 
+def _manual_review_name(operation):
+    if not isinstance(operation, str) or not OP.fullmatch(operation):
+        raise TerminalError("Invalid manual-review operation ID")
+    return MANUAL_REVIEW_PREFIX + operation + MANUAL_REVIEW_SUFFIX
+
+
+def _read_manual_review(fd, operation):
+    """Read one private, immutable-identity event and its delivery receipt."""
+    payload = _read_owned(fd, _manual_review_name(operation), required=True,
+                          max_bytes=MAX_MANUAL_REVIEW_BYTES)
+    try:
+        row = json.loads(payload)
+    except (ValueError, UnicodeError) as exc:
+        raise TerminalError("Unreadable native WP manual-review evidence") from exc
+    event = row.get("event") if isinstance(row, dict) else None
+    required_fields = {"schema", "time_utc", "level", "module", "action",
+                       "stage", "outcome", "operation_id", "target",
+                       "error_class", "detail", "recovery_id"}
+    if (not isinstance(row, dict) or set(row) != {"schema", "created_ns", "delivered", "event"}
+            or type(row["schema"]) is not int or row["schema"] != 1
+            or type(row["created_ns"]) is not int or row["created_ns"] <= 0
+            or type(row["delivered"]) is not bool or not isinstance(event, dict)
+            or set(event) != required_fields
+            or not all(isinstance(v, str) for k, v in event.items() if k != "schema")
+            or type(event["schema"]) is not int or event["schema"] != 1
+            or event["operation_id"] != operation
+            or event["level"] != "WARNING" or event["module"] != "lifecycle"
+            or event["action"] != "wp_terminal_manual_review"
+            or event["stage"] != "native_terminal"
+            or event["outcome"] != "Manual Review Required"
+            or event["detail"] != MANUAL_REVIEW_REASON
+            or event["error_class"] or event["recovery_id"]
+            or len(event["time_utc"]) > 40
+            or not event["time_utc"].endswith("+00:00")
+            or _hostname(event["target"]) != event["target"]
+            or "." not in event["target"]):
+        raise TerminalError("Invalid native WP manual-review ownership or content")
+    return row
+
+
+def _manual_review_rows(fd):
+    """Private durable audit entries outlive last_worker, Activity rotation and restarts."""
+    rows = []
+    for filename in os.listdir(fd):
+        match = MANUAL_REVIEW_FILE.fullmatch(filename)
+        if match:
+            rows.append(_read_manual_review(fd, match.group(1)))
+    return sorted(rows, key=lambda row: (row["created_ns"], row["event"]["operation_id"]),
+                  reverse=True)
+
+
+def _write_manual_review(fd, row, *, initial=False):
+    operation = row["event"]["operation_id"]
+    name = _manual_review_name(operation)
+    payload = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(payload) > MAX_MANUAL_REVIEW_BYTES:
+        raise TerminalError("Native WP manual-review evidence is too large")
+    if initial:
+        try:
+            _new_file(fd, name, payload)
+            os.fsync(fd)
+        except FileExistsError:
+            previous = _read_manual_review(fd, operation)
+            if (previous["event"]["target"] != row["event"]["target"]
+                    or previous["event"]["detail"] != row["event"]["detail"]):
+                raise TerminalError("Conflicting native WP manual-review ownership")
+        return
+    staging = "." + name + "." + uuid4().hex + ".tmp"
+    _new_file(fd, staging, payload)
+    try:
+        os.replace(staging, name, src_dir_fd=fd, dst_dir_fd=fd)
+        os.fsync(fd)
+    finally:
+        try:
+            os.unlink(staging, dir_fd=fd)
+        except FileNotFoundError:
+            pass
+
+
+def _prepare_manual_review(fd, operation, domain):
+    """Durable, single-operation source of truth BEFORE the terminal token save."""
+    existing = _read_owned(fd, _manual_review_name(operation),
+                           max_bytes=MAX_MANUAL_REVIEW_BYTES)
+    if existing is not None:
+        row = _read_manual_review(fd, operation)
+        if row["event"]["target"] != domain:
+            raise TerminalError("Conflicting native WP manual-review domain")
+        return row
+    from ach_customizer_activity import record
+    event = record(
+        level="WARNING", module="lifecycle", action="wp_terminal_manual_review",
+        operation_id=operation, stage="native_terminal", outcome="Manual Review Required",
+        target=domain, detail=MANUAL_REVIEW_REASON)
+    row = {"schema": 1, "created_ns": time.time_ns(), "delivered": False, "event": event}
+    _write_manual_review(fd, row, initial=True)
+    return _read_manual_review(fd, operation)
+
+
+def _deliver_pending_manual_reviews(fd, data_dir):
+    """Retry the durable outbox without ever replaying a Hosts operation.
+
+    The logger checks both live and rotated Activity files under its own lock,
+    so a crash after log fsync but before the receipt update is idempotent.
+    The immutable event itself remains available even while delivery fails.
+    """
+    from ach_customizer_activity import append_activity
+    for row in _manual_review_rows(fd):
+        if row["delivered"]:
+            continue
+        try:
+            persisted = append_activity(data_dir, row["event"], mandatory_manual_review=True)
+            if persisted is not True:
+                continue
+            updated = dict(row)
+            updated["delivered"] = True
+            _write_manual_review(fd, updated)
+        except Exception:
+            # Never consume the source-of-truth outbox identity or terminal
+            # token to mask an audit failure. A later invocation retries.
+            continue
+
+
+def manual_review_activity(*, data_dir=DATA_DIR, level="", module=""):
+    """Return durable, immutable Activity events even if JSONL delivery failed.
+
+    Intended for the separately authorized primary-admin Activity endpoint.
+    """
+    fd = _open_state_dir(data_dir)
+    try:
+        rows = _manual_review_rows(fd)
+        return [row["event"] for row in rows
+                if (not level or row["event"]["level"] == level)
+                and (not module or row["event"]["module"] == module)]
+    finally:
+        os.close(fd)
+
+
 def inspect(*, data_dir=DATA_DIR):
     fd = _open_state_dir(data_dir)
     try:
@@ -200,7 +344,16 @@ def inspect(*, data_dir=DATA_DIR):
                 recovery_state = _read_recovery(fd, recovery_id)["phase"]
             except (TerminalError, HostsManageError):
                 recovery_state = "Needs Review"
+        manual_rows = _manual_review_rows(fd)
+        latest = manual_rows[0] if manual_rows else None
+        manual_review = ({
+            "operation_id": latest["event"]["operation_id"],
+            "domain": latest["event"]["target"],
+            "activity_delivered": latest["delivered"],
+        } if latest else None)
         return {key: value[key] for key in ("enabled", "revision", "last_reason", "recoveries", "last_worker")} | {
+            "manual_review": manual_review,
+            "manual_review_count": len(manual_rows),
             "last_recovery": recovery_id,
             "active_domain": value["active"]["domain"] if value["active"] else None,
             "last_recovery_state": recovery_state,
@@ -245,15 +398,13 @@ def _worker_outcome(fd, policy, state, stage, reason, *, data_dir, operation=Non
         if state in review_states:
             policy["last_reason"] = reason
         _save(fd, policy)
-        if state in review_states:
+        if state in ("Needs Review", "Recovery Required"):
             try:
                 from ach_customizer_activity import append_activity, record
                 durable_recovery = (operation if operation and
                     _read_owned(fd, _recovery_name(operation), max_bytes=4096) is not None else "")
                 entry = record(
-                    level="WARNING", module="lifecycle",
-                    action="wp_terminal_manual_review" if state == "Manual Review Required"
-                           else "wp_terminal_refused",
+                    level="WARNING", module="lifecycle", action="wp_terminal_refused",
                     operation_id=operation or uuid4().hex,
                     stage=stage, outcome=state, target=domain,
                     detail=reason, recovery_id=durable_recovery)
@@ -262,6 +413,8 @@ def _worker_outcome(fd, policy, state, stage, reason, *, data_dir, operation=Non
                 import logging
                 logging.getLogger("ach_customizer").exception(
                     "Native WP operational refusal Activity persistence failed")
+        # Manual Review Required has its own immutable evidence file. Generic
+        # Activity is a recoverable projection, never the sole domain identity.
     return {"state": state, "changed": False,
             **({"reason": reason} if state in review_states else {}),
             **({"recovery_id": operation} if state == "Recovery Required" and operation and
@@ -412,6 +565,9 @@ def process_event(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGRESS
     """Handle one native filesystem notification without editing Hosts."""
     now_ns = time.time_ns() if now_ns is None else now_ns
     with _locked_state(data_dir) as fd:
+        # Recovery is independent of the native progress lifecycle and must
+        # run before Disabled/Already Observed can short-circuit delivery.
+        _deliver_pending_manual_reviews(fd, data_dir)
         policy = _load(fd)
         if not policy["enabled"]:
             return {"state": "Disabled", "changed": False}
@@ -540,9 +696,11 @@ def process_event(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGRESS
                 # F_GETLEASE followed by ftruncate may erase a later append.
                 # Preserve the entire file, record a safe manual-review result,
                 # and retire this witnessed terminal token (no retry).
-                reason, state, changed = (
-                    "Exact native WP failed-install alias observed; Hosts unchanged; inspect Activity and remove manually",
-                    "Manual Review Required", False)
+                reason, state, changed = (MANUAL_REVIEW_REASON, "Manual Review Required", False)
+                # Durable mapping first: a crash or disk/log policy failure
+                # after the terminal token is committed must never erase the
+                # actionable domain and operation identity.
+                _prepare_manual_review(fd, active["operation"], active["domain"])
             else:
                 reason, state, changed = (
                     "Hosts differs from witnessed vendor append; no edit; inspect manually",
@@ -557,6 +715,8 @@ def process_event(*, data_dir=DATA_DIR, hosts_path=HOSTS, progress_path=PROGRESS
         # Already Observed token without the manual-review Activity evidence.
         _worker_outcome(fd, policy, state, "native_terminal", reason,
                         data_dir=data_dir, operation=active["operation"], domain=active["domain"])
+        if state == "Manual Review Required":
+            _deliver_pending_manual_reviews(fd, data_dir)
         if not changed:
             _release_unused_baseline(fd, active["operation"])
         return {"state": state, "changed": changed, "domain": active["domain"],
