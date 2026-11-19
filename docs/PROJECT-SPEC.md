@@ -14,6 +14,42 @@ The product manages *operator-approved desired behavior* rather than blindly ove
 
 **Identity:** This is an aaPanel **customization system**, not merely a WordPress optimization tool, generic hosting control panel, separate administration service, or automatic server optimizer.
 
+
+### Owner-wide operating principle: simplicity and informed choice (2026-11-20)
+
+**Applies to every existing and future module**, including UI, configuration,
+website operations, security controls, repair, automation and diagnostics.
+Prefer the smallest understandable implementation that performs the intended
+operation. Do not add compatibility allowlists, exhaustive scenario checks,
+persistent recovery machinery or strict blocking preconditions merely for
+hypothetical risks.
+
+If the operation could have side effects or some checks are unverified, show
+the administrator a **brief, plain-language pre-action note** identifying the
+affected scope, meaningful risks and a few suggested checks (such as verifying
+a backup or current configuration). These are **recommendations, not a
+mandatory checklist**. Provide **Cancel / Continue anyway**. When an
+authorized administrator chooses Continue, **execute the intended operation
+even when suggested checks remain undone**, and report its real result;
+do not require a new mechanism to force every precaution to be satisfied.
+Do not silently upgrade uncertainty into a claim of success.
+
+Keep only boundaries justified by an actual correctness requirement, a
+demonstrated destructive failure, genuine access/authorization constraints,
+or the inability to identify the intended target. Operator confirmation does
+not authorize unrelated data deletion or make an inherently destructive
+concurrent write safe; solve such concrete problems with the simplest correct
+operation or a clearly scoped manual route, not layered hypothetical defenses.
+Protect the intended operation from errors while preserving the administrator's
+choice over acceptable *disclosed* residual risk.
+
+This owner decision governs subsequent design and the simplification of
+overly defensive existing workflows. Earlier checklists and proposed
+complexity must be re-evaluated against it when their affected areas are next
+revised; recording this decision alone does not imply existing runtime
+controls have already changed.
+
+
 ### Optional WordPress companion
 
 The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Coordinated pre-releases can attach both artifacts after their respective review and release authorization; installation and Production deployment remain separate actions.
