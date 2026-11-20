@@ -96,7 +96,7 @@ def _read_source(parent):
         mode = stat.S_IMODE(before.st_mode)
         if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
                 or before.st_uid != os.geteuid() or before.st_mode & 0o022
-                or before.st_mode & 0o7000 or not 0 < before.st_size <= MAX_BYTES):
+                or before.st_mode & 0o7000 or not 0 <= before.st_size <= MAX_BYTES):
             raise HostsManageError("Unsupported /etc/hosts source ownership or permissions")
         if os.listxattr(handle):
             # Replacing an inode without preserving its security labels/ACLs is unsafe.
@@ -286,7 +286,9 @@ def _remove_domain_aliases(payload, domain):
             # Removing every alias leaves no valid hosts mapping: preserve the
             # trailing comment as its own comment line when one exists.
             if marker:
-                ending = b"\r\n" if line.endswith(b"\r\n") else (b"\n" if line.endswith(b"\n") else b"")
+                ending = (b"\r\n" if line.endswith(b"\r\n") else
+                          b"\n" if line.endswith(b"\n") else
+                          b"\r" if line.endswith(b"\r") else b"")
                 output.append(b"#" + comment.rstrip(b"\r\n") + ending)
             continue
         # Preserve the exact bytes of all other tokens and comments.
@@ -407,8 +409,6 @@ def remove_available_alias(*, domain, source_path=HOSTS_PATH, data_dir=DATA_DIR)
                 return {"state": "Already Absent", "changed": False,
                         "domain": domain, "removed_aliases": 0,
                         "hosts_sha256": _sha(before)}
-            if not after:
-                raise HostsManageError("Hosts file cannot be emptied")
             op = uuid4().hex
             try:
                 _replace_source(parent, after, meta, expected_sha=_sha(before),

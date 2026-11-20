@@ -271,6 +271,43 @@ class OneClickHostsTests(unittest.TestCase):
         self.assertEqual([x["domain"] for x in self.inspect()["entries"]], ["peer.test"])
         self.assertEqual(len(list(self.state.glob("*.backup"))), 0)
 
+    def test_cr_only_comment_line_preserves_next_unrelated_mapping(self):
+        original = (b"127.0.0.1 remove.test #note\r"
+                    b"127.0.0.2 unrelated.test\n")
+        self.write(original)
+        before = self.inspect()
+        self.assertEqual([entry["domain"] for entry in before["entries"]],
+                         ["remove.test", "unrelated.test"])
+        removed = self.remove("remove.test")
+        self.assertEqual(removed["state"], "Alias Removed")
+        self.assertEqual(removed["removed_aliases"], 1)
+        self.assertEqual(self.source.read_bytes(),
+                         b"#note\r127.0.0.2 unrelated.test\n")
+        self.assertEqual([entry["domain"] for entry in self.inspect()["entries"]],
+                         ["unrelated.test"])
+
+    def test_last_alias_can_be_removed_to_zero_length_file(self):
+        self.write(b"127.0.0.1 orphan.test")
+        before = self.inspect()
+        self.assertEqual(before["state"], "Aliases Found")
+        self.assertEqual([entry["domain"] for entry in before["entries"]],
+                         ["orphan.test"])
+        removed = self.remove("orphan.test")
+        self.assertTrue(removed["changed"])
+        self.assertEqual(removed["removed_aliases"], 1)
+        self.assertEqual(removed["state"], "Alias Removed")
+        self.assertEqual(self.source.read_bytes(), b"")
+        self.assertEqual(self.source.stat().st_size, 0)
+        inspected = self.inspect()
+        self.assertEqual(inspected["state"], "No Aliases")
+        self.assertEqual(inspected["entries"], [])
+        self.assertEqual(inspected["hosts_sha256"], hashlib.sha256(b"").hexdigest())
+        again = self.remove("orphan.test")
+        self.assertEqual(again["state"], "Already Absent")
+        self.assertFalse(again["changed"])
+        self.assertEqual(again["removed_aliases"], 0)
+        self.assertEqual(self.source.read_bytes(), b"")
+
     def test_unrelated_malformed_or_non_utf8_lines_do_not_block_exact_removal(self):
         original = (b"invalid line without ip\n" +
                     b"bad\xff # foreign tool\n" +
@@ -449,6 +486,41 @@ class NativeHostsManagementEndpointTests(unittest.TestCase):
         self.assertTrue(any(event["action"] == "remove_hosts_alias" and
                             event["target"] == "absent-site.test" and
                             event["outcome"] == "Alias Removed" for event in audit))
+
+    def test_last_alias_authorized_endpoint_removes_to_empty_and_reinspects(self):
+        import ach_customizer_hosts_manage as mod
+        original_inspect, original_remove = mod.inspect_available_aliases, mod.remove_available_alias
+        self.source.write_bytes(b"127.0.0.1 orphan.test")
+        self.source.chmod(0o644)
+
+        def inspected(**kwargs):
+            return original_inspect(source_path=str(self.source), **kwargs)
+
+        def removed(**kwargs):
+            return original_remove(source_path=str(self.source), **kwargs)
+
+        with patch.object(mod, "inspect_available_aliases", side_effect=inspected), \
+             patch.object(mod, "remove_available_alias", side_effect=removed):
+            with patch.dict(sys.modules, {"flask": self.flask(uid=2)}):
+                denied = self.plugin.remove_hosts_alias({"domain": "orphan.test"})
+                self.assertFalse(denied["status"])
+                self.assertEqual(self.source.read_bytes(), b"127.0.0.1 orphan.test")
+            with patch.dict(sys.modules, {"flask": self.flask()}):
+                visible = self.plugin.inspect_hosts_aliases({})
+                self.assertTrue(visible["status"])
+                self.assertEqual(visible["entries"][0]["domain"], "orphan.test")
+                response = self.plugin.remove_hosts_alias({"domain": "orphan.test"})
+                self.assertTrue(response["status"], response)
+                self.assertEqual(response["state"], "Alias Removed")
+                self.assertEqual(self.source.read_bytes(), b"")
+                after = self.plugin.inspect_hosts_aliases({})
+                self.assertTrue(after["status"], after)
+                self.assertEqual(after["state"], "No Aliases")
+                self.assertEqual(after["entries"], [])
+                repeated = self.plugin.remove_hosts_alias({"domain": "orphan.test"})
+                self.assertTrue(repeated["status"], repeated)
+                self.assertEqual(repeated["state"], "Already Absent")
+                self.assertFalse(repeated["changed"])
 
     def test_real_source_delete_and_restore_via_panel_endpoint(self):
         original = self.source.read_bytes()

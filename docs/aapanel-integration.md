@@ -161,11 +161,15 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal, lossless Hosts cleanup remains open. Native PHP-FPM
-auto-repair is merged in unpublished v0.1.62 source after recorded systemd
-success/failure acceptance on native aaPanel 8.0.7. Fresh authenticated Browser
-acceptance and Production qualification remain separate. The Hosts witness
-still does not autonomously edit Hosts.
+The earlier automatic post-terminal Hosts cleanup requirement was superseded
+by the Owner's 2026-11-20 decision: offer administrator-click removal of a
+selected hostname found in the current local Hosts file after successful or
+failed WP setup, including when aaPanel has no site record. No unattended
+Hosts deletion is required; the existing failed-install witness remains
+observation-only. Native PHP-FPM auto-repair is merged in unpublished v0.1.62
+source after recorded systemd success/failure acceptance on aaPanel 8.0.7.
+Fresh authenticated Browser acceptance and Production qualification remain
+separate.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -262,11 +266,14 @@ recovery material for forensics rather than overwriting it invisibly.
 The manual tool alone cannot identify the writer, guarantee external
 DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.60**
 adds a **separate, opt-in, observer-only native WP Toolkit failed-install
-witness** described immediately below. The Owner explicitly **rejected**
-observer-only reporting as a substitute for automatic correction. No-loss
-Hosts cleanup remains OPEN P0; the native PHP-FPM automatic correction
-in merged but unpublished v0.1.62 passed source-bound native systemd
-success/failure acceptance.
+witness** described immediately below. At that historical 0.1.60 checkpoint
+the Owner rejected observer-only reporting in favor of automatic correction.
+**This was superseded on 2026-11-20:** the accepted requirement is inspection of the current Hosts
+file and explicit one-click administrator removal after successful or failed WP
+setup, including orphaned domains. Unattended Hosts cleanup is **not** an
+open P0. The separate native PHP-FPM automatic correction in merged but
+unpublished v0.1.62 passed source-bound native systemd success/failure
+acceptance.
 The manual 0.1.52 capability is **not**
 available in published native 0.1.51. Installed-package fixture QA has
 passed, but authenticated resident-watcher/end-to-end acceptance remains
@@ -490,7 +497,10 @@ website selector, status gate, WP watcher or automatic cleanup path.
 
 The action reads the latest local Hosts bytes at click time and removes
 only the chosen exact hostname's loopback tokens. Other addresses, names,
-comments and unrelated malformed lines remain untouched. A basic
+comments and unrelated malformed lines remain untouched, including CR-only
+line endings. Removing the last mapping may leave an empty Hosts file;
+subsequent inspection reports `No Aliases`, and a repeat click reports
+`Already Absent`. A basic
 descriptor-relative source/identity check immediately before atomic replace
 detects most external edits; a simultaneously writing uncoordinated OS
 process is **not** covered by a universal transaction. If the alias is
