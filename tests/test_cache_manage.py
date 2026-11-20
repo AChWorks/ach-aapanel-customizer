@@ -660,6 +660,93 @@ class CacheManageTests(unittest.TestCase):
         self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
             recovery_id=second['recovery_id'],**self.kwargs())['state'],'Restored')
 
+    def test_restored_wpfastcgi_to_stock_can_reapply_with_fresh_approval(self):
+        """Restore retires old WP handler Cache; a native stock switch is reversible.
+
+        This is a new generation, not adoption of the old WordPress fragment.
+        The original journal and retained bytes remain under their original ID.
+        """
+        vhost=self.vhost/'qa.test.conf'
+        stock_vhost=vhost.read_text()
+        vhost.write_text(stock_vhost.replace(
+            'enable-php-85.conf','enable-php-85-wpfastcgi.conf'))
+        (self.nginx/'enable-php-85-wpfastcgi.conf').write_text(
+            cache.WP_NATIVE_CANONICAL.replace('NATIVE_PHP','85'))
+        self.sources=cache._site_sources(
+            self.site,'85',native_handler='wpfastcgi',
+            vhost_root=str(self.vhost),nginx_root=str(self.nginx))
+        wordpress_native=dict(self.native,zone_state='Direct Zone',
+                             cache_zone='WORDPRESS',purge_directive_seen=True)
+        def wp_compatible(site,public,**kw):
+            reference=cache.generate_reference(
+                7,'85',cache_generation=kw.get('cache_generation'),
+                native_handler='wpfastcgi')
+            return wordpress_native,reference,self.sources
+        with patch.object(cache,'_compatibility',side_effect=wp_compatible):
+            first=self.apply()
+        journal=self.state/cache._names(7)[2]
+        prior=json.loads(journal.read_text())
+        self.assertEqual(prior['native_handler'],'wpfastcgi')
+        self.assertEqual(cache.manage_cache('restore',self.site,
+            approved=True,recovery_id=first['recovery_id'],**self.kwargs())['state'],
+            'Restored')
+        original_bytes=journal.read_bytes()
+        restored_prior=json.loads(original_bytes)
+        self.assertEqual(restored_prior['phase'],'restored')
+        self.assertEqual(cache.manage_cache('recheck',self.site,
+            **self.kwargs())['state'],'Restored')
+        vhost.write_text(stock_vhost)
+        self.sources=cache._site_sources(self.site,'85',
+            native_handler='stock',vhost_root=str(self.vhost),
+            nginx_root=str(self.nginx))
+        self.assertEqual(cache.manage_cache('recheck',self.site,
+            **self.kwargs())['state'],'Needs Review',
+            'Historical source drift remains diagnostic until new approval')
+        before_commands=list(self.commands)
+        prior_ext=self.ext/(cache._names(7)[1]+'.'+prior['op']+'.retained')
+        original_ext=prior_ext.read_bytes()
+        prior_ext.write_bytes(original_ext+b'# tampered restored fragment\n')
+        with self.assertRaisesRegex(cache.CacheManageError,'byte-identical'):
+            self.preview()
+        self.assertEqual(journal.read_bytes(),original_bytes)
+        prior_ext.write_bytes(original_ext)
+        with patch.object(cache,'_path_owned',return_value=(19,24)):
+            with self.assertRaisesRegex(cache.CacheManageError,'identity'):
+                self.preview()
+        self.assertEqual(journal.read_bytes(),original_bytes)
+        plan=self.preview()
+        self.assertEqual(plan['state'],'Ready for Review')
+        self.assertEqual(plan['native_handler'],'stock')
+        self.assertIn('wpfastcgi handler',plan['note'])
+        self.assertIn('stock handler',plan['note'])
+        self.assertEqual(journal.read_bytes(),original_bytes)
+        self.assertEqual(self.commands,before_commands)
+        with patch('ach_customizer_cache_bridge.inspect',return_value='Not Provisioned'):
+            with self.assertRaisesRegex(cache.CacheManageError,'approval'):
+                cache.manage_cache('apply',self.site,public=object(),
+                    expected_source=plan['source_sha256'],
+                    expected_proposal=plan['proposal_sha256'],
+                    cache_generation=plan['cache_generation'],
+                    approved=False,**self.kwargs())
+            self.assertEqual(journal.read_bytes(),original_bytes)
+            second=cache.manage_cache('apply',self.site,public=object(),
+                expected_source=plan['source_sha256'],
+                expected_proposal=plan['proposal_sha256'],
+                cache_generation=plan['cache_generation'],
+                approved=True,**self.kwargs())
+        self.assertEqual(second['state'],'Applied')
+        self.assertNotEqual(second['recovery_id'],first['recovery_id'])
+        current=json.loads(journal.read_text())
+        self.assertNotIn('native_handler',current)
+        self.assertNotEqual(current['cache_generation'],prior['cache_generation'])
+        archived=self.state/(cache._names(7)[2]+'.'+prior['op']+'.restored')
+        self.assertEqual(json.loads(archived.read_text()),restored_prior)
+        self.assertTrue((self.ext/(cache._names(7)[1]+'.'+prior['op']+'.retained')).is_file())
+        self.assertEqual(cache.manage_cache('recheck',self.site,
+            **self.kwargs())['state'],'Applied')
+        self.assertEqual(cache.manage_cache('restore',self.site,approved=True,
+            recovery_id=second['recovery_id'],**self.kwargs())['state'],'Restored')
+
     def test_changed_restored_identity_fails_without_pinned_bytes_or_inode(self):
         first=self.apply()
         cache.manage_cache('restore',self.site,approved=True,

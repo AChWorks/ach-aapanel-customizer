@@ -1083,8 +1083,8 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
 
     Reuse the pinned site directory with a fresh generation. A fully restored
     schema-2 journal may precede an aaPanel site-key change or a supported
-    stock-to-wpfastcgi source migration: its exact old fragments and physical
-    identity must still match. No active/prepared recovery may be adopted.
+    stock/wpfastcgi handler change in either direction: its exact old fragments
+    and physical identity must still match. No active/prepared recovery may be adopted.
     Prior journals are archived, not discarded.
     """
     prior_reference = generate_reference(
@@ -1097,8 +1097,6 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
     changed_identity = old['site_key'] != site['name'] or prior_handler != current_handler
     if (old['phase'] != 'restored' or
             old['php_version'] != reference['php_version'] or
-            (prior_handler != current_handler and
-             (prior_handler, current_handler) != ('stock', 'wpfastcgi')) or
             (changed_identity and (old['schema'] != 2 or old['cache_identity'] is None)) or
             old['cache_generation'] == reference['cache_generation'] or
             old['proposal_sha'] != prior_reference['proposal_sha256']):

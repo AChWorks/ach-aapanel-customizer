@@ -34,13 +34,15 @@ risk, show a brief, nonmandatory pre-action note; an authorized administrator
 can continue without completing every recommendation. Real authorization,
 target correctness, and avoidance of unintended unrelated data loss remain
 essential. See the [project-wide operating principle](docs/PROJECT-SPEC.md#owner-wide-operating-principle-simplicity-and-informed-choice-2026-11-20).
-v0.1.62–0.1.67 are merged but not publicly released; native 0.1.67 was
-installed and tested on the isolated aaPanel QA guest, not Production.
-Source **0.1.68** simplifies optional Bridge Provision/Disable to one explicit
-primary-admin button per action, retaining fresh Applied Recheck/Recovery ID
-for Provision and exact site/ownership checks for both. This source tree is
-not a published release or evidence of an installed host. Verify the current
-PR/CI, published versions and checksums before integration or installation.
+Native 0.1.68 is merged, not publicly released, and was installed using the
+real aaPanel importer on isolated QA (63/63 package bytes matched the reviewed
+build); authenticated browser acceptance remains outstanding. Source candidate
+**0.1.69** also accepts the reverse **wpfastcgi → stock** PHP handler change
+after a fully Restored site-owned Cache, by requiring a fresh reviewed Cache
+Preview/Apply and preserving the old Recovery ID and retained fragments. The
+new generation is not activated by the handler change alone. No release or
+Production deployment is implied; verify current PR/CI, releases and checksums
+before installation.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
 is a separate WordPress plugin whose ZIP includes a standard
