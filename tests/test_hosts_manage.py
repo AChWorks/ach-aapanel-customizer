@@ -308,11 +308,24 @@ class OneClickHostsTests(unittest.TestCase):
             return original(parent)
 
         with patch.object(manager, "_read_source", side_effect=foreign_edit):
-            with self.assertRaisesRegex(manager.HostsManageError, "after review"):
+            with self.assertRaisesRegex(manager.HostsManageError, "refresh local aliases"):
                 self.remove("remove.test")
         self.assertEqual(self.source.read_bytes(),
                          b"127.0.0.1 localhost\n127.0.0.1 remove.test\n"
                          b"127.0.0.7 foreign.test\n")
+
+    def test_uncertain_direct_write_never_fabricates_historical_restore_id(self):
+        self.write(b"127.0.0.1 localhost\n127.0.0.1 remove.test\n")
+        original = self.source.read_bytes()
+        with patch.object(manager, "_replace_source",
+                          side_effect=manager.HostsManageError(
+                              "simulated private failure", "f" * 32)):
+            with self.assertRaisesRegex(manager.HostsManageError,
+                                        "refresh local aliases") as error:
+                self.remove("remove.test")
+        self.assertIsNone(error.exception.recovery_id)
+        self.assertNotIn("simulated private failure", str(error.exception))
+        self.assertEqual(self.source.read_bytes(), original)
 
     def test_symbolic_link_does_not_redirect_a_click(self):
         self.write(b"127.0.0.1 one.test\n")

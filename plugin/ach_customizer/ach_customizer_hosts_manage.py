@@ -410,8 +410,16 @@ def remove_available_alias(*, domain, source_path=HOSTS_PATH, data_dir=DATA_DIR)
             if not after:
                 raise HostsManageError("Hosts file cannot be emptied")
             op = uuid4().hex
-            _replace_source(parent, after, meta, expected_sha=_sha(before),
-                            recovery_id=op)
+            try:
+                _replace_source(parent, after, meta, expected_sha=_sha(before),
+                                recovery_id=op)
+            except HostsManageError as exc:
+                # Unlike the historical selected-site editor, this simple
+                # click has no journal/Restore ID. Never advertise a staged
+                # filename token as if it were a durable recovery record.
+                raise HostsManageError(
+                    "Hosts change unconfirmed; refresh local aliases before retrying"
+                ) from exc
             return {"state": "Alias Removed", "changed": True, "domain": domain,
                     "removed_aliases": removed, "hosts_sha256": _sha(after)}
         finally:
