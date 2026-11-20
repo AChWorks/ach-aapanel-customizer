@@ -560,8 +560,10 @@ checkboxes. Displayed scope/impact explanations remain. Existing
 authentication, fresh selection identity and revision checks remain in
 the backend. Low-contrast Status Pages colors are allowed: preview and Save
 show accessibility advice instead of rejecting the user's chosen palette.
-This source package has not yet passed new-version native installed UI
-acceptance or been published; it is not a Production deployment.
+At the v0.1.63 source checkpoint, native installed UI acceptance had
+not yet been completed and the package was unpublished. Later bounded
+installed 0.1.69 acceptance is recorded in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21);
+it does not certify every adapter or authorize Production deployment.
 
 A second cross-layer limit audit additionally removes stale frontend
 ceilings on large Hosts/VHost/Cache peer results, the 32-installation/128-root
@@ -592,20 +594,22 @@ Nginx source and retains a stable panel-version/webserver observation rather
 than rejecting recognizable sources solely by aaPanel version string.
 These changes did **not** extend Nginx/PHP-FPM/Cache writer eligibility.
 The exact v0.1.63 candidate passed CI and independent review before its
-Owner-authorized Merge. Installed native QA, public Release and Production
-remain separate, still-unverified gates.
+Owner-authorized Merge. At that checkpoint, native installed QA was pending;
+later bounded 0.1.69 QA is tracked in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+Public Release and Production delivery remain separately gated.
 
 ## Native Nginx writer source completeness (merged v0.1.64; unpublished)
 
-Two existing *write* workflows — selected-site sensitive-path protection and
-Status Pages extension Apply/Restore — still blocked otherwise valid native
-installations solely for having more than 24 site domain bindings, 128 native
-VHost sources, 32 peer extension fragments, or 128 included files. A second
-Status Pages parked-VHost scan independently stopped at 128 entries. Proposed
-Merged v0.1.64 removes those collection-count stops from the actual downstream
-writer preflights. It also streams native peer and include-graph enumeration,
-rather than building whole-directory candidate lists or retaining an arbitrary
-aggregate source-byte ceiling on otherwise individually validated files.
+Before v0.1.64, two existing *write* workflows — selected-site
+sensitive-path protection and Status Pages extension Apply/Restore — rejected
+otherwise valid native inventories above former fixed counts of 24 site domain
+bindings, 128 native VHosts, 32 peer extension fragments or 128 included
+files. The Status Pages parked-VHost scan separately stopped at 128 entries.
+Merged v0.1.64 (PR #104) removed these aggregate collection-count ceilings
+and streams complete native peer/include-graph and parked-VHost enumeration,
+instead of accumulating whole-directory candidate lists or imposing a
+separate aggregate source-byte ceiling. These are merged source capabilities,
+not a claim that every installed site topology has passed real Nginx QA.
 
 **Unchanged correctness boundaries:** the selected site's current native
 identity/binding SHA; the exact server-scoped Nginx include ownership graph;
@@ -801,11 +805,15 @@ Emergency Disable clears future authority before stopping the owned watcher,
 potentially waiting on an existing guarded operation. Uninstall preserves
 host PHP settings, snapshots, archived recovery and desired policy.
 
-This is a **development candidate**, not a claim of operational acceptance:
-real start/terminal event timing under a resident enabled watcher, end-to-end
-PHP 8.1/8.5 corrections, peer-site health, restart/duplicate behavior, and
-browser authorization must be verified in isolated native QA. It is not
-automated Hosts cleanup, nor does it cover unrelated aaPanel PHP operations.
+At the original R1–R4 source-integration checkpoint, those controls were
+development work, not blanket operational acceptance. The earlier bounded
+systemd PHP 8.1/8.5 start/terminal and peer-site results above remain valid
+for their tested source and guest; they do not automatically certify every
+later control-flow remediation or the authenticated policy/auto-repair UI.
+Broader resident-watcher and UI acceptance remains open in
+[Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+This feature is not automated Hosts cleanup and does not cover unrelated
+aaPanel PHP operations.
 
 ## PHP-FPM scope and guarded change
 
@@ -1020,10 +1028,11 @@ never report them as a successful Apply.
   rollback. Unknown write outcome requires read-only reconciliation before
   any retry. Full physical service/VM disruption needs stronger isolation,
   explicit scope and recovery evidence.
-- **Latest evidence:** [#21 release ZIP/lifecycle receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6937217273),
-  [#21 real two-customer native Woo acceptance](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6938476216),
+- **Current acceptance and selected historical evidence:** [#21 current installed-native QA and remaining work](https://github.com/AChWorks/ach-aapanel-customizer/issues/21),
+  earlier [release ZIP/lifecycle receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6937217273)
+  and [two-customer native Woo receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6938476216),
   [#2 functional backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2),
-  and archived, bounded, file-based [QA evidence](evidence/).
+  and historical, bounded, file-based [QA evidence](evidence/).
 
 ## Verified source references and history
 
