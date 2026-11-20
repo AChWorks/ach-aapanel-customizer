@@ -795,6 +795,22 @@ and requires a fresh Recheck before retry, not a reported successful
 complete purge. This is a guarded deletion of cache **files**, not a
 recursive vendor Purge All or a request to reload Nginx.
 
+### Cache recovery after native PHP-handler changes
+
+A fully **Restored** site-owned Cache generation is historical recovery, not
+active Cache. If aaPanel subsequently switches that site's supported native
+PHP handler between **stock** and **wpfastcgi** (in either direction), the old
+Recheck may report **Needs Review** because its source fingerprint is pinned
+to the previous handler. A new read-only **Check site-specific Cache Apply
+readiness** can establish the current exact source and show a fresh-generation
+proposal; the administrator must explicitly approve **Apply** before any new
+Cache activation. The old operation journal, exact retained configuration
+fragments and physical Cache directory identity must still match. Unsupported
+source shapes, foreign fragments, replaced directory inodes or missing saved
+recovery remain blocking; neither direction automatically migrates or clears
+Cache files. Verify the new generation with Recheck and use its own Recovery
+ID for Restore.
+
 ## Optional WordPress Bridge: operator prerequisites
 
 [WordPress Bridge](../wordpress/ach-aapanel-bridge/README.md) is an
