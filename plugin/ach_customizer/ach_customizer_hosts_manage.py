@@ -250,10 +250,8 @@ def _loopback(ip):
 
 def _remove_domain_aliases(payload, domain):
     """Remove matching loopback aliases, retaining other tokens and comments."""
-    try:
-        payload.decode("utf-8", "strict")
-    except UnicodeError as exc:
-        raise HostsManageError("Hosts file text encoding is unsupported") from exc
+    # Unrelated OS-specific entries and comments must not prevent an
+    # administrator from removing a recognized exact hostname.
     lines = payload.splitlines(keepends=True)
     output, removed = [], 0
     for line in lines:
@@ -263,11 +261,13 @@ def _remove_domain_aliases(payload, domain):
             output.append(line)
             continue
         if len(spans) < 2:
-            raise HostsManageError("Cannot safely edit malformed hosts line")
+            output.append(line)
+            continue
         try:
             ip = ipaddress.ip_address(spans[0].group().decode("ascii"))
-        except (ValueError, UnicodeError) as exc:
-            raise HostsManageError("Cannot safely edit invalid hosts address") from exc
+        except (ValueError, UnicodeError):
+            output.append(line)
+            continue
         if not _loopback(ip):
             output.append(line)
             continue
@@ -338,6 +338,84 @@ def _replace_source(parent, payload, baseline, *, expected_sha, recovery_id):
     after, _ = _read_source(parent)
     if after != payload:
         raise HostsManageError("Hosts write outcome uncertain; inspect recovery", recovery_id)
+
+
+# Site-independent one-click removal is the primary operator workflow.
+# The fixed origin file is authoritative even when aaPanel removed the site
+# record or the WordPress operation completed without an error.
+_RESERVED = frozenset(("localhost", "ip6-localhost", "ip6-loopback"))
+
+
+def _available_aliases(payload):
+    entries = []
+    for line_number, line in enumerate(payload.splitlines(), 1):
+        parts = line.partition(b"#")[0].split()
+        if len(parts) < 2:
+            continue
+        try:
+            ip = ipaddress.ip_address(parts[0].decode("ascii"))
+        except (ValueError, UnicodeError):
+            continue
+        if not _loopback(ip):
+            continue
+        seen = set()
+        for alias in parts[1:]:
+            try:
+                domain = _hostname(alias.decode("utf-8"))
+            except (HostsInspectionError, UnicodeError):
+                continue
+            if domain in _RESERVED or domain in seen:
+                continue
+            seen.add(domain)
+            entries.append({"domain": domain, "address": str(ip),
+                            "line": line_number})
+    return entries
+
+
+def inspect_available_aliases(*, source_path=HOSTS_PATH):
+    """Observe actual loopback mappings, independent of site/WP status."""
+    parent = _open_parent(source_path)
+    try:
+        payload, _ = _read_source(parent)
+    finally:
+        os.close(parent)
+    entries = _available_aliases(payload)
+    return {"state": "Aliases Found" if entries else "No Aliases",
+            "entries": entries, "hosts_sha256": _sha(payload),
+            "read_only": True}
+
+
+def remove_available_alias(*, domain, source_path=HOSTS_PATH, data_dir=DATA_DIR):
+    """One admin click removes this exact current hostname, not other entries.
+
+    No watcher, native site ID, manual-review token, additional checkbox or
+    historical full-file Restore journal is needed. Retain the existing
+    stable-descriptor read and immediate recheck before atomic publication.
+    """
+    try:
+        canonical = _hostname(domain)
+    except HostsInspectionError as exc:
+        raise HostsManageError("Choose a valid local hostname") from exc
+    if canonical != domain or canonical in _RESERVED:
+        raise HostsManageError("Choose a listed non-system local hostname")
+    with _locked_state(data_dir):
+        parent = _open_parent(source_path)
+        try:
+            before, meta = _read_source(parent)
+            after, removed = _remove_domain_aliases(before, domain)
+            if not removed:
+                return {"state": "Already Absent", "changed": False,
+                        "domain": domain, "removed_aliases": 0,
+                        "hosts_sha256": _sha(before)}
+            if not after:
+                raise HostsManageError("Hosts file cannot be emptied")
+            op = uuid4().hex
+            _replace_source(parent, after, meta, expected_sha=_sha(before),
+                            recovery_id=op)
+            return {"state": "Alias Removed", "changed": True, "domain": domain,
+                    "removed_aliases": removed, "hosts_sha256": _sha(after)}
+        finally:
+            os.close(parent)
 
 
 def inspect_recovery(site, *, data_dir=DATA_DIR, source_path=HOSTS_PATH):

@@ -21,9 +21,9 @@ compatibility certification. For source-tree version details, inspect
 | --- | --- |
 | **Overview / Monitor** | Enable/disable monitoring, observe packaged vs resident entrypoint versions, see availability and diagnostics. |
 | **Website list** | Refresh paginated native website inventory, compare site/domain changes without an arbitrary site or alias count cap, and save selected-site or all-sites observation baselines. Baseline changes never modify website configuration. |
-| **Routing & Nginx** | Inspect the actual native Nginx VHosts, site-bound local Hosts, HTTP and recovery rather than reject an otherwise recognizable source solely because of the aaPanel version. Unpublished source has opt-in Nginx protections and failed WordPress Toolkit Hosts witnessing. Unattended lossless Hosts cleanup remains open; published v0.1.51 does not include these additions. |
+| **Routing & Nginx** | Inspect current origin-local loopback entries and remove a chosen hostname with one administrator click, whether WordPress installation succeeded or failed and even without a native website record (proposed source v0.1.65). Existing site-specific recovery and source-scoped Nginx tools remain available; no unattended Hosts cleanup. Published v0.1.51 does not include these additions. |
 | **PHP-FPM** | Discover and inspect PHP installations based on actual native files (including older versions), view file/socket relationships, and use guarded Apply/Restore only for currently implemented 8.1/8.5 adapters. Native post-terminal PHP-FPM repair is merged in unpublished v0.1.62, with successful isolated ordinary-systemd QA for both successful and failed native WordPress setup. Fresh authenticated Browser and Production qualification remain outstanding. |
-| **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. Proposed v0.1.64 validates complete native Nginx source graphs and peer inventories instead of fixed site/file counts before those writes. |
+| **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. Merged, unpublished v0.1.64 validates complete native Nginx source graphs and peer inventories instead of fixed site/file counts before those writes. |
 | **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. |
 | **Activity & Logs** | Operation/stage/error details, correlation IDs, scope and recovery guidance. |
 
@@ -34,8 +34,8 @@ risk, show a brief, nonmandatory pre-action note; an authorized administrator
 can continue without completing every recommendation. Real authorization,
 target correctness, and avoidance of unintended unrelated data loss remain
 essential. See the [project-wide operating principle](docs/PROJECT-SPEC.md#owner-wide-operating-principle-simplicity-and-informed-choice-2026-11-20).
-v0.1.62 and v0.1.63 are merged source, not published ZIPs. This proposed
-Nginx writer inventory improvement is versioned v0.1.64; it is not merged,
+v0.1.62–0.1.64 are merged source, not published ZIPs. This proposed
+one-click Hosts remediation is versioned v0.1.65; it is not merged,
 released or deployed. Confirm published versions and checksums before installation.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
@@ -52,36 +52,17 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
 - **Nginx Helper `Purge All` is not certified** for shared or ambiguous physical
   Cache roots. Native **site-owned full-tree Clear** is a different, independently
   guarded operation. Neither should be confused with Bridge's per-URL filtering.
-- **Merged 0.1.60 source, unpublished Hosts observer:** native WP Toolkit failed-install
-  `/etc/hosts` alias detection is opt-in, source-pinned to aaPanel **8.0.7 + Nginx**,
-  and relies on a **pre-terminal witnessed** single-site operation plus an exact
-  vendor-appended `127.0.0.1` line. **The watcher never writes to Hosts.**
-  A Linux file lease may forcibly expire while the process is paused; no safe
-  no-loss automatic deletion protocol against uncoordinated writers has been
-  proved. Exact failure evidence is durably stored first in a private,
-  per-operation manual-review record (full canonical domain up to 253
-  characters, Operation ID, delivery status). Initial publication uses
-  a fsynced private staging file and atomic Linux no-clobber rename; incomplete
-  stages are ignored. A malformed older canonical record remains
-  preserved and visibly flagged for reviewed OS quarantine, while
-  other valid reports remain available. The Activity event is delivered
-  idempotently, including after worker
-  crashes, log failures and at ERROR verbosity. The authorized Activity
-  endpoint projects these retained records even after log rotation/corruption.
-  Routing also displays the most recently recorded domain and delivery state.
-  The selected-site Hosts editor may be unavailable once aaPanel has deleted the
-  failed site record. Historical applied recovery journals remain inspectable
-  and separately approved legacy Restore uses append-only source writes.
-  **Automatic Hosts remediation remains P0. The first native WordPress
-  post-terminal FPM auto-repair implementation is in unpublished candidate
-  0.1.62, with ordinary-systemd native success/failure acceptance recorded.** The plugin also
-  lacks general shared-cache purge, unsupported PHP pool rewrites, silent
-  VHost repair and blanket
-  status-page deployment. Once explicitly activated, selected-site
-  Nginx guards enforce their fixed paths per request; they are not a global
-  firewall, automatic scanner blocker or verified HTTP/3 edge protection.
-  Native VHost regeneration and foreign Nginx rule conflicts require fresh
-  inspection; never claim silently self-healing security without evidence.
+- **Origin-local Hosts removal (proposed 0.1.65):** open **Routing & Nginx**
+  to see current local loopback hostnames, regardless of WordPress installation
+  result or whether aaPanel still has a matching site. Select the hostname and
+  press **Remove selected hostname**: no watcher or second approval checkbox is
+  required, and only matching loopback aliases are removed. The server's
+  own `/etc/hosts` is the evidence. This is an explicit primary-admin action,
+  not unattended cleanup, a DNS change or a universal transaction with foreign
+  writers. Legacy failed-WP witness records and historical recovery actions
+  remain accessible when previously created; they are not prerequisites.
+  Original v0.1.60 native-WP watcher remains optional and read-only for
+  diagnostic event evidence, while PHP-FPM has its separate automation.
 - **Unpublished 0.1.62 automatic FPM repair:** following explicit one-time
   primary-admin approval of saved PHP 8.1/8.5 shared `[www]` values, a separate
   owned `ach-customizer-fpm-auto.path`/`.timer`/`.service` tracks the

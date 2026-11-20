@@ -448,14 +448,14 @@ The exact v0.1.63 candidate passed CI and independent review before its
 Owner-authorized Merge. Installed native QA, public Release and Production
 remain separate, still-unverified gates.
 
-## Native Nginx writer source completeness (proposed v0.1.64; unpublished)
+## Native Nginx writer source completeness (merged v0.1.64; unpublished)
 
 Two existing *write* workflows — selected-site sensitive-path protection and
 Status Pages extension Apply/Restore — still blocked otherwise valid native
 installations solely for having more than 24 site domain bindings, 128 native
 VHost sources, 32 peer extension fragments, or 128 included files. A second
 Status Pages parked-VHost scan independently stopped at 128 entries. Proposed
-v0.1.64 removes those collection-count stops from the actual downstream
+Merged v0.1.64 removes those collection-count stops from the actual downstream
 writer preflights. It also streams native peer and include-graph enumeration,
 rather than building whole-directory candidate lists or retaining an arbitrary
 aggregate source-byte ceiling on otherwise individually validated files.
@@ -474,8 +474,37 @@ Targeted fixture acceptance covers 141 native bound domains, 136 parked peer
 VHosts, 40/41 extension fragments, more than 1 MiB of sibling extension
 sources and more than 2 MiB of included native configuration; it verifies
 Apply/Recheck/Restore, last-peer ownership conflicts, stale preview refusal
-and no changes to unrelated peer bytes. Fresh native installed v0.1.64
-acceptance and independent review remain separate requirements.
+and no changes to unrelated peer bytes. Fresh native installed v0.1.64 acceptance remains a separate
+requirement; its exact-HEAD independent review and owner-authorized Merge
+were completed in PR #104.
+
+## One-click local Hosts alias removal (proposed v0.1.65; unpublished)
+
+The origin's current `/etc/hosts` is the source of truth, including after
+successful WordPress setup and when a failed setup left no aaPanel site record.
+Open **Routing & Nginx**: the new Local Hosts section loads the non-system
+loopback hostnames automatically, and **Refresh local aliases** can recheck
+after an installation. Select the unwanted name and choose **Remove selected
+hostname**. The click itself is approval: there is no second checkbox, native
+website selector, status gate, WP watcher or automatic cleanup path.
+
+The action reads the latest local Hosts bytes at click time and removes
+only the chosen exact hostname's loopback tokens. Other addresses, names,
+comments and unrelated malformed lines remain untouched. A basic
+descriptor-relative source/identity check immediately before atomic replace
+detects most external edits; a simultaneously writing uncoordinated OS
+process is **not** covered by a universal transaction. If the alias is
+already absent, the action reports that state and the UI refreshes. Source
+writes remain full-primary-admin-only. Existing advanced selected-site
+Recovery and historical, explicitly approved WP Restore remain separately
+accessible only for their earlier saved state; no new automatic cleanup
+journal, daemon, watcher, or backup subsystem is created by this feature.
+
+New source-level regressions cover successful and failed/deleted-site names,
+multiple mappings, preservation of peer aliases, invalid/non-UTF-8
+unrelated lines, symlink refusal, external change detection and the
+authenticated UI endpoint. Native installed aaPanel acceptance, public
+Release and Production deployment remain separate authorization/QA gates.
 
 ## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 

@@ -220,6 +220,112 @@ class HostsRemediationTests(unittest.TestCase):
         self.assertEqual(self.recovery()["state"], "Needs Review")
 
 
+class OneClickHostsTests(unittest.TestCase):
+    """Actual origin file is the source, not a WP status/site inventory."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="ach-hosts-one-click-")
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        directory = root / "origin"
+        directory.mkdir(mode=0o700)
+        self.source = directory / "hosts"
+        self.state = root / "state"
+        self.state.mkdir(mode=0o700)
+
+    def write(self, payload):
+        self.source.write_bytes(payload)
+        self.source.chmod(0o644)
+
+    def inspect(self):
+        return manager.inspect_available_aliases(source_path=str(self.source))
+
+    def remove(self, domain):
+        return manager.remove_available_alias(
+            domain=domain, source_path=str(self.source), data_dir=str(self.state))
+
+    def test_success_and_failed_deleted_site_are_equally_visible(self):
+        self.write(b"127.0.0.1 localhost\n"
+                   b"127.0.0.1 success.test failed.test # peer context\r\n"
+                   b"::1 failed.test\n192.0.2.3 success.test\n"
+                   b"127.0.0.7 peer.test\n")
+        before = self.source.read_bytes()
+        snapshot = self.inspect()
+        self.assertEqual(snapshot["state"], "Aliases Found")
+        self.assertEqual([(x["domain"], x["address"]) for x in snapshot["entries"]],
+                         [("success.test", "127.0.0.1"), ("failed.test", "127.0.0.1"),
+                          ("failed.test", "::1"), ("peer.test", "127.0.0.7")])
+        self.assertEqual(self.source.read_bytes(), before)
+        result = self.remove("failed.test")
+        self.assertEqual(result["state"], "Alias Removed")
+        self.assertEqual(result["removed_aliases"], 2)
+        self.assertEqual(
+            self.source.read_bytes(),
+            b"127.0.0.1 localhost\n"
+            b"127.0.0.1 success.test # peer context\r\n"
+            b"192.0.2.3 success.test\n127.0.0.7 peer.test\n")
+        self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                         ["success.test", "peer.test"])
+        self.assertEqual(self.remove("failed.test")["state"], "Already Absent")
+        self.assertEqual(self.remove("success.test")["removed_aliases"], 1)
+        self.assertEqual([x["domain"] for x in self.inspect()["entries"]], ["peer.test"])
+        self.assertEqual(len(list(self.state.glob("*.backup"))), 0)
+
+    def test_unrelated_malformed_or_non_utf8_lines_do_not_block_exact_removal(self):
+        original = (b"invalid line without ip\n" +
+                    b"bad\xff # foreign tool\n" +
+                    b"127.0.0.1 localhost removable.test other.test #keep\n")
+        self.write(original)
+        self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                         ["removable.test", "other.test"])
+        self.assertEqual(self.remove("removable.test")["state"], "Alias Removed")
+        self.assertEqual(self.source.read_bytes(), (
+            b"invalid line without ip\n" +
+            b"bad\xff # foreign tool\n" +
+            b"127.0.0.1 localhost other.test #keep\n"))
+
+    def test_only_listed_hostname_is_eligible_and_system_names_are_preserved(self):
+        self.write(b"127.0.0.1 localhost ip6-loopback other.test\n")
+        original = self.source.read_bytes()
+        for domain in ("localhost", "ip6-localhost", "ip6-loopback",
+                       "OTHER.test", "../etc/passwd", "*.other.test", ""):
+            with self.subTest(domain=domain):
+                with self.assertRaises(manager.HostsManageError):
+                    self.remove(domain)
+                self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual(self.inspect()["entries"][0]["domain"], "other.test")
+
+    def test_external_edit_detected_before_publication_is_not_discarded(self):
+        self.write(b"127.0.0.1 localhost\n127.0.0.1 remove.test\n")
+        original = manager._read_source
+        calls = 0
+
+        def foreign_edit(parent):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.write(self.source.read_bytes() + b"127.0.0.7 foreign.test\n")
+            return original(parent)
+
+        with patch.object(manager, "_read_source", side_effect=foreign_edit):
+            with self.assertRaisesRegex(manager.HostsManageError, "after review"):
+                self.remove("remove.test")
+        self.assertEqual(self.source.read_bytes(),
+                         b"127.0.0.1 localhost\n127.0.0.1 remove.test\n"
+                         b"127.0.0.7 foreign.test\n")
+
+    def test_symbolic_link_does_not_redirect_a_click(self):
+        self.write(b"127.0.0.1 one.test\n")
+        target = self.source.parent / "other"
+        target.write_bytes(self.source.read_bytes())
+        target.chmod(0o644)
+        self.source.unlink()
+        self.source.symlink_to(target)
+        with self.assertRaises(OSError):
+            self.remove("one.test")
+        self.assertEqual(target.read_bytes(), b"127.0.0.1 one.test\n")
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -281,6 +387,55 @@ class NativeHostsManagementEndpointTests(unittest.TestCase):
              patch.object(mod, "remove_loopback_alias", side_effect=removed), \
              patch.object(mod, "restore_loopback_alias", side_effect=restored):
             return self.plugin.manage_local_hosts(args)
+
+    def test_one_click_source_driven_without_site_or_watcher_and_primary_admin_gate(self):
+        from ach_customizer_activity import read_activity
+        import ach_customizer_hosts_manage as mod
+        original_inspect, original_remove = mod.inspect_available_aliases, mod.remove_available_alias
+        self.source.write_bytes(
+            b"127.0.0.1 localhost\n127.0.0.1 success.test failed.test\n"
+            b"127.0.0.7 absent-site.test\n")
+        self.source.chmod(0o644)
+        def inspected(**kwargs):
+            return original_inspect(source_path=str(self.source), **kwargs)
+        def removed(**kwargs):
+            return original_remove(source_path=str(self.source), **kwargs)
+
+        with patch.object(mod, "inspect_available_aliases", side_effect=inspected), \
+             patch.object(mod, "remove_available_alias", side_effect=removed):
+            for access in (self.flask(uid=2), self.flask(temporary=True),
+                           self.flask(method="GET")):
+                with self.subTest(access=access.session):
+                    with patch.dict(sys.modules, {"flask": access}):
+                        denied = self.plugin.remove_hosts_alias({"domain":"absent-site.test"})
+                        self.assertFalse(denied["status"])
+                        self.assertEqual(denied["stage"], "hosts_authorization")
+                        denied_read = self.plugin.inspect_hosts_aliases({})
+                        self.assertFalse(denied_read["status"])
+            with patch.dict(sys.modules, {"flask": self.flask()}):
+                current = self.plugin.inspect_hosts_aliases({"site_id":"99999"})
+                self.assertTrue(current["status"], current)
+                self.assertEqual(
+                    [x["domain"] for x in current["entries"]],
+                    ["success.test", "failed.test", "absent-site.test"])
+                self.assertEqual(self.read_count, 0)
+                applied = self.plugin.remove_hosts_alias(
+                    {"domain":"absent-site.test", "source_path":"/etc/shadow"})
+                self.assertTrue(applied["status"], applied)
+                self.assertTrue(applied["changed"])
+                self.assertEqual(applied["domain"], "absent-site.test")
+                self.assertEqual(applied["removed_aliases"], 1)
+                again = self.plugin.remove_hosts_alias({"domain":"absent-site.test"})
+                self.assertTrue(again["status"])
+                self.assertEqual(again["state"], "Already Absent")
+                self.assertFalse(again["changed"])
+                self.assertEqual(self.read_count, 0)
+        self.assertEqual(self.source.read_bytes(),
+                         b"127.0.0.1 localhost\n127.0.0.1 success.test failed.test\n")
+        audit = read_activity(str(self.data), module="websites")
+        self.assertTrue(any(event["action"] == "remove_hosts_alias" and
+                            event["target"] == "absent-site.test" and
+                            event["outcome"] == "Alias Removed" for event in audit))
 
     def test_real_source_delete_and_restore_via_panel_endpoint(self):
         original = self.source.read_bytes()

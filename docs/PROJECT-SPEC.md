@@ -72,6 +72,23 @@ Earlier checklists and proposed complexity must be re-evaluated against this
 principle. Recording it does not imply other runtime controls have changed.
 
 
+### Owner decision: direct local Hosts removal (2026-11-20)
+
+Unattended /etc/hosts cleanup after WordPress setup is **no longer a product
+requirement**. The administrator's explicit **Remove** click authorizes removal
+of the chosen hostname's current loopback mappings on the aaPanel origin. On
+opening Routing, the plugin must inspect the *actual local Hosts file*, not
+infer aliases from a WordPress failure record. The action must work whether
+WordPress installation succeeded, failed or left no native site record; it
+requires neither a pre-terminal watcher nor a selected website, automatic
+cleanup, a second review checkbox or a version-pinned WP writer. It does not
+edit DNS, unrelated names or network/peer hosts. Retain primary-admin access,
+exact hostname targeting and basic file integrity, but do not invent extra
+prerequisite/recovery layers or prevent an informed Remove because no native
+site exists. Keep only genuine historical recovery paths for older applied
+state; never silently delete their retained records. An OS-level edit is not
+the required workflow.
+
 ### Optional WordPress companion
 
 The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Coordinated pre-releases can attach both artifacts after their respective review and release authorization; installation and Production deployment remain separate actions.
@@ -152,8 +169,9 @@ to enforce explicitly opted-in, site/service-scoped protections against
 known sensitive-file exposure and abusive traffic. In particular, preserve
 approved shared PHP-FPM settings automatically after compatible lifecycle
 changes (with verified, recoverable native event/reconciliation ownership),
-provide narrow reviewed correction of unwanted local hosts aliases plus a
-reproducible prevention path, implement verified Nginx-sensitive-path and
+provide a straightforward administrator-click removal of unwanted local
+Hosts loopback aliases even after successful WP installation or a deleted
+site record, implement verified Nginx-sensitive-path and
 pre-PHP anti-scan rules, and address actual HTTP/2/HTTP/3-aware site-log
 Fail2ban compatibility. Site-level `.well-known`/OAuth/hotlink exceptions
 and authorized WordPress HTTPS URL, debugging, Cron and XML-RPC corrections
@@ -185,8 +203,11 @@ non-emergency watcher controls must verify the **loaded helper** contract
 and fail closed if stale, while keeping Emergency disable accessible.
 A panel reload is separately authorized, never triggered by import.
 
-The originally requested **automatic post-terminal Hosts cleanup** remains
-outstanding P0. **Unpublished candidate 0.1.62** adds an independently
+**Historical requirement superseded 2026-11-20:** the earlier P0
+automatic post-terminal Hosts cleanup is explicitly **cancelled**; current
+Hosts acceptance requires one-click in-plugin removal from the actual file.
+Legacy witness/journal text below is implementation history, not a new
+automatic-cleanup requirement. **Merged source 0.1.62** added an independently
 opt-in, service-scoped PHP 8.1/8.5 auto-repair worker. It records a trusted
 pre-terminal native WP progress identity and FPM file fingerprint, requires a
 matching later successful/failed terminal and changed FPM source, then

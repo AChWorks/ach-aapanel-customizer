@@ -465,7 +465,18 @@
     </section>
     <section class="ach-view" id="ach-panel-routing" aria-labelledby="ach-tab-routing" data-view="routing" role="tabpanel" hidden>
       <h4>Routing &amp; Nginx</h4>
-      <p class="ach-note">Inspect local hosts and Nginx sources for the selected website. These checks do not change routing or prove active Nginx worker state. Expand Technical evidence when needed.</p>
+      <p class="ach-note">Local Hosts aliases are available without selecting a website. Other Nginx and recovery inspections still use the selected native site.</p>
+      <div class="ach-note" aria-label="Origin-local Hosts aliases">
+        <strong>Local Hosts — one-click removal</strong>
+        <p>Detected loopback mappings from this server's current <code>/etc/hosts</code> appear here after successful or failed WordPress installation, even if the site no longer exists in aaPanel. Choose the hostname and click Remove. Only that hostname's loopback mappings are removed; external DNS and other Hosts names remain unchanged. No automatic deletion or extra approval checkbox.</p>
+        <div class="ach-controls">
+          <button id="ach-hosts-alias-refresh" type="button">Refresh local aliases</button>
+          <label for="ach-hosts-alias-select">Detected hostname</label>
+          <select id="ach-hosts-alias-select" disabled><option value="">No aliases inspected</option></select>
+          <button id="ach-hosts-alias-remove" type="button" class="btn btn-warning" disabled>Remove selected hostname</button>
+        </div>
+        <p id="ach-hosts-alias-result" role="status" aria-live="polite">Open Routing &amp; Nginx to inspect current local loopback aliases.</p>
+      </div>
       <p class="ach-note"><strong>Local hosts override:</strong> inspect exact site-bound names in the origin server's /etc/hosts. An unwanted loopback alias can be removed only after a fresh file/site inspection and explicit approval, with a saved original for guarded Restore. This neither proves remote DNS/Gateway failure nor prevents WordPress Toolkit from recreating the entry.</p>
       <div class="ach-controls"><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts file</button></div>
       <p class="ach-note">Use the shared website selector above. For another page, choose Browse websites. This checks the server's local file, not public DNS or a remote host.</p>
@@ -474,7 +485,7 @@
         <p id="ach-hosts-result" class="ach-status-metadata" role="status">Select a website from the inventory for read-only inspection.</p>
       </details>
       <details class="ach-help" id="ach-hosts-remediation">
-        <summary>Remove an unwanted local hosts alias (manual / recoverable)</summary>
+        <summary>Advanced selected-website Hosts recovery</summary>
         <p>Choose only an alias positively identified as unwanted for this website. A loopback entry may be intentional. The action removes that exact domain's loopback aliases from this origin server, preserving unrelated names; it does not change external DNS or fix why a provisioning tool inserted the entry. An operation requires a fresh SHA-256 and selected-site identity; unsupported or changed source refuses the write.</p>
         <label for="ach-hosts-removal-domain">Loopback alias from latest inspection</label>
         <select id="ach-hosts-removal-domain" disabled><option value="">Inspect a selected website first</option></select>
@@ -487,9 +498,9 @@
       </details>
       <div class="ach-note" aria-label="Native WordPress failed-install read-only witness">
         <strong>Native WordPress failed-install witness — opt-in, observation only</strong>
-        <p>For the verified aaPanel 8.0.7 Nginx single-site WP Toolkit writer only. This watcher records a pre-terminal, alias-free Hosts baseline and detects an exact vendor-added <code>127.0.0.1</code> alias after a terminal failure. <strong>No unattended Hosts modification occurs.</strong> Linux file leases can expire, so removing a line safely against uncoordinated writers is not proved. If a failed installation is reported, find <code>wp_terminal_manual_review</code> in Activity &amp; Logs for the exact affected domain, confirm the native install is finished, then have an authorized OS operator independently review and edit <code>/etc/hosts</code>. Failed site records may no longer exist, so the selected-site Hosts editor might not apply. No automatic PHP-FPM changes.</p>
+        <p>This optional aaPanel 8.0.7 Nginx witness records detailed evidence of failed single-site WP Toolkit operations. It never edits Hosts automatically. Use <strong>Local Hosts — one-click removal</strong> above to remove a detected alias after either successful or failed installation, regardless of site inventory status. The witness is not required to inspect or remove a current alias. No automatic PHP-FPM changes from this witness.</p>
         <p id="ach-wp-terminal-status" role="status" aria-live="polite">Inspect the optional read-only witness policy before enabling.</p>
-        <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> I approve a read-only, event-driven failed-install watcher; it will log candidates for manual OS review, never edit /etc/hosts automatically.</label>
+        <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> Enable optional detailed failed-install diagnostics. Alias removal above works even without this watcher; it never edits /etc/hosts automatically.</label>
         <div class="ach-controls">
           <button type="button" id="ach-wp-terminal-refresh">Inspect witness policy</button>
           <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck historical recovery</button>
@@ -873,7 +884,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.64'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.65'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1058,7 +1069,8 @@
   }
   function hasPotentialActivity(method) {
     return method === 'set_control' || method === 'inspect_local_hosts' ||
-      method === 'manage_local_hosts' ||
+      method === 'manage_local_hosts' || method === 'inspect_hosts_aliases' ||
+      method === 'remove_hosts_alias' ||
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'manage_nginx_protection' || method === 'wp_terminal_manage' || method === 'status_manage' || method === 'status_defaults' ||
@@ -1899,6 +1911,93 @@
     cacheActivationLock();
     vhostLock();
   }
+  var hostsAliasBusy = false, hostsAliasTicket = 0, hostsAliasDomains = [];
+  function hostsAliasLock() {
+    var selected = String(root.find('#ach-hosts-alias-select').val() || '');
+    root.find('#ach-hosts-alias-refresh').prop('disabled', hostsAliasBusy);
+    root.find('#ach-hosts-alias-select').prop('disabled',
+      hostsAliasBusy || !hostsAliasDomains.length);
+    root.find('#ach-hosts-alias-remove').prop('disabled',
+      hostsAliasBusy || !hostsAliasDomains.includes(selected));
+  }
+  function loadHostsAliases(note) {
+    if (hostsAliasBusy) return;
+    var ticket = ++hostsAliasTicket;
+    hostsAliasBusy = true;
+    hostsAliasDomains = [];
+    root.find('#ach-hosts-alias-select').empty().append(
+      $('<option>').val('').text('Inspecting aliases…')).val('');
+    root.find('#ach-hosts-alias-result').text('Reading current origin-local /etc/hosts…');
+    hostsAliasLock();
+    request('inspect_hosts_aliases', {}, function (r, failure) {
+      if (ticket !== hostsAliasTicket) return;
+      hostsAliasBusy = false;
+      var valid = r && r.status === true && r.schema === 1 &&
+        r.read_only === true && ['Aliases Found','No Aliases'].includes(r.state) &&
+        /^[0-9a-f]{64}$/.test(r.hosts_sha256 || '') &&
+        Array.isArray(r.entries) &&
+        r.entries.every(function (item) {
+          return item && typeof item.domain === 'string' && item.domain.length <= 253 &&
+            /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/.test(item.domain) &&
+            !['localhost','ip6-localhost','ip6-loopback'].includes(item.domain) &&
+            typeof item.address === 'string' && item.address.length <= 45 &&
+            !/[^0-9a-f:.]/i.test(item.address) &&
+            Number.isSafeInteger(item.line) && item.line > 0;
+        }) && (r.state === 'Aliases Found') === (r.entries.length > 0);
+      var select = root.find('#ach-hosts-alias-select').empty();
+      $('<option>').val('').text('Choose a hostname').appendTo(select);
+      if (!valid) {
+        root.find('#ach-hosts-alias-result').text(
+          'Local Hosts inspection unavailable. ' +
+          (failure && typeof failure.msg === 'string' ? failure.msg.slice(0, 240) : 'Refresh to retry.'));
+      } else {
+        var counts = new Map();
+        r.entries.forEach(function (item) {
+          counts.set(item.domain, (counts.get(item.domain) || 0) + 1);
+        });
+        hostsAliasDomains = Array.from(counts.keys());
+        hostsAliasDomains.forEach(function (domain) {
+          $('<option>').val(domain).text(domain + ' (' + counts.get(domain) + ' mapping(s))').appendTo(select);
+        });
+        root.find('#ach-hosts-alias-result').text(
+          (note ? note + ' ' : '') + (hostsAliasDomains.length ?
+            hostsAliasDomains.length + ' removable hostname(s) found in local Hosts. Choose one and click Remove.' :
+            'No removable local loopback hostnames remain.'));
+      }
+      select.val('');
+      hostsAliasLock();
+    });
+  }
+  root.find('#ach-hosts-alias-refresh').on('click', function () {
+    loadHostsAliases();
+  });
+  root.find('#ach-hosts-alias-select').on('change', hostsAliasLock);
+  root.find('#ach-hosts-alias-remove').on('click', function () {
+    var domain = String(root.find('#ach-hosts-alias-select').val() || '');
+    if (hostsAliasBusy || !hostsAliasDomains.includes(domain)) return;
+    hostsAliasBusy = true;
+    hostsAliasLock();
+    root.find('#ach-hosts-alias-result').text('Removing current loopback mapping for ' + domain + '…');
+    request('remove_hosts_alias', {domain:domain}, function (r, failure) {
+      hostsAliasBusy = false;
+      hostsAliasDomains = [];
+      hostsAliasLock();
+      if (r && r.status === true && r.schema === 1 && r.domain === domain &&
+          (r.state === 'Alias Removed' || r.state === 'Already Absent') &&
+          typeof r.changed === 'boolean' &&
+          Number.isSafeInteger(r.removed_aliases) && r.removed_aliases >= 0 &&
+          /^[0-9a-f]{64}$/.test(r.hosts_sha256 || '')) {
+        loadHostsAliases(r.changed ?
+          'Removed ' + r.removed_aliases + ' mapping(s) for ' + domain + '.' :
+          domain + ' was already absent.');
+      } else {
+        loadHostsAliases('Removal not confirmed for ' + domain + '. ' +
+          (failure && typeof failure.msg === 'string' ? failure.msg.slice(0, 240) :
+          'Current file refreshed; try again if the alias remains.'));
+      }
+    });
+  });
+
   function nativeHostsSnapshot(site) {
     var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
     bindings.sort(function (a, b) {
@@ -5213,6 +5312,8 @@
     syncWorkerVersionVisibility();
     msg('', false);
     if (tab === 'overview' && !sectionsLoaded.overview) overview();
+    // Use the live origin file rather than WP success/failure or site records.
+    if (tab === 'routing' && !hostsAliasBusy) loadHostsAliases();
     if (['websites','routing','cache'].includes(tab) && !sectionsLoaded.websites && !siteBusy) sites();
     if (tab === 'php' && !sectionsLoaded.php && !phpInventoryBusy) loadPhpInventory();
     if (tab === 'status') {
@@ -6013,7 +6114,7 @@
     root.find('#ach-wp-terminal-restore-reviewed, #ach-wp-terminal-reviewed, #ach-wp-terminal-abandon-reviewed').prop('checked', false);
     root.find('#ach-wp-terminal-restore-reviewed').prop('disabled', !wpTerminalRecovery);
     root.find('#ach-wp-terminal-status').text('Native WP observer: ' + (r.enabled ? 'Enabled' : 'Disabled') +
-      ' · Unattended Hosts edits: OFF (manual OS review only)' +
+      ' · Unattended Hosts edits: OFF (use Local Hosts one-click removal above)' +
       ' · Watcher: ' + (r.watcher_ready ? 'Active' : 'Not ready') +
       ' (' + r.watcher_status + ')' +
       ' · Last worker: ' + r.last_worker.state + ' / ' + r.last_worker.stage +
