@@ -3662,7 +3662,8 @@
       !unboundMatches || !['Source Ready','Restored'].includes(statusUnboundEvidence.state) ||
       root.find('#ach-status-unbound-apply-approve').prop('checked') !== true);
     root.find('#ach-status-unbound-restore').prop('disabled',
-      !unboundMatches || !['Applied','Recovery Required'].includes(statusUnboundEvidence.state) ||
+      !unboundMatches || !['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) ||
+      !statusUnboundEvidence.recovery ||
       root.find('#ach-status-unbound-restore-approve').prop('checked') !== true);
     // Do not invent readiness: the messages below derive from the very same
     // evidence conditions that already gate the corresponding action buttons.
@@ -3708,7 +3709,8 @@
     var unboundApply = !!(unboundMatches &&
       ['Source Ready','Restored'].includes(statusUnboundEvidence.state));
     var unboundRestore = !!(unboundMatches &&
-      ['Applied','Recovery Required'].includes(statusUnboundEvidence.state));
+      ['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) &&
+      !!statusUnboundEvidence.recovery);
     explainGate('ach-status-unbound-apply-why', unboundApply && !busy ? 'ready' : 'blocked',
       pending || (!unboundApply ?
         'Choose global / unbound, load branding and Recheck HTTP routing. Apply is unavailable without a compatible source.' :
@@ -4772,6 +4774,8 @@
         !hash(r.source_sha256) || !hash(r.rendered_sha256) ||
         !status(r.before_ipv4_status) || !status(r.before_ipv6_status) ||
         r.recovery_id !== null && !id(r.recovery_id) ||
+        (['Source Ready','Applied','Restored','Needs Review','Recovery Required'].includes(r.state) &&
+         r.before_ipv4_status === null && r.before_ipv6_status === null) ||
         r.read_only !== (action === 'recheck') ||
         typeof r.runtime_verified !== 'boolean' ||
         typeof r.changed !== 'boolean' ||
@@ -4781,7 +4785,8 @@
       return r.changed === false &&
         ['Source Ready','Applied','Restored','Conflict','Drift','Recovery Required','Needs Review'].includes(r.state) &&
         (r.state !== 'Source Ready' || r.recovery_id === null) &&
-        (r.state !== 'Applied' || id(r.recovery_id));
+        (['Applied','Needs Review','Recovery Required'].includes(r.state) ?
+          id(r.recovery_id) : true);
     return action === 'apply' ?
       r.state === 'Applied' && r.changed && r.runtime_verified && id(r.recovery_id) :
       r.state === 'Restored' && r.changed && r.runtime_verified && id(r.recovery_id);
@@ -4798,7 +4803,8 @@
          root.find('#ach-status-unbound-apply-approve').prop('checked') !== true)) return;
     if (action === 'restore' &&
         (!sameDefaultSelection(previous) ||
-         !['Applied','Recovery Required'].includes(previous.state) ||
+         !['Applied','Needs Review','Recovery Required'].includes(previous.state) ||
+         !previous.recovery ||
          root.find('#ach-status-unbound-restore-approve').prop('checked') !== true)) return;
     var ticket = statusTicket, revision = statusRevision, brand = statusFields();
     statusUnboundEvidence = null;
@@ -4826,6 +4832,7 @@
       if (!same || !validUnboundResponse(r, action, locale, revision) ||
           action === 'apply' && r &&
           (r.rendered_sha256 !== previous.rendered || r.source_sha256 !== previous.source ||
+           r.before_ipv4_status !== previous.v4 || r.before_ipv6_status !== previous.v6 ||
            r.recovery_id === previous.recovery && previous.state !== 'Restored') ||
           action === 'restore' && r &&
           (r.recovery_id !== previous.recovery || r.source_sha256 !== previous.source)) {

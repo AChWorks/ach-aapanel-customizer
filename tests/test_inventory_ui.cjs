@@ -7477,6 +7477,78 @@ test('IPv4-only unbound Browser path accepts absent IPv6 without approving a new
   assert.match(ui.state().unboundResult,/Restored/);
 });
 
+test('Unbound Needs Review listener drift enables approved Restore with existing Recovery ID', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Source Ready'));
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  ui.statusClick('#ach-status-unbound-apply').respond(unboundReply('apply','Applied'));
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Applied'));
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+  const changed=unboundReply('recheck','Needs Review',{
+    before_ipv4_status:200, before_ipv6_status:null, runtime_verified:false,
+    recovery_id:'c'.repeat(32), source_sha256:'7'.repeat(64)
+  });
+  ui.statusClick('#ach-status-unbound-recheck').respond(changed);
+  assert.match(ui.state().unboundResult,/Needs Review/);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-unbound-restore-approve',true);
+  assert.equal(ui.state().unboundRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-unbound-restore');
+  assert.match(restore.options.url,/s=status_unbound$/);
+  assert.equal(restore.options.data.unbound_action,'restore');
+  assert.equal(restore.options.data.expected_source_sha256,'7'.repeat(64));
+  assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
+  assert.equal(restore.options.data.unbound_approval,'restore_global_http_unbound_reload');
+  restore.respond(unboundReply('restore','Restored',{
+    before_ipv4_status:200, before_ipv6_status:null, source_sha256:'7'.repeat(64)
+  }));
+  assert.match(ui.state().unboundResult,/Restored/);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+});
+
+test('Unbound malformed family and drift recovery evidence does not unlock writes', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  const noFamily={before_ipv4_status:null,before_ipv6_status:null};
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Source Ready',noFamily));
+  assert.match(ui.state().unboundResult,/Read-only Recheck incomplete or incompatible/);
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Needs Review',{
+    recovery_id:null,runtime_verified:false
+  }));
+  assert.match(ui.state().unboundResult,/Read-only Recheck incomplete or incompatible/);
+  ui.statusSetChecked('#ach-status-unbound-restore-approve',true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Conflict',{
+    ...noFamily, recovery_id:null, runtime_verified:false
+  }));
+  assert.match(ui.state().unboundResult,/Conflict/);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+});
+
+test('Unbound Apply response cannot silently change approved listener family baseline', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Source Ready',{
+    before_ipv4_status:200,before_ipv6_status:null
+  }));
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  const apply=ui.statusClick('#ach-status-unbound-apply');
+  apply.respond(unboundReply('apply','Applied',{
+    before_ipv4_status:200,before_ipv6_status:200
+  }));
+  assert.match(ui.state().unboundResult,/outcome unconfirmed|incomplete or incompatible/i);
+  assert.equal(ui.state().unboundApplyDisabled,true);
+  assert.equal(ui.state().unboundRestoreDisabled,true);
+});
+
 test('HTTP unbound wrong replies, brand edits and scope/locale changes revoke authorization', () => {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());

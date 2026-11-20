@@ -40,6 +40,10 @@ class UnboundError(StatusPageError):
         super().__init__(message)
 
 
+class UnboundProbeRefused(UnboundError):
+    """A refused loopback TCP connection; not a timeout or an unknown failure."""
+
+
 def _sha(value):
     return hashlib.sha256(value).hexdigest()
 
@@ -203,6 +207,8 @@ def _probe(ipv6=False):
         if len(body) > 128 * 1024 or (length is not None and len(body) != int(length)):
             raise UnboundError("probe", "Unbound HTTP body incomplete or oversized")
         return response.status, _sha(body), response.getheader("X-ACh-Status-Proof")
+    except ConnectionRefusedError as exc:
+        raise UnboundProbeRefused("probe", "Unbound loopback HTTP connection refused") from exc
     except (OSError, http.client.HTTPException, TimeoutError) as exc:
         raise UnboundError("probe", "Unbound loopback HTTP request unavailable") from exc
     finally:
@@ -219,24 +225,38 @@ def _baseline(families, probe):
 def _settled(operation_id, after_sha, *, present, before_v4=None, before_v6=None,
              families=None, probe=None):
     fn = probe or _probe
-    if families is None:
-        families = frozenset(family for family, previous in
-                             (("ipv4", before_v4), ("ipv6", before_v6))
-                             if previous is not None)
+    previous_families = frozenset(
+        family for family, previous in
+        (("ipv4", before_v4), ("ipv6", before_v6)) if previous is not None
+    )
+    current_families = families if families is not None else previous_families
+    # On Restore, all currently configured families AND all previously
+    # managed families must lose this exact proof. An old listener may still
+    # be running even after its native source was removed.
+    to_check = current_families | previous_families if not present else current_families
     for ipv6, family in ((False, "ipv4"), (True, "ipv6")):
-        if family not in families:
+        if family not in to_check:
             continue
+        removed_family = not present and family not in current_families
         deadline = time.monotonic() + 8
         count = 0
         while True:
-            status, body, nonce = fn(ipv6)
-            if present:
-                match = status == 404 and body == after_sha and nonce == operation_id
+            try:
+                status, body, nonce = fn(ipv6)
+            except UnboundProbeRefused:
+                # Only a previously managed family absent from current native
+                # source may use confirmed TCP refusal as absence evidence.
+                # Timeouts and all other probe errors remain uncertain.
+                if not removed_family:
+                    raise
+                match = True
             else:
-                # An unrelated named VHost can change the native fallback after
-                # Apply. Restore removes only our route; it must not require an
-                # old unrelated response status/body to remain unchanged.
-                match = nonce != operation_id
+                if present:
+                    match = status == 404 and body == after_sha and nonce == operation_id
+                else:
+                    # A foreign fallback may legitimately differ from the
+                    # pre-Apply status/body; exact managed proof must vanish.
+                    match = nonce != operation_id
             count = count + 1 if match else 0
             if count >= 3:
                 break
@@ -400,6 +420,7 @@ def manage_unbound(action, html, *, data_fd,
             _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
             _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
             _settled(operation_id, record["rendered_sha256"], present=False,
+                     before_v4=record["before_v4"], before_v6=record["before_v6"],
                      families=families, probe=probe)
             if _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner) != (source_sha, False, families):
                 raise UnboundError("concurrency", "Nginx source changed after Restore", operation_id)
