@@ -20,18 +20,23 @@ compatibility certification. For source-tree version details, inspect
 | Native section | Current operator capability |
 | --- | --- |
 | **Overview / Monitor** | Enable/disable monitoring, observe packaged vs resident entrypoint versions, see availability and diagnostics. |
-| **Website list** | Refresh native website inventory, compare changes, and save either **one reviewed site's** baseline or a separately reviewed **all-sites** baseline. Saving a baseline does not reconfigure a website. |
-| **Routing & Nginx** | Inspect generated VHosts, selected-site `/etc/hosts`, local HTTP and recovery context. **Unpublished source 0.1.60** includes opt-in site-owned Nginx sensitive-file guards and a separately opt-in, **read-only failed WP Toolkit Hosts witness** for the verified aaPanel 8.0.7/Nginx source. No unattended alias cleanup is promised; an authorized OS operator must coordinate manual corrections. **Published 0.1.51 lacks these features**. PHP-FPM automation exists only as an unpublished 0.1.62 candidate pending native acceptance. |
-| **PHP-FPM** | Discover PHP and site/socket relationships; compare version-scoped desired policies and use guarded shared-pool Apply/Restore for verified PHP 8.1/8.5 shapes. **Unpublished candidate 0.1.62** adds separately opt-in, repeatable native WordPress post-terminal FPM repair from a witnessed before/after file transition, with reviewed service settings, site mapping, runtime checks and recovery. Live native enabled-watcher acceptance is pending. |
-| **Status Pages** | Offline EN/FA templates and branding; guarded per-site 404/502 and Nginx-generated 50x delivery, future-site defaults, stopped-site HTTP503 and global unknown-Host **HTTP/80** paths where compatible. Each has its **own** approval and Restore. |
+| **Website list** | Refresh paginated native website inventory, compare site/domain changes without an arbitrary site or alias count cap, and save selected-site or all-sites observation baselines. Baseline changes never modify website configuration. |
+| **Routing & Nginx** | Inspect the actual native Nginx VHosts, site-bound local Hosts, HTTP and recovery rather than reject an otherwise recognizable source solely because of the aaPanel version. Unpublished source has opt-in Nginx protections and failed WordPress Toolkit Hosts witnessing. Unattended lossless Hosts cleanup remains open; published v0.1.51 does not include these additions. |
+| **PHP-FPM** | Discover and inspect PHP installations based on actual native files (including older versions), view file/socket relationships, and use guarded Apply/Restore only for currently implemented 8.1/8.5 adapters. Native post-terminal PHP-FPM repair is merged in unpublished v0.1.62, with successful isolated ordinary-systemd QA for both successful and failed native WordPress setup. Fresh authenticated Browser and Production qualification remain outstanding. |
+| **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. |
 | **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. |
 | **Activity & Logs** | Operation/stage/error details, correlation IDs, scope and recovery guidance. |
 
-These are **bounded, source- and topology-checked capabilities**, not promises
-that every aaPanel release, PHP version, website type or configuration can be
-modified. Unsupported or drifted situations report **Needs Review** rather than
-silently replacing third-party files. Monitoring is the default; destructive
-or shared-service changes require a separate, current, explicit approval.
+**Owner-approved product direction:** Keep tasks usable and straightforward.
+Do not invent hard-coded site/domain count or version limits when native
+capabilities or paginated data can be discovered. For acceptable residual
+risk, show a brief, nonmandatory pre-action note; an authorized administrator
+can continue without completing every recommendation. Real authorization,
+target correctness, and avoidance of unintended unrelated data loss remain
+essential. See the [project-wide operating principle](docs/PROJECT-SPEC.md#owner-wide-operating-principle-simplicity-and-informed-choice-2026-11-20).
+v0.1.62 is merged source, not a published ZIP. This proposed source change
+is versioned v0.1.63; it is not released or deployed. Confirm published
+versions and checksums before installation.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
 is a separate WordPress plugin whose ZIP includes a standard
@@ -69,7 +74,7 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
   and separately approved legacy Restore uses append-only source writes.
   **Automatic Hosts remediation remains P0. The first native WordPress
   post-terminal FPM auto-repair implementation is in unpublished candidate
-  0.1.62, still awaiting real enabled-watcher acceptance.** The plugin also
+  0.1.62, with ordinary-systemd native success/failure acceptance recorded.** The plugin also
   lacks general shared-cache purge, unsupported PHP pool rewrites, silent
   VHost repair and blanket
   status-page deployment. Once explicitly activated, selected-site
@@ -99,9 +104,9 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
   8.0.7 systemd-only WordPress PHP 8.1 success and post-optimizer
   PHP 8.5 failure automatic repair. See the
   [native QA evidence](docs/evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json).
-  It is not a universal FPM hook or a Hosts fix. Authenticated Browser
-  acceptance, independent review and Production qualification remain
-  separate gates. Do not deploy to Production based on isolated QA alone.
+  It is not a universal FPM hook or a Hosts fix. Independent exact-source
+  review and PR #102 integration passed. Fresh authenticated Browser
+  acceptance and Production qualification remain separate gates. Do not deploy to Production based on isolated QA alone.
 - Per-site website roots are discovered from current native aaPanel records,
   not assumed under `/www/wwwroot`. Confirmed QA roots include `/www/acdomains`
   and `/www/other-sites`; unrelated aaPanel service-install prefixes and

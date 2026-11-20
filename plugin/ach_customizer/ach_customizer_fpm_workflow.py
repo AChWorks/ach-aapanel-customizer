@@ -167,7 +167,7 @@ class ManualFpmWorkflow:
                 or not isinstance(impact.get("matched_sites"), list)
                 or not impact["matched_sites"]
                 or type(impact.get("site_count")) is not int
-                or not 1 <= impact["site_count"] <= 100
+                or impact["site_count"] < 1
                 or not 1 <= len(impact["matched_sites"]) <= impact["site_count"]
                 or type(impact.get("other_php_sites_count")) is not int
                 or impact["other_php_sites_count"] < 0

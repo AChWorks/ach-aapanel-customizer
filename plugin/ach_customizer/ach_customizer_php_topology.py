@@ -69,11 +69,9 @@ def inspect_php_fpm_site_topology(
     try:
         if not isinstance(version, str) or not VERSION.fullmatch(version):
             raise MonitorInputError("Unsupported version identifier")
-        if (int(version[0]), int(version[1:])) < (8, 1):
-            raise MonitorInputError("PHP 8.1+ is required for site topology")
-        if panel_public.get_webserver() != "nginx" or str(
-                panel_public.get_panel_version()).strip() != "8.0.7":
-            raise MonitorInputError("Native Nginx site attribution requires verified aaPanel 8.0.7 layout")
+        if panel_public.get_webserver() != "nginx":
+            raise MonitorInputError("Native Nginx is required for PHP site-file attribution")
+        panel_version = str(panel_public.get_panel_version()).strip()
         inventory = discover_php_fpm_versions(config_root)
         observed = {
             item["code"] for item in inventory["versions"] if item["preview_candidate"]
@@ -118,6 +116,9 @@ def inspect_php_fpm_site_topology(
         current = discover_php_fpm_versions(config_root)
         if current != inventory:
             raise MonitorInputError("Installed PHP inventory changed during site mapping")
+        if (panel_public.get_webserver() != "nginx" or
+                str(panel_public.get_panel_version()).strip() != panel_version):
+            raise MonitorInputError("Panel webserver or version changed during site mapping")
 
         complete = first["state"] == "File Mapping"
         # Tie the source digest to BOTH Nginx include/VHost evidence and all

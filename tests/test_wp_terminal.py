@@ -130,6 +130,12 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual((self.data / LOG_NAME).read_text().count('"wp_terminal_manual_review"'),1)
         self.assertEqual(self.hosts.read_bytes(), self.before + marker)
 
+    def test_recovery_counter_is_not_limited_to_64_events(self):
+        from ach_customizer_wp_terminal import _default, _validate
+        record = _default()
+        record["recoveries"] = 135
+        self.assertEqual(_validate(record)["recoveries"], 135)
+
     def test_exact_long_domain_survives_private_outbox_activity_and_crash(self):
         from ach_customizer_activity import read_activity
         import ach_customizer_main as api

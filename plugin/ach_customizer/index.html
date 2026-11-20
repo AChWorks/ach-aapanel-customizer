@@ -444,7 +444,7 @@
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
       <div class="ach-note" aria-label="Native website lifecycle Monitor">
         <strong>Website lifecycle changes (read-only)</strong>
-        <p>Compare all supported native aaPanel site IDs, site keys, roots, enabled status and bound domain/port records to the last explicitly saved baseline. Does not inspect effective Nginx routing, PHP, DNS or live content. Up to 100 sites; new/removed sites and aaPanel DB changes are never automatically enforced.</p>
+        <p>Compare all supported native aaPanel site IDs, site keys, roots, enabled status and bound domain/port records to the last explicitly saved baseline. Does not inspect effective Nginx routing, PHP, DNS or live content. All native site pages are inspected; new/removed sites and aaPanel DB changes are never automatically enforced.</p>
         <div class="ach-controls"><button type="button" id="ach-site-changes-compare">Compare website records</button></div>
         <p id="ach-site-changes-summary" class="ach-inspection-summary" data-tone="neutral" role="status" aria-live="polite">No comparison yet. Choose Compare website records to see what changed.</p>
         <details class="ach-technical-report"><summary>Comparison source details (expand when needed)</summary>
@@ -456,11 +456,10 @@
         <p>Choose a website from the native selector above, Compare website records, and review its before/after state. This updates <em>only that site's</em> record in the saved plugin baseline; other pending site changes remain visible and unaccepted. No Nginx or PHP settings are changed.</p>
         <p id="ach-site-changes-selected-evidence" class="ach-status-metadata" role="status" aria-live="polite">Select a current native website and Compare its database state.</p>
         <p id="ach-site-changes-selected-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: choose a selected site's Added/Changed/Initial record and Compare.</p>
-        <label><input id="ach-site-changes-selected-reviewed" type="checkbox" aria-describedby="ach-site-changes-selected-why" disabled /> I reviewed the selected site's exact identity, current root, status and domain bindings and approve updating only its observation baseline.</label>
         <div class="ach-controls"><button type="button" id="ach-site-changes-save-selected" class="btn btn-warning" disabled>Save only selected website baseline</button></div>
         <hr />
         <p id="ach-site-changes-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Not available yet: run Compare website records, then review the results before approving a new comparison baseline.</p>
-        <label><input id="ach-site-changes-approve" type="checkbox" aria-describedby="ach-site-changes-why" disabled /> I reviewed ALL currently compared website records and want to replace the full monitoring comparison baseline.</label>
+        <p class="ach-note">Saving the all-sites baseline accepts the currently displayed comparison, including removed websites. This updates monitoring history only, not live website settings. Review the list if useful, then select Save to continue.</p>
         <div class="ach-controls"><button type="button" id="ach-site-changes-save" class="btn btn-warning" disabled>Save baseline for ALL websites</button></div>
       </div>
     </section>
@@ -640,7 +639,7 @@
       <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP service + site files (read-only)</button></div>
       <p id="ach-php-runtime-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect the selected PHP service and site file assignments.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
-        <p id="ach-php-runtime-result" class="ach-status-metadata" role="status">Select a discovered PHP 8.1+ version for bounded Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
+        <p id="ach-php-runtime-result" class="ach-status-metadata" role="status">Select a discovered PHP installation for read-only Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
       </details>
       <p id="ach-php-topology-summary" class="ach-status-metadata" role="status" aria-live="polite">No site-to-PHP socket file mapping loaded. The runtime process check does not by itself identify impacted sites.</p>
       <div class="ach-scroll" aria-label="Read-only native PHP file assignments"><table>
@@ -673,8 +672,8 @@
         <div class="ach-controls">
           <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>
           <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
-          <p id="ach-fpm-policy-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Not available yet: select PHP, enter five settings, and run Preview PHP-FPM settings. Only a current valid preview unlocks this approval.</p>
-          <label><input id="ach-fpm-policy-reviewed" type="checkbox" aria-describedby="ach-fpm-policy-why" disabled /> I reviewed the PHP service, proposed values and latest file preview; save as Monitor-only desired settings (no service reload).</label>
+          <p id="ach-fpm-policy-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Select PHP, enter five settings, then run Preview PHP-FPM settings. A current valid preview enables Save; the PHP service remains unchanged.</p>
+          <p class="ach-note">Saving records desired Monitor settings only; it does not reload PHP. Review the affected service and proposed values if useful, then choose Save.</p>
           <button id="ach-fpm-policy-save" type="button" disabled>Save desired policy (Monitor)</button>
         </div>
         <p id="ach-fpm-policy-status" role="status" aria-live="polite">Select an installed version and Preview to compare or save an explicit policy.</p>
@@ -761,6 +760,7 @@
         <div><label for="ach-status-foreground">Text color</label><input id="ach-status-foreground" maxlength="7" placeholder="#0b1718" /></div>
       </div>
       <label><input id="ach-status-footer" type="checkbox" checked /> Show footer attribution</label>
+      <p class="ach-note" id="ach-status-color-notes">Accessibility recommendation: Preview your chosen colors and check readability before publishing. Low contrast is a warning, not a Save restriction.</p>
       <div class="ach-controls">
         <button id="ach-status-load" type="button">Recheck saved branding</button>
         <button id="ach-status-preview-button" type="button" disabled>Preview unsaved settings</button>
@@ -769,8 +769,7 @@
       <p id="ach-status-result" role="status" aria-live="polite" data-state="info">Open Status Pages to load saved preferences.</p>
       <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
       <div class="ach-controls">
-        <p id="ach-status-reset-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Before resetting, confirm the saved branding scope. Reset changes preferences only; it does not install an error page.</p>
-        <label><input id="ach-status-reset-approve" type="checkbox" aria-describedby="ach-status-reset-why" /> I approve resetting this scope to inherited or ACh defaults.</label>
+        <p id="ach-status-reset-why" class="ach-note" role="status" aria-live="polite">Reset changes only the selected saved branding preferences, not live error pages. Check the scope if needed, then select Reset to continue.</p>
         <button id="ach-status-reset" type="button" aria-describedby="ach-status-reset-why" class="btn btn-warning" disabled>Reset selected branding scope</button>
       </div>
       <p id="ach-status-workflow-note" class="ach-note" role="status" hidden>Preview only for this template and scope. No live Apply is supported.</p>
@@ -874,7 +873,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.62'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.63'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1006,9 +1005,7 @@
     siteChangesTicket++;
     siteChangesBusy = false;
     siteChangesSnapshot = null;
-    root.find('#ach-site-changes-approve').prop('checked', false).prop('disabled', true);
     root.find('#ach-site-changes-save').prop('disabled', true);
-    root.find('#ach-site-changes-selected-reviewed').prop('checked', false).prop('disabled', true);
     root.find('#ach-site-changes-save-selected').prop('disabled', true);
     root.find('#ach-site-changes-selected-evidence').text(
       'Selection, inventory or baseline changed; choose a native site and Compare again.');
@@ -1089,7 +1086,6 @@
           !Array.isArray(site.bound_domains)) return false;
       seenIds.add(site.id);
       domainCount += site.bound_domains.length;
-      if (domainCount > 1000) return false;
       var canonicalBound = false;
       for (var j = 0; j < site.bound_domains.length; j++) {
         var binding = site.bound_domains[j];
@@ -1497,7 +1493,7 @@
         typeof site.name !== 'string' || !site.name.trim() || site.name.length > 255 ||
         typeof site.document_root !== 'string' || site.document_root.length > 2048 ||
         typeof site.panel_status !== 'string' || site.panel_status.length > 64 ||
-        !Array.isArray(site.bound_domains) || site.bound_domains.length > 24) return false;
+        !Array.isArray(site.bound_domains)) return false;
     var seen = new Set();
     return site.bound_domains.every(function (binding) {
       if (!Array.isArray(binding) || binding.length !== 2 ||
@@ -1516,11 +1512,11 @@
         !['Baseline Missing', 'Changes Observed', 'No Changes'].includes(r.state) ||
         !Number.isSafeInteger(r.baseline_revision) || r.baseline_revision < 0 ||
         !Number.isSafeInteger(r.monitor_revision) || r.monitor_revision < 0 ||
-        !Number.isSafeInteger(r.site_count) || r.site_count < 0 || r.site_count > 100 ||
+        !Number.isSafeInteger(r.site_count) || r.site_count < 0 ||
         !/^[a-f0-9]{64}$/.test(String(r.source_sha256 || '')) ||
         typeof r.note !== 'string' ||
-        !Array.isArray(r.initial_sites) || r.initial_sites.length > 100 ||
-        !Array.isArray(r.changes) || r.changes.length > 200) return false;
+        !Array.isArray(r.initial_sites) ||
+        !Array.isArray(r.changes)) return false;
     if (r.baseline_revision === 0) {
       if (r.state !== 'Baseline Missing' || r.baseline_sha256 !== null ||
           r.changes.length || r.initial_sites.length !== r.site_count) return false;
@@ -1602,9 +1598,7 @@
     var candidate = selectedSiteBaselineCandidate();
     var ready = !!candidate && !siteChangesBusy && !siteBusy &&
       websitePolicyState === 'stable';
-    root.find('#ach-site-changes-selected-reviewed').prop('disabled', !ready);
-    root.find('#ach-site-changes-save-selected').prop('disabled',
-      !ready || root.find('#ach-site-changes-selected-reviewed').prop('checked') !== true);
+    root.find('#ach-site-changes-save-selected').prop('disabled', !ready);
     root.find('#ach-site-changes-selected-evidence').text(candidate ?
       'Selected #' + candidate.id + ' (' + candidate.kind + ')' +
       '\nPrevious observed: ' + (candidate.before ?
@@ -1617,28 +1611,21 @@
       !ready ?
         'Locked: select an Added/Changed/Initial native site and compare again. ' +
         'Removed or unchanged sites cannot be re-baselined by this action.' :
-        root.find('#ach-site-changes-selected-reviewed').prop('checked') === true ?
-        'Selected-site review approved. This changes only its saved DB baseline; all other pending site deltas remain.' :
-        'Review the selected native record above and tick to enable the scoped baseline update.');
+        'Review the selected native record above if useful, then select Save. This changes only its plugin-owned observation baseline.');
   }
   function siteChangesLock(busy) {
     siteChangesBusy = busy;
     root.find('#ach-site-changes-compare').prop('disabled',
       busy || siteBusy || websitePolicyState !== 'stable');
-    root.find('#ach-site-changes-approve').prop('disabled',
-      busy || !siteChangesSnapshot || websitePolicyState !== 'stable');
     root.find('#ach-site-changes-save').prop('disabled',
-      busy || !siteChangesSnapshot || siteBusy || websitePolicyState !== 'stable' ||
-      root.find('#ach-site-changes-approve').prop('checked') !== true);
+      busy || !siteChangesSnapshot || siteBusy || websitePolicyState !== 'stable');
     var explanation = websitePolicyState !== 'stable' ?
       'Locked: Monitor state needs verification. Open Overview and Refresh state, then compare again.' :
       busy || siteBusy ?
       'Checking current site records. Wait for this comparison or website inventory load to finish.' :
       !siteChangesSnapshot ?
       'Locked: choose Compare website records above. Review the records before updating the plugin-owned baseline.' :
-      root.find('#ach-site-changes-approve').prop('checked') === true ?
-      'Approval selected. Save reviewed baseline replaces only the plugin-owned comparison snapshot; it does not change sites or Nginx.' :
-      'Comparison ready. Review the listed site records, then check to enable Save reviewed baseline. No website configuration is changed.';
+      'Comparison ready. Review the listed records if useful, then select Save to accept this plugin-owned baseline. Live website configuration stays unchanged.';
     explainGate('ach-site-changes-why',
       siteChangesSnapshot && !busy && !siteBusy && websitePolicyState === 'stable' ? 'ready' : 'blocked',
       explanation);
@@ -1695,24 +1682,16 @@
         r.state + ' — ' + r.site_count + ' site(s) in current bounded inventory, ' +
         r.changes.length + ' changed ID(s). Baseline revision ' + r.baseline_revision +
         '. Source SHA256: ' + r.source_sha256 + '. ' + r.note);
-      root.find('#ach-site-changes-approve').prop('checked', false);
-      root.find('#ach-site-changes-selected-reviewed').prop('checked', false);
       siteChangesLock(false);
     });
   });
-  root.find('#ach-site-changes-selected-reviewed').on('change', function () {
-    refreshSelectedSiteBaselineGate();
-  });
   root.find('#ach-site-changes-save-selected').on('click', function () {
-    if (siteChangesBusy || siteBusy || websitePolicyState !== 'stable' ||
-        root.find('#ach-site-changes-selected-reviewed').prop('checked') !== true) return;
+    if (siteChangesBusy || siteBusy || websitePolicyState !== 'stable') return;
     var candidate = selectedSiteBaselineCandidate();
     if (!candidate || !siteChangesSnapshot) return;
     var snapshot = siteChangesSnapshot, id = candidate.id, selectedKey = candidate.site.name;
     var ticket = ++siteChangesTicket;
     siteChangesSnapshot = null; // An ambiguous write must be reconciled before retry.
-    root.find('#ach-site-changes-selected-reviewed,#ach-site-changes-approve')
-      .prop('checked', false);
     root.find('#ach-site-changes-status').text(
       'Saving reviewed selected website record; other saved baselines are preserved...');
     siteChangesLock(true);
@@ -1743,16 +1722,11 @@
         '. Other pending website differences were left unchanged. Compare again to verify.');
     });
   });
-  root.find('#ach-site-changes-approve').on('change', function () {
-    siteChangesLock(siteChangesBusy);
-  });
   root.find('#ach-site-changes-save').on('click', function () {
     if (siteChangesBusy || siteBusy || !siteChangesSnapshot ||
-        websitePolicyState !== 'stable' ||
-        root.find('#ach-site-changes-approve').prop('checked') !== true) return;
+        websitePolicyState !== 'stable') return;
     var snapshot = siteChangesSnapshot, ticket = ++siteChangesTicket;
     siteChangesSnapshot = null; // An uncertain request must not be retried blindly.
-    root.find('#ach-site-changes-approve').prop('checked', false);
     root.find('#ach-site-changes-status').text('Saving reviewed plugin-owned baseline...');
     siteChangesLock(true);
     request('save_site_baseline', {
@@ -1997,13 +1971,12 @@
       var id = String(site.id);
       // A snapshot is an optimistic *comparison only*, not a domain/path source.
       var snapshot = nativeHostsSnapshot(site);
-      if (site.bound_domains.length > 100 || snapshot.length > 110000) return;
       hostsPageSites.set(id, {name:site.name, snapshot:snapshot});
       $('<option>').val(id).text(site.name + ' (#' + id + ')').appendTo(select);
     });
     root.find('#ach-hosts-result').text(
       hostsPageSites.size ? 'Select a website to inspect its origin-local /etc/hosts entries.' :
-      'No supported website selection on this page (domain inventory may be too large).');
+      'No website available for selection on this inventory page.');
     inspectionSummary('hosts', hostsPageSites.size ?
       'Website list ready. Select a website to check its local hosts entries.' :
       'No eligible websites on this inventory page.', hostsPageSites.size ? 'neutral' : 'review');
@@ -2020,9 +1993,9 @@
         typeof r.reason !== 'string' || r.reason.length > 300 ||
         typeof r.note !== 'string' || r.note.length > 600 ||
         !['Local Loopback Entry','No Local Loopback Entry','Needs Review'].includes(r.state) ||
-        !Array.isArray(r.domains) || r.domains.length < 1 || r.domains.length > 100 ||
-        !Array.isArray(r.uninspected_wildcards) || r.uninspected_wildcards.length > 100 ||
-        !Array.isArray(r.entries) || r.entries.length > 100) return false;
+        !Array.isArray(r.domains) || r.domains.length < 1 ||
+        !Array.isArray(r.uninspected_wildcards) ||
+        !Array.isArray(r.entries)) return false;
     var nameOK = x => typeof x === 'string' && x.length > 0 && x.length <= 253 &&
       /^[a-z0-9.-]+$/.test(x);
     if (!r.domains.every(nameOK) || !r.uninspected_wildcards.every(
@@ -2031,7 +2004,7 @@
     for (const item of r.entries) {
       if (!item || !r.domains.includes(item.domain) ||
           typeof item.address !== 'string' || !/^[0-9a-f:.]{2,45}$/i.test(item.address) ||
-          !Number.isSafeInteger(item.line) || item.line < 1 || item.line > 2048 ||
+          !Number.isSafeInteger(item.line) || item.line < 1 ||
           typeof item.loopback !== 'boolean') return false;
       hasLoopback = hasLoopback || item.loopback;
     }
@@ -2049,7 +2022,6 @@
       'Choose one website to inspect.');
     inspectionSummary('hosts', 'Website changed. Run the local hosts check again.');
     invalidateCacheAudit('Website selection changed; no previous cache audit is current.');
-    root.find('#ach-site-changes-selected-reviewed').prop('checked', false);
     hostsLock(false);
     refreshSelectedSiteBaselineGate();
   });
@@ -2298,9 +2270,9 @@
           'VHOST_HOST_NOT_IN_NATIVE_BINDINGS'
         ].includes(x)) ||
         new Set(r.findings).size !== r.findings.length ||
-        !Array.isArray(r.native_names) || r.native_names.length > 100 ||
-        !Array.isArray(r.vhost_names) || r.vhost_names.length > 100 ||
-        !Array.isArray(r.listen_ports) || r.listen_ports.length > 20 ||
+        !Array.isArray(r.native_names) ||
+        !Array.isArray(r.vhost_names) ||
+        !Array.isArray(r.listen_ports) ||
         !r.listen_ports.every(x => Number.isSafeInteger(x) && x >= 1 && x <= 65535)) return false;
     var hostOK = x => typeof x === 'string' && x.length > 0 && x.length <= 253 &&
       /^[a-z0-9.-]+$/.test(x) && !x.endsWith('.') && !x.includes('..');
@@ -2671,21 +2643,18 @@
         !['Unknown','Shared Registered Directory','No Registered Directory Peer'].includes(r.purge_scope) ||
         !Array.isArray(r.global_ignore_headers) || r.global_ignore_headers.length > 5 ||
         !Array.isArray(r.other_sites_same_directory) ||
-        r.other_sites_same_directory.length > 99 ||
         typeof r.bypass_directive_seen !== 'boolean' ||
         typeof r.no_cache_directive_seen !== 'boolean' ||
         typeof r.host_key_variable_seen !== 'boolean' ||
         typeof r.purge_directive_seen !== 'boolean' ||
         !Number.isSafeInteger(r.inspected_sites) || r.inspected_sites < 0 ||
-        r.inspected_sites > 100 ||
         !Number.isSafeInteger(r.unresolved_other_sites) ||
-        r.unresolved_other_sites < 0 || r.unresolved_other_sites > 99 ||
+        r.unresolved_other_sites < 0 ||
         typeof r.reason !== 'string' || r.reason.length > 250 ||
         typeof r.note !== 'string' || r.note.length > 650 ||
         !Array.isArray(r.findings) || r.findings.length > 12 ||
         !Array.isArray(r.ignore_headers) || r.ignore_headers.length > 5 ||
-        !Array.isArray(r.other_sites_same_zone) ||
-        r.other_sites_same_zone.length > 99) return false;
+        !Array.isArray(r.other_sites_same_zone)) return false;
     var codes = new Set([
       'NO_DIRECT_CACHE_BYPASS','NO_DIRECT_CACHE_WRITE_GUARD',
       'KEY_NOT_DIRECTLY_OBSERVED','HOST_PARTITION_NOT_OBSERVED',
@@ -3542,9 +3511,7 @@
     root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer').prop('disabled', busy || !editable);
     root.find('#ach-status-preview-button, #ach-status-save').prop(
       'disabled', busy || !actionable);
-    root.find('#ach-status-reset').prop('disabled',
-      busy || !actionable ||
-      root.find('#ach-status-reset-approve').prop('checked') !== true);
+    root.find('#ach-status-reset').prop('disabled', busy || !actionable);
     root.find('#ach-status-inspect-button').prop('disabled', busy || !actionable ||
       !scope || scope.scope !== 'site' ||
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
@@ -3604,9 +3571,7 @@
     var scopeHint = 'Select a supported template/scope and Recheck saved branding before using this action.';
     explainGate('ach-status-reset-why', actionable && !busy ? 'ready' : 'blocked',
       pending || (!actionable ? scopeHint :
-        root.find('#ach-status-reset-approve').prop('checked') ?
-        'Reset approved for the current branding scope. It affects saved preferences only, not live page delivery.' :
-        'Saved branding loaded. Tick this box to enable Reset; it changes only branding preferences for the selected scope.'));
+        'Saved branding loaded. Choose Reset to revert this scope to inherited/default preferences; no live pages are changed.'));
     var siteApply = !!(siteRunning && sameStatusSelection(statusProbeEvidence));
     var siteRestore = !!(siteRunning && sameStatusSelection(statusManageEvidence) &&
       ['Applied','Recovery Required'].includes(statusManageEvidence.state));
@@ -3744,7 +3709,6 @@
         root.find('#ach-status-source').text(r.source + '; revision ' + r.revision +
           '; scope: ' + (scope.scope === 'site' ? 'site ID ' + scope.site_id : 'global'));
         statusNotice('Saved preferences loaded (Revision ' + r.revision + '). Edit fields and Save when needed.');
-        root.find('#ach-status-reset-approve').prop('checked', false);
       }
       statusLock(false);
     });
@@ -3871,7 +3835,6 @@
         'Fields match saved preferences (Revision ' + statusRevision + ').' :
         'Unsaved changes — select Save branding preferences to keep them.');
     });
-  root.find('#ach-status-reset-approve').on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
     .on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-delivery').on('change', function () {
@@ -3910,7 +3873,9 @@
         root.find('#ach-status-sha').text(
           'Bundled SHA-256: ' + r.source_sha256 + '\nRendered SHA-256: ' + r.rendered_sha256);
         statusNotice('Rendered offline ' + r.locale + '/' + r.template +
-          ' preview using ' + r.source + '. No site changes.');
+          ' preview using ' + r.source + '. No site changes.' +
+          (Array.isArray(r.advisories) && r.advisories.length ?
+           ' Accessibility notes: ' + r.advisories.join(' ') + ' You can still save.' : ''));
       }
       statusLock(false);
     });
@@ -3922,9 +3887,12 @@
                        'Unreferenced Extension','Alternate','Ambiguous'];
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
-    var boundedStrings = function (value, max) {
-      return Array.isArray(value) && value.length <= max &&
-        value.every(function (entry) { return typeof entry === 'string' && entry.length > 0 && entry.length <= 256; });
+    var nativeSourceNames = function (value, maxEntryLength) {
+      return Array.isArray(value) &&
+        value.every(function (entry) {
+          return typeof entry === 'string' && entry.length > 0 &&
+            entry.length <= maxEntryLength;
+        });
     };
     var comparison = r && r.comparison;
     var integerWithin = function (value, max) {
@@ -3981,8 +3949,8 @@
       maybeHash(r.vhost_sha256) &&
       (r.page_file_bytes === null || (Number.isSafeInteger(r.page_file_bytes) && r.page_file_bytes >= 0 && r.page_file_bytes <= 65536)) &&
       typeof r.extension_include_textual === 'boolean' &&
-      boundedStrings(r.extensions_scanned, 32) &&
-      boundedStrings(r.error_page_sources, 33) &&
+      nativeSourceNames(r.extensions_scanned, 255) &&
+      nativeSourceNames(r.error_page_sources, 265) &&
       (r.route_source_state === undefined || routeStates.includes(r.route_source_state)) &&
       (r.route_source_state !== 'Native VHost' ||
         r.error_page_sources.includes('site VHost')) &&
@@ -4833,15 +4801,16 @@
         statusNotice((r.changed ?
           'Saved ' + scope.scope + ' branding preferences.' :
           'No changes needed — preferences already match the saved values.') +
-          ' Revision ' + r.revision + '. No page or service changed.', 'saved');
+          ' Revision ' + r.revision + '. No page or service changed.' +
+          (Array.isArray(r.advisories) && r.advisories.length ?
+            ' Accessibility notes: ' + r.advisories.join(' ') : ''), 'saved');
         statusClearPreview();
       }
       statusLock(false);
     });
   });
   root.find('#ach-status-reset').on('click', function () {
-    if (statusBusy || statusRevision === null ||
-        root.find('#ach-status-reset-approve').prop('checked') !== true) return;
+    if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
     if (!statusTrustedSelection(scope)) return;
     var priorRevision = statusRevision;
@@ -4850,7 +4819,6 @@
     request('status_save', Object.assign({}, scope, {
       branding_action:'reset', expected_revision:String(priorRevision)
     }), function (r) {
-      root.find('#ach-status-reset-approve').prop('checked', false);
       var acknowledged = r && r.schema === 1 &&
         Number.isSafeInteger(r.revision) && typeof r.changed === 'boolean' &&
         r.revision === priorRevision + (r.changed ? 1 : 0) &&
@@ -4999,7 +4967,7 @@
         (t.pool !== null && t.pool !== 'www') ||
         (t.config_path !== null && t.config_path !== '/www/server/php/' + version + '/etc/php-fpm.conf') ||
         (t.socket_path !== null && !socket(t.socket_path)) ||
-        !Number.isSafeInteger(t.site_count) || t.site_count < 0 || t.site_count > 100 ||
+        !Number.isSafeInteger(t.site_count) || t.site_count < 0 ||
         typeof t.reason !== 'string' || t.reason.length > 250 ||
         typeof t.note !== 'string' || t.note.length > 600 ||
         !Array.isArray(t.matched_sites) || !Array.isArray(t.other_sites) ||
@@ -5017,9 +4985,7 @@
     }
     for (var other of t.other_sites) {
       var validCode = other.version === '00' ||
-        typeof other.version === 'string' && /^[1-9][0-9]{1,2}$/.test(other.version) &&
-        (Number(other.version[0]) > 8 ||
-         Number(other.version[0]) === 8 && Number(other.version.slice(1)) >= 1);
+        typeof other.version === 'string' && /^[1-9][0-9]{1,2}$/.test(other.version);
       if (!validCode || other.version === version ||
           (other.version === '00' ? other.socket_path !== null : !socket(other.socket_path))) return false;
     }
@@ -5082,7 +5048,7 @@
         ['Observed','Partial','Needs Review'].indexOf(r.state) < 0 ||
         typeof r.reason !== 'string' || r.reason.length > 250 ||
         typeof r.note !== 'string' || r.note.length > 600 ||
-        !Array.isArray(r.versions) || r.versions.length > 32) return false;
+        !Array.isArray(r.versions)) return false;
     var seen = new Set(), previous = -1, incomplete = 0;
     for (var i = 0; i < r.versions.length; i++) {
       var v = r.versions[i];
@@ -5100,8 +5066,7 @@
           ['guarded_php81','guarded_php85'].includes(v.manual_apply_adapter) &&
             (v.manual_apply_adapter !== 'guarded_php' + v.code || !v.preview_candidate) ||
           (v.preview_candidate !== (v.state === 'File Preview Candidate')) ||
-          v.preview_candidate && (!v.binary_present || !v.config_present || major < 8 ||
-            major === 8 && minor < 1)) return false;
+          v.preview_candidate && (!v.binary_present || !v.config_present)) return false;
       previous = major * 100 + minor;
       seen.add(v.code);
       if (!v.preview_candidate) incomplete++;
@@ -5556,16 +5521,11 @@
   }
   function resetFpmPolicyEvidence(note) {
     fpmPolicyEvidence = null;
-    root.find('#ach-fpm-policy-reviewed').prop('checked', false).prop('disabled', true);
     root.find('#ach-fpm-policy-save').prop('disabled', true);
     if (note) root.find('#ach-fpm-policy-status').text(note);
     explainGate('ach-fpm-policy-why', 'blocked',
       'Locked: the five values need a new valid PHP file preview. This approval saves desired Monitor values only, not PHP-FPM configuration.');
   }
-  root.find('#ach-fpm-policy-reviewed').on('change', function () {
-    root.find('#ach-fpm-policy-save').prop('disabled', fpmPolicyBusy ||
-      !fpmPolicyEvidence || !root.find('#ach-fpm-policy-reviewed').prop('checked'));
-  });
   root.find('#ach-fpm-policy-load').on('click', function () {
     var version = String(root.find('#ach-php-version').val() || '');
     if (fpmPolicyBusy || !phpInventory.get(version)?.preview_candidate) return;
@@ -5605,7 +5565,7 @@
   });
   root.find('#ach-fpm-policy-save').on('click', function () {
     var evidence = fpmPolicyEvidence, data = phpFields();
-    if (!evidence || fpmPolicyBusy || !root.find('#ach-fpm-policy-reviewed').prop('checked') ||
+    if (!evidence || fpmPolicyBusy ||
         JSON.stringify(data) !== evidence.form ||
         data.php_version !== evidence.version) return;
     fpmPolicyBusy = true;
@@ -5913,9 +5873,9 @@
           version:data.php_version, form:snapshot, digest:r.fpm_observation_sha256,
           policy_revision:saved.policy_revision, monitor_revision:saved.monitor_revision
         };
-        root.find('#ach-fpm-policy-reviewed').prop('disabled', false);
+        root.find('#ach-fpm-policy-save').prop('disabled', false);
         explainGate('ach-fpm-policy-why', 'ready',
-          'Review complete preview and affected sites first. Then check to enable Save desired policy; this stores a Monitor-only baseline and does not reload PHP.');
+          'Preview is current. Choose Save to store these desired Monitor settings; the PHP service and site files will not change.');
         var match = saved.saved && fpmPolicyKeys.every(function (key) {
           return Number(data[key.replace('pm.','')]) === saved.desired[key];
         });
@@ -6008,7 +5968,7 @@
     wpTerminalHelperStale = false;
     if (!r || r.schema !== 1 || typeof r.enabled !== 'boolean' ||
         !Number.isSafeInteger(r.revision) || r.revision < 0 ||
-        !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 || r.recoveries > 64 ||
+        !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 ||
         r.auto_hosts !== false || r.auto_fpm !== false ||
         r.scope !== 'failed_native_single_site_wp_toolkit' ||
         typeof r.last_reason !== 'string' || r.last_reason.length > 240 ||

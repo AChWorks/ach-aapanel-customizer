@@ -19,7 +19,6 @@ from ach_customizer_monitor import MonitorInputError, _active_nginx_text
 VHOST_ROOT = "/www/server/panel/vhost/nginx"
 SUPPORTED_PAGES = ("404", "502")
 MAX_FILE_BYTES = 64 * 1024
-MAX_EXTENSIONS = 32
 # Diff is display-only, never an Apply patch. Bound both CPU and response size.
 MAX_COMPARE_BYTES = 24 * 1024
 MAX_COMPARE_LINES = 240
@@ -420,8 +419,6 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
                 names = sorted(
                     name for name in os.listdir(extension_fd) if name.endswith(".conf")
                 )
-                if len(names) > MAX_EXTENSIONS:
-                    raise StatusInspectError("Too many site extension config fragments")
                 _remember_source(bindings, extension_path, extension_fd, None, None, names=names)
                 for name in names:
                     fragment = _file_snapshot(extension_fd, name)

@@ -184,18 +184,15 @@ class RuntimeIdentityTests(unittest.TestCase):
         self.deny(r)
         self.assertIn("changed", r["reason"].lower())
 
-    def test_file_descriptor_overflow_must_not_infer_bound_master(self):
+    def test_more_than_256_master_fds_do_not_hide_a_real_bound_listener(self):
         folder = self.proc / self.pid / "fd"
-        # The valid listener is present before hundreds of unrelated FDs.
-        # Even if scandir yields the valid listener first, no positive result
-        # may be returned before the complete bounded-list validation.
         self.assertEqual((folder / "7").readlink().as_posix(),
                          "socket:[" + self.inode + "]")
-        for idx in range(runtime.MAX_MASTER_FDS + 1):
+        for idx in range(300):
             (folder / str(1000 + idx)).symlink_to("pipe:[123]")
         r = self.inspect()
-        self.deny(r)
-        self.assertIn("too many file descriptors", r["reason"].lower())
+        self.assertEqual(r["state"], "Observed", r)
+        self.assertFalse(r["apply_eligible"])
 
     def test_multiple_masters_and_unsupported_includes_fail_closed(self):
         self.process("433")
@@ -305,12 +302,21 @@ class RuntimeIdentityTests(unittest.TestCase):
         self.assertEqual(result["state"], "Needs Review")
         self.assertIsNone(result["master_pid"])
 
-    def test_numeric_procfs_bound_blocks_untrusted_mass_listing(self):
-        for i in range(runtime.MAX_PROCESSES):
+    def test_more_than_4096_procfs_entries_do_not_block_matching_master(self):
+        for i in range(4130):
             (self.proc / str(2000 + i)).mkdir()
         r = self.inspect()
-        self.deny(r)
-        self.assertIn("too many", r["reason"].lower())
+        self.assertEqual(r["state"], "Observed", r)
+        self.assertEqual(r["master_pid"], int(self.pid))
+
+    def test_older_native_php_runtime_is_observed_only_when_actual_sources_match(self):
+        self.create_php("74")
+        self.process(self.pid, exe=self.phps / "74" / "sbin" / "php-fpm",
+                     title="php-fpm: master process (" +
+                           str(self.phps / "74" / "etc" / "php-fpm.conf") + ")")
+        r = self.inspect("74")
+        self.assertEqual(r["state"], "Observed", r)
+        self.assertFalse(r["apply_eligible"])
 
 
 if __name__ == "__main__":

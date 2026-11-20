@@ -402,6 +402,61 @@ class TestManualFpmWorkflow(unittest.TestCase):
         with self.assertRaises(core.FpmApplyError):
             self.controller.prepare(VALUES)
 
+    def test_complete_101_and_138_site_impacts_accept_without_implicit_writes(self):
+        baseline=self.config.read_bytes()
+        for total in (101,138):
+            with self.subTest(total=total):
+                self.impact["matched_sites"]=[
+                    {"id":n+3,"site_key":f"site-{n:04d}.example.test"}
+                    for n in range(total)]
+                self.impact["site_count"]=total
+                inspected,digest=self.controller._impact(
+                    self.panel,{"version":"85","source":str(self.config)})
+                self.assertEqual(len(inspected["matched_sites"]),total)
+                self.assertEqual(len(digest),64)
+                prepared=self.controller.prepare(VALUES)
+                self.assertEqual(prepared["impact_sha256"],digest)
+                self.assertEqual(prepared["shared_impact"]["site_count"],total)
+                self.assertEqual(self.config.read_bytes(),baseline)
+                self.assertEqual(list(self.state_dir.iterdir()),[])
+                with self.assertRaises(core.FpmApplyError) as caught:
+                    self.controller.apply({**self.payload(),"approved_scope":"no"})
+                self.assertEqual(caught.exception.stage,"fpm_approval")
+                self.assertEqual(self.config.read_bytes(),baseline)
+                self.assertEqual(list(self.state_dir.iterdir()),[])
+
+    def test_large_impact_digest_tracks_every_site_and_rejects_conflicts(self):
+        self.impact["matched_sites"]=[
+            {"id":i+3,"site_key":f"site-{i:04d}.example.test"}
+            for i in range(138)]
+        self.impact["site_count"]=138
+        payload=self.payload()
+        original=self.impact["matched_sites"]
+        with self.assertRaises(core.FpmApplyError) as caught:
+            self.controller.apply({**payload,"expected_impact":"0"*64})
+        self.assertEqual(caught.exception.stage,"fpm_conflict")
+        scenarios=[
+            lambda: self.impact.update(matched_sites=original[:-1]),
+            lambda: self.impact.update(matched_sites=original[:-1]+[dict(original[0])]),
+            lambda: self.impact.update(matched_sites=original[:-1]+[
+                {**original[-1],"site_key":"new-owner.example.test"}]),
+            lambda: self.impact.update(dependency_sha256="b"*64),
+        ]
+        for mutate in scenarios:
+            with self.subTest(scenario=str(mutate)):
+                self.impact["matched_sites"]=[dict(site) for site in original]
+                self.impact["dependency_sha256"]="a"*64
+                mutate()
+                with self.assertRaises(core.FpmApplyError) as caught:
+                    self.controller.apply(payload)
+                self.assertIn(caught.exception.stage,("fpm_impact","fpm_conflict"))
+                self.assertEqual(self.config.read_bytes(),SOURCE)
+                self.assertEqual(list(self.state_dir.iterdir()),[])
+        self.impact["matched_sites"]=[dict(site) for site in original]
+        self.impact["dependency_sha256"]="a"*64
+        self.assertEqual(self.controller.prepare(VALUES)["impact_sha256"],
+                         payload["expected_impact"])
+
     def test_unresolved_sites_and_unsupported_version_reject(self):
         self.impact["unresolved_sites"].append({"id":12,"reason":"not verified"})
         with self.assertRaises(core.FpmApplyError) as caught:

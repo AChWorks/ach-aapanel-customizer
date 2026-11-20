@@ -1,4 +1,4 @@
-"""Bounded, read-only native site lifecycle comparison with explicit baseline storage.
+"""Paginated, read-only native site lifecycle comparison with explicit baseline storage.
 
 Only aaPanel SQLite site/domain records are observed. No Nginx/PHP routing,
 filesystem configuration, DNS or live request is inferred. Baseline is a
@@ -18,13 +18,11 @@ from ach_customizer_state import (
 )
 
 SCHEMA = 1
-MAX_SITES = 100
-SITE_PAGE_SIZE = 20  # <=480 bindings/query at 24/site, under shared 1000-row cap.
-MAX_BINDINGS_PER_SITE = 24
+SITE_PAGE_SIZE = 20  # Query batch, not a maximum supported site count.
 MAX_SITE_KEY_BYTES = 255
 MAX_DOMAIN_BYTES = 255
 MAX_PATH_BYTES = 2048
-MAX_BASELINE_BYTES = 512 * 1024
+MAX_BASELINE_BYTES = 8 * 1024 * 1024  # Resource bound for a complete saved snapshot, not a site-count cap.
 MAX_REVISION = 2147483647
 BASELINE_FILE = "ach_customizer.sites-baseline.json"
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
@@ -51,8 +49,8 @@ def _normalize(site):
     root = _text(site.get("document_root"), "document root", MAX_PATH_BYTES, allow_empty=True)
     status = _text(site.get("panel_status"), "site status", 64, allow_empty=True)
     bindings = site.get("bound_domains")
-    if not isinstance(bindings, list) or len(bindings) > MAX_BINDINGS_PER_SITE:
-        raise SiteChangesError("Native site has too many or invalid domain bindings")
+    if not isinstance(bindings, list):
+        raise SiteChangesError("Native site domain bindings are not a list")
     domains = []
     seen = set()
     for binding in bindings:
@@ -81,7 +79,7 @@ def _digest(sites):
 
 
 def _validated_sites(sites):
-    if not isinstance(sites, list) or len(sites) > MAX_SITES:
+    if not isinstance(sites, list):
         raise SiteChangesError("Invalid saved site inventory")
     ids = set()
     previous = 0
@@ -108,16 +106,15 @@ def _validated_sites(sites):
 
 
 def _scan(panel_public):
-    """Two independent bounded native queries; require an identical snapshot."""
+    """Two independent paginated native scans; require identical snapshots."""
     def one():
-        # Bound each native domain query instead of applying the shared
-        # 1000-row-per-page reader to all 100 sites at once. The lifecycle
-        # capacity is 100 x 24 domain/port records without silent truncation.
         observed = []
         seen = set()
         domain_ids = set()
         previous = 0
-        for page in range(1, MAX_SITES // SITE_PAGE_SIZE + 1):
+        page = 1
+        snapshot_bytes = 2  # JSON list delimiters; one pass instead of O(pages^2).
+        while True:
             result = get_site_page(
                 panel_public, page=page, page_size=SITE_PAGE_SIZE,
                 strict_native=True)
@@ -131,12 +128,15 @@ def _scan(panel_public):
                 if site["id"] in seen or site["id"] <= previous:
                     raise SiteChangesError(
                         "Native site identity duplicated or changed during pagination")
+                snapshot_bytes += (1 if observed else 0) + len(_canonical(site))
+                if snapshot_bytes > MAX_BASELINE_BYTES:
+                    raise SiteChangesError("Complete native site snapshot exceeds the storage byte budget")
                 observed.append(site)
                 seen.add(site["id"])
                 previous = site["id"]
             if not result["has_more"]:
                 return _validated_sites(observed)
-        raise SiteChangesError("More than 100 native sites; baseline is unsupported")
+            page += 1
 
     first = one()
     second = one()

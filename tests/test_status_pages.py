@@ -15,7 +15,7 @@ sys.path.insert(0, str(PLUGIN))
 from ach_customizer_status_pages import (
     ASSETS_DIR, BRAND_KEYS, DEFAULT_BRAND, LOCALES, PAGES, STATE_FILE,
     StatusPageError, _contrast, _semantic_palette, read_preferences, render_page,
-    select_brand, update_preferences, validate_brand,
+    select_brand, update_preferences, validate_brand, contrast_advisories,
 )
 
 SPEC = importlib.util.spec_from_file_location("status_endpoint", PLUGIN / "ach_customizer_main.py")
@@ -221,10 +221,17 @@ class RenderTests(unittest.TestCase):
         for name in ("a\r\nb", "a\u202eb"):
             with self.assertRaises(StatusPageError):
                 validate_brand(customized(name))
-        with self.assertRaises(StatusPageError):
-            validate_brand(customized("E", foreground="#ffffff", background="#ffffff"))
-        with self.assertRaises(StatusPageError):
-            validate_brand(customized("E", accent="#009da4"))
+        same = customized("E", foreground="#ffffff", background="#ffffff")
+        self.assertEqual(validate_brand(same), same)
+        self.assertTrue(any("Text/background" in note
+                            for note in contrast_advisories(same)))
+        accent = customized("E", accent="#009da4")
+        self.assertEqual(validate_brand(accent), accent)
+        self.assertTrue(any("Accent/background" in note
+                            for note in contrast_advisories(accent)))
+        preview = render_page("en", "404", same)
+        self.assertTrue(preview["changed"])
+        self.assertTrue(preview["advisories"])
 
     def test_escaping_does_not_inject_html_markup_attributes_or_scripts(self):
         custom = customized('"><script>alert(1)</script>&"')
@@ -290,6 +297,14 @@ class PreferenceTests(unittest.TestCase):
         stat_info = (self.dir / STATE_FILE).stat()
         self.assertEqual(stat_info.st_mode & 0o777, 0o600)
         self.assertEqual(stat_info.st_uid, os.geteuid())
+
+    def test_more_than_100_site_brand_overrides_are_saved(self):
+        state = read_preferences(self.dir)
+        for site in range(1, 119):
+            state, changed = self.change("site", site, state["revision"], customized(f"Site {site}"))
+            self.assertTrue(changed)
+        self.assertEqual(len(read_preferences(self.dir)["sites"]), 118)
+        self.assertEqual(read_preferences(self.dir)["sites"]["118"]["brand_name"], "Site 118")
 
     def test_state_file_symlink_and_malformed_values_fail_closed(self):
         path = self.dir / STATE_FILE

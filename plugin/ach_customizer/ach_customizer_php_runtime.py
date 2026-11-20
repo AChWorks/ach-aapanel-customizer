@@ -17,9 +17,6 @@ from ach_customizer_monitor import (
     _single_www_listen, MAX_CONFIG_BYTES,
 )
 
-MAX_PROCESSES = 4096
-MAX_MASTER_MATCHES = 8
-MAX_MASTER_FDS = 256
 MAX_PROC_CMD = 4096
 MAX_PROC_STAT = 8192
 MAX_UNIX_LIST = 256 * 1024
@@ -156,8 +153,6 @@ def _find_masters(proc_root, expected, config_path):
                 name = entry.name
                 if not name.isascii() or not name.isdecimal():
                     continue
-                if len(pids) >= MAX_PROCESSES:
-                    raise RuntimeInspectError("Too many Linux PIDs to inspect reliably")
                 pids.append(name)
         matches = []
         denied = False
@@ -167,8 +162,6 @@ def _find_masters(proc_root, expected, config_path):
                 if _exe_matches(proc_root, pid, expected) and _master_title(
                         proc_root, pid, config_path):
                     matches.append((pid, start))
-                    if len(matches) > MAX_MASTER_MATCHES:
-                        raise RuntimeInspectError("Ambiguous PHP-FPM master process count")
             except (FileNotFoundError, ProcessLookupError):
                 continue  # Process exited between procfs directory and inspection.
             except PermissionError:
@@ -218,16 +211,11 @@ def _listening_inode(proc_root, socket_path):
 def _master_holds_listener(proc_root, pid, inode):
     fd = _open_directory(Path(proc_root) / pid / "fd")
     try:
-        count = 0
         matched_listener = False
-        # Scan to completion before trusting a positive fd match: otherwise
-        # a valid listener encountered first could hide an unbounded number
-        # of later entries on another filesystem/directory ordering.
+        # Scan the actual open descriptors, without an arbitrary FD count cap.
+        # An observed listener cannot be trusted before the scan completes.
         with os.scandir(fd) as entries:
             for entry in entries:
-                if count >= MAX_MASTER_FDS:
-                    raise RuntimeInspectError("Master has too many file descriptors for bounded inspection")
-                count += 1
                 if not entry.name.isdecimal():
                     continue
                 try:
@@ -256,10 +244,6 @@ def inspect_php_fpm_runtime(config_root, version, *, proc_root="/proc"):
     }
     if not isinstance(version, str) or not VERSION.fullmatch(version):
         raise RuntimeInspectError("Select a valid discovered PHP version")
-    major, minor = int(version[0]), int(version[1:])
-    if (major, minor) < (8, 1):
-        result["reason"] = "Only PHP 8.1+ is supported for this runtime inspection"
-        return result
     if not Path(config_root).is_absolute() or ".." in Path(config_root).parts:
         raise RuntimeInspectError("Noncanonical aaPanel PHP root")
     binary = str(Path(config_root) / version / "sbin" / "php-fpm")

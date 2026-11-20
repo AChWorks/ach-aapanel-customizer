@@ -25,14 +25,13 @@ PM_PASSTHROUGH_KEYS = frozenset((
 # Conservative INI key syntax: regular FPM directives and php/env array keys.
 FPM_INI_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*(?:\[[A-Za-z0-9_./:-]+\])?")
 
-CONFIG_FILES_LIMIT = 32
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_DOMAIN_ROWS_PER_PAGE = 1000
 MAX_DOMAIN_NAME_BYTES = 1024
 MAX_DOMAIN_TEXT_BYTES_PER_PAGE = 256 * 1024
 INVENTORY_SCHEMA_VERSION = 2
 PHP_IMPACT_SCHEMA_VERSION = 1
-PHP_IMPACT_SITE_LIMIT = 100
+NATIVE_SITE_QUERY_BATCH = 100  # Paged query size, not a maximum website count.
 MAX_NGINX_SITE_BYTES = 64 * 1024
 
 # One policy for every accepted Nginx file, not one predicate per include type.
@@ -48,12 +47,8 @@ class MonitorInputError(ValueError):
 
 
 PHP_DISCOVERY_SCHEMA_VERSION = 1
-MAX_PHP_ROOT_ENTRIES = 128
-MAX_PHP_VERSION_DIRECTORIES = 32
-
-
 def discover_php_fpm_versions(config_root):
-    """Bounded aaPanel PHP installation *file presence*, never runtime proof.
+    """Inspect installed aaPanel PHP file presence, never runtime proof.
 
     Names are discovered from the trusted aaPanel PHP root, not user input.
     Open each directory relative to the pinned parent with O_NOFOLLOW;
@@ -71,8 +66,8 @@ def discover_php_fpm_versions(config_root):
         "reason": "",
         "note": ("Observed aaPanel versioned files only. This does not prove installed "
                  "processes, effective pool configuration, or runtime compatibility. "
-                 "PHP 8.5 has a separate guarded Manual Apply adapter; discovery "
-                 "never authorizes a change or enables another adapter."),
+                 "Only the write adapters actually implemented in this package "
+                 "can Apply; discovery never authorizes a change."),
     }
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     path = Path(config_root)
@@ -118,14 +113,11 @@ def discover_php_fpm_versions(config_root):
         finally:
             os.close(sub)
 
-    def bounded_names(fd):
-        names = []
+    def root_names(fd):
+        # The actual installation directory determines its own cardinality.
+        # Read-only listing is not a reason to cap supported PHP versions.
         with os.scandir(fd) as entries:
-            for entry in entries:
-                if len(names) >= MAX_PHP_ROOT_ENTRIES:
-                    raise MonitorInputError("Too many entries in aaPanel PHP installation root")
-                names.append(entry.name)
-        return sorted(names)
+            return sorted(entry.name for entry in entries)
 
     try:
         root = anchored_root()
@@ -133,14 +125,12 @@ def discover_php_fpm_versions(config_root):
         response["reason"] = "aaPanel PHP installation root missing or inaccessible"
         return response
     try:
-        # Two bounded scans are compared; the second is rooted at the actual
+        # Two scans are compared; the second is rooted at the actual
         # current path, not the original, possibly detached descriptor.
-        names = bounded_names(root)
+        names = root_names(root)
         original_root_identity = identity(os.fstat(root))
         version_names = [name for name in names if re.fullmatch(r"[1-9][0-9]{1,2}", name)]
         observed = {}
-        if len(version_names) > MAX_PHP_VERSION_DIRECTORIES:
-            raise MonitorInputError("Too many PHP version directories for bounded discovery")
         for code in sorted(version_names, key=lambda x: (int(x[0]), int(x[1:]))):
             major, minor = int(code[0]), int(code[1:])
             version = {"code": code, "label": "PHP " + str(major) + "." + str(minor),
@@ -162,10 +152,7 @@ def discover_php_fpm_versions(config_root):
                 observed[code] = (ver_identity, binary_identity, config_identity)
                 version["binary_present"] = binary
                 version["config_present"] = config
-                if (major, minor) < (8, 1):
-                    version["state"] = "Unsupported"
-                    version["reason"] = "Below the PHP 8.1+ inspection target"
-                elif version["binary_present"] and version["config_present"]:
+                if version["binary_present"] and version["config_present"]:
                     version["state"] = "File Preview Candidate"
                     version["preview_candidate"] = True
                     # This indicates only that an adapter exists in source;
@@ -184,7 +171,7 @@ def discover_php_fpm_versions(config_root):
             current_root = anchored_root()
             try:
                 if (identity(os.fstat(current_root)) != original_root_identity
-                        or bounded_names(current_root) != names):
+                        or root_names(current_root) != names):
                     raise OSError("PHP installation root or entries changed")
                 for code in version_names:
                     try:
@@ -410,8 +397,37 @@ def parse_page(value, *, maximum=100000):
     return number
 
 
+def iter_native_site_rows(panel_public, *, batch_size=NATIVE_SITE_QUERY_BATCH):
+    """Iterate a complete ordered native site ID/name table, in bounded pages.
+
+    Page size bounds each query, not the number of supported websites.
+    Repeated/out-of-order rows are rejected so a changed database cannot
+    silently turn an incomplete inventory into a trusted shared-site map.
+    """
+    offset, previous = 0, 0
+    while True:
+        rows = (panel_public.M("sites")
+                .order("id asc")
+                .limit(f"{offset},{batch_size + 1}")
+                .field("id,name")
+                .select())
+        if not isinstance(rows, list) or len(rows) > batch_size + 1:
+            raise MonitorInputError("Native website page unavailable or malformed")
+        for row in rows[:batch_size]:
+            if not isinstance(row, dict) or not re.fullmatch(r"[0-9]+", str(row.get("id", ""))):
+                raise MonitorInputError("Invalid native website identity")
+            identity = int(row["id"])
+            if identity <= previous or identity > 2147483647:
+                raise MonitorInputError("Native website pagination changed or repeated an ID")
+            previous = identity
+            yield row
+        if len(rows) <= batch_size:
+            return
+        offset += batch_size
+
+
 def _bound_domains_for_sites(panel_public, sites, *, strict_native=False):
-    """Read recorded domain bindings in one bounded aaPanel domain-table query.
+    """Read recorded domain bindings using bounded native query pages.
 
     aaPanel's native AddDomain/DelDomain can change HTTP domains without
     changing sites.name or its VHost filename. Never infer active domains
@@ -423,59 +439,74 @@ def _bound_domains_for_sites(panel_public, sites, *, strict_native=False):
     if len(set(ids)) != len(ids):
         raise RuntimeError("aaPanel sites query returned duplicate site IDs")
     placeholders = ",".join("?" for _ in ids)
-    result = (
-        panel_public.M("domain")
-        .where("pid IN (" + placeholders + ")", tuple(ids))
-        .order("pid asc, id asc")
-        .limit(f"0,{MAX_DOMAIN_ROWS_PER_PAGE + 1}")
-        .field("id,pid,name,port")
-        .select()
-    )
-    if not isinstance(result, list):
-        raise RuntimeError("aaPanel domain query did not return a list")
-    if len(result) > MAX_DOMAIN_ROWS_PER_PAGE:
-        raise RuntimeError("Bound-domain inventory exceeded the read limit; use a smaller page size")
+    # Page *domain rows*, not the number of websites or their bindings.
+    # Each bounded query stays within the source-reader byte budget, while
+    # a site with many valid aliases remains observable.
+    batch_size = min(MAX_DOMAIN_ROWS_PER_PAGE,
+                     MAX_DOMAIN_TEXT_BYTES_PER_PAGE // MAX_DOMAIN_NAME_BYTES)
     bindings = {site_id: [] for site_id in ids}
     native_ids = {site_id: [] for site_id in ids} if strict_native else None
     seen = set()
     seen_ids = set()
-    total_name_bytes = 0
-    for record in result:
-        if not isinstance(record, dict):
-            raise RuntimeError("aaPanel domain query returned an invalid row")
-        try:
-            raw_pid = str(record["pid"])
-            raw_id = str(record["id"])
-            if not re.fullmatch(r"[0-9]+", raw_pid) or not re.fullmatch(r"[0-9]+", raw_id):
-                raise ValueError("invalid row identity")
-            pid = int(raw_pid)
-            row_id = int(raw_id)
-            port_text = str(record["port"])
-            if not re.fullmatch(r"[0-9]{1,5}", port_text):
-                raise ValueError("invalid port")
-            port = int(port_text)
-        except (KeyError, TypeError, ValueError):
-            raise RuntimeError("aaPanel domain query returned an invalid site ID or port") from None
-        domain = record.get("name")
-        if row_id <= 0 or pid not in bindings or not 1 <= port <= 65535 or not isinstance(domain, str) or not domain.strip():
-            raise RuntimeError("aaPanel domain query returned an invalid or out-of-page binding")
-        try:
-            name_bytes = len(domain.encode("utf-8"))
-        except UnicodeEncodeError:
-            raise RuntimeError("aaPanel domain query returned an invalid domain encoding") from None
-        if name_bytes > MAX_DOMAIN_NAME_BYTES:
-            raise RuntimeError("aaPanel domain name exceeds the read limit")
-        total_name_bytes += name_bytes
-        if total_name_bytes > MAX_DOMAIN_TEXT_BYTES_PER_PAGE:
-            raise RuntimeError("Bound-domain inventory exceeds the response text limit; use a smaller page size")
-        identity = (pid, domain, port)
-        if identity in seen or row_id in seen_ids:
-            raise RuntimeError("aaPanel domain query returned a duplicate binding")
-        seen.add(identity)
-        seen_ids.add(row_id)
-        bindings[pid].append({"name": domain, "port": port})
-        if strict_native:
-            native_ids[pid].append(row_id)
+    offset = 0
+    last_order = None
+    while True:
+        result = (
+            panel_public.M("domain")
+            .where("pid IN (" + placeholders + ")", tuple(ids))
+            .order("pid asc, id asc")
+            .limit(f"{offset},{batch_size + 1}")
+            .field("id,pid,name,port")
+            .select()
+        )
+        if not isinstance(result, list):
+            raise RuntimeError("aaPanel domain query did not return a list")
+        if len(result) > batch_size + 1:
+            raise RuntimeError("aaPanel domain query ignored its bounded page")
+        total_name_bytes = 0
+        for record in result[:batch_size]:
+            if not isinstance(record, dict):
+                raise RuntimeError("aaPanel domain query returned an invalid row")
+            try:
+                raw_pid = str(record["pid"])
+                raw_id = str(record["id"])
+                if not re.fullmatch(r"[0-9]+", raw_pid) or not re.fullmatch(r"[0-9]+", raw_id):
+                    raise ValueError("invalid row identity")
+                pid = int(raw_pid)
+                row_id = int(raw_id)
+                port_text = str(record["port"])
+                if not re.fullmatch(r"[0-9]{1,5}", port_text):
+                    raise ValueError("invalid port")
+                port = int(port_text)
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError("aaPanel domain query returned an invalid site ID or port") from None
+            domain = record.get("name")
+            if row_id <= 0 or pid not in bindings or not 1 <= port <= 65535 or not isinstance(domain, str) or not domain.strip():
+                raise RuntimeError("aaPanel domain query returned an invalid or out-of-page binding")
+            order = (pid, row_id)
+            if last_order is not None and order <= last_order:
+                raise RuntimeError("aaPanel domain query changed order during pagination")
+            last_order = order
+            try:
+                name_bytes = len(domain.encode("utf-8"))
+            except UnicodeEncodeError:
+                raise RuntimeError("aaPanel domain query returned an invalid domain encoding") from None
+            if name_bytes > MAX_DOMAIN_NAME_BYTES:
+                raise RuntimeError("aaPanel domain name exceeds the read limit")
+            total_name_bytes += name_bytes
+            if total_name_bytes > MAX_DOMAIN_TEXT_BYTES_PER_PAGE:
+                raise RuntimeError("Bound-domain response page exceeds the byte budget")
+            identity = (pid, domain, port)
+            if identity in seen or row_id in seen_ids:
+                raise RuntimeError("aaPanel domain query returned a duplicate binding")
+            seen.add(identity)
+            seen_ids.add(row_id)
+            bindings[pid].append({"name": domain, "port": port})
+            if strict_native:
+                native_ids[pid].append(row_id)
+        if len(result) <= batch_size:
+            break
+        offset += batch_size
     for site in sites:
         site["bound_domains"] = bindings[site["id"]]
         if strict_native:
@@ -694,8 +725,6 @@ def preview_php_fpm(config_root, version, expected):
         if not includes_dir.is_dir():
             return {"state": "Needs Review", "reason": "Unexpected PHP-FPM include directory type", "scope": "shared_service", "version": version}
         include_files = sorted(includes_dir.glob("*.conf"))
-        if len(include_files) > CONFIG_FILES_LIMIT:
-            return {"state": "Needs Review", "reason": "Too many PHP-FPM files for bounded discovery", "scope": "shared_service", "version": version}
         paths.extend(include_files)
     found = []
     try:
@@ -979,17 +1008,9 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
             if (not stat.S_ISDIR(before.st_mode) or before.st_uid != os.geteuid()
                     or before.st_mode & 0o022):
                 raise MonitorInputError("Unsafe native extension directory")
-            # Count every entry, including non-.conf files, and stop before
-            # collecting or sorting an unbounded directory listing.
+            # Snapshot every real entry; quantity is not proof of invalid routing.
             with os.scandir(fd) as iterator:
-                entries = []
-                for entry in iterator:
-                    if len(entries) >= CONFIG_FILES_LIMIT:
-                        raise MonitorInputError(
-                            "Native extension directory exceeds bounded inventory"
-                        )
-                    entries.append(entry.name)
-            entries.sort()
+                entries = sorted(entry.name for entry in iterator)
             files = []
             for name in entries:
                 if not name.endswith(".conf"):
@@ -1130,19 +1151,8 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         checked_snippets = {native_standard}
         # Native DB is the authority for website IDs. Refuse partial sets:
         # missing later pages would create an unsafe shared-resource claim.
-        rows = (
-            panel_public.M("sites")
-            .order("id asc")
-            .limit("0," + str(PHP_IMPACT_SITE_LIMIT + 1))
-            .field("id,name")
-            .select()
-        )
-        if not isinstance(rows, list):
-            raise MonitorInputError("aaPanel website inventory is unavailable")
-        if len(rows) > PHP_IMPACT_SITE_LIMIT:
-            raise MonitorInputError("Website count exceeds bounded shared-pool attribution")
         seen = set()
-        for site in rows:
+        for site in iter_native_site_rows(panel_public):
             if not isinstance(site, dict) or not re.fullmatch(r"[0-9]+", str(site.get("id", ""))):
                 raise MonitorInputError("Unexpected website identity")
             site_id = int(site["id"])

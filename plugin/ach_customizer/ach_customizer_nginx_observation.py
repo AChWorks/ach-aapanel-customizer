@@ -191,9 +191,9 @@ def observe_nginx_site(panel_public, site, *, vhost_root=VHOST_DIR,
         if (type(site.get("id")) is not int or not 1 <= site["id"] <= 2147483647 or
                 not isinstance(site.get("name"), str) or
                 not SITE_KEY.fullmatch(site["name"]) or
-                panel_public.get_webserver() != "nginx" or
-                str(panel_public.get_panel_version()).strip() != "8.0.7"):
-            raise NginxObservationError("Only selected aaPanel 8.0.7 Nginx sites are supported")
+                panel_public.get_webserver() != "nginx"):
+            raise NginxObservationError("A selected native Nginx site is required")
+        observed_panel_version = str(panel_public.get_panel_version()).strip()
         if str(nginx_bin) != NGINX_BIN or str(nginx_conf) != NGINX_CONF:
             raise NginxObservationError("Unrecognized native Nginx binary or config")
         # Test helper may override vhost_root, but not a real endpoint caller.
@@ -218,8 +218,8 @@ def observe_nginx_site(panel_public, site, *, vhost_root=VHOST_DIR,
                 signature != _bounded_file_text(path, MAX_NGINX_SITE_BYTES,
                                                  with_fingerprint=True)[1] or
                 panel_public.get_webserver() != "nginx" or
-                str(panel_public.get_panel_version()).strip() != "8.0.7"):
-            raise NginxObservationError("Nginx or native VHost source changed during inspection")
+                str(panel_public.get_panel_version()).strip() != observed_panel_version):
+            raise NginxObservationError("Nginx panel identity or native source changed during inspection")
         response.update({
             "state": "Candidate Included" if included else "Candidate Not Included",
             "candidate_config_test_passed": True,
@@ -230,7 +230,7 @@ def observe_nginx_site(panel_public, site, *, vhost_root=VHOST_DIR,
         # Active HTTP/80 is a distinct, optional observation of native names.
         # Only a valid literal native HTTP/80 binding can supply Host.
         bindings = site.get("bound_domains")
-        if not isinstance(bindings, list) or len(bindings) > 100:
+        if not isinstance(bindings, list):
             raise NginxObservationError("Native Host bindings unavailable for HTTP observation")
         hosts = sorted({
             _canonical_host(row["name"])

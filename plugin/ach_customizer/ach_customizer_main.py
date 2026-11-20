@@ -35,11 +35,12 @@ from ach_customizer_status_inspect import SUPPORTED_PAGES, inspect_site_files
 from ach_customizer_status_pages import (
     DEFAULT_BRAND, BRAND_KEYS, PAGES, LOCALES, StatusPageError,
     read_preferences, render_page, select_brand, update_preferences, validate_brand,
+    contrast_advisories,
 )
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.62'
+WORKER_SOURCE_VERSION = '0.1.63'
 
 _STATE_DIR = DATA_DIR
 
@@ -577,7 +578,7 @@ class ach_customizer_main:
             if (not isinstance(expected_site_key, str) or not expected_site_key
                     or len(expected_site_key) > 255 or
                     not isinstance(expected_snapshot, str) or
-                    not 1 <= len(expected_snapshot) <= 110000):
+                    not expected_snapshot):
                 raise HostsInspectionError("Refresh the native website inventory before inspection")
             try:
                 selected_identity = json.loads(expected_snapshot)
@@ -590,7 +591,6 @@ class ach_customizer_main:
                     not isinstance(selected_identity[2], str) or
                     not isinstance(selected_identity[3], str) or
                     not isinstance(selected_identity[4], list) or
-                    len(selected_identity[4]) > 100 or
                     any(not isinstance(pair, list) or len(pair) != 2 or
                         not isinstance(pair[0], str) or
                         type(pair[1]) is not int
@@ -764,7 +764,7 @@ class ach_customizer_main:
         if (not isinstance(expected_key, str) or not expected_key or
                 len(expected_key) > 255 or
                 not isinstance(expected_snapshot, str) or
-                not 1 <= len(expected_snapshot) <= 110000):
+                not expected_snapshot):
             raise MonitorInputError("Refresh the selected native website inventory")
         try:
             selected = json.loads(expected_snapshot)
@@ -773,7 +773,7 @@ class ach_customizer_main:
         if (not isinstance(selected, list) or len(selected) != 5 or
                 type(selected[0]) is not int or not isinstance(selected[1], str) or
                 not isinstance(selected[2], str) or not isinstance(selected[3], str) or
-                not isinstance(selected[4], list) or len(selected[4]) > 100 or
+                not isinstance(selected[4], list) or
                 any(not isinstance(item, list) or len(item) != 2 or
                         not isinstance(item[0], str) or type(item[1]) is not int
                         for item in selected[4])):
@@ -1495,6 +1495,7 @@ class ach_customizer_main:
                 "effective": effective, "source": source, "site_id": site_id,
                 "templates": list(PAGES), "locales": list(LOCALES),
                 "mode": "Preview only", "apply_supported": False,
+                "advisories": contrast_advisories(effective),
             }
             return self._activity_result(
                 response, "status_pages", "status_preferences",
@@ -1584,7 +1585,7 @@ class ach_customizer_main:
         if (not isinstance(expected_key, str) or not expected_key
                 or len(expected_key) > 255 or
                 not isinstance(serialized, str) or
-                not 1 <= len(serialized) <= 110000):
+                not serialized):
             raise StatusPageError(refresh)
         try:
             identity = json.loads(serialized)
@@ -1596,7 +1597,6 @@ class ach_customizer_main:
                 not isinstance(identity[2], str) or
                 not isinstance(identity[3], str) or
                 not isinstance(identity[4], list) or
-                len(identity[4]) > 100 or
                 any(not isinstance(pair, list) or len(pair) != 2 or
                     not isinstance(pair[0], str) or
                     type(pair[1]) is not int or
@@ -2192,6 +2192,7 @@ class ach_customizer_main:
                 "schema": 1, "revision": state["revision"],
                 "changed": changed, "scope": scope, "site_id": site_id,
                 "source": source, "effective": effective,
+                "advisories": contrast_advisories(effective),
                 "message": (
                     "Branding preferences reset for this scope; no site files or services changed"
                     if action == "reset" else

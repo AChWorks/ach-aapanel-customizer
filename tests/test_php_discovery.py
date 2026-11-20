@@ -40,7 +40,7 @@ class PHPDiscoveryFilesTests(unittest.TestCase):
     def scan(self):
         return monitor.discover_php_fpm_versions(str(self.root))
 
-    def test_php81_php85_future_version_and_unsupported_are_distinct(self):
+    def test_php81_php85_future_and_older_versions_remain_discoverable(self):
         self.make('81')
         v85 = self.make('85')
         self.make('810')
@@ -58,8 +58,10 @@ class PHPDiscoveryFilesTests(unittest.TestCase):
         versions = {v['code']: v for v in result['versions']}
         self.assertEqual([v['code'] for v in result['versions']],
                          ['80', '81', '83', '84', '85', '810'])
-        self.assertEqual(versions['80']['state'], 'Unsupported')
-        self.assertFalse(versions['80']['preview_candidate'])
+        self.assertEqual(versions['80']['state'], 'File Preview Candidate')
+        self.assertTrue(versions['80']['preview_candidate'])
+        self.assertEqual(versions['80']['manual_apply_adapter'], 'none')
+        self.assertFalse(versions['80']['apply_eligible'])
         self.assertEqual(versions['81']['label'], 'PHP 8.1')
         self.assertEqual(versions['81']['state'], 'File Preview Candidate')
         self.assertTrue(versions['81']['preview_candidate'])
@@ -227,17 +229,21 @@ class PHPDiscoveryFilesTests(unittest.TestCase):
             with self.subTest(path=value), self.assertRaises(monitor.MonitorInputError):
                 monitor.discover_php_fpm_versions(value)
 
-    def test_bounded_versus_silent_partial_inventory(self):
-        for i in range(129):
+    def test_unrelated_root_entries_and_many_installed_versions_do_not_block_inspection(self):
+        for i in range(140):
             (self.root / ('other-' + str(i))).mkdir()
-        with self.assertRaises(monitor.MonitorInputError):
-            self.scan()
-        for path in self.root.iterdir():
-            path.rmdir()
-        for code in range(81, 114):
-            (self.root / str(code)).mkdir()
-        with self.assertRaises(monitor.MonitorInputError):
-            self.scan()
+        self.make('74')
+        codes = [str(i) for i in range(81, 90)] + [
+            '8' + str(i) for i in range(10, 41)]
+        for code in codes:
+            self.make(code)
+        result = self.scan()
+        self.assertEqual(result['state'], 'Observed')
+        self.assertEqual(len(result['versions']), len(codes) + 1)
+        self.assertEqual(result['versions'][0]['code'], '74')
+        self.assertTrue(result['versions'][0]['preview_candidate'])
+        self.assertEqual(result['versions'][0]['manual_apply_adapter'], 'none')
+        self.assertFalse(any(v['apply_eligible'] for v in result['versions']))
 
 
 class NativePHPDiscoveryEndpointTests(unittest.TestCase):

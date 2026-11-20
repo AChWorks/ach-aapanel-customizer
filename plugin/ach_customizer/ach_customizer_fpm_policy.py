@@ -23,8 +23,7 @@ from ach_customizer_state import (
 
 POLICY_FILE = "ach_customizer.fpm-policy.json"
 SCHEMA = 1
-MAX_BYTES = 8192
-MAX_PROFILES = 32
+MAX_BYTES = 128 * 1024  # Bounded storage resource, not PHP-version count.
 MAX_REVISION = 2147483647
 VERSION_PATTERN = re.compile(r"[1-9][0-9]{1,2}\Z")
 SHA_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
@@ -38,10 +37,7 @@ class FpmPolicyError(MonitorInputError):
 
 def _version(value):
     if not isinstance(value, str) or not VERSION_PATTERN.fullmatch(value):
-        raise FpmPolicyError("Select a native PHP 8.1+ version")
-    major, minor = int(value[0]), int(value[1:])
-    if major < 8 or major == 8 and minor < 1:
-        raise FpmPolicyError("Only PHP 8.1+ can have a monitored policy")
+        raise FpmPolicyError("Select a native PHP version")
     return value
 
 
@@ -59,8 +55,7 @@ def _checked(data):
     if (not isinstance(data, dict) or set(data) != {"schema", "revision", "profiles"}
             or type(data["schema"]) is not int or data["schema"] != SCHEMA
             or type(data["revision"]) is not int or not 0 <= data["revision"] <= MAX_REVISION
-            or not isinstance(data["profiles"], dict)
-            or len(data["profiles"]) > MAX_PROFILES):
+            or not isinstance(data["profiles"], dict)):
         raise FpmPolicyError("Malformed or unsupported PHP-FPM policy store")
     for version, values in data["profiles"].items():
         _version(version)
@@ -228,8 +223,6 @@ def save_policy(config_root, version, desired, *, directory, expected_revision,
             else:
                 if current["revision"] >= MAX_REVISION:
                     raise FpmPolicyError("PHP-FPM policy revision exhausted")
-                if version not in current["profiles"] and len(current["profiles"]) >= MAX_PROFILES:
-                    raise FpmPolicyError("Too many versioned PHP policies")
                 profiles = dict(current["profiles"])
                 profiles[version] = values
                 updated = {"schema": SCHEMA, "revision": revision + 1,

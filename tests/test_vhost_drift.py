@@ -217,11 +217,21 @@ class GeneratedVhostDriftTests(unittest.TestCase):
         self.assertEqual(got["state"], "Needs Review")
         self.assertIn("changed", got["reason"])
 
-    def test_unsupported_panel_never_reads_source(self):
+    def test_new_panel_version_accepts_same_actual_read_only_nginx_shape(self):
         self.panel.get_panel_version = lambda: "8.0.8"
-        with patch.object(drift, "_bounded_file_text", side_effect=AssertionError):
-            result = self.inspect()
-        self.assertEqual(result["state"], "Needs Review")
+        result = self.inspect()
+        self.assertEqual(result["state"], "File Match", result)
+        self.assertFalse(result["fix_supported"])
+
+    def test_more_than_100_native_names_do_not_block_source_comparison(self):
+        names = [f"alias{i}.example.test" for i in range(135)]
+        self.site["bound_domains"] = [{"name": name, "port": 80} for name in names]
+        self.write("server {\n listen 80;\n server_name " +
+                   " ".join(names) + ";\n root /www/alpha;\n}\n")
+        result = self.inspect()
+        self.assertEqual(result["state"], "File Match", result)
+        self.assertEqual(len(result["native_names"]), 135)
+        self.assertEqual(len(result["vhost_names"]), 135)
 
 
 class VhostEndpointTests(unittest.TestCase):
@@ -267,7 +277,7 @@ class VhostEndpointTests(unittest.TestCase):
                 assert value == "pid asc, id asc"
                 return self
             def limit(self, value):
-                assert value == "0,1001"
+                assert value == "0,257"
                 return self
             def select(self):
                 return [{"id": 25, "pid": 7, "port": 80, "name": "alpha.test"}]

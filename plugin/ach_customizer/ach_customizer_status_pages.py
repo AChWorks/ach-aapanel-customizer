@@ -38,8 +38,7 @@ DEFAULT_BRAND = {
 }
 STATE_FILE = "ach_customizer.status_pages.json"
 LOCK_FILE = "ach_customizer.status_pages.lock"
-MAX_BYTES = 65536
-MAX_SITES = 100
+MAX_BYTES = 1024 * 1024  # Bounded preference file, not a website-count restriction.
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -119,12 +118,18 @@ def validate_brand(value):
     if type(value["footer_enabled"]) is not bool:
         raise StatusPageError("Invalid footer attribution setting")
     result["footer_enabled"] = value["footer_enabled"]
-    if _contrast(result["foreground"], result["background"]) < 4.5:
-        raise StatusPageError("Foreground/background contrast is too low")
-    # The accent is mainly decorative, but it must remain distinguishable.
-    if _contrast(result["accent"], result["background"]) < 3.0:
-        raise StatusPageError("Accent/background contrast is too low")
     return result
+
+
+def contrast_advisories(value):
+    """Present accessibility suggestions without rejecting chosen colors."""
+    brand = validate_brand(value)
+    notes = []
+    if _contrast(brand["foreground"], brand["background"]) < 4.5:
+        notes.append("Text/background contrast is below 4.5:1; check readability before publishing.")
+    if _contrast(brand["accent"], brand["background"]) < 3.0:
+        notes.append("Accent/background contrast is below 3:1; check visual distinguishability.")
+    return notes
 
 
 def _default_state():
@@ -140,7 +145,7 @@ def _validate_state(state):
         raise StatusPageError("Invalid Status Pages state revision")
     state["global"] = validate_brand(state["global"])
     sites = state["sites"]
-    if not isinstance(sites, dict) or len(sites) > MAX_SITES:
+    if not isinstance(sites, dict):
         raise StatusPageError("Invalid Status Pages site preferences")
     for key, value in sites.items():
         if not re.fullmatch(r"[1-9][0-9]{0,9}", key) or int(key) > 2147483647:
@@ -345,8 +350,8 @@ def _mix_color(base, target, fraction):
 def _readable_tint(background, foreground, minimum):
     """Find the least foreground tint meeting contrast on the page background.
 
-    The original foreground has already passed the 4.5:1 check. Test the
-    rounded output explicitly; unusual multichannel palettes must fail safe.
+    The operator may deliberately choose a low-contrast foreground.
+    Leave that color intact; the preview emits a nonblocking advisory.
     """
     if _contrast(foreground, background) < minimum:
         return foreground
@@ -373,8 +378,8 @@ def _semantic_palette(brand):
     """Resolve every meaningful custom-theme color, not only base CSS vars.
 
     Original ACh HTML is returned verbatim; this palette is used only for
-    customized output. All text/background relationships are checked against
-    the actual elements used by the reference CSS.
+    customized output. Low-contrast choices remain permitted and are reported
+    as advisory, rather than invalidating the operator's selected colors.
     """
     paper = brand["background"]
     ink = brand["foreground"]
@@ -397,17 +402,6 @@ def _semantic_palette(brand):
         "grid": ink + "18",
         "halo": _mix_color(paper, accent, 0.18),
     }
-    for name in ("muted", "link"):
-        if _contrast(palette[name], paper) < 4.5:
-            raise StatusPageError("Custom theme text contrast unavailable: " + name)
-    for name in ("button_bg", "button_hover"):
-        if _contrast(palette[name], palette["button_text"]) < 4.5:
-            raise StatusPageError("Custom theme button contrast unavailable: " + name)
-    for name in ("visual_a", "visual_b"):
-        if _contrast(palette["visual_ink"], palette[name]) < 4.5:
-            raise StatusPageError("Custom theme visual text contrast unavailable: " + name)
-    if _contrast(palette["line"], paper) < 3.0:
-        raise StatusPageError("Custom theme border contrast unavailable")
     return palette
 
 
@@ -468,7 +462,8 @@ def render_page(locale, page, brand=None):
     # Preserve the exact owner-provided HTML bytes for defaults, no silent restyling.
     if brand == DEFAULT_BRAND:
         return {"html": source.decode("utf-8"), "source_sha256": source_hash,
-                "rendered_sha256": source_hash, "changed": False}
+                "rendered_sha256": source_hash, "changed": False,
+                "advisories": contrast_advisories(brand)}
     original = source.decode("utf-8")
     auxiliary = (brand["accent"] if _contrast(brand["accent"], brand["background"]) >= 4.5
                  else brand["foreground"])
@@ -501,4 +496,4 @@ def render_page(locale, page, brand=None):
         raise StatusPageError("Rendered template exceeds size limit")
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return {"html": text, "source_sha256": source_hash, "rendered_sha256": digest,
-            "changed": source_hash != digest}
+            "changed": source_hash != digest, "advisories": contrast_advisories(brand)}

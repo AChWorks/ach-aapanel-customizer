@@ -104,16 +104,17 @@ fields are **not** an authorization workaround.
    AddDomain/DelDomain event can change HTTP routing without changing
    `sites.name` or the VHost filename.
 2. **Compare website records** reports additions, removals and changes
-   against the separately stored observation baseline. To accept **one**
-   reviewed native site without overwriting other pending differences,
-   select it, review its current identity, consent and choose
-   **Save only selected website baseline**. This writes observation state,
-   not a live website or policy.
-3. **Save baseline for ALL websites** is a distinct and consequential action:
-   after reviewing the complete snapshot it accepts all records, including
-   removals. A removed site cannot be silently accepted by the single-site
-   path. Reused IDs, ambiguous bindings and conflicting revisions require
-   fresh review.
+   against the separately stored observation baseline. Select one changed
+   native site and click **Save only selected website baseline** to accept
+   only that site's observed state. The displayed before/after values are
+   optional review guidance: the explicit Save click is consent, with
+   no extra approval checkbox. No live website or policy is changed.
+3. **Save baseline for ALL websites** is a separate explicit action accepting
+   every compared record, including removals. Explain that scope beside
+   the button and allow direct Save after a fresh comparison; never force
+   another checkbox. A removed site is not silently accepted by the
+   single-site path. Reused IDs, ambiguous bindings and stale revisions
+   still require current identity rather than an unverified DB overwrite.
 4. **Routing & Nginx → Review selected site & recovery** combines a
    point-in-time observed site baseline, generated VHost, per-site Cache
    source/recovery and shared PHP desired state. It is **read-only** and
@@ -160,11 +161,11 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal Hosts correction remains P0. Unpublished candidate
-0.1.62 adds separate opt-in shared PHP-FPM auto repair after a witnessed
-native WordPress start/terminal transition; live enabled-watcher acceptance
-is still PENDING. The merged v0.1.60 Hosts witness remains read-only and
-does not autonomously clean up Hosts.
+Automatic post-terminal, lossless Hosts cleanup remains open. Native PHP-FPM
+auto-repair is merged in unpublished v0.1.62 source after recorded systemd
+success/failure acceptance on native aaPanel 8.0.7. Fresh authenticated Browser
+acceptance and Production qualification remain separate. The Hosts witness
+still does not autonomously edit Hosts.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -263,8 +264,9 @@ DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.60**
 adds a **separate, opt-in, observer-only native WP Toolkit failed-install
 witness** described immediately below. The Owner explicitly **rejected**
 observer-only reporting as a substitute for automatic correction. No-loss
-Hosts cleanup remains OPEN P0; source-stage PHP-FPM automatic correction
-exists only in unpublished 0.1.62 and still requires native end-to-end QA.
+Hosts cleanup remains OPEN P0; the native PHP-FPM automatic correction
+in merged but unpublished v0.1.62 passed source-bound native systemd
+success/failure acceptance.
 The manual 0.1.52 capability is **not**
 available in published native 0.1.51. Installed-package fixture QA has
 passed, but authenticated resident-watcher/end-to-end acceptance remains
@@ -373,7 +375,7 @@ discard actionable manual-review evidence.
 
 After ZIP upgrades, the resident aaPanel Python process may retain a
 previous `ach_customizer_wp_terminal` module despite exact installed bytes
-and a matching entrypoint version. The v0.1.60 endpoint checks the
+and a matching entrypoint version. The original v0.1.60 endpoint checks the
 **loaded helper's** durable-review contract before non-emergency actions,
 refuses stale helpers with `resident_wp_helper_stale`, and leaves Emergency
 disable available. Ordinary general Activity remains readable with a
@@ -397,7 +399,55 @@ WordPress success/failure and recovery on the old automatic candidate.
 Revised observation-only behavior requires fresh exact-source validation;
 previous native QA is not a source of approval for unattended writes.
 
-## Source-stage automatic PHP-FPM repair (unpublished 0.1.62)
+## Simplification and operator choice (source v0.1.63; unpublished)
+
+The current development branch removes arbitrary maximum totals on observed
+native site records, PHP-FPM site attribution, Cache audit website lists,
+read-only Hosts matching and Status Pages branding scopes. Native site and
+domain queries are paginated; exact targets and page-level query budgets
+remain verified rather than silently losing results.
+
+For plugin-owned observation baselines and Status Pages branding Reset,
+the operator's direct Save/Reset click replaces redundant approval
+checkboxes. Displayed scope/impact explanations remain. Existing
+authentication, fresh selection identity and revision checks remain in
+the backend. Low-contrast Status Pages colors are allowed: preview and Save
+show accessibility advice instead of rejecting the user's chosen palette.
+This source package has not yet passed new-version native installed UI
+acceptance or been published; it is not a Production deployment.
+
+A second cross-layer limit audit additionally removes stale frontend
+ceilings on large Hosts/VHost/Cache peer results, the 32-installation/128-root
+PHP inventory limits, artificial Linux process/FD count stops, the 32-profile
+Monitor-only PHP intent cap, the 32-fragment Nginx/PHP source reader caps,
+and the 64-event historical WordPress recovery count stop. Inspection
+of installed older PHP versions and newer aaPanel Nginx sources uses
+observed readable files rather than version-text bans. The explicitly
+implemented 8.1/8.5 PHP-FPM and Cache write adapters, native WP watcher
+source fingerprint and data-ownership boundaries remain unchanged.
+Large-source handling still retains per-file/resource budgets and current
+target/ownership validation; these are not absolute support ceilings.
+
+The saved shared PHP-FPM Monitor policy also uses the current Preview and
+direct Save click without requiring an additional checkbox. This only writes
+plugin-owned desired values, not shared service configuration.
+
+**Independent-review F1-F3 remediation (PR #103, pending new review):**
+the PHP-FPM Manual/Auto shared-impact consumer now accepts complete native
+mappings with 101+ sites rather than stopping at a fixed count. The
+selected-site Hosts, VHost, Cache and Status Pages endpoints also accept
+complete binding snapshots with 101, 135 and 1001 domains instead of the
+old 100-binding or 110000-character restrictions. The website is always
+re-read from aaPanel by native ID; stale names, roots and domain bindings
+remain rejection conditions, and supplied client paths/domains are never
+authoritative. The read-only Nginx candidate observer evaluates the actual
+Nginx source and retains a stable panel-version/webserver observation rather
+than rejecting recognizable sources solely by aaPanel version string.
+These changes do **not** extend Nginx/PHP-FPM/Cache writer eligibility.
+Full candidate CI, fresh independent approval, installed native QA and
+separate Owner Merge/Release permission must be checked for the new HEAD.
+
+## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 
 The 0.1.62 candidate fixes the standalone systemd worker's missing
 root-owned aaPanel Python import roots. Its existing path-triggered worker
@@ -437,8 +487,8 @@ All three task-owned QA VMs were stopped after validation. Production
 was untouched; the existing primary QA guest was not modified by these
 tests. These two concrete source-verified lifecycles do not prove general
 compatibility with other aaPanel versions, arbitrary external writers or
-unexpectedly delayed native starts. Exact candidate review, CI, fresh
-authenticated Browser QA and Production rollout remain distinct gates.
+unexpectedly delayed native starts. Exact-source CI and independent review passed and PR #102 was merged.
+Fresh authenticated Browser QA and Production rollout remain distinct gates.
 The detailed reproducible source identity and native QA results are in
 [the 0.1.62 native systemd QA evidence](evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json).
 
@@ -565,8 +615,10 @@ automated Hosts cleanup, nor does it cover unrelated aaPanel PHP operations.
   distinguish a failed/uncertain reload from successful worker adoption,
   and never blindly repeat Apply or cross-version Restore.
 
-PHP 8.1+ is a **product discovery/compatibility target**, not a promise of
-guarded Apply on every newer version or nonstandard pool.
+Installed native PHP versions are read-only discovery and inspection candidates
+when their actual files and service shapes can be understood, including
+older installations. The currently implemented PHP 8.1/8.5 **write adapters**
+are not a claim of guarded Apply on every other version or pool.
 
 ## Status Pages: static assets and distinct delivery modes
 
@@ -576,10 +628,11 @@ self-contained static HTML assets under
 The [manifest](../plugin/ach_customizer/status_pages/manifest.json) records
 their original asset hashes. Preview uses validated, escaped brand URL/text,
 palette and target/site scope; site-local home links must remain site-local
-regardless of configured brand URL. Custom palettes check text, link,
-button, focus and border contrast (4.5:1 for readable text; 3:1 for
-meaningful boundaries) before rendering; unsupported combinations fail
-review. Default reference HTML remains byte-identical.
+regardless of configured brand URL. Custom palettes retain the administrator's chosen colors. Text/background
+contrast below 4.5:1 or accent/background contrast below 3:1 produces
+nonblocking accessibility advice, not a save prohibition. Valid color syntax,
+safe escaping and site scope remain required. Default reference HTML
+remains byte-identical.
 
 | Delivery | Supported meaning and prerequisites |
 | --- | --- |

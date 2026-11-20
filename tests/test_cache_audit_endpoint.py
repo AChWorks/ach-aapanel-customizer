@@ -63,7 +63,7 @@ class NativeCacheAuditEndpointTests(unittest.TestCase):
                 assert val == "pid asc, id asc"
                 return self
             def limit(self, val):
-                assert val == "0,1001"
+                assert val == "0,257"
                 return self
             def field(self, val):
                 assert val == "id,pid,name,port"

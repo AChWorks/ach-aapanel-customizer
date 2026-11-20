@@ -140,14 +140,12 @@ def _inspect(site, vhost_root):
     if not _literal_document_root(native_root):
         raise VhostDriftError("Native document root uses an unsupported path shape")
     bindings = site.get("bound_domains")
-    if not isinstance(bindings, list) or not 1 <= len(bindings) <= 100:
-        raise VhostDriftError("Native domain inventory is missing or too large")
+    if not isinstance(bindings, list) or not bindings:
+        raise VhostDriftError("Native domain inventory is missing")
     if any(not isinstance(row, dict) or type(row.get("port")) is not int or
            not 1 <= row["port"] <= 65535 for row in bindings):
         raise VhostDriftError("Malformed native domain or port binding")
     native_names = {_canonical_host(row.get("name")) for row in bindings}
-    if len(native_names) > 100:
-        raise VhostDriftError("Too many website hostnames")
     path = Path(vhost_root) / (site_key + ".conf")
     source, signature = _bounded_file_text(path, MAX_NGINX_SITE_BYTES,
                                             with_fingerprint=True)
@@ -200,14 +198,14 @@ def inspect_vhost_drift(panel_public, site, *,
     }
     try:
         if (type(site.get("id")) is not int or not 1 <= site["id"] <= 2147483647 or
-                panel_public.get_webserver() != "nginx" or
-                str(panel_public.get_panel_version()).strip() != "8.0.7"):
-            raise VhostDriftError("Only a selected aaPanel 8.0.7 Nginx website can be inspected")
+                panel_public.get_webserver() != "nginx"):
+            raise VhostDriftError("A selected native Nginx website is required")
+        panel_version = str(panel_public.get_panel_version()).strip()
         initial = _inspect(site, vhost_root)
         if initial != _inspect(site, vhost_root):
             raise VhostDriftError("Generated Nginx VHost changed during comparison")
         if (panel_public.get_webserver() != "nginx" or
-                str(panel_public.get_panel_version()).strip() != "8.0.7"):
+                str(panel_public.get_panel_version()).strip() != panel_version):
             raise VhostDriftError("Native panel version or web engine changed during inspection")
         response.update(initial)
         response["state"] = "File Drift" if initial["findings"] else "File Match"
