@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.65'
+WORKER_SOURCE_VERSION = '0.1.66'
 
 _STATE_DIR = DATA_DIR
 
@@ -1057,7 +1057,8 @@ class ach_customizer_main:
                 after = inspect_site_fastcgi_cache(
                     public, before["id"], before["name"])
                 if (after.get("state") != "Source Observed" or
-                        after.get("source_sha256") != audited.get("source_sha256")):
+                        after.get("source_sha256") != audited.get("source_sha256") or
+                        after.get("managed_cache_handler") != audited.get("managed_cache_handler")):
                     result["state"] = "Needs Review"
                     result["private_probe_bypass_observed"] = False
                     if "default_guest_bypass_observed" in result:

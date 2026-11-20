@@ -765,6 +765,20 @@ and source checks; it does not transfer old ownership blindly.
 | **Nginx Helper `purge_url` / `unlink_files`** | Vendor per-URL behavior; optional Bridge constrains **only supported current-generation URL-file mapping** when provisioned. |
 | **Nginx Helper `purge_all()`** | Vendor recursive deletion of its **configured cache root**, bypasses Bridge's URL filter; **not certified/authorized** for a shared or ambiguous root. |
 
+
+**Native private-request Cache probe:** A twice-verified native PHP source
+with a direct Cache zone may be observed with four fixed origin-local HEAD
+requests (nine for default WooCommerce routes). The legacy native WordPress
+handler is checked against `X-Cache: BYPASS From <site-host>`; an **Applied,
+exact journal-owned** Customizer Cache handler (stock or wpfastcgi) instead
+requires both `X-ACh-Cache: BYPASS` and `X-ACh-Cache-Site: <site-id>`.
+Reject unknown/unfinished managed recovery, changed PHP/include precedence,
+wrong zone/directory and foreign markers before claiming observed BYPASS.
+These are response-header observations, **not authenticated-session
+isolation, verified responding VHost, HTTPS edge policy, production safety or
+permission to purge any cache tree**. After a positive result the selected
+native source is re-audited for drift; unknown source produces Needs Review.
+
 One successful site-owned Clear is **not** permission to turn on vendor
 Purge All. Concurrent clients can refill objects after any Clear; verify
 actual resulting Cache behavior and separate external request effects.

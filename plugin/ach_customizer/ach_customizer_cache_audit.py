@@ -156,9 +156,10 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
             if owned_cache.exists() or owned_cache.is_symlink():
                 raise CacheAuditError("Static site retains a managed cache handler")
             fingerprints.append(("extension", site_key, sig))
-        return _merge_directives(vhost, snippet_source), fingerprints, "00"
+        return _merge_directives(vhost, snippet_source), fingerprints, "00", None
     sources = [vhost, snippet_source]
     managed_wp = False
+    managed_cache_handler = None
     managed_php_source = None
     fingerprints = ([("vhost", site_key, vhost_sig),
                      ("php-snippet", snippet, snippet_sig)] + extra_files)
@@ -207,6 +208,11 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
             record = verified_cache_extension(
                 extension, site_id, site_key, managed_name, managed_raw)
             managed_wp = record.get('native_handler') == 'wpfastcgi'
+            # Only a fully Applied, journal/byte-verified owned policy can
+            # authorize the managed runtime header diagnostic. A prepared
+            # recovery remains source-observable but is not probe-ready.
+            managed_cache_handler = (record.get('native_handler', 'stock')
+                                     if record.get('phase') == 'applied' else 'pending')
             managed_php_source = _active_nginx_text(managed_raw)
             sources.append(managed_php_source)
             fingerprints.append(("managed-cache-extension", managed_name, managed_sig))
@@ -240,7 +246,7 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
         for directive in DIRECTIVES:
             if directive != 'fastcgi_cache_purge':
                 combined[directive] = effective[directive]
-    return combined, fingerprints, version
+    return combined, fingerprints, version, managed_cache_handler
 
 
 def _native_sites(panel_public):
@@ -519,7 +525,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         "runtime_verified": False, "cache_safe_verified": False,
         "purge_supported": False, "fix_supported": False,
         "zone_state": "Needs Review", "cache_zone": None,
-        "php_version": None,
+        "php_version": None, "managed_cache_handler": None,
         "global_zone_directly_declared": False,
         "aaPanel_global_include_observed": False,
         "global_ignore_headers": [], "cache_directory": None,
@@ -544,7 +550,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             if (site_id, site_key) not in sites:
                 raise CacheAuditError("Selected native site identity has changed")
             globals_ = _known_global_cache(nginx_root, vhost_root)
-            selected_directives, selected_files, version = _site_source(
+            selected_directives, selected_files, version, managed_handler = _site_source(
                 site_id, site_key, vhost_root, nginx_root, rewrite_root)
             zone_state, zone = _cache_zone(selected_directives)
             peers = []
@@ -561,7 +567,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                 if ident == site_id:
                     continue
                 try:
-                    peer_directives, files, _ = _site_source(
+                    peer_directives, files, _, _ = _site_source(
                         ident, key, vhost_root, nginx_root, rewrite_root)
                     _, peer_zone = _cache_zone(peer_directives)
                 except (CacheAuditError, MonitorInputError, OSError, UnicodeError, ValueError):
@@ -584,7 +590,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                         # or mounts. Source-only diagnostics cannot certify that
                         # they are separate physical directories.
                         different_directory_peer = True
-            return (sites, globals_, selected_directives, version, zone_state,
+            return (sites, globals_, selected_directives, version, managed_handler, zone_state,
                     zone, peers, directory_peers, different_directory_peer,
                     physical_peer_paths, unresolved, fingerprints)
 
@@ -594,7 +600,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         if (panel_public.get_webserver() != "nginx" or
                 str(panel_public.get_panel_version()).strip() != panel_version):
             raise CacheAuditError("Native web engine or panel version changed during audit")
-        (sites, globals_, directives, php_version, zone_state, zone, peers,
+        (sites, globals_, directives, php_version, managed_handler, zone_state, zone, peers,
          directory_peers, different_directory_peer, physical_peer_paths,
          unresolved, fingerprints) = first
         findings, ignored = _analyze_selected(
@@ -618,6 +624,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
         result.update(
             state="Partial" if unresolved else "Source Observed",
             zone_state=zone_state, cache_zone=zone, php_version=php_version,
+            managed_cache_handler=managed_handler,
             global_zone_directly_declared=zone is not None and
                 zone in globals_["direct_zones"],
             aaPanel_global_include_observed=globals_["include_observed"],
