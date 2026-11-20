@@ -835,8 +835,8 @@
         <p id="ach-status-default-result" role="status" aria-live="polite">Choose global scope and a supported template, then Recheck. No active site is modified.</p>
       </div>
       <div class="ach-note" id="ach-status-unbound-section" aria-label="HTTP unbound default-server management" hidden>
-        <strong>Unknown domains · global HTTP/80 catch-all (IPv4 + IPv6)</strong>
-        <p>aaPanel 8.0.7 Nginx only. Select <code>unbound</code> and global branding above. A guarded plugin-owned <code>default_server</code> serves the chosen static HTML with real HTTP 404 for unmatched Host headers. This requires an explicitly approved <strong>global Nginx reload</strong>. It does not change named websites, HTTPS/443, stopped sites, or aaPanel's new-site sources. Recheck first; conflicting default servers are unsupported.</p>
+        <strong>Unknown domains · global HTTP/80 catch-all (native IPv4 / IPv6)</strong>
+        <p>aaPanel 8.0.7 Nginx only. Select <code>unbound</code> and global branding above. A guarded plugin-owned <code>default_server</code> serves the chosen static HTML with real HTTP 404 for unmatched Host headers on currently configured native IPv4/IPv6 wildcard listeners. It does not enable a new IP family. This requires an explicitly approved <strong>global Nginx reload</strong>. It does not change named websites, HTTPS/443, stopped sites, or aaPanel's new-site sources. Recheck first; conflicting default servers are unsupported.</p>
         <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" disabled>Recheck HTTP unbound routing</button></div>
         <p id="ach-status-unbound-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a fresh valid global HTTP/80 Recheck and explicit approval.</p>
         <label><input id="ach-status-unbound-apply-approve" type="checkbox" aria-describedby="ach-status-unbound-apply-why" /> I approve the exact global HTTP/80 default-server and shared Nginx reload.</label>
@@ -884,7 +884,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.66'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.67'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1128,7 +1128,7 @@
       readOnly ? '\nNo routing change was requested. Resolve the cause and Recheck.' :
       '\nRecheck saved recovery before any retry; do not assume success or failure.';
     if (readOnly && failure.stage === 'status_unbound_probe')
-      guidance += '\nCheck Nginx HTTP/80 loopback listeners at 127.0.0.1 and [::1].';
+      guidance += '\nCheck the active HTTP/80 Nginx listener families and their local routes.';
     var id = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
     var operationId = id(failure.operation_id) ? failure.operation_id : null;
     var requestId = id(failure.request_id) ? failure.request_id : null;
@@ -3662,7 +3662,8 @@
       !unboundMatches || !['Source Ready','Restored'].includes(statusUnboundEvidence.state) ||
       root.find('#ach-status-unbound-apply-approve').prop('checked') !== true);
     root.find('#ach-status-unbound-restore').prop('disabled',
-      !unboundMatches || !['Applied','Recovery Required'].includes(statusUnboundEvidence.state) ||
+      !unboundMatches || !['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) ||
+      !statusUnboundEvidence.recovery ||
       root.find('#ach-status-unbound-restore-approve').prop('checked') !== true);
     // Do not invent readiness: the messages below derive from the very same
     // evidence conditions that already gate the corresponding action buttons.
@@ -3708,7 +3709,8 @@
     var unboundApply = !!(unboundMatches &&
       ['Source Ready','Restored'].includes(statusUnboundEvidence.state));
     var unboundRestore = !!(unboundMatches &&
-      ['Applied','Recovery Required'].includes(statusUnboundEvidence.state));
+      ['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) &&
+      !!statusUnboundEvidence.recovery);
     explainGate('ach-status-unbound-apply-why', unboundApply && !busy ? 'ready' : 'blocked',
       pending || (!unboundApply ?
         'Choose global / unbound, load branding and Recheck HTTP routing. Apply is unavailable without a compatible source.' :
@@ -4772,16 +4774,19 @@
         !hash(r.source_sha256) || !hash(r.rendered_sha256) ||
         !status(r.before_ipv4_status) || !status(r.before_ipv6_status) ||
         r.recovery_id !== null && !id(r.recovery_id) ||
+        (['Source Ready','Applied','Restored','Needs Review','Recovery Required'].includes(r.state) &&
+         r.before_ipv4_status === null && r.before_ipv6_status === null) ||
         r.read_only !== (action === 'recheck') ||
         typeof r.runtime_verified !== 'boolean' ||
         typeof r.changed !== 'boolean' ||
-        r.impact !== 'Unknown HTTP Host on port 80 (IPv4/IPv6) only; no HTTPS or stopped-site change')
+        r.impact !== 'Unknown HTTP Host on native HTTP/80 listeners only; no HTTPS or stopped-site change')
       return false;
     if (action === 'recheck')
       return r.changed === false &&
         ['Source Ready','Applied','Restored','Conflict','Drift','Recovery Required','Needs Review'].includes(r.state) &&
         (r.state !== 'Source Ready' || r.recovery_id === null) &&
-        (r.state !== 'Applied' || id(r.recovery_id));
+        (['Applied','Needs Review','Recovery Required'].includes(r.state) ?
+          id(r.recovery_id) : true);
     return action === 'apply' ?
       r.state === 'Applied' && r.changed && r.runtime_verified && id(r.recovery_id) :
       r.state === 'Restored' && r.changed && r.runtime_verified && id(r.recovery_id);
@@ -4798,7 +4803,8 @@
          root.find('#ach-status-unbound-apply-approve').prop('checked') !== true)) return;
     if (action === 'restore' &&
         (!sameDefaultSelection(previous) ||
-         !['Applied','Recovery Required'].includes(previous.state) ||
+         !['Applied','Needs Review','Recovery Required'].includes(previous.state) ||
+         !previous.recovery ||
          root.find('#ach-status-unbound-restore-approve').prop('checked') !== true)) return;
     var ticket = statusTicket, revision = statusRevision, brand = statusFields();
     statusUnboundEvidence = null;
@@ -4826,6 +4832,7 @@
       if (!same || !validUnboundResponse(r, action, locale, revision) ||
           action === 'apply' && r &&
           (r.rendered_sha256 !== previous.rendered || r.source_sha256 !== previous.source ||
+           r.before_ipv4_status !== previous.v4 || r.before_ipv6_status !== previous.v6 ||
            r.recovery_id === previous.recovery && previous.state !== 'Restored') ||
           action === 'restore' && r &&
           (r.recovery_id !== previous.recovery || r.source_sha256 !== previous.source)) {
@@ -4849,7 +4856,8 @@
           r.state + (r.changed ? ' — HTTP route changed' : ' — no configuration change') +
           '\nNginx source SHA-256: ' + r.source_sha256 +
           '\nSelected HTML SHA-256: ' + r.rendered_sha256 +
-          '\nPrevious IPv4/IPv6 HTTP statuses: ' + r.before_ipv4_status + ' / ' + r.before_ipv6_status +
+          '\nPrevious IPv4/IPv6 HTTP statuses: ' + (r.before_ipv4_status === null ? 'Not configured' : r.before_ipv4_status) + ' / ' +
+          (r.before_ipv6_status === null ? 'Not configured' : r.before_ipv6_status) +
           '\nRuntime verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
           '\nRecovery ID: ' + (r.recovery_id || 'None') +
           '\nRequest ID: ' + r.operation_id +

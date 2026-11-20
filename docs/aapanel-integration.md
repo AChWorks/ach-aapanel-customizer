@@ -711,7 +711,7 @@ remains byte-identical.
 | **Site Nginx extension 404/502** | Checked site-specific native include, source/ownership validation, approved Nginx reload, observed HTTP response and exact Restore. |
 | **Site Nginx-generated 50x** | Verified extension route for **Nginx-generated** 500/502/503/504; not intercepted application/PHP responses. Conflicting `error_page` mappings refuse Apply. |
 | **Stopped website HTTP503** | Opt-in, source/proof-checked lifecycle operation where native aaPanel stop would otherwise serve a 200; native site Stop/Start can suspend other applied status routes. |
-| **Global unknown Host HTTP/80** | Independently approved Nginx-owned default_server on IPv4/IPv6, genuine HTTP 404, checked reload and Restore. Never claim HTTPS/443 support. |
+| **Global unknown Host HTTP/80** | Independent Nginx-owned default_server on the native wildcard HTTP/80 listener families (IPv4-only, IPv6-only or dual-stack), real HTTP 404 on configured families, checked reload and Restore. Absent families are not probed or enabled. Address-specific binds and IPv6 dual-mode sockets are not widened. Never claim HTTPS/443 support. |
 
 A given route can conflict with existing per-site mapping, generated
 includes, `site_total` or aaPanel stop handling. Never assume that changing
