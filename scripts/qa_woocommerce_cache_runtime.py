@@ -57,6 +57,22 @@ if ($in['op'] === 'observe') {
       $products[] = array('id'=>$p->ID,'name'=>$p->post_title);
   }
   if (count($products)<2) { fwrite(STDERR,'Need two buyable real Woo products'); exit(4); }
+  // WordPress may redirect ?page_id=N to pretty permalinks with HTTP 301.
+  // Exercise the canonical URL produced by the actual installed site, not a
+  // guessed rewrite form. These are request paths on the already pinned Host.
+  $page_paths = array();
+  foreach (array('cart'=>'woocommerce_cart_page_id',
+                 'checkout'=>'woocommerce_checkout_page_id',
+                 'account'=>'woocommerce_myaccount_page_id') as $name=>$option) {
+    $page = (int)get_option($option);
+    $link = $page > 0 ? get_permalink($page) : false;
+    $target = is_string($link) ? wp_make_link_relative($link) : false;
+    if (!is_string($target) || !str_starts_with($target, '/') ||
+        str_starts_with($target, '//')) {
+      fwrite(STDERR,'WooCommerce canonical page URL unavailable'); exit(4);
+    }
+    $page_paths[$name] = $target;
+  }
   // Check both names BEFORE any write, not after creating the first user.
   foreach ($names as $login) {
     if (get_user_by('login',$login)) { fwrite(STDERR,'QA identity already in use'); exit(4); }
@@ -83,6 +99,7 @@ if ($in['op'] === 'observe') {
         'cart_page'=>get_option('woocommerce_cart_page_id'),
         'checkout_page'=>get_option('woocommerce_checkout_page_id'),
         'account_page'=>get_option('woocommerce_myaccount_page_id'),
+        'page_paths'=>$page_paths,
         'permalink'=>get_option('permalink_structure'),
         'woo'=>WC_VERSION));
 } elseif ($in['op'] === 'remove') {
@@ -166,6 +183,11 @@ def validate_prepared_accounts(data, run_id):
                     not isinstance(x.get("cookie"),str) or "=" not in x["cookie"]
                     for x in data["users"] if isinstance(x,dict))):
         raise RuntimeError("WordPress QA prepare returned incomplete identities")
+    paths = data.get("page_paths")
+    if (not isinstance(paths, dict) or set(paths) != {"cart", "checkout", "account"}
+            or any(not isinstance(path, str) or not path.startswith("/")
+                   or path.startswith("//") for path in paths.values())):
+        raise RuntimeError("WordPress QA prepare returned invalid canonical WooCommerce page paths")
     return data
 
 
@@ -313,21 +335,21 @@ def exercise_store_clients(port, hostname, site_id, users, *,
     a,b = (Client(port,hostname,u["cookie"],tls_ca_file=tls_ca_file)
            for u in users["users"])
     names = [u["login"] for u in users["users"]]
-    profile = "?page_id="+str(users["account_page"])
+    paths = users["page_paths"]  # Actual WP get_permalink() for this installed site.
+    profile = paths["account"]
     for client,login,other in ((a,names[0],names[1]),(b,names[1],names[0])):
-        r = client.get("/"+profile)
+        r = client.get(profile)
         if r["status"]!=200 or r["cache"]!="BYPASS" or login not in r["body"] or other in r["body"]:
             raise AssertionError("Logged-in Woo account identity or bypass not verified")
     for client,product in zip((a,b),users["products"]):
         r = client.get("/?add-to-cart="+str(product["id"]))
         if r["cache"] not in ("BYPASS",None):
             raise AssertionError("Add-to-cart was cacheable")
-    cart = "?page_id="+str(users["cart_page"])
-    checkout = "?page_id="+str(users["checkout_page"])
+    cart, checkout = paths["cart"], paths["checkout"]
     for client,mine,other in ((a,users["products"][0],users["products"][1]),
                               (b,users["products"][1],users["products"][0])):
         for label,path in (("cart",cart),("checkout",checkout),("account",profile)):
-            r=client.get("/"+path)
+            r=client.get(path)
             if r["status"]!=200 or r["cache"]!="BYPASS":
                 raise AssertionError(label+" did not bypass for logged-in customer")
         # Woo Cart/Checkout blocks hydrate items via the Store API.
