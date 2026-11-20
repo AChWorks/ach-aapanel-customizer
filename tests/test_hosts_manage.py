@@ -301,6 +301,11 @@ class OneClickHostsTests(unittest.TestCase):
         inspected = self.inspect()
         self.assertEqual(inspected["state"], "No Aliases")
         self.assertEqual(inspected["entries"], [])
+        # The older selected-site diagnostic also remains usable after a
+        # one-click removal empties the actual shared Hosts source.
+        self.assertEqual(inspect_local_hosts(["orphan.test"],
+                         source_path=str(self.source))["state"],
+                         "No Local Loopback Entry")
         self.assertEqual(inspected["hosts_sha256"], hashlib.sha256(b"").hexdigest())
         again = self.remove("orphan.test")
         self.assertEqual(again["state"], "Already Absent")
