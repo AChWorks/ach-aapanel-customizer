@@ -57,6 +57,8 @@ function loadUi() {
     '#ach-hosts-site-id', '#ach-hosts-inspect-button', '#ach-hosts-result',
     '#ach-hosts-removal-domain', '#ach-hosts-removal-why', '#ach-hosts-removal-reviewed',
     '#ach-hosts-removal-button', '#ach-hosts-recovery-why',
+    '#ach-hosts-alias-refresh', '#ach-hosts-alias-select',
+    '#ach-hosts-alias-remove', '#ach-hosts-alias-result',
     '#ach-hosts-restore-reviewed', '#ach-hosts-restore-button',
     '#ach-wp-terminal-reviewed', '#ach-wp-terminal-restore-reviewed',
     '#ach-wp-terminal-status', '#ach-wp-terminal-recovery',
@@ -355,6 +357,9 @@ function loadUi() {
     return {
       rows: rows(),
       hostsResult: elements.get('#ach-hosts-result').textContent,
+      hostsAliasesResult: elements.get('#ach-hosts-alias-result').textContent,
+      hostsAliasesChoices: elements.get('#ach-hosts-alias-select').children.map(x => x.props.value),
+      hostsAliasesRemoveDisabled: elements.get('#ach-hosts-alias-remove').props.disabled,
       wpTerminalStatus: elements.get('#ach-wp-terminal-status').textContent,
       wpTerminalRecovery: elements.get('#ach-wp-terminal-recovery').textContent,
       wpTerminalEnableDisabled: elements.get('#ach-wp-terminal-enable').props.disabled,
@@ -1740,6 +1745,70 @@ const hostsInspection = (overrides={}) => ({
   entries:[{domain:'site.test',address:'127.0.0.2',line:3,loopback:true}],
   hosts_recovery:{state:'None',recovery_id:null,domain:null},
   note:'Origin local only; Gateway unverified.',...overrides
+});
+
+const hostsAliasResponse = (entries = []) => ({
+  status:true, schema:1, read_only:true,
+  hosts_sha256:'a'.repeat(64),
+  state: entries.length ? 'Aliases Found' : 'No Aliases',
+  entries
+});
+
+test('Routing automatically lists loopback aliases without any website selection or WP watcher', () => {
+  const ui = loadUi();
+  ui.openTab('routing');
+  const listing = ui.requests.find(x => /s=inspect_hosts_aliases$/.test(x.options.url));
+  assert.ok(listing, 'Actual local Hosts inventory loads when Routing opens');
+  assert.equal(ui.state().hostsAliasesRemoveDisabled, true);
+  listing.respond(hostsAliasResponse([
+    {domain:'success.test',address:'127.0.0.1',line:2},
+    {domain:'failed.test',address:'127.0.0.1',line:3},
+    {domain:'failed.test',address:'::1',line:4}
+  ]));
+  assert.deepEqual(ui.state().hostsAliasesChoices,
+    ['', 'success.test', 'failed.test']);
+  assert.equal(ui.state().hostsAliasesRemoveDisabled, true);
+  ui.statusSetValue('#ach-hosts-alias-select', 'failed.test', 'change');
+  assert.equal(ui.state().hostsAliasesRemoveDisabled, false);
+  const remove = ui.statusClick('#ach-hosts-alias-remove');
+  assert.match(remove.options.url, /s=remove_hosts_alias$/);
+  assert.equal(remove.options.data.domain, 'failed.test');
+  assert.equal(Object.keys(remove.options.data).length, 1);
+  assert.equal(ui.state().hostsAliasesRemoveDisabled, true);
+  remove.respond({
+    status:true,schema:1,state:'Alias Removed',changed:true,
+    domain:'failed.test',removed_aliases:2,hosts_sha256:'b'.repeat(64)
+  });
+  const refreshed = ui.requests.at(-1);
+  assert.match(refreshed.options.url, /s=inspect_hosts_aliases$/);
+  refreshed.respond(hostsAliasResponse([
+    {domain:'success.test',address:'127.0.0.1',line:2}
+  ]));
+  assert.deepEqual(ui.state().hostsAliasesChoices, ['', 'success.test']);
+  assert.match(ui.state().hostsAliasesResult, /Removed 2 mapping/);
+});
+
+test('Invalid alias inventory never offers Remove and already-absent action can be refreshed', () => {
+  const ui=loadUi();
+  ui.openTab('routing');
+  const listing=ui.requests.find(x=>/s=inspect_hosts_aliases$/.test(x.options.url));
+  listing.respond(hostsAliasResponse([
+    {domain:'localhost',address:'127.0.0.1',line:1}
+  ]));
+  assert.equal(ui.state().hostsAliasesRemoveDisabled,true);
+  assert.deepEqual(ui.state().hostsAliasesChoices,['']);
+  ui.statusClick('#ach-hosts-alias-refresh').respond(hostsAliasResponse([
+    {domain:'deleted-site.test',address:'127.0.0.1',line:3}
+  ]));
+  ui.statusSetValue('#ach-hosts-alias-select','deleted-site.test','change');
+  const removing=ui.statusClick('#ach-hosts-alias-remove');
+  removing.respond({
+    status:true,schema:1,state:'Already Absent',changed:false,
+    domain:'deleted-site.test',removed_aliases:0,
+    hosts_sha256:'b'.repeat(64)
+  });
+  ui.requests.at(-1).respond(hostsAliasResponse());
+  assert.match(ui.state().hostsAliasesResult,/No removable local loopback/);
 });
 
 const hostsInventory = (name = 'site.test') => page([
@@ -8059,9 +8128,13 @@ test('Routing and Cache open with the same selected website and no duplicate inv
   req.respond(hostsInventory());
   ui.statusSetValue('#ach-hosts-site-id','7','input change');
   ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection());
-  const count=ui.requests.length;
+  const count=ui.requests.filter(x=>/s=get_sites$/.test(x.options.url)).length;
   ui.openTab('routing');
-  assert.equal(ui.requests.length,count,'Shared verified list must not refetch on tab switch');
+  assert.match(ui.requests.at(-1).options.url,/s=inspect_hosts_aliases$/,
+    'Routing inspects actual Hosts independently, not the website inventory');
+  ui.requests.at(-1).respond(hostsAliasResponse());
+  assert.equal(ui.requests.filter(x=>/s=get_sites$/.test(x.options.url)).length,
+    count, 'Shared verified website list must not refetch on tab switch');
   assert.equal(ui.state().websiteContextHidden,false);
   ui.statusClick('#ach-vhost-inspect-button').respond(vhostInspection());
   assert.match(ui.state().vhostSummary,/matches aaPanel site records/);

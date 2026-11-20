@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.64'
+WORKER_SOURCE_VERSION = '0.1.65'
 
 _STATE_DIR = DATA_DIR
 
@@ -634,6 +634,38 @@ class ach_customizer_main:
             return self._fail("hosts_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("hosts_inspection", exc, request_id)
+
+    def inspect_hosts_aliases(self, args):
+        """List origin-local loopback names with no native-site prerequisite."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            from ach_customizer_hosts_manage import inspect_available_aliases
+            result = inspect_available_aliases()
+            return self._activity_result(
+                {"status": True, "schema": 1, "request_id": request_id, **result},
+                "websites", "inspect_hosts_aliases", level="DEBUG")
+        except PermissionError as exc:
+            return self._fail("hosts_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("hosts_inspection", exc, request_id)
+
+    def remove_hosts_alias(self, args):
+        """One explicit administrator action; read current Hosts at click time."""
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            from ach_customizer_hosts_manage import remove_available_alias
+            result = remove_available_alias(domain=self._argument(args, "domain"),
+                                            data_dir=_STATE_DIR)
+            return self._activity_result(
+                {"status": True, "schema": 1, "request_id": request_id, **result},
+                "websites", "remove_hosts_alias", target=result["domain"],
+                level="WARNING")
+        except PermissionError as exc:
+            return self._fail("hosts_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("hosts_management", exc, request_id)
 
     def manage_local_hosts(self, args):
         """Opt-in exact domain/hosts remediation with recoverable original bytes.

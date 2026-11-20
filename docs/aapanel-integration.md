@@ -161,11 +161,15 @@ PHP-FPM installs, plugin-owned cache) are different from **per-site roots**.
 They must be discovered/validated through version-compatible service adapters
 before claiming alternate aaPanel installation-prefix support. See Issue #21
 for current custom-root and native WP Toolkit success/failure evidence.
-Automatic post-terminal, lossless Hosts cleanup remains open. Native PHP-FPM
-auto-repair is merged in unpublished v0.1.62 source after recorded systemd
-success/failure acceptance on native aaPanel 8.0.7. Fresh authenticated Browser
-acceptance and Production qualification remain separate. The Hosts witness
-still does not autonomously edit Hosts.
+The earlier automatic post-terminal Hosts cleanup requirement was superseded
+by the Owner's 2026-11-20 decision: offer administrator-click removal of a
+selected hostname found in the current local Hosts file after successful or
+failed WP setup, including when aaPanel has no site record. No unattended
+Hosts deletion is required; the existing failed-install witness remains
+observation-only. Native PHP-FPM auto-repair is merged in unpublished v0.1.62
+source after recorded systemd success/failure acceptance on aaPanel 8.0.7.
+Fresh authenticated Browser acceptance and Production qualification remain
+separate.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
 
@@ -262,11 +266,14 @@ recovery material for forensics rather than overwriting it invisibly.
 The manual tool alone cannot identify the writer, guarantee external
 DNS/Gateway health or prevent repeat insertion. **Candidate source 0.1.60**
 adds a **separate, opt-in, observer-only native WP Toolkit failed-install
-witness** described immediately below. The Owner explicitly **rejected**
-observer-only reporting as a substitute for automatic correction. No-loss
-Hosts cleanup remains OPEN P0; the native PHP-FPM automatic correction
-in merged but unpublished v0.1.62 passed source-bound native systemd
-success/failure acceptance.
+witness** described immediately below. At that historical 0.1.60 checkpoint
+the Owner rejected observer-only reporting in favor of automatic correction.
+**This was superseded on 2026-11-20:** the accepted requirement is inspection of the current Hosts
+file and explicit one-click administrator removal after successful or failed WP
+setup, including orphaned domains. Unattended Hosts cleanup is **not** an
+open P0. The separate native PHP-FPM automatic correction in merged but
+unpublished v0.1.62 passed source-bound native systemd success/failure
+acceptance.
 The manual 0.1.52 capability is **not**
 available in published native 0.1.51. Installed-package fixture QA has
 passed, but authenticated resident-watcher/end-to-end acceptance remains
@@ -448,14 +455,14 @@ The exact v0.1.63 candidate passed CI and independent review before its
 Owner-authorized Merge. Installed native QA, public Release and Production
 remain separate, still-unverified gates.
 
-## Native Nginx writer source completeness (proposed v0.1.64; unpublished)
+## Native Nginx writer source completeness (merged v0.1.64; unpublished)
 
 Two existing *write* workflows — selected-site sensitive-path protection and
 Status Pages extension Apply/Restore — still blocked otherwise valid native
 installations solely for having more than 24 site domain bindings, 128 native
 VHost sources, 32 peer extension fragments, or 128 included files. A second
 Status Pages parked-VHost scan independently stopped at 128 entries. Proposed
-v0.1.64 removes those collection-count stops from the actual downstream
+Merged v0.1.64 removes those collection-count stops from the actual downstream
 writer preflights. It also streams native peer and include-graph enumeration,
 rather than building whole-directory candidate lists or retaining an arbitrary
 aggregate source-byte ceiling on otherwise individually validated files.
@@ -474,8 +481,40 @@ Targeted fixture acceptance covers 141 native bound domains, 136 parked peer
 VHosts, 40/41 extension fragments, more than 1 MiB of sibling extension
 sources and more than 2 MiB of included native configuration; it verifies
 Apply/Recheck/Restore, last-peer ownership conflicts, stale preview refusal
-and no changes to unrelated peer bytes. Fresh native installed v0.1.64
-acceptance and independent review remain separate requirements.
+and no changes to unrelated peer bytes. Fresh native installed v0.1.64 acceptance remains a separate
+requirement; its exact-HEAD independent review and owner-authorized Merge
+were completed in PR #104.
+
+## One-click local Hosts alias removal (proposed v0.1.65; unpublished)
+
+The origin's current `/etc/hosts` is the source of truth, including after
+successful WordPress setup and when a failed setup left no aaPanel site record.
+Open **Routing & Nginx**: the new Local Hosts section loads the non-system
+loopback hostnames automatically, and **Refresh local aliases** can recheck
+after an installation. Select the unwanted name and choose **Remove selected
+hostname**. The click itself is approval: there is no second checkbox, native
+website selector, status gate, WP watcher or automatic cleanup path.
+
+The action reads the latest local Hosts bytes at click time and removes
+only the chosen exact hostname's loopback tokens. Other addresses, names,
+comments and unrelated malformed lines remain untouched, including CR-only
+line endings. Removing the last mapping may leave an empty Hosts file;
+subsequent inspection reports `No Aliases`, and a repeat click reports
+`Already Absent`. A basic
+descriptor-relative source/identity check immediately before atomic replace
+detects most external edits; a simultaneously writing uncoordinated OS
+process is **not** covered by a universal transaction. If the alias is
+already absent, the action reports that state and the UI refreshes. Source
+writes remain full-primary-admin-only. Existing advanced selected-site
+Recovery and historical, explicitly approved WP Restore remain separately
+accessible only for their earlier saved state; no new automatic cleanup
+journal, daemon, watcher, or backup subsystem is created by this feature.
+
+New source-level regressions cover successful and failed/deleted-site names,
+multiple mappings, preservation of peer aliases, invalid/non-UTF-8
+unrelated lines, symlink refusal, external change detection and the
+authenticated UI endpoint. Native installed aaPanel acceptance, public
+Release and Production deployment remain separate authorization/QA gates.
 
 ## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 

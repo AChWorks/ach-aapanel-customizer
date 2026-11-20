@@ -44,6 +44,16 @@ class LocalHostsTests(unittest.TestCase):
         self.assertEqual(r["hosts_sha256"], hashlib.sha256(before).hexdigest())
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_empty_hosts_file_after_one_click_is_valid_no_aliases(self):
+        self.write("")
+        inspected = self.inspect()
+        self.assertEqual(inspected["state"], "No Local Loopback Entry")
+        self.assertEqual(inspected["entries"], [])
+        self.assertEqual(inspected["hosts_sha256"], hashlib.sha256(b"").hexdigest())
+        self.assertTrue(inspected["read_only"])
+        self.assertFalse(inspected["remote_dns_verified"])
+        self.assertEqual(self.path.read_bytes(), b"")
+
     def test_ipv4_ipv6_and_mapped_loopback_with_duplicate_hostname_entries(self):
         self.write("127.0.0.2 example.test Other.Example\n"
                    "::1 example.test\n"
