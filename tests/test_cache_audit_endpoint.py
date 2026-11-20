@@ -308,6 +308,27 @@ class NativeCacheAuditEndpointTests(unittest.TestCase):
         self.assertFalse(got["private_probe_bypass_observed"])
         self.assertIn("changed", got["reason"])
 
+    def test_managed_recovery_phase_change_revokes_positive_probe(self):
+        # Even if VHost bytes and the source fingerprint stay identical,
+        # losing the exact Applied journal claim invalidates a positive
+        # site-owned header observation before it reaches an administrator.
+        result = {"schema": 1, "state": "Observed BYPASS",
+                  "private_probe_bypass_observed": True}
+        first = {**self.sample(), "managed_cache_handler": "stock"}
+        after = {**self.sample(), "managed_cache_handler": "pending"}
+        with patch.dict(sys.modules, {
+                "public": self.native(), "flask": self.flask()
+        }), patch.object(audit, "inspect_site_fastcgi_cache",
+                         side_effect=[first, after]), \
+             patch("ach_customizer_cache_runtime.probe_private_cache",
+                   return_value=result):
+            got = self.plugin.probe_private_cache(self.args())
+        self.assertTrue(got["status"])
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertFalse(got["private_probe_bypass_observed"])
+        self.assertIn("changed", got["reason"])
+        self.assertEqual(self.reads, 3)
+
     def test_private_probe_rejects_nonprimary_or_get_without_any_http(self):
         with patch.dict(sys.modules, {
                 "public": self.native(), "flask": self.flask(uid=2)

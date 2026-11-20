@@ -592,7 +592,7 @@
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-cache-result" class="ach-status-metadata" role="status">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
       </details>
-      <p class="ach-note"><strong>Local WordPress cache header probe (synthetic, no login):</strong> four fixed HTTP/80 HEAD requests to localhost with invalid Authorization or test Cookie headers. Tests homepage and WordPress REST bypass, not real users, anonymous WooCommerce routes, HTTPS edge or safe Purge All. A defective cache policy might warm a public cache entry.</p>
+      <p class="ach-note"><strong>Local WordPress cache header probe (synthetic, no login):</strong> four fixed HTTP/80 HEAD requests to localhost with invalid Authorization or test Cookie headers. Understands the native wpfastcgi X-Cache header and verified applied site-owned Cache X-ACh-Cache / X-ACh-Cache-Site headers (including stock PHP). Tests homepage and WordPress REST bypass, not real users, anonymous WooCommerce routes, HTTPS edge or safe Purge All. A defective cache policy might warm a public cache entry.</p>
       <div class="ach-controls"><button type="button" id="ach-cache-private-probe-button" disabled>Probe local private-request Cache headers</button></div>
       <p id="ach-cache-private-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to test synthetic request bypass without changing configuration.</p>
       <p class="ach-note"><strong>Default WooCommerce guest-route probe (no login):</strong> five extra fixed anonymous HTTP/80 HEAD checks for <code>/cart/</code>, <code>/checkout/</code>, <code>/my-account/</code> and Store API cart/checkout, after four synthetic WordPress checks. Customized page slugs, GET behavior, identity/session cookies and the responding VHost are not verified. A faulty policy could warm a guest response.</p>
@@ -884,7 +884,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.65'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.66'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',

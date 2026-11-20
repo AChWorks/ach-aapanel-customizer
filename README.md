@@ -21,10 +21,10 @@ compatibility certification. For source-tree version details, inspect
 | --- | --- |
 | **Overview / Monitor** | Enable/disable monitoring, observe packaged vs resident entrypoint versions, see availability and diagnostics. |
 | **Website list** | Refresh paginated native website inventory, compare site/domain changes without an arbitrary site or alias count cap, and save selected-site or all-sites observation baselines. Baseline changes never modify website configuration. |
-| **Routing & Nginx** | Inspect current origin-local loopback entries and remove a chosen hostname with one administrator click, whether WordPress installation succeeded or failed and even without a native website record (proposed source v0.1.65). Existing site-specific recovery and source-scoped Nginx tools remain available; no unattended Hosts cleanup. Published v0.1.51 does not include these additions. |
+| **Routing & Nginx** | Inspect current origin-local loopback entries and remove a chosen hostname with one administrator click, whether WordPress installation succeeded or failed and even without a native website record (merged, unpublished source v0.1.65). Existing site-specific recovery and source-scoped Nginx tools remain available; no unattended Hosts cleanup. Published v0.1.51 does not include these additions. |
 | **PHP-FPM** | Discover and inspect PHP installations based on actual native files (including older versions), view file/socket relationships, and use guarded Apply/Restore only for currently implemented 8.1/8.5 adapters. Native post-terminal PHP-FPM repair is merged in unpublished v0.1.62, with successful isolated ordinary-systemd QA for both successful and failed native WordPress setup. Fresh authenticated Browser and Production qualification remain outstanding. |
 | **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. Merged, unpublished v0.1.64 validates complete native Nginx source graphs and peer inventories instead of fixed site/file counts before those writes. |
-| **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. |
+| **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. The proposed v0.1.66 native probe also recognizes exact applied site-owned Cache headers on stock or wpfastcgi PHP without claiming session privacy or safe Purge All. |
 | **Activity & Logs** | Operation/stage/error details, correlation IDs, scope and recovery guidance. |
 
 **Owner-approved product direction:** Keep tasks usable and straightforward.
@@ -34,9 +34,10 @@ risk, show a brief, nonmandatory pre-action note; an authorized administrator
 can continue without completing every recommendation. Real authorization,
 target correctness, and avoidance of unintended unrelated data loss remain
 essential. See the [project-wide operating principle](docs/PROJECT-SPEC.md#owner-wide-operating-principle-simplicity-and-informed-choice-2026-11-20).
-v0.1.62–0.1.64 are merged source, not published ZIPs. This proposed
-one-click Hosts remediation is versioned v0.1.65; it is not merged,
-released or deployed. Confirm published versions and checksums before installation.
+v0.1.62–0.1.65 are merged source, not published ZIPs. The current
+source-only v0.1.66 candidate extends the owned Cache header probe; it is
+not merged, released or deployed. Confirm published versions and checksums
+before installation.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
 is a separate WordPress plugin whose ZIP includes a standard
@@ -52,7 +53,7 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
 - **Nginx Helper `Purge All` is not certified** for shared or ambiguous physical
   Cache roots. Native **site-owned full-tree Clear** is a different, independently
   guarded operation. Neither should be confused with Bridge's per-URL filtering.
-- **Origin-local Hosts removal (proposed 0.1.65):** open **Routing & Nginx**
+- **Origin-local Hosts removal (merged, unpublished 0.1.65):** open **Routing & Nginx**
   to see current local loopback hostnames, regardless of WordPress installation
   result or whether aaPanel still has a matching site. Select the hostname and
   press **Remove selected hostname**: no watcher or second approval checkbox is

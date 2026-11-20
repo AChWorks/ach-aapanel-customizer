@@ -10,8 +10,10 @@ import http.client
 import re
 from pathlib import Path
 
+from ach_customizer_cache_policy import CACHE_ROOT
 from ach_customizer_monitor import (
-    MonitorInputError, _active_nginx_text, _bounded_file_text, MAX_NGINX_SITE_BYTES,
+    MonitorInputError, _active_nginx_text, _bounded_file_text,
+    _native_server_direct_include, MAX_NGINX_SITE_BYTES,
 )
 
 _SITE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}\Z")
@@ -34,8 +36,8 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
     """Observe only a registered native site on literal loopback port 80.
 
     Request headers cannot contain real user credentials. A positive result
-    proves only the returned native X-Cache header for these four HEAD
-    requests; not production HTTPS, real sessions or full WooCommerce privacy.
+    reports native X-Cache or journal-owned X-ACh-Cache headers for four
+    fixed HEAD requests; not production HTTPS or real-session privacy.
     WooCommerce mode adds five anonymous *default* route observations.
     """
     if profile not in ("wordpress", "woocommerce_default") or type(profile) is not str:
@@ -85,14 +87,39 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
         result["state"] = "Needs Review"
         result["reason"] = "Selected native VHost source is not readable or stable"
         return result
-    include = "include enable-php-" + version + "-wpfastcgi.conf;"
-    # This diagnostic is limited to native WordPress-style cached PHP
-    # handlers. A bare PHP or isolated managed zone has other semantics.
-    if (len(re.findall(r"\binclude\s+enable-php-[^\s;]+;", active)) != 1 or
-            active.count(include) != 1):
-        result["state"] = "Unsupported"
-        result["reason"] = "Selected site is not using one native wpfastcgi PHP include"
+    managed = source_audit.get("managed_cache_handler")
+    if managed not in (None, "stock", "wpfastcgi"):
+        result["state"] = "Needs Review"
+        result["reason"] = "Unrecognized managed Cache source identity"
         return result
+    if managed is None:
+        include = "include enable-php-" + version + "-wpfastcgi.conf;"
+        if (len(re.findall(r"\binclude\s+enable-php-[^\s;]+;", active)) != 1 or
+                active.count(include) != 1):
+            result["state"] = "Unsupported"
+            result["reason"] = "Selected site has neither a native wpfastcgi handler nor an applied managed Cache"
+            return result
+    else:
+        # The audit already read the exact owned Extension twice, verifying
+        # its bytes against the persistent *applied* Cache recovery journal.
+        # Reconcile the selected native VHost's PHP and include precedence;
+        # a stock PHP site must never be accepted from a zone name alone.
+        expected_zone = "ACHFC_" + str(identity)
+        expected_directory = CACHE_ROOT + "/site-" + str(identity)
+        native_php = "include enable-php-" + version + (
+            "-wpfastcgi" if managed == "wpfastcgi" else "") + ".conf;"
+        extension = str(Path(vhost_root) / "extension" / name / "*.conf")
+        extension_line = "include " + extension + ";"
+        if (source_audit.get("cache_zone") != expected_zone or
+                source_audit.get("cache_directory") != expected_directory or
+                len(re.findall(r"\binclude\s+enable-php-[^\s;]+;", active)) != 1 or
+                active.count(native_php) != 1 or active.count(extension_line) != 1 or
+                active.index(extension_line) > active.index(native_php) or
+                re.search(r"\blocation\s+~", active[:active.index(extension_line)]) or
+                not _native_server_direct_include(active, extension)):
+            result["state"] = "Needs Review"
+            result["reason"] = "Applied site-owned Cache source or PHP routing changed"
+            return result
 
     connection_factory = connection_factory or (
         lambda: http.client.HTTPConnection("127.0.0.1", 80, timeout=4))
@@ -117,17 +144,27 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
             conn.request("HEAD", path, headers=headers)
             reply = conn.getresponse()
             status = reply.status
-            raw_cache = reply.getheader("X-Cache", "")
+            if managed is None:
+                raw_cache = reply.getheader("X-Cache", "")
+            else:
+                # Both headers must identify the exact managed selected-site
+                # handler. Neither header authenticates a real user/VHost.
+                marker = reply.getheader("X-ACh-Cache-Site", "")
+                raw_cache = (reply.getheader("X-ACh-Cache", "")
+                             if marker == str(identity) else "")
             reply.read(0)
         except (OSError, http.client.HTTPException):
             result["reason"] = "Origin-local HTTP request failed"
             break
         finally:
             conn.close()
-        match = re.fullmatch(
-            r"(BYPASS|HIT|MISS|EXPIRED|STALE|UPDATING|REVALIDATED) From " +
-            re.escape(name), raw_cache or "")
-        cache = match.group(1) if match else "Not Observed"
+        if managed is None:
+            match = re.fullmatch(
+                r"(BYPASS|HIT|MISS|EXPIRED|STALE|UPDATING|REVALIDATED) From " +
+                re.escape(name), raw_cache or "")
+            cache = match.group(1) if match else "Not Observed"
+        else:
+            cache = raw_cache if raw_cache in _EXPECTED else "Not Observed"
         result["probes"].append({
             "path": path, "route": label, "scenario": scenario,
             "http_status": status, "cache": cache,

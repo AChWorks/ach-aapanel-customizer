@@ -16,6 +16,8 @@ class Response:
         self.status = status
         self.value = value
     def getheader(self, key, default=""):
+        if isinstance(self.value, dict):
+            return self.value.get(key, default)
         return self.value if key == "X-Cache" else default
     def read(self, size):
         assert size == 0
@@ -130,6 +132,93 @@ class RuntimePrivateCacheTests(unittest.TestCase):
                 got = self.observe()
                 self.assertEqual(got["state"], "Unsupported")
                 self.assertFalse(self.calls)
+
+    def managed(self, native_handler="stock"):
+        # The real source audit sets this only for a twice-scanned, exact
+        # journal/byte-owned live site Cache include (phase=applied).
+        self.audit.update(
+            managed_cache_handler=native_handler, cache_zone="ACHFC_9",
+            cache_directory="/www/server/ach-customizer-fastcgi/site-9",
+        )
+        extension = self.root / "extension" / self.name / "*.conf"
+        suffix = "-wpfastcgi" if native_handler == "wpfastcgi" else ""
+        self.vhost.write_text(
+            "server {\n include " + str(extension) + ";\n"
+            " include enable-php-85" + suffix + ".conf;\n}\n")
+        self.responses = [Response(200, {
+            "X-ACh-Cache": "BYPASS", "X-ACh-Cache-Site": "9",
+        }) for _ in range(4)]
+        self.connections.clear()
+        self.calls.clear()
+
+    def test_applied_managed_stock_cache_observes_all_private_head_bypass(self):
+        self.managed()
+        got = self.observe()
+        self.assertEqual(got["state"], "Observed BYPASS")
+        self.assertTrue(got["private_probe_bypass_observed"])
+        self.assertFalse(got["runtime_verified"])
+        self.assertFalse(got["cache_safe_verified"])
+        self.assertFalse(got["purge_supported"])
+        self.assertEqual(len(got["probes"]), 4)
+        self.assertTrue(all(x["cache"] == "BYPASS" for x in got["probes"]))
+        self.assertTrue(all(c.closed for c in self.connections))
+
+    def test_managed_stock_cached_identity_request_is_not_accepted(self):
+        self.managed()
+        self.responses[1] = Response(200, {
+            "X-ACh-Cache": "HIT", "X-ACh-Cache-Site": "9",
+        })
+        got = self.observe()
+        self.assertEqual(got["state"], "Needs Review")
+        self.assertEqual(got["probes"][1]["cache"], "HIT")
+        self.assertFalse(got["private_probe_bypass_observed"])
+
+    def test_managed_ignores_native_or_other_site_cache_markers(self):
+        self.managed()
+        self.responses[0] = Response(200, {
+            "X-ACh-Cache": "BYPASS", "X-ACh-Cache-Site": "other",
+            "X-Cache": "BYPASS From " + self.name,
+        })
+        got = self.observe()
+        self.assertEqual(got["state"], "Unavailable")
+        self.assertEqual(got["probes"][0]["cache"], "Not Observed")
+        self.assertFalse(got["private_probe_bypass_observed"])
+
+    def test_managed_wordpress_handler_uses_owned_cache_marker(self):
+        self.managed("wpfastcgi")
+        self.assertEqual(self.observe()["state"], "Observed BYPASS")
+
+    def test_managed_probe_refuses_unapplied_or_drifted_source_before_http(self):
+        for change in (
+            {"managed_cache_handler": "pending"},
+            {"managed_cache_handler": "forged"},
+            {"cache_zone": "WORDPRESS"},
+            {"cache_directory": "/www/server/fastcgi_cache"},
+        ):
+            with self.subTest(change=change):
+                self.managed()
+                self.audit.update(change)
+                got = self.observe()
+                self.assertEqual(got["state"], "Needs Review")
+                self.assertFalse(self.calls)
+
+    def test_managed_probe_refuses_changed_extension_precedence(self):
+        self.managed()
+        correct = self.vhost.read_text()
+        for text in (
+            correct.replace("include enable-php-85.conf;", "include enable-php-81.conf;"),
+            correct.replace(" include enable-php-85.conf;", ""),
+            correct.replace("server {\n", "server {\n location ~ \\.php$ { return 200; }\n"),
+            correct.replace("server {\n", "server {\n include enable-php-85.conf;\n"),
+        ):
+            with self.subTest(vhost=text):
+                self.calls.clear()
+                self.connections.clear()
+                self.vhost.write_text(text)
+                got = self.observe()
+                self.assertEqual(got["state"], "Needs Review")
+                self.assertFalse(self.calls)
+                self.vhost.write_text(correct)
 
     def woo(self):
         self.responses = [

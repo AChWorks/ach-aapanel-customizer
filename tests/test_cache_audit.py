@@ -686,14 +686,15 @@ class FastCgiCacheSourceTests(unittest.TestCase):
                                       prefix+' include enable-php-85-wpfastcgi.conf;'))
 
         def inspect():
-            directives, fingerprints, version = audit._site_source(
+            directives, fingerprints, version, managed = audit._site_source(
                 4,'wp.test',str(self.vhost),str(self.nginx),str(self.rewrites))
-            return directives, audit._cache_zone(directives), version
+            return directives, audit._cache_zone(directives), version, managed
 
         with (patch.object(audit,'_native_extension_fingerprint',return_value=('ext',)),
               patch('ach_customizer_cache_manage.verified_cache_extension',
-                    return_value={'native_handler':'wpfastcgi'})):
-            directives, zone, version = inspect()
+                    return_value={'native_handler':'wpfastcgi', 'phase':'applied'})):
+            directives, zone, version, managed_mode = inspect()
+            self.assertEqual(managed_mode, 'wpfastcgi')
             self.assertEqual(version,'85')
             self.assertEqual(zone,('Direct Zone','ACHFC_4'))
             self.assertEqual(directives['fastcgi_cache'],['ACHFC_4'])
@@ -702,7 +703,7 @@ class FastCgiCacheSourceTests(unittest.TestCase):
             # Without exact owned mode, two PHP cache directives cannot be
             # flattened into a falsely reassuring isolated source verdict.
             with patch('ach_customizer_cache_manage.verified_cache_extension',
-                       return_value={'native_handler':'stock'}):
+                       return_value={'native_handler':'stock', 'phase':'applied'}):
                 with self.assertRaisesRegex(audit.CacheAuditError,'Multiple'):
                     audit._cache_zone(inspect()[0])
             # Source drift, extension order and nested include cannot claim
@@ -741,6 +742,9 @@ class FastCgiCacheSourceTests(unittest.TestCase):
                 ' # location ~ .*\\.php { return 500; }\n' +
                 prefix + ' include enable-php-85-wpfastcgi.conf;'))
             self.assertEqual(inspect()[1], ('Direct Zone', 'ACHFC_4'))
+            with patch('ach_customizer_cache_manage.verified_cache_extension',
+                       return_value={'native_handler':'wpfastcgi', 'phase':'prepared'}):
+                self.assertEqual(inspect()[3], 'pending')
             source.write_text(old)
 
 
