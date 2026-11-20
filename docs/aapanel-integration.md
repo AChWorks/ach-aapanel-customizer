@@ -77,6 +77,145 @@ Do not enable Apply merely because a checkbox is ticked or the UI looks
 valid. Refreshing or changing a selected site, version, branding, policy,
 VHost or relevant source revokes stale selection/preview/approval evidence.
 
+## Native authenticated Browser QA runbook (aaPanel 8.0.7)
+
+This is the **working, actually exercised** login path for the isolated
+native QA guest, not a general aaPanel login contract. The current guest,
+protected credential reference, source/installed versions and full test
+receipts are maintained in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7045862216).
+If the target, aaPanel version or login template changes, inspect its actual
+form and post-login DOM instead of blindly reusing these selectors.
+
+### Recover target and credential metadata (no secret access)
+
+1. On the **AI Test Server**, recover the existing `ach-aapanel-qa` guest
+   `aac-native-qa-20261118` with `managed_environment.inspect` and check its
+   current native UUID/status. Check the existing **aaPanel** credential with
+   `service_access.inspect`; its host, project, guest and guest UUID must match,
+   and its status must be `ready` and not expired. Get the opaque
+   `credential_ref` from the live protected service metadata / Issue #21;
+   do not export its value, invent a replacement login or reveal passwords.
+2. Verify the current registered aaPanel form origin. For the tested guest it
+   was `https://aapanelai.gotohell.top/manage`, corresponding to its actual
+   `data/admin_path.pl`. This is a **test-only reverse-proxy origin**, not a
+   Production endpoint. Use the actual registered origin, not `localhost`,
+   the raw backend port or a different QA hostname.
+3. Check `browser_status` for an available isolated Browser slot. Use an
+   **isolated session** on the same Test Server, not a shared profile or a
+   separate unrelated Browser tool. The demonstrated Browser workspace was
+   `/srv/ai-workspace`. A new Master must recheck that workspace exists.
+
+### Protected login: exact verified selectors and success criterion
+
+Use the managed Browser-session tools so the protected credential is consumed
+by the authorized adapter and never enters a script, a log or the response:
+
+```js
+// Tool calls within functions.exec on the same AI Test Server.
+// Inspect guest and service-access metadata FIRST, as above.
+const workspace = "/srv/ai-workspace";
+const formUrl = "https://aapanelai.gotohell.top/manage";
+const credentialRef = "<existing guest-bound protected credential ref>";
+const opened = await tools.mcp__AI_Test_Server__browser_session_open({
+  workspace, profile_mode: "isolated"
+});
+const session_id = opened.session_id;
+try {
+  await tools.mcp__AI_Test_Server__browser_session_flow({
+    workspace, session_id, steps: [{ action: "goto", url: formUrl }]
+  });
+  const login = await tools.mcp__AI_Test_Server__browser_session_credential_login({
+    workspace, session_id, credential_ref: credentialRef,
+    username_selector: "#username",
+    secret_selector: "#password",
+    submit_selector: ".login_btn",
+    success_selector: "#app"
+  });
+  if (login.status !== "authenticated") throw new Error("Login not confirmed");
+  // Continue REAL plugin UI checks through browser_session_script / flow
+  // using this SAME authenticated session; never export cookies or tokens.
+} finally {
+  await tools.mcp__AI_Test_Server__browser_session_close({ workspace, session_id });
+}
+```
+
+**Critical correction:** The installed aaPanel 8.0.7 **new** panel uses
+`BTPanel/templates/default/index_new.html` with the actual post-login root
+`#app`. The older `index.html` has `.main-content`; using that legacy element
+as `success_selector` yielded **`credential_login_not_confirmed` even when
+login succeeded**. The official guest login Activity recorded a successful
+administrator login during one such false-negative attempt. The real frontend
+sets a session-scoped `/apsess_.../` route after login; do **not** paste its
+value, use its dynamic suffix as a tool argument, record it in logs or require
+a static post-login URL. The verified `success_selector: "#app"` produced
+`status: "authenticated"`. A generic `success_url` root prefix is not a
+replacement for an actual post-login-only DOM criterion.
+
+If this check does not confirm Login, **do not infer a bad password or an
+identity mismatch from the helper outcome alone**. Check the response code,
+the exact guest/credential binding, current login-page DOM, whether a
+challenge/MFA is present, protected aaPanel Activity and reverse-proxy
+routing. A `browser_session_script` after an *unverified* credential-login
+attempt may itself be rejected; close that isolated session, then use a new
+pre-login diagnostic session for read-only inspection. Never bypass the
+protected login adapter or reset credentials to work around a wrong selector.
+Avoid unrelated `AI Server Agent` host-control-plane probes: one such root
+check triggered an unnecessary `approval_required`, unrelated to the plugin.
+
+### Verify real operator actions, not just login or package bytes
+
+- Confirm the authenticated aaPanel app and installed plugin version through
+  its real UI. Open the installed **ACh aaPanel Customizer** plugin, then use
+  the semantic tab selector `getByRole('tab', {name:'Routing & Nginx'})`,
+  not ambiguous `getByText('Routing & Nginx', {exact:true})` (which also
+  matches the page heading). The UI's Overview can report matching
+  **Python entrypoint** and UI versions; this alone does **not** certify all
+  resident Python helpers or running Nginx workers.
+- For **Local Hosts**: on the isolated guest, preserve the exact pre-test
+  `/etc/hosts` bytes/hash, confirm a unique task-owned harmless loopback
+  alias is absent, create that fixture only, then click **Refresh local
+  aliases → select the exact hostname → Remove selected hostname** in the
+  authenticated plugin. The real button is the authorization; no extra
+  checkbox is required. Verify the chosen alias disappears, unrelated
+  aliases remain, and `/etc/hosts` is byte-for-byte equal to its original
+  contents. Verify **Activity & Logs** has the matching
+  `websites / remove_hosts_alias` event and an Operation ID; run actual
+  Nginx syntax and WP/Woo/peer-site health checks. Do not delete unknown
+  host mappings or use synthetic backend POST as a substitute for the click.
+- The verified installed **native 0.1.69** exercise on 2026-11-20 returned
+  `authenticated`, removed exactly one task-owned alias, restored the original
+  Hosts SHA256, logged `Alias Removed / complete`, and passed
+  `ACCEPTANCE_GUEST_PASSED`. Read-only authenticated UI checks also exercised
+  13-site Website inventory/Refresh, PHP 8.1/8.5 discovery and PHP85
+  site mapping, site #7 Restored Cache Recheck + stock-PHP Preview, and the
+  offline **Persian 404** preview with `html lang=fa dir=rtl`.
+- **Negative authorization:** a fresh unauthenticated isolated Browser POST
+  to the read-only plugin endpoint served login HTML rather than privileged
+  JSON. Separately, a successfully authenticated Browser request to
+  `remove_hosts_alias` **without the required CSRF token** returned JSON
+  `status:false`, `msg:"INIT_CSRF_ERR"` and did not alter Hosts. The normal
+  plugin UI supplies its authenticated CSRF context; never simulate success
+  by stripping or fabricating it. The resulting original Hosts bytes and
+  service health were rechecked.
+
+### Boundaries, recovery and handoff
+
+These specific login/Local Hosts/CSRF checks are **complete**, not a new P0
+blocker. Earlier Issue #21 comments describing `credential_guest_identity_mismatch`,
+`credential_login_not_confirmed`, or missing real Browser acceptance are
+**historical** and have been superseded for this installed 0.1.69 QA guest.
+`dom_too_large` from a broad Browser snapshot is not an auth failure; use
+scoped selectors. A failed login attempt can lock further inspection of
+that session; explicitly close it instead of retrying uncertain writes.
+
+The same QA login does **not** prove every Status Pages/Nginx Guard/PHP-FPM
+Apply/Restore, all imported helpers, other aaPanel versions, public Release
+or Production deployment. Keep Issue #21 open for its *remaining specific*
+acceptance matrix and Issue #10 open for the unknown-host HTTPS/443
+TLS/SNI decision. The protected guest retains native source/backup and
+Browser/CSRF test evidence under `/root/achqa/`; do not purge recovery files
+for convenience. The tested disposable sessions were all explicitly closed.
+
 ## Native aaPanel request authorization and parameter namespace
 
 The verified aaPanel **8.0.7** native plugin dispatch uses the ordinary
@@ -168,7 +307,8 @@ failed WP setup, including when aaPanel has no site record. No unattended
 Hosts deletion is required; the existing failed-install witness remains
 observation-only. Native PHP-FPM auto-repair is merged in unpublished v0.1.62
 source after recorded systemd success/failure acceptance on aaPanel 8.0.7.
-Fresh authenticated Browser acceptance and Production qualification remain
+Full authenticated PHP-FPM automatic-repair UI acceptance and Production
+qualification remain
 separate.
 
 ## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
@@ -420,8 +560,10 @@ checkboxes. Displayed scope/impact explanations remain. Existing
 authentication, fresh selection identity and revision checks remain in
 the backend. Low-contrast Status Pages colors are allowed: preview and Save
 show accessibility advice instead of rejecting the user's chosen palette.
-This source package has not yet passed new-version native installed UI
-acceptance or been published; it is not a Production deployment.
+At the v0.1.63 source checkpoint, native installed UI acceptance had
+not yet been completed and the package was unpublished. Later bounded
+installed 0.1.69 acceptance is recorded in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21);
+it does not certify every adapter or authorize Production deployment.
 
 A second cross-layer limit audit additionally removes stale frontend
 ceilings on large Hosts/VHost/Cache peer results, the 32-installation/128-root
@@ -452,20 +594,22 @@ Nginx source and retains a stable panel-version/webserver observation rather
 than rejecting recognizable sources solely by aaPanel version string.
 These changes did **not** extend Nginx/PHP-FPM/Cache writer eligibility.
 The exact v0.1.63 candidate passed CI and independent review before its
-Owner-authorized Merge. Installed native QA, public Release and Production
-remain separate, still-unverified gates.
+Owner-authorized Merge. At that checkpoint, native installed QA was pending;
+later bounded 0.1.69 QA is tracked in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+Public Release and Production delivery remain separately gated.
 
 ## Native Nginx writer source completeness (merged v0.1.64; unpublished)
 
-Two existing *write* workflows — selected-site sensitive-path protection and
-Status Pages extension Apply/Restore — still blocked otherwise valid native
-installations solely for having more than 24 site domain bindings, 128 native
-VHost sources, 32 peer extension fragments, or 128 included files. A second
-Status Pages parked-VHost scan independently stopped at 128 entries. Proposed
-Merged v0.1.64 removes those collection-count stops from the actual downstream
-writer preflights. It also streams native peer and include-graph enumeration,
-rather than building whole-directory candidate lists or retaining an arbitrary
-aggregate source-byte ceiling on otherwise individually validated files.
+Before v0.1.64, two existing *write* workflows — selected-site
+sensitive-path protection and Status Pages extension Apply/Restore — rejected
+otherwise valid native inventories above former fixed counts of 24 site domain
+bindings, 128 native VHosts, 32 peer extension fragments or 128 included
+files. The Status Pages parked-VHost scan separately stopped at 128 entries.
+Merged v0.1.64 (PR #104) removed these aggregate collection-count ceilings
+and streams complete native peer/include-graph and parked-VHost enumeration,
+instead of accumulating whole-directory candidate lists or imposing a
+separate aggregate source-byte ceiling. These are merged source capabilities,
+not a claim that every installed site topology has passed real Nginx QA.
 
 **Unchanged correctness boundaries:** the selected site's current native
 identity/binding SHA; the exact server-scoped Nginx include ownership graph;
@@ -481,11 +625,12 @@ Targeted fixture acceptance covers 141 native bound domains, 136 parked peer
 VHosts, 40/41 extension fragments, more than 1 MiB of sibling extension
 sources and more than 2 MiB of included native configuration; it verifies
 Apply/Recheck/Restore, last-peer ownership conflicts, stale preview refusal
-and no changes to unrelated peer bytes. Fresh native installed v0.1.64 acceptance remains a separate
-requirement; its exact-HEAD independent review and owner-authorized Merge
-were completed in PR #104.
+and no changes to unrelated peer bytes. Broader installed site-topology acceptance remains a separate
+requirement; exact-HEAD independent review and Owner-authorized Merge
+were completed in PR #104. Installed native 0.1.69 and real Cache/Hosts QA
+do not by themselves certify this module on every Nginx source graph.
 
-## One-click local Hosts alias removal (proposed v0.1.65; unpublished)
+## One-click local Hosts alias removal (merged source; verified on native 0.1.69 QA)
 
 The origin's current `/etc/hosts` is the source of truth, including after
 successful WordPress setup and when a failed setup left no aaPanel site record.
@@ -510,11 +655,13 @@ Recovery and historical, explicitly approved WP Restore remain separately
 accessible only for their earlier saved state; no new automatic cleanup
 journal, daemon, watcher, or backup subsystem is created by this feature.
 
-New source-level regressions cover successful and failed/deleted-site names,
+Source-level regressions cover successful and failed/deleted-site names,
 multiple mappings, preservation of peer aliases, invalid/non-UTF-8
 unrelated lines, symlink refusal, external change detection and the
-authenticated UI endpoint. Native installed aaPanel acceptance, public
-Release and Production deployment remain separate authorization/QA gates.
+authenticated UI endpoint. **Native installed aaPanel 8.0.7 / plugin 0.1.69**
+primary-admin one-click deletion, Activity and original Hosts byte preservation
+then passed with a real protected Browser session ([#21 receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7045862216)).
+Other versions and Production delivery remain separate gates.
 
 ## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 
@@ -557,7 +704,8 @@ was untouched; the existing primary QA guest was not modified by these
 tests. These two concrete source-verified lifecycles do not prove general
 compatibility with other aaPanel versions, arbitrary external writers or
 unexpectedly delayed native starts. Exact-source CI and independent review passed and PR #102 was merged.
-Fresh authenticated Browser QA and Production rollout remain distinct gates.
+Full authenticated PHP-FPM policy/automatic-repair UI acceptance and
+Production rollout remain distinct gates.
 The detailed reproducible source identity and native QA results are in
 [the 0.1.62 native systemd QA evidence](evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json).
 
@@ -597,7 +745,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### Independent-review R1–R4 control-flow remediation (candidate only)
+### Source-integrated R1–R4 control-flow remediation (verify installed behavior)
 
 - **Reviewed-site consent (R1):** Enable carries the exact versioned
   `impact_sha256` from saved-policy Recheck plus the saved policy and
@@ -657,11 +805,15 @@ Emergency Disable clears future authority before stopping the owned watcher,
 potentially waiting on an existing guarded operation. Uninstall preserves
 host PHP settings, snapshots, archived recovery and desired policy.
 
-This is a **development candidate**, not a claim of operational acceptance:
-real start/terminal event timing under a resident enabled watcher, end-to-end
-PHP 8.1/8.5 corrections, peer-site health, restart/duplicate behavior, and
-browser authorization must be verified in isolated native QA. It is not
-automated Hosts cleanup, nor does it cover unrelated aaPanel PHP operations.
+At the original R1–R4 source-integration checkpoint, those controls were
+development work, not blanket operational acceptance. The earlier bounded
+systemd PHP 8.1/8.5 start/terminal and peer-site results above remain valid
+for their tested source and guest; they do not automatically certify every
+later control-flow remediation or the authenticated policy/auto-repair UI.
+Broader resident-watcher and UI acceptance remains open in
+[Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+This feature is not automated Hosts cleanup and does not cover unrelated
+aaPanel PHP operations.
 
 ## PHP-FPM scope and guarded change
 
@@ -876,10 +1028,11 @@ never report them as a successful Apply.
   rollback. Unknown write outcome requires read-only reconciliation before
   any retry. Full physical service/VM disruption needs stronger isolation,
   explicit scope and recovery evidence.
-- **Latest evidence:** [#21 release ZIP/lifecycle receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6937217273),
-  [#21 real two-customer native Woo acceptance](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6938476216),
+- **Current acceptance and selected historical evidence:** [#21 current installed-native QA and remaining work](https://github.com/AChWorks/ach-aapanel-customizer/issues/21),
+  earlier [release ZIP/lifecycle receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6937217273)
+  and [two-customer native Woo receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6938476216),
   [#2 functional backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2),
-  and archived, bounded, file-based [QA evidence](evidence/).
+  and historical, bounded, file-based [QA evidence](evidence/).
 
 ## Verified source references and history
 

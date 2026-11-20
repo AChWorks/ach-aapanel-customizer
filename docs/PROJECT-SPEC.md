@@ -230,8 +230,11 @@ Live native aaPanel 8.0.7 systemd-only QA on two isolated guests now
 proves a successful WordPress PHP 8.1 first-time optimizer reset and a
 failed-installation/removed-site PHP 8.5 reset both repaired to saved
 shared policy, with service and peer-site checks. Independent exact-candidate
-review, native authenticated Browser QA, broader compatibility proof and
-Production approval remain separate OPEN gates. The read-only Hosts
+review, native authenticated **PHP-FPM policy/automatic-repair UI** QA,
+broader compatibility proof and Production approval remain separate OPEN
+gates. This does not re-open the independently proven primary-admin Login,
+Local Hosts one-click action or CSRF/no-session denial acceptance on the
+installed 0.1.69 QA guest (see Issue #21). The read-only Hosts
 witness is not an automatic recurrence-prevention deliverable. An exact
 no-loss removal cannot rely on Linux F_SETLEASE alone: a lease can be forcibly
 revoked after the timeout while the holder is suspended, and an intervening
