@@ -81,8 +81,7 @@ function loadUi() {
     '#ach-cache-url-path', '#ach-cache-url-why',
     '#ach-cache-url-reviewed', '#ach-cache-clear-url',
     '#ach-bridge-inspect', '#ach-bridge-result', '#ach-bridge-why',
-    '#ach-bridge-enable-reviewed', '#ach-bridge-enable',
-    '#ach-bridge-disable-reviewed', '#ach-bridge-disable',
+    '#ach-bridge-enable', '#ach-bridge-disable',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-reconcile-button', '#ach-reconcile-result',
     '#ach-reconcile-to-websites', '#ach-reconcile-to-cache',
@@ -398,6 +397,8 @@ function loadUi() {
       cacheUrlClearDisabled: elements.get('#ach-cache-clear-url').props.disabled,
       cacheUrlConsentDisabled: elements.get('#ach-cache-url-reviewed').props.disabled,
       cacheUrlPath: elements.get('#ach-cache-url-path').props.value,
+      bridgeEnableDisabled: elements.get('#ach-bridge-enable').props.disabled,
+      bridgeDisableDisabled: elements.get('#ach-bridge-disable').props.disabled,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       guardResult: elements.get('#ach-guard-result').textContent,
@@ -8551,20 +8552,26 @@ test('WooCommerce route results invalidate on native site change while pending',
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
 });
 
-test('WordPress Bridge native actions require fresh Applied Recheck and distinct consent', () => {
+test('WordPress Bridge uses only the named action buttons and no redundant approval checkbox', () => {
+  assert.doesNotMatch(html, /id="ach-bridge-(?:enable|disable)-reviewed"/);
+  assert.match(html, /id="ach-bridge-enable"/);
+  assert.match(html, /id="ach-bridge-disable"/);
+  assert.match(html, /Each button is the administrator's explicit approval/);
+});
+
+test('WordPress Bridge Provision button requires fresh Applied Recheck and sends explicit approval', () => {
   const ui=loadUi();
   selectHostsSite(ui);
   const start=ui.requests.length;
   ui.statusClick('#ach-bridge-enable');
   assert.equal(ui.requests.length,start,'No bridge enable without Applied Recheck');
-  ui.statusSetChecked('#ach-bridge-enable-reviewed',true);
   ui.statusClick('#ach-bridge-enable');
   assert.equal(ui.requests.length,start);
   const check=ui.statusClick('#ach-cache-activation-recheck');
   check.respond({status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
     journal_phase:'applied',recovery_id:'f'.repeat(32),
     read_only:true,runtime_verified:true,purge_supported:false});
-  ui.statusSetChecked('#ach-bridge-enable-reviewed',true);
+  assert.equal(ui.state().bridgeEnableDisabled,false);
   const enable=ui.statusClick('#ach-bridge-enable');
   assert.match(enable.options.url,/s=manage_cache_policy$/);
   assert.equal(enable.options.type,'POST');
@@ -8573,9 +8580,16 @@ test('WordPress Bridge native actions require fresh Applied Recheck and distinct
   assert.equal(enable.options.data.approved,'true');
   assert.equal(enable.options.data.expected_site_key,'site.test');
   assert.equal(enable.options.data.site_id,'7');
+  assert.equal(ui.state().bridgeEnableDisabled,true, 'Only one native request may be pending');
+  const pendingRequests=ui.requests.length;
+  ui.statusClick('#ach-bridge-enable');
+  ui.statusClick('#ach-bridge-disable');
+  assert.equal(ui.requests.length,pendingRequests, 'Pending Bridge change blocks re-entry');
   enable.respond({status:true,schema:1,state:'Provisioned',site_id:7,site_key:'site.test',
     recovery_id:'f'.repeat(32),read_only:false,runtime_verified:false,
     purge_supported:false,changed:true,note:'Native file provisioned'});
+  assert.equal(ui.state().bridgeEnableDisabled,true,
+    'A Bridge write invalidates the prior Applied Recheck and requires a new one');
   const inspect=ui.statusClick('#ach-bridge-inspect');
   assert.equal(inspect.options.data.cache_action,'bridge_inspect');
   assert.equal(inspect.options.data.approved,'false');
@@ -8587,13 +8601,17 @@ test('WordPress Bridge native actions require fresh Applied Recheck and distinct
 
 test('WordPress Bridge Disable is authorized separately and stale replies cannot cross sites', () => {
   const ui=loadUi(); selectHostsSite(ui);
-  const start=ui.requests.length;
-  ui.statusClick('#ach-bridge-disable');
-  assert.equal(ui.requests.length,start);
-  ui.statusSetChecked('#ach-bridge-disable-reviewed',true);
+  assert.equal(ui.state().bridgeDisableDisabled,false,
+    'Disable remains available without an Applied Cache or recovery checkbox');
   const disable=ui.statusClick('#ach-bridge-disable');
+  assert.equal(disable.options.type,'POST');
   assert.equal(disable.options.data.cache_action,'bridge_disable');
+  assert.equal(disable.options.data.expected_site_key,'site.test');
+  assert.equal(disable.options.data.site_id,'7');
   assert.equal(disable.options.data.approved,'true');
+  assert.equal(disable.options.data.recovery_id,null,
+    'A stale manifest may be disabled without an Applied Cache recovery ID');
+  assert.equal(ui.state().bridgeDisableDisabled,true, 'Pending disable disables re-entry');
   disable.respond({status:true,schema:1,state:'Not Provisioned',changed:true,
     site_id:7,site_key:'site.test',read_only:false,runtime_verified:false,
     purge_supported:false,note:'Native manifest removed'});
