@@ -8206,7 +8206,7 @@ test('Navigation splits real site, routing and cache controls without duplicatin
   assert.match(cache,/Native full-site Cache file clear/);
   assert.match(cache,/older generations and cached aliases in that same directory/);
   assert.match(cache,/Clear all selected-site Cache files/);
-  assert.match(cache,/does not enable, block or certify Nginx Helper Purge All/);
+  assert.match(cache,/neither changes Nginx Helper settings or enables Purge All/);
   assert.match(cache,/public GET\/HEAD URL objects/);
   for (const name of ['hosts','vhost','nginx-candidate','cache','php-runtime']) {
     assert.equal(html.split('id="ach-' + name + '-summary"').length,2,'One human summary '+name);
