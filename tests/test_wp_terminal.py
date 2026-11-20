@@ -16,6 +16,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"plugin"/"ach_customi
 import ach_customizer_wp_terminal as worker
 
 
+class TestNativeWpSourceAttestation(unittest.TestCase):
+    def test_verified_eight_zero_seven_source_pairs_only(self):
+        expected = {
+            ("7578c279424f0b653c0f65ca2f22fbf0b86ce873673b05939e4b4b16c6713bf8",
+             "b75a5a0b45c319df7eb49381363d3c3e90208157ebfd88de6f9b173d013d98fb"),
+            ("baac86fed3328182e1c99c823e2bcc274c0e902f0db16a8fe2fc16fceb4874ce",
+             "9696e3114a79587b78344bb2a661eac2555eb1227cf8da4c1ae8fa5b16283e92"),
+        }
+        self.assertEqual(worker.NATIVE_WRITER_SHA_PAIRS, expected)
+
+        def verify(writer_sha, site_sha, version=b"8.0.7"):
+            sources = {
+                worker.NATIVE_SOURCE: b"writer",
+                worker.NATIVE_SITE_SOURCE: b"site",
+                worker.NATIVE_META: b"g.version = '" + version + b"'",
+            }
+            def read(path, **_kwargs):
+                return sources[path], None
+            def digest(content):
+                return {b"writer": writer_sha, b"site": site_sha}[content]
+            with patch.object(worker, "_trusted_file", side_effect=read), patch.object(
+                    worker, "_sha", side_effect=digest):
+                worker._native_supported()
+
+        for writer_sha, site_sha in expected:
+            with self.subTest(cohort=writer_sha[:12]):
+                verify(writer_sha, site_sha)
+                with self.assertRaisesRegex(worker.TerminalError, "Unverified native"):
+                    verify(writer_sha, site_sha, version=b"8.0.8")
+        old, updated = sorted(expected)
+        for writer_sha, site_sha in ((old[0], updated[1]), (updated[0], old[1])):
+            with self.subTest(mixed=(writer_sha[:12], site_sha[:12])):
+                with self.assertRaisesRegex(worker.TerminalError, "Unverified native"):
+                    verify(writer_sha, site_sha)
+        with self.assertRaisesRegex(worker.TerminalError, "Unverified native"):
+            verify("0" * 64, updated[1])
+
+
 class TestNativeWpWitness(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="ach-wp-native-")
@@ -42,11 +80,13 @@ class TestNativeWpWitness(unittest.TestCase):
         self.metadata.write_bytes(b"g.version = '8.0.7'\n")
         self.metadata.chmod(0o644)
         sha = hashlib.sha256(self.native.read_bytes()).hexdigest()
-        self.settings = patch.multiple(worker, NATIVE_SOURCE_SHA=sha,
-                                       NATIVE_SITE_SOURCE=str(self.site_handler),
-                                       NATIVE_SITE_SHA=hashlib.sha256(self.site_handler.read_bytes()).hexdigest(),
-                                       NATIVE_META=str(self.metadata),
-                                       LOCK=str(self.lock), BATCH_LOCK=str(self.batch))
+        self.settings = patch.multiple(
+            worker,
+            NATIVE_WRITER_SHA_PAIRS=frozenset({(
+                sha, hashlib.sha256(self.site_handler.read_bytes()).hexdigest())}),
+            NATIVE_SITE_SOURCE=str(self.site_handler),
+            NATIVE_META=str(self.metadata),
+            LOCK=str(self.lock), BATCH_LOCK=str(self.batch))
         self.settings.start()
         self.addCleanup(self.settings.stop)
         worker.set_enabled(True, data_dir=str(self.data))
