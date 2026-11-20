@@ -118,6 +118,47 @@ class ExtensionTests(unittest.TestCase):
                 self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
         self.assertEqual(sum("reload" in cmd for cmd in self.commands), 6)
 
+    def _large_native_graph(self, *, peer_comment_bytes=0):
+        for number in range(136):
+            name = f"peer-{number:03d}.invalid"
+            (self.vhost_root / (name + ".conf")).write_text(
+                f"server {{\nlisten 80;\nserver_name {name};\n}}\n"
+                + ("# " + "x" * peer_comment_bytes + "\n"
+                   if peer_comment_bytes else ""))
+        for number in range(41):
+            (self.ext / f"foreign_{number:03d}.conf").write_text(
+                f"add_header X-Peer-{number} yes;\n")
+        return self.vhost_root / "peer-135.invalid.conf"
+
+    def test_native_status_apply_restore_includes_every_peer_and_extension(self):
+        self._large_native_graph(peer_comment_bytes=16_000)
+        self.assertGreater(
+            sum(p.stat().st_size for p in self.vhost_root.glob("peer-*.conf")),
+            2 * 1024 * 1024)
+        last_fragment = self.ext / "foreign_040.conf"
+        old = last_fragment.read_bytes()
+        self.assertEqual(self.run_manager("recheck")["state"], "Unmanaged")
+        applied = self.run_manager()
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(self.run_manager("recheck")["state"], "Applied")
+        self.assertEqual(self.run_manager(
+            "restore", recovery=applied["recovery_id"])["state"], "Restored")
+        self.assertEqual(last_fragment.read_bytes(), old)
+        self.assertEqual(self.other.read_bytes(), b"Untouched non-target bytes")
+        self.assertEqual(len([c for c in self.commands if "reload" in c]), 2)
+
+    def test_native_status_late_peer_ownership_conflict_refuses_any_write(self):
+        last_peer = self._large_native_graph()
+        last_peer.write_text(
+            "server {\nserver_name peer-135.invalid;\n"
+            f"include {self.ext}/*.conf;\n}}\n")
+        with self.assertRaises(extension.ExtensionError) as blocked:
+            self.run_manager()
+        self.assertEqual(blocked.exception.stage, "ownership")
+        self.assertFalse((self.ext / extension._include_name(7, "404")).exists())
+        self.assertFalse(list(self.state.iterdir()))
+        self.assertFalse(self.commands)
+
     def test_custom_document_root_extension_apply_recheck_and_restore(self):
         """Native per-site source ownership does not require /www/wwwroot."""
         relocated = self.root / "www" / "acdomains" / "demo.invalid"

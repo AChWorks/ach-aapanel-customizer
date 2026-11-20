@@ -147,6 +147,70 @@ class NativeSecurityTests(unittest.TestCase):
                          "Restored")
         self.assertEqual(len([c for c in self.commands if "reload" in c]), 4)
 
+    def _large_native_inventory(self, *, extension_comment_bytes=0):
+        """Complete native inventory, including >1 MiB of valid sources."""
+        for number in range(136):
+            name = f"peer-{number:03d}.invalid"
+            (self.vhost_root / (name + ".conf")).write_text(
+                f"server {{\nlisten 80;\nserver_name {name};\n}}\n")
+        for number in range(40):
+            (self.ext / f"foreign_{number:03d}.conf").write_text(
+                f"add_header X-Peer-{number} yes;\n"
+                + ("# " + "x" * extension_comment_bytes + "\n"
+                   if extension_comment_bytes else ""))
+        self.site["bound_domains"].extend(
+            {"name": f"alias-{number:03d}.invalid", "port": 80}
+            for number in range(140))
+
+    def test_complete_large_native_inventory_applies_and_restores_without_touching_peers(self):
+        self._large_native_inventory(extension_comment_bytes=30_000)
+        self.assertEqual(len(self.site["bound_domains"]), 141)
+        self.assertGreater(sum(p.stat().st_size for p in self.ext.glob("*.conf")),
+                           1024 * 1024)
+        peer = self.vhost_root / "peer-135.invalid.conf"
+        foreign = self.ext / "foreign_039.conf"
+        peer_bytes = peer.read_bytes()
+        preview = self.operate("preview")
+        self.assertEqual(preview["state"], "Unmanaged")
+        # The final source must participate in the precondition, not silently
+        # disappear when the 33rd extension or 129th peer is discovered.
+        foreign.write_text("add_header X-Peer-39 changed;\n")
+        with self.assertRaisesRegex(guard.GuardError, "changed"):
+            self.operate("apply", source=preview["vhost_sha256"])
+        self.assertFalse(self.fragment.exists())
+        latest = self.operate("preview")
+        self.assertNotEqual(latest["vhost_sha256"], preview["vhost_sha256"])
+        applied = self.operate("apply", source=latest["vhost_sha256"])
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(self.operate("recheck")["state"], "Applied")
+        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])["state"],
+                         "Restored")
+        self.assertEqual(peer.read_bytes(), peer_bytes)
+        self.assertEqual(foreign.read_text(), "add_header X-Peer-39 changed;\n")
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+        self.assertEqual(len([c for c in self.commands if "reload" in c]), 2)
+
+    def test_large_inventory_still_rejects_ownership_conflict_in_last_peer(self):
+        self._large_native_inventory()
+        peer = self.vhost_root / "peer-135.invalid.conf"
+        peer.write_text(
+            "server {\nserver_name peer-135.invalid;\n"
+            f"include {self.ext}/*.conf;\n}}\n")
+        with self.assertRaises(guard.ExtensionError) as blocked:
+            self.operate("apply")
+        self.assertEqual(blocked.exception.stage, "ownership")
+        self.assertFalse(self.fragment.exists())
+        self.assertFalse(list(self.state.iterdir()))
+        self.assertFalse(self.commands)
+
+        peer.write_text("server { server_name peer-135.invalid; }\n")
+        self.site["bound_domains"].append(
+            {"name": "alias-139.invalid", "port": 80})
+        with self.assertRaisesRegex(guard.GuardError, "Duplicate"):
+            self.operate("apply")
+        self.assertFalse(self.fragment.exists())
+        self.assertFalse(self.commands)
+
     def test_native_guard_does_not_require_a_404_status_route(self):
         # Pre-PHP defenses must not be coupled to Status Pages policy.
         text = self.vhost.read_text().replace("error_page 404 /404.html;\n", "")

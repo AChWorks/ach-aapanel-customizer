@@ -399,9 +399,9 @@ WordPress success/failure and recovery on the old automatic candidate.
 Revised observation-only behavior requires fresh exact-source validation;
 previous native QA is not a source of approval for unattended writes.
 
-## Simplification and operator choice (source v0.1.63; unpublished)
+## Simplification and operator choice (merged source v0.1.63; unpublished)
 
-The current development branch removes arbitrary maximum totals on observed
+Merged PR #103 removed arbitrary maximum totals on observed
 native site records, PHP-FPM site attribution, Cache audit website lists,
 read-only Hosts matching and Status Pages branding scopes. Native site and
 domain queries are paginated; exact targets and page-level query budgets
@@ -432,7 +432,7 @@ The saved shared PHP-FPM Monitor policy also uses the current Preview and
 direct Save click without requiring an additional checkbox. This only writes
 plugin-owned desired values, not shared service configuration.
 
-**Independent-review F1-F3 remediation (PR #103, pending new review):**
+**Independent-review F1-F3 remediation (PR #103, merged after APPROVE):**
 the PHP-FPM Manual/Auto shared-impact consumer now accepts complete native
 mappings with 101+ sites rather than stopping at a fixed count. The
 selected-site Hosts, VHost, Cache and Status Pages endpoints also accept
@@ -443,9 +443,39 @@ remain rejection conditions, and supplied client paths/domains are never
 authoritative. The read-only Nginx candidate observer evaluates the actual
 Nginx source and retains a stable panel-version/webserver observation rather
 than rejecting recognizable sources solely by aaPanel version string.
-These changes do **not** extend Nginx/PHP-FPM/Cache writer eligibility.
-Full candidate CI, fresh independent approval, installed native QA and
-separate Owner Merge/Release permission must be checked for the new HEAD.
+These changes did **not** extend Nginx/PHP-FPM/Cache writer eligibility.
+The exact v0.1.63 candidate passed CI and independent review before its
+Owner-authorized Merge. Installed native QA, public Release and Production
+remain separate, still-unverified gates.
+
+## Native Nginx writer source completeness (proposed v0.1.64; unpublished)
+
+Two existing *write* workflows — selected-site sensitive-path protection and
+Status Pages extension Apply/Restore — still blocked otherwise valid native
+installations solely for having more than 24 site domain bindings, 128 native
+VHost sources, 32 peer extension fragments, or 128 included files. A second
+Status Pages parked-VHost scan independently stopped at 128 entries. Proposed
+v0.1.64 removes those collection-count stops from the actual downstream
+writer preflights. It also streams native peer and include-graph enumeration,
+rather than building whole-directory candidate lists or retaining an arbitrary
+aggregate source-byte ceiling on otherwise individually validated files.
+
+**Unchanged correctness boundaries:** the selected site's current native
+identity/binding SHA; the exact server-scoped Nginx include ownership graph;
+complete peer checks, including parked VHosts; per-file bounded reads with
+owner, mode, inode, symlink and content-stability checks; source revalidation,
+versioned/recovery-backed publication, Nginx syntax/reload/HTTP probe and
+explicit Apply/Restore authorization. Unknown, cyclic, too-deep or
+multiply-imported source graphs still refuse a write. External aaPanel/Nginx
+writers are not atomically serialized by this observation; no new universal
+Nginx layout or Production certification is claimed.
+
+Targeted fixture acceptance covers 141 native bound domains, 136 parked peer
+VHosts, 40/41 extension fragments, more than 1 MiB of sibling extension
+sources and more than 2 MiB of included native configuration; it verifies
+Apply/Recheck/Restore, last-peer ownership conflicts, stale preview refusal
+and no changes to unrelated peer bytes. Fresh native installed v0.1.64
+acceptance and independent review remain separate requirements.
 
 ## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 

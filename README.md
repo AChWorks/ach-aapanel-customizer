@@ -23,7 +23,7 @@ compatibility certification. For source-tree version details, inspect
 | **Website list** | Refresh paginated native website inventory, compare site/domain changes without an arbitrary site or alias count cap, and save selected-site or all-sites observation baselines. Baseline changes never modify website configuration. |
 | **Routing & Nginx** | Inspect the actual native Nginx VHosts, site-bound local Hosts, HTTP and recovery rather than reject an otherwise recognizable source solely because of the aaPanel version. Unpublished source has opt-in Nginx protections and failed WordPress Toolkit Hosts witnessing. Unattended lossless Hosts cleanup remains open; published v0.1.51 does not include these additions. |
 | **PHP-FPM** | Discover and inspect PHP installations based on actual native files (including older versions), view file/socket relationships, and use guarded Apply/Restore only for currently implemented 8.1/8.5 adapters. Native post-terminal PHP-FPM repair is merged in unpublished v0.1.62, with successful isolated ordinary-systemd QA for both successful and failed native WordPress setup. Fresh authenticated Browser and Production qualification remain outstanding. |
-| **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. |
+| **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. Proposed v0.1.64 validates complete native Nginx source graphs and peer inventories instead of fixed site/file counts before those writes. |
 | **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. |
 | **Activity & Logs** | Operation/stage/error details, correlation IDs, scope and recovery guidance. |
 
@@ -34,9 +34,9 @@ risk, show a brief, nonmandatory pre-action note; an authorized administrator
 can continue without completing every recommendation. Real authorization,
 target correctness, and avoidance of unintended unrelated data loss remain
 essential. See the [project-wide operating principle](docs/PROJECT-SPEC.md#owner-wide-operating-principle-simplicity-and-informed-choice-2026-11-20).
-v0.1.62 is merged source, not a published ZIP. This proposed source change
-is versioned v0.1.63; it is not released or deployed. Confirm published
-versions and checksums before installation.
+v0.1.62 and v0.1.63 are merged source, not published ZIPs. This proposed
+Nginx writer inventory improvement is versioned v0.1.64; it is not merged,
+released or deployed. Confirm published versions and checksums before installation.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
 is a separate WordPress plugin whose ZIP includes a standard
