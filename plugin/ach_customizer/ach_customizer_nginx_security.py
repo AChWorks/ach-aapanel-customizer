@@ -75,7 +75,7 @@ def _site_identity(site):
             or "//" in site["path"] or ".." in site["path"].split("/")):
         raise GuardError("identity", "Unsupported native site root or identity")
     bindings = site.get("bound_domains")
-    if not isinstance(bindings, list) or len(bindings) > 24:
+    if not isinstance(bindings, list):
         raise GuardError("identity", "Invalid native domain binding inventory")
     clean = []
     for binding in bindings:
@@ -298,19 +298,21 @@ def _source_safe(site, *, vhost_root, nginx_conf):
             or any(item not in native_domains for item in observed_names)):
         raise GuardError("source", "Generated VHost names do not match native bindings")
     _include_graph_guard(site, "404", vhost_root, nginx_conf)
-    with os.scandir(vhost_root) as entries:
-        parked = [entry.name for entry in entries
-                  if entry.name.endswith(".conf") and entry.name != name + ".conf"]
-    if len(parked) > 128:
-        raise GuardError("source", "Too many native sites for source isolation")
     vhost_fd = _directory(vhost_root)
     try:
-        for other in parked:
-            if not DOMAIN.fullmatch(other[:-5]):
-                continue
-            peer = _bounded_file(vhost_fd, other)
-            if peer is not None and expected_glob.encode() in peer:
-                raise GuardError("ownership", "Another native Nginx server imports this site's extension")
+        _owned_dir(vhost_fd)
+        # Check every parked native VHost, not just the first N filenames.
+        # Stream directory entries so large installations do not accumulate
+        # an unrelated peer-name inventory.
+        with os.scandir(vhost_fd) as entries:
+            for entry in entries:
+                other = entry.name
+                if (other == name + ".conf" or not other.endswith(".conf")
+                        or not DOMAIN.fullmatch(other[:-5])):
+                    continue
+                peer = _bounded_file(vhost_fd, other)
+                if peer is not None and expected_glob.encode() in peer:
+                    raise GuardError("ownership", "Another native Nginx server imports this site's extension")
     finally:
         os.close(vhost_fd)
     ext_path = vhost_root + "/extension/" + name
@@ -318,10 +320,7 @@ def _source_safe(site, *, vhost_root, nginx_conf):
     try:
         _owned_dir(ext_fd)
         files = sorted(item for item in os.listdir(ext_fd) if item.endswith(".conf"))
-        if len(files) > 32:
-            raise GuardError("source", "Too many native site-extension sources")
         digest = hashlib.sha256(raw)
-        total = 0
         for filename in files:
             if filename == _file(site["id"]):
                 continue
@@ -330,9 +329,6 @@ def _source_safe(site, *, vhost_root, nginx_conf):
             fragment = _bounded_file(ext_fd, filename, limit=64 * 1024)
             if fragment is None:
                 raise GuardError("concurrency", "Native Nginx extension disappeared")
-            total += len(fragment)
-            if total > 1024 * 1024:
-                raise GuardError("source", "Native Nginx extension scan exceeds limit")
             digest.update(filename.encode("utf8") + b"\0" + hashlib.sha256(fragment).digest())
         return digest.hexdigest(), ext_path
     finally:

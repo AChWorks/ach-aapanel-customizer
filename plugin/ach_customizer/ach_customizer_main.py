@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.63'
+WORKER_SOURCE_VERSION = '0.1.64'
 
 _STATE_DIR = DATA_DIR
 

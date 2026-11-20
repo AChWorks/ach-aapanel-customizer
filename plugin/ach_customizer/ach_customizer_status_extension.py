@@ -223,16 +223,14 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
             for item, pattern_part in zip(rhs, lhs)
         )
 
-    scanned = 0
     imported = 0
     selected_vhost_count = 0
     visiting = set()
-    total_bytes = 0
 
     def walk(path, depth):
-        nonlocal scanned, imported, selected_vhost_count, total_bytes
-        if depth > 12 or scanned >= 128 or path in visiting:
-            raise ExtensionError("source", "Native Nginx include graph is cyclic or too large")
+        nonlocal imported, selected_vhost_count
+        if depth > 12 or path in visiting:
+            raise ExtensionError("source", "Native Nginx include graph is cyclic or too deeply nested")
         if (not os.path.isabs(path) or ".." in path.split("/")
                 or os.path.realpath(path) != path):
             raise ExtensionError("source", "Nginx include graph has an unresolved source path")
@@ -245,10 +243,6 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
             os.close(directory)
         if raw is None:
             raise ExtensionError("source", "Nginx include graph source disappeared")
-        scanned += 1
-        total_bytes += len(raw)
-        if total_bytes > 2 * 1024 * 1024:
-            raise ExtensionError("source", "Nginx include graph exceeds bounded read limit")
         if path == site_conf:
             selected_vhost_count += 1
         try:
@@ -304,7 +298,7 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
                                 "ownership", "Native per-site subdirectory routes need review") from exc
                         # Scan a fresh glob too; an unexpected concurrent
                         # creation cannot become an accepted route.
-                        if glob.glob(mask):
+                        if next(glob.iglob(mask), None) is not None:
                             raise ExtensionError(
                                 "ownership", "Native per-site subdirectory routes need review")
                         continue
@@ -317,10 +311,10 @@ def _include_graph_guard(site, code, vhost_root, nginx_conf):
                         raise ExtensionError(
                             "ownership", "A second Nginx source can import the selected extension")
                     imported += 1
-                candidates = glob.glob(mask)
-                if len(candidates) > 128:
-                    raise ExtensionError("source", "Nginx include wildcard is too broad")
-                for child in sorted(candidates):
+                # Nginx may include any number of native sites: validate
+                # every matched source without materializing a glob result.
+                # Each source read remains size/identity/ownership bounded.
+                for child in glob.iglob(mask):
                     if (child == site_conf and
                             (path != nginx_conf or mask != vhost_root + "/*.conf")):
                         raise ExtensionError(
@@ -479,19 +473,17 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
     # Also fail on parked native VHost sources which could become active later.
     directory = _directory(vhost_root)
     try:
-        entries = []
+        # Inspect every native peer, including parked VHosts not yet in the
+        # loaded Nginx graph. Directory cardinality is not an ownership proof.
         with os.scandir(directory) as stream:
             for entry in stream:
-                if len(entries) >= 128:
-                    raise ExtensionError("source", "Too many native VHosts for bounded isolation")
-                entries.append(entry.name)
-        for filename in entries:
-            if (filename == name + ".conf" or not filename.endswith(".conf")
-                    or not DOMAIN.fullmatch(filename[:-5])):
-                continue
-            data = _bounded_file(directory, filename)
-            if data is not None and expected_include.encode() in data:
-                raise ExtensionError("ownership", "Another Nginx VHost shares this extension include")
+                filename = entry.name
+                if (filename == name + ".conf" or not filename.endswith(".conf")
+                        or not DOMAIN.fullmatch(filename[:-5])):
+                    continue
+                data = _bounded_file(directory, filename)
+                if data is not None and expected_include.encode() in data:
+                    raise ExtensionError("ownership", "Another Nginx VHost shares this extension include")
     finally:
         os.close(directory)
     ext_path = vhost_root + "/extension/" + name
