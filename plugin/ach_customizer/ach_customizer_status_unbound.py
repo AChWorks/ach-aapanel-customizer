@@ -1,7 +1,8 @@
 """Guarded HTTP/80 unbound-domain Status Page for native aaPanel 8.0.7.
 
-Adds an independent plugin-owned IPv4/IPv6 default_server and one static HTML
-asset. Does not edit aaPanel-generated VHosts, vendor files or TLS routes.
+Adds a plugin-owned HTTP/80 default_server only on native wildcard
+listener families, plus one static HTML asset. Does not edit aaPanel-generated
+VHosts, vendor files or TLS routes.
 All operations are behind the caller's primary-admin POST and state lock.
 """
 from __future__ import annotations
@@ -43,20 +44,25 @@ def _sha(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def _config(operation_id, html_root):
-    # Nonce proves an actual newly loaded Nginx generation, not only a file.
+def _config(operation_id, html_root, before):
+    # Only claim sockets that native Nginx already listens on. Adding a new
+    # IPv6 listener to an IPv4-only server is a topology change, not a safe
+    # side effect of managing the HTTP default Host.
+    listeners = "".join(
+        "    listen " + address + " default_server;\n"
+        for status, address in zip(before, ("80", "[::]:80"))
+        if status is not None
+    )
     return ("""# ACh Customizer managed HTTP unbound route. Restore in plugin before manual edits.
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name ach-unbound-%s.invalid;
+%s    server_name ach-unbound-%s.invalid;
     root %s;
     add_header X-ACh-Status-Proof %s always;
     error_page 404 /%s;
     location / { return 404; }
     location = /%s { internal; }
 }
-""" % (operation_id, html_root, operation_id, HTML_NAME, HTML_NAME)).encode("ascii")
+""" % (listeners, operation_id, html_root, operation_id, HTML_NAME, HTML_NAME)).encode("ascii")
 
 
 def _record_read(data_fd):
@@ -76,8 +82,9 @@ def _record_read(data_fd):
             not TOKEN.fullmatch(record["operation_id"]) or
             any(not isinstance(record[k], str) or not HASH.fullmatch(record[k])
                 for k in ("source_sha256", "rendered_sha256", "config_sha256")) or
-            any(type(record[k]) is not int or not 100 <= record[k] <= 599
-                for k in ("before_v4", "before_v6"))):
+            any(value is not None and (type(value) is not int or not 100 <= value <= 599)
+                for value in (record["before_v4"], record["before_v6"])) or
+            record["before_v4"] is None and record["before_v6"] is None):
         raise UnboundError("recovery", "Unbound route recovery identity is invalid")
     return record
 
@@ -155,12 +162,28 @@ def _source(nginx, nginx_conf, vhost_root, conf_name, runner=None):
     # directives even in inline server blocks or with tab whitespace, while
     # ignoring comments and matching only the listener's actual port.
     uncommented = re.sub(r"(?m)#[^\r\n]*", "", normalized)
+    native_families = set()
     for match in re.finditer(r"(?:(?<=^)|(?<=[;{}]))\s*listen\s+([^;{}]+);",
                              uncommented, re.MULTILINE):
         parts = match.group(1).split()
-        if parts and "default_server" in parts[1:] and _http_port_80(parts[0]):
+        if not parts or not _http_port_80(parts[0]):
+            continue
+        if "default_server" in parts[1:]:
             raise UnboundError("conflict", "Another Nginx HTTP default_server already exists")
-    return _sha(normalized.encode("utf-8")), owned_found
+        if "ipv6only=off" in parts[1:]:
+            # A shared IPv6 dual-mode socket cannot safely be reproduced by
+            # adding two separate default_server listeners.
+            raise UnboundError("compatibility", "HTTP IPv6 listener uses ipv6only=off; cannot preserve socket ownership")
+        # The managed default is a family wildcard. A native server bound
+        # only to a particular address must never be widened to 0.0.0.0/::.
+        address = parts[0]
+        if address in ("80", "*", "*:80", "0.0.0.0", "0.0.0.0:80"):
+            native_families.add("ipv4")
+        elif address in ("[::]", "[::]:80"):
+            native_families.add("ipv6")
+        else:
+            raise UnboundError("compatibility", "HTTP/80 has an address-specific listener; wildcard default would widen exposure")
+    return _sha(normalized.encode("utf-8")), owned_found, frozenset(native_families)
 
 
 def _probe(ipv6=False):
@@ -186,9 +209,23 @@ def _probe(ipv6=False):
         conn.close()
 
 
-def _settled(operation_id, after_sha, *, present, before_v4=None, before_v6=None, probe=None):
+def _baseline(families, probe):
+    if not families:
+        raise UnboundError("compatibility", "Native Nginx has no configured HTTP/80 listener")
+    return tuple(probe(ipv6)[0] if family in families else None
+                 for ipv6, family in ((False, "ipv4"), (True, "ipv6")))
+
+
+def _settled(operation_id, after_sha, *, present, before_v4=None, before_v6=None,
+             families=None, probe=None):
     fn = probe or _probe
-    for ipv6, previous in ((False, before_v4), (True, before_v6)):
+    if families is None:
+        families = frozenset(family for family, previous in
+                             (("ipv4", before_v4), ("ipv6", before_v6))
+                             if previous is not None)
+    for ipv6, family in ((False, "ipv4"), (True, "ipv6")):
+        if family not in families:
+            continue
         deadline = time.monotonic() + 8
         count = 0
         while True:
@@ -221,7 +258,7 @@ def _response(state, record, source_sha, rendered_sha, before, *, changed=False,
         "before_ipv4_status": before[0], "before_ipv6_status": before[1],
         "changed": changed, "read_only": read_only,
         "runtime_verified": runtime_verified,
-        "impact": "Unknown HTTP Host on port 80 (IPv4/IPv6) only; no HTTPS or stopped-site change",
+        "impact": "Unknown HTTP Host on native HTTP/80 listeners only; no HTTPS or stopped-site change",
     }
 
 
@@ -247,14 +284,14 @@ def manage_unbound(action, html, *, data_fd,
         asset = _bounded_file(hfd, HTML_NAME, limit=MAX_HTML, permissions=0o644)
         retired = (_bounded_file(vfd, _retired(record["operation_id"]),
                     limit=8192, permissions=0o600) if record else None)
-        source_sha, loaded = _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner)
+        source_sha, loaded, families = _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner)
         if conf is not None and not loaded:
             raise UnboundError("source", "Managed-looking Nginx file is not loaded")
         if action == "recheck":
             if not record:
                 state = "Source Ready" if conf is None and asset is None else "Conflict"
                 verified = False
-                before = ((probe or _probe)(False)[0], (probe or _probe)(True)[0]) if state == "Source Ready" else (None, None)
+                before = _baseline(families, probe or _probe) if state == "Source Ready" else (None, None)
             else:
                 before = (record["before_v4"], record["before_v6"])
                 if record["phase"] == "restored":
@@ -262,15 +299,22 @@ def manage_unbound(action, html, *, data_fd,
                     verified = False
                     if state == "Restored":
                         # Fresh native baselines after unrelated site changes.
-                        before = ((probe or _probe)(False)[0], (probe or _probe)(True)[0])
+                        before = _baseline(families, probe or _probe)
                 elif record["phase"] != "applied":
                     state, verified = "Recovery Required", False
                 elif (conf is not None and loaded and
                       _sha(conf) == record["config_sha256"] and
                       asset is not None and _sha(asset) == record["rendered_sha256"]):
-                    result = (probe or _probe)(False), (probe or _probe)(True)
-                    verified = all(item == (404, record["rendered_sha256"], record["operation_id"])
-                                   for item in result)
+                    expected_families = frozenset(
+                        family for family, status in
+                        (("ipv4", record["before_v4"]), ("ipv6", record["before_v6"]))
+                        if status is not None
+                    )
+                    verified = families == expected_families and all(
+                        (probe or _probe)(family == "ipv6") ==
+                        (404, record["rendered_sha256"], record["operation_id"])
+                        for family in ("ipv4", "ipv6") if family in expected_families
+                    )
                     state = "Applied" if verified else "Needs Review"
                 else:
                     state, verified = "Recovery Required", False
@@ -281,15 +325,13 @@ def manage_unbound(action, html, *, data_fd,
             if ((record and record["phase"] != "restored") or conf is not None
                     or asset is not None or retired is not None):
                 raise UnboundError("recovery", "Existing/unconfirmed managed unbound route; Recheck first")
-            if (expected_source != source_sha or expected_render != rendered_sha or
-                    type(expected_v4) is not int or type(expected_v6) is not int or
-                    not 100 <= expected_v4 <= 599 or not 100 <= expected_v6 <= 599):
+            if expected_source != source_sha or expected_render != rendered_sha:
                 raise UnboundError("concurrency", "Unbound routing approval is stale; Recheck")
-            observed = ((probe or _probe)(False)[0], (probe or _probe)(True)[0])
+            observed = _baseline(families, probe or _probe)
             if observed != (expected_v4, expected_v6):
                 raise UnboundError("concurrency", "Original unbound HTTP response changed; Recheck")
             operation_id = uuid4().hex
-            config = _config(operation_id, html_root)
+            config = _config(operation_id, html_root, observed)
             journal = {
                 "schema": 1, "operation_id": operation_id, "phase": "prepared",
                 "source_sha256": source_sha, "rendered_sha256": rendered_sha,
@@ -313,12 +355,14 @@ def manage_unbound(action, html, *, data_fd,
                         _rename_noreplace(vfd, CONF_NAME, _retired(operation_id))
                         os.fsync(vfd)
                     raise
-                renewed, present = _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner)
-                if renewed != source_sha or not present:
+                renewed, present, updated_families = _source(
+                    nginx, nginx_conf, vhost_root, CONF_NAME, runner)
+                if renewed != source_sha or not present or updated_families != families:
                     raise UnboundError("concurrency", "Nginx routing source changed during Apply", operation_id)
                 _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
-                _settled(operation_id, rendered_sha, present=True, probe=probe)
-                if _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner) != (source_sha, True):
+                _settled(operation_id, rendered_sha, present=True,
+                         before_v4=observed[0], before_v6=observed[1], probe=probe)
+                if _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner) != (source_sha, True, families):
                     raise UnboundError("concurrency", "Nginx source drift after Apply", operation_id)
                 journal["phase"] = "applied"
                 _record_write(data_fd, journal)
@@ -349,14 +393,15 @@ def manage_unbound(action, html, *, data_fd,
             if conf is not None:
                 _rename_noreplace(vfd, CONF_NAME, _retired(operation_id))
                 os.fsync(vfd)
-            renewed, loaded_now = _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner)
-            if renewed != source_sha or loaded_now:
+            renewed, loaded_now, updated_families = _source(
+                nginx, nginx_conf, vhost_root, CONF_NAME, runner)
+            if renewed != source_sha or loaded_now or updated_families != families:
                 raise UnboundError("concurrency", "Another Nginx source changed during Restore", operation_id)
             _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
             _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
             _settled(operation_id, record["rendered_sha256"], present=False,
-                     before_v4=record["before_v4"], before_v6=record["before_v6"], probe=probe)
-            if _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner) != (source_sha, False):
+                     families=families, probe=probe)
+            if _source(nginx, nginx_conf, vhost_root, CONF_NAME, runner) != (source_sha, False, families):
                 raise UnboundError("concurrency", "Nginx source changed after Restore", operation_id)
             if retired is not None or conf is not None:
                 retained = _bounded_file(

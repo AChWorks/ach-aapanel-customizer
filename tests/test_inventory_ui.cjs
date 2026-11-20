@@ -7378,7 +7378,7 @@ test('New-site defaults revoke source evidence on branding, locale, scope change
 });
 
 
-const unboundImpact = 'Unknown HTTP Host on port 80 (IPv4/IPv6) only; no HTTPS or stopped-site change';
+const unboundImpact = 'Unknown HTTP Host on native HTTP/80 listeners only; no HTTPS or stopped-site change';
 function unboundReply(action, state='Source Ready', overrides={}) {
   const recovery='c'.repeat(32);
   const changed=action!=='recheck';
@@ -7456,6 +7456,27 @@ test('HTTP/80 unbound requires explicit approvals and fresh recovery Recheck', (
   assert.equal(ui.state().unboundApplyDisabled,true);
 });
 
+test('IPv4-only unbound Browser path accepts absent IPv6 without approving a new listener', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  const baseline={before_ipv4_status:200,before_ipv6_status:null};
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Source Ready',baseline));
+  assert.match(ui.state().unboundResult,/Previous IPv4\/IPv6 HTTP statuses: 200 \/ Not configured/);
+  ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+  const apply=ui.statusClick('#ach-status-unbound-apply');
+  assert.equal(apply.options.data.expected_ipv4_status,'200');
+  assert.equal(apply.options.data.expected_ipv6_status,'null');
+  apply.respond(unboundReply('apply','Applied',baseline));
+  assert.match(ui.state().unboundResult,/Applied/);
+  ui.statusClick('#ach-status-unbound-recheck').respond(unboundReply('recheck','Applied',baseline));
+  ui.statusSetChecked('#ach-status-unbound-restore-approve',true);
+  const restore=ui.statusClick('#ach-status-unbound-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
+  restore.respond(unboundReply('restore','Restored',baseline));
+  assert.match(ui.state().unboundResult,/Restored/);
+});
+
 test('HTTP unbound wrong replies, brand edits and scope/locale changes revoke authorization', () => {
   const ui=loadUi();
   ui.openStatus().respond(statusPrefs());
@@ -7493,7 +7514,7 @@ test('Native HTTP unbound read-only failure shows backend cause at its own contr
   const shown=ui.state().unboundResult;
   assert.match(shown,/Read-only Recheck failed at status_unbound_probe/);
   assert.match(shown,/Unbound loopback HTTP request unavailable/);
-  assert.match(shown,/127\.0\.0\.1 and \[::1\]/);
+  assert.match(shown,/active HTTP\/80 Nginx listener families/);
   assert.match(shown,/No routing change was requested/);
   assert.match(shown,/Request ID: a{32}/);
   assert.doesNotMatch(shown,/Write outcome|saved recovery before any retry/i);

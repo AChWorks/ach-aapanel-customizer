@@ -24,7 +24,7 @@ compatibility certification. For source-tree version details, inspect
 | **Routing & Nginx** | Inspect current origin-local loopback entries and remove a chosen hostname with one administrator click, whether WordPress installation succeeded or failed and even without a native website record (merged, unpublished source v0.1.65). Existing site-specific recovery and source-scoped Nginx tools remain available; no unattended Hosts cleanup. Published v0.1.51 does not include these additions. |
 | **PHP-FPM** | Discover and inspect PHP installations based on actual native files (including older versions), view file/socket relationships, and use guarded Apply/Restore only for currently implemented 8.1/8.5 adapters. Native post-terminal PHP-FPM repair is merged in unpublished v0.1.62, with successful isolated ordinary-systemd QA for both successful and failed native WordPress setup. Fresh authenticated Browser and Production qualification remain outstanding. |
 | **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. Merged, unpublished v0.1.64 validates complete native Nginx source graphs and peer inventories instead of fixed site/file counts before those writes. |
-| **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. The proposed v0.1.66 native probe also recognizes exact applied site-owned Cache headers on stock or wpfastcgi PHP without claiming session privacy or safe Purge All. |
+| **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. The merged v0.1.66 native probe also recognizes exact applied site-owned Cache headers on stock or wpfastcgi PHP without claiming session privacy or safe Purge All. |
 | **Activity & Logs** | Operation/stage/error details, correlation IDs, scope and recovery guidance. |
 
 **Owner-approved product direction:** Keep tasks usable and straightforward.
@@ -34,9 +34,9 @@ risk, show a brief, nonmandatory pre-action note; an authorized administrator
 can continue without completing every recommendation. Real authorization,
 target correctness, and avoidance of unintended unrelated data loss remain
 essential. See the [project-wide operating principle](docs/PROJECT-SPEC.md#owner-wide-operating-principle-simplicity-and-informed-choice-2026-11-20).
-v0.1.62–0.1.65 are merged source, not published ZIPs. The current
-source-only v0.1.66 candidate extends the owned Cache header probe; it is
-not merged, released or deployed. Confirm published versions and checksums
+v0.1.62–0.1.66 are merged source, not published ZIPs. The current
+source-only v0.1.67 candidate adapts global unbound HTTP/80 management to
+the actual native listener families; it is not merged, released or deployed. Confirm published versions and checksums
 before installation.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
@@ -93,6 +93,11 @@ archives. It neither installs/configures Nginx Helper nor enables vendor Purge A
   not assumed under `/www/wwwroot`. Confirmed QA roots include `/www/acdomains`
   and `/www/other-sites`; unrelated aaPanel service-install prefixes and
   custom/unsupported Nginx layouts are separately gated.
+- Source version 0.1.67 fixes the optional **global unbound HTTP/80** route:
+  native IPv4-only, IPv6-only and dual-stack wildcard listener families are
+  checked separately. Missing families are neither probed nor enabled;
+  Apply/Restore retain exact recovery and source ownership. Narrow address-only
+  listeners and IPv6 dual-mode sockets are not silently widened. No HTTPS/443 change.
 - Global **unknown-Host HTTPS/443** requires an unresolved TLS/SNI and
   operator-policy decision; the tested HTTP/80 path does not authorize it.
 - WordPress Bridge does not cover arbitrary Host aliases, query-style or

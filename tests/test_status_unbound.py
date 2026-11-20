@@ -77,7 +77,7 @@ class UnboundRouteTests(unittest.TestCase):
         self.nginx_conf.write_text("http {\n include " + str(self.vhost) + "/*.conf;\n}\n")
         self.nginx_conf.chmod(0o600)
         self.base_default = self.vhost / "0.default.conf"
-        self.base_default.write_text("server { listen 80; server_name _; }\n")
+        self.base_default.write_text("server { listen 80; listen [::]:80; server_name _; }\n")
         self.base_default.chmod(0o600)
         self.config = self.vhost / subject.CONF_NAME
         self.html = self.www / subject.HTML_NAME
@@ -138,6 +138,85 @@ class UnboundRouteTests(unittest.TestCase):
                 self.assertEqual(self.runner.probe(True)[0],200)
                 self.assertEqual(self.base_default.read_bytes(),original)
         self.assertEqual(self.runner.reloads,4)
+
+    def test_ipv4_only_native_listener_does_not_require_or_create_ipv6(self):
+        self.base_default.write_text("server { listen 80; server_name only4.invalid; }\n")
+        original=self.base_default.read_bytes()
+        checked=[]
+        def only_ipv4(ipv6=False):
+            checked.append(ipv6)
+            if ipv6:
+                raise AssertionError("IPv6 is not configured and must not be probed")
+            return FakeNginx.probe(self.runner, False)
+        with patch.object(self.runner, "probe", side_effect=only_ipv4):
+            before=self.read()
+            self.assertEqual((before["before_ipv4_status"], before["before_ipv6_status"]), (200,None))
+            applied=self.apply()
+            self.assertEqual(applied["state"],"Applied")
+            self.assertIn(b"listen 80 default_server;",self.config.read_bytes())
+            self.assertNotIn(b"[::]:80",self.config.read_bytes())
+            self.assertEqual(self.read()["state"],"Applied")
+            self.assertEqual(self.restore(applied)["state"],"Restored")
+            self.assertIsNone(self.read()["before_ipv6_status"])
+        self.assertTrue(checked)
+        self.assertFalse(any(checked))
+        self.assertEqual(self.base_default.read_bytes(),original)
+
+    def test_ipv6_only_native_listener_does_not_require_or_create_ipv4(self):
+        self.base_default.write_text("server { listen [::]:80; server_name only6.invalid; }\n")
+        original=self.base_default.read_bytes()
+        checked=[]
+        def only_ipv6(ipv6=False):
+            checked.append(ipv6)
+            if not ipv6:
+                raise AssertionError("IPv4 is not configured and must not be probed")
+            return FakeNginx.probe(self.runner, True)
+        with patch.object(self.runner, "probe", side_effect=only_ipv6):
+            before=self.read()
+            self.assertEqual((before["before_ipv4_status"], before["before_ipv6_status"]), (None,200))
+            applied=self.apply()
+            self.assertNotIn(b"listen 80 default_server;",self.config.read_bytes())
+            self.assertIn(b"listen [::]:80 default_server;",self.config.read_bytes())
+            self.assertEqual(self.read()["state"],"Applied")
+            self.assertEqual(self.restore(applied)["state"],"Restored")
+        self.assertTrue(checked)
+        self.assertTrue(all(checked))
+        self.assertEqual(self.base_default.read_bytes(),original)
+
+    def test_absent_http_listener_is_incompatible_not_a_synthetic_success(self):
+        self.base_default.write_text("server { listen 888; server_name unrelated.invalid; }\n")
+        with self.assertRaises(subject.UnboundError) as error:
+            self.read()
+        self.assertEqual(error.exception.stage,"compatibility")
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.html.exists())
+        self.assertEqual(list(self.data.iterdir()),[])
+
+    def test_new_native_ipv6_listener_revokes_positive_applied_proof(self):
+        self.base_default.write_text("server { listen 80; server_name only4.invalid; }\n")
+        applied=self.apply()
+        self.base_default.write_text("server { listen 80; listen [::]:80; server_name dual.invalid; }\n")
+        current=self.read()
+        self.assertEqual(current["state"],"Needs Review")
+        self.assertFalse(current["runtime_verified"])
+        self.assertEqual(self.restore(applied)["state"],"Restored")
+
+    def test_address_specific_listener_never_expands_to_wildcard(self):
+        for native in ("127.0.0.1:80", "192.0.2.5:80", "[::1]:80", "[2001:db8::5]:80"):
+            with self.subTest(native=native):
+                self.base_default.write_text("server { listen " + native + "; server_name limited.invalid; }\n")
+                with self.assertRaises(subject.UnboundError) as error:
+                    self.read()
+                self.assertEqual(error.exception.stage,"compatibility")
+                self.assertEqual(list(self.data.iterdir()),[])
+                self.assertFalse(self.config.exists())
+
+    def test_ipv6_dual_mode_socket_is_not_rebound_as_independent_listeners(self):
+        self.base_default.write_text("server { listen [::]:80 ipv6only=off; server_name dual.invalid; }\n")
+        with self.assertRaises(subject.UnboundError) as error:
+            self.read()
+        self.assertEqual(error.exception.stage,"compatibility")
+        self.assertEqual(list(self.data.iterdir()),[])
 
     def test_read_only_recheck_creates_no_journal_or_static_files(self):
         result=self.read()
@@ -354,7 +433,7 @@ class UnboundRouteTests(unittest.TestCase):
         applied=self.apply()
         old_generator=subject._config
         with patch.object(subject, "_config",
-                          side_effect=lambda op, root: old_generator(op, root)+b"# revised generator\\n"):
+                          side_effect=lambda op, root, before: old_generator(op, root, before)+b"# revised generator\\n"):
             # Only the installed generator changed; the managed Nginx
             # bytes and their persistent approved SHA are still intact.
             state=self.read()
@@ -406,7 +485,7 @@ class NativeUnboundEndpointTests(unittest.TestCase):
                 "source_sha256":"a"*64,"rendered_sha256":"b"*64,
                 "recovery_id":None,"before_ipv4_status":200,"before_ipv6_status":200,
                 "changed":False,"read_only":True,"runtime_verified":False,
-                "impact":"Unknown HTTP Host on port 80 (IPv4/IPv6) only; no HTTPS or stopped-site change",
+                "impact":"Unknown HTTP Host on native HTTP/80 listeners only; no HTTPS or stopped-site change",
             }),
         ]
         for p in self.patchers:
