@@ -33,9 +33,15 @@ LOCK = "/tmp/wp_aapanel_deploy.lock"
 BATCH_LOCK = "/tmp/wp_batch_aapanel_deploy.lock"
 HOSTS = "/etc/hosts"
 NATIVE_SOURCE = "/www/server/panel/class_v2/one_key_wp_v2.py"
-NATIVE_SOURCE_SHA = "7578c279424f0b653c0f65ca2f22fbf0b86ce873673b05939e4b4b16c6713bf8"
 NATIVE_SITE_SOURCE = "/www/server/panel/class_v2/panel_site_v2.py"
-NATIVE_SITE_SHA = "b75a5a0b45c319df7eb49381363d3c3e90208157ebfd88de6f9b173d013d98fb"
+# Verified aaPanel 8.0.7 source cohorts. Keep writer/lifecycle hashes paired:
+# independently updated files cannot be mixed to authorize native mutation.
+NATIVE_WRITER_SHA_PAIRS = frozenset({
+    ("7578c279424f0b653c0f65ca2f22fbf0b86ce873673b05939e4b4b16c6713bf8",
+     "b75a5a0b45c319df7eb49381363d3c3e90208157ebfd88de6f9b173d013d98fb"),
+    ("baac86fed3328182e1c99c823e2bcc274c0e902f0db16a8fe2fc16fceb4874ce",
+     "9696e3114a79587b78344bb2a661eac2555eb1227cf8da4c1ae8fa5b16283e92"),
+})
 NATIVE_META = "/www/server/panel/class/common.py"
 # Advertise the loaded Python module's actual safety/diagnostic contract,
 # not a fresh on-disk version which may hide stale aaPanel worker imports.
@@ -94,7 +100,7 @@ def _native_supported(source=NATIVE_SOURCE):
     handler, _ = _trusted_file(NATIVE_SITE_SOURCE, limit=1048576)
     panel, _ = _trusted_file(NATIVE_META, limit=65536)
     version = re.findall(rb"\bg\.version\s*=\s*'([0-9]+\.[0-9]+\.[0-9]+)'", panel)
-    if (_sha(raw) != NATIVE_SOURCE_SHA or _sha(handler) != NATIVE_SITE_SHA
+    if ((_sha(raw), _sha(handler)) not in NATIVE_WRITER_SHA_PAIRS
             or version != [b"8.0.7"]):
         raise TerminalError("Unverified native aaPanel 8.0.7 WP Toolkit writer or lifecycle; disable automatic reconciliation")
 

@@ -672,6 +672,21 @@ now rechecks verified native install progress in a bounded 20-second window
 initial witness. The existing timer remains the longer-install fallback.
 There is no new daemon, native source patch, or unattended Hosts edit.
 
+**Verified native-writer source variants (2026-11-21 candidate):** A fresh
+official aaPanel 8.0.7 installation on Debian 13 provides different
+`class_v2/one_key_wp_v2.py` and `class_v2/panel_site_v2.py` hashes than the
+earlier tested 8.0.7 guest. A whole-module AST comparison found unchanged
+WordPress creation, deployment, first-time PHP optimization and native
+`setFpmConfig` paths. The actual differences affect four WordPress
+cache/update helpers (including an optional installation-time FastCGI cache
+path) and five site backup helpers. The separate `class/config.py` PHP-FPM
+setter SHA is unchanged. The source guard accepts either **complete,
+byte-exact reviewed pair**, not mismatched or unknown source combinations,
+and still requires native 8.0.7. This is source-compatibility evidence, not
+yet a claim of a fresh resident worker repair, universal compatibility or
+Production readiness. Current acceptance status belongs to
+[Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+
 **Native QA (2026-11-19):** The exact 0.1.62 ZIP SHA256
 0b18ff8eb0a8c3ca1dd2029de10085ff06087ef47968e4407013d021b3dd8d1d
 was installed with 63/63 byte-identical payload members using the real
