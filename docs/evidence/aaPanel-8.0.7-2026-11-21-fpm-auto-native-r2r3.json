@@ -1,0 +1,94 @@
+{
+  "attestation": {
+    "native_fpm_setter_sha256": "22f61688e0a41b6599f09d3addcea1b2dea9ce12f87ac9770a897aea32a6657d",
+    "native_imported_members_equal_sha256_count": 63,
+    "native_plugin_zip_sha256": "4c3eb02813740a68a91817f60f1d9ddafaeb7d0a68d48cc90b4a78c60741d840",
+    "native_site_lifecycle_sha256": "9696e3114a79587b78344bb2a661eac2555eb1227cf8da4c1ae8fa5b16283e92",
+    "native_wordpress_writer_sha256": "baac86fed3328182e1c99c823e2bcc274c0e902f0db16a8fe2fc16fceb4874ce"
+  },
+  "before_event": {
+    "native_optimizer_marker": "absent",
+    "php_version": "85",
+    "saved_policy": {
+      "pm.max_requests": 300,
+      "pm.max_spare_servers": 20
+    },
+    "watcher": "enabled using ordinary systemd path/timer"
+  },
+  "cleanup": {
+    "enabled_watcher_disabled": true,
+    "fpm_recovery_journal_and_snapshot_preserved": true,
+    "guest_stopped_after_acceptance": true,
+    "owned_systemd_path_timer_service_removed": true
+  },
+  "diagnosed_guest_setup": {
+    "first_test_runner_umask": "0077",
+    "fixed_guest_php_cli_access": "narrow www traverse ACL",
+    "initial_php_directory_mode": "0700",
+    "native_panel_umask": "0022",
+    "reference_acl": "user:www:--x",
+    "resolved_successful_install": "runner changed to 0022; no plugin or production change"
+  },
+  "environment": {
+    "MariaDB": "10.11.19",
+    "Nginx": "1.28.3",
+    "PHP": "8.5.13",
+    "aaPanel": "8.0.7",
+    "instance": "aac-fpm-r2r3-qa-20261121",
+    "kind": "nonproduction isolated Debian 13 Incus VM",
+    "plugin_version": "0.1.69",
+    "project": "ach-aapanel-qa",
+    "uuid": "54856a51-db3a-4ee9-9a1e-1acfc6db64c2"
+  },
+  "first_native_wordpress_attempt": {
+    "auto_repaired_max_requests": 300,
+    "auto_repaired_max_spare_servers": 20,
+    "domain": "auto85-r2r3c.aitest.gotohell.top",
+    "failed_native_site_domain_and_binding_rows": 0,
+    "journal_snapshot_sha256_match": true,
+    "optimizer_marker": "created by vendor",
+    "recovery_after_sha256": "836e29d07851414c3679264d85bc3e7317f3eb1b1aafdca6362b8b55aab8333e",
+    "recovery_before_sha256": "9b61c3d7532790c3501242c44dee9a7cf493e338b9ed2efb0fe4d3c8ccd087c6",
+    "recovery_operation_id": "52d57d972a92471592bf2126f6d1c8c4",
+    "terminal_stage_statuses": [
+      1,
+      1,
+      1,
+      -1
+    ],
+    "vendor_written_max_spare_servers": 30
+  },
+  "private_on_guest_receipt": "/root/achqa-r2r3-e2e-20261121/final-native-r2r3-evidence.json",
+  "repeat_worker": {
+    "idempotent": true,
+    "no_php_source_write_or_reload": true,
+    "operation_id_unchanged": true
+  },
+  "repository": {
+    "base_sha": "23c581e46b99611954e1c875b90ee732f01fa235",
+    "original_code_candidate_head": "81a81c109331c5192455e44fb8c6ed9de862999a",
+    "pull_request": "https://github.com/AChWorks/ach-aapanel-customizer/pull/112"
+  },
+  "scope_limitations": [
+    "R3 fault/crash-injection acceptance not executed",
+    "Fresh successful first-time WordPress optimizer run was not separately attested: successful WordPress followed earlier failed native optimizer and its marker",
+    "Only verified exact native source cohorts supported; no general aaPanel compatibility claim",
+    "No Production delivery or Release"
+  ],
+  "subsequent_successful_wordpress": {
+    "domain": "auto85-r2r3e.aitest.gotohell.top",
+    "http_status": 200,
+    "no_new_fpm_repair": true,
+    "peer_site_http_and_php": "200 and AChR2R3-PHP85-OK",
+    "site_id": 6,
+    "stages": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "version": "7.1.5",
+    "wordpress_toolkit_rows": 1
+  },
+  "task": "Issue #21 / PR #112 fresh aaPanel 8.0.7 PHP-FPM native auto repair acceptance"
+}

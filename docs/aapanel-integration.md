@@ -682,10 +682,24 @@ cache/update helpers (including an optional installation-time FastCGI cache
 path) and five site backup helpers. The separate `class/config.py` PHP-FPM
 setter SHA is unchanged. The source guard accepts either **complete,
 byte-exact reviewed pair**, not mismatched or unknown source combinations,
-and still requires native 8.0.7. This is source-compatibility evidence, not
-yet a claim of a fresh resident worker repair, universal compatibility or
-Production readiness. Current acceptance status belongs to
-[Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+and still requires native 8.0.7. The paired-source acceptance was subsequently verified in a **fresh native
+2026-11-21 QA guest** using the installed 0.1.69 ZIP, a real native WordPress
+7.1.5 failure *after* the first PHP-FPM optimizer, and ordinary systemd
+path/timer auto-repair. The vendor set `pm.max_spare_servers=30`, then the
+resident worker returned it to saved `20` and `pm.max_requests=300`.
+Recovery `52d57d972a92471592bf2126f6d1c8c4` passed exact journal/snapshot
+SHA checks, and the neighboring PHP site remained healthy. A second genuine
+WordPress installation completed all stages, returned HTTP 200, and caused
+no extra repair. Emergency Disable and owned-unit uninstall preserved the
+repaired PHP pool and recovery evidence. The root causes of earlier failed
+test setup (PHP `www` traverse ACL and private test-runner `UMask`) were
+corrected only in the QA guest, using the native panel's established behavior.
+
+This is **R2 native event + subsequent success acceptance**, not R3
+fault-injection/crash recovery or universal source compatibility. Inspect
+`docs/evidence/aaPanel-8.0.7-2026-11-21-fpm-auto-native-r2r3.json`
+and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
+for exact identities, checksums, reproduction and remaining gates.
 
 **Native QA (2026-11-19):** The exact 0.1.62 ZIP SHA256
 0b18ff8eb0a8c3ca1dd2029de10085ff06087ef47968e4407013d021b3dd8d1d
