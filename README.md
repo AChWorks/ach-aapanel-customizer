@@ -1,174 +1,111 @@
 # ACh aaPanel Customizer
 
-A **native aaPanel plugin** for inspecting, reviewing, applying and recovering
-operator-approved website and service customizations. It runs **inside aaPanel**,
-not as a separate dashboard, server daemon or WordPress-only tool.
+A **native aaPanel plugin** for inspecting, applying, rechecking and restoring
+administrator-approved website and service customizations **inside aaPanel**.
+It is not a standalone dashboard, a server-wide unattended enforcement agent,
+or a WordPress-only plugin.
 
-**Distribution:** [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases)
-is the authoritative source for published versions, downloadable ZIPs and
-checksums. The latest published development **pre-release at this checkpoint**
-is [v0.1.51](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51):
-native Customizer **0.1.51** and optional WordPress Bridge **0.1.8**.
-The native and WordPress versions are independent. A pre-release is **not**
-a stable-release declaration, automatic update, Production install or general
-compatibility certification. For source-tree version details, inspect
-[`plugin/ach_customizer/info.json`](plugin/ach_customizer/info.json) and
-[`wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php`](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php).
+## Distribution, source and tested state
 
-## What is available
+| Layer | Current verified reference (2026-11-20) | What it proves |
+| --- | --- | --- |
+| **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional WordPress Bridge `0.1.8` | The latest **published** package at this checkpoint, **not** Production approval |
+| **Merged source** | `main` native `0.1.69`; Bridge `0.1.8` | Unpublished development code; see the [native](plugin/ach_customizer/info.json) and [WordPress](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) version manifests |
+| **Installed native QA** | Exact `0.1.69` package installed on isolated aaPanel `8.0.7` guest; 63/63 member hashes matched, real Cache Apply/Recheck/Restore and actual admin Browser/Hosts/CSRF tests passed | Only the [exercised acceptance](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), not every worker, platform, site, HTTPS route or Production |
 
-| Native section | Current operator capability |
+Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
+source manifests, current PR/CI and the target installation before relying on
+this dated checkpoint. **Merge, publication and deployment are separate steps.**
+
+## Capabilities in the merged development source
+
+| Native section | Operator tasks and important boundary |
 | --- | --- |
-| **Overview / Monitor** | Enable/disable monitoring, observe packaged vs resident entrypoint versions, see availability and diagnostics. |
-| **Website list** | Refresh paginated native website inventory, compare site/domain changes without an arbitrary site or alias count cap, and save selected-site or all-sites observation baselines. Baseline changes never modify website configuration. |
-| **Routing & Nginx** | Inspect current origin-local loopback entries and remove a chosen hostname with one administrator click, whether WordPress installation succeeded or failed and even without a native website record (merged, unpublished source v0.1.65). Existing site-specific recovery and source-scoped Nginx tools remain available; no unattended Hosts cleanup. Published v0.1.51 does not include these additions. |
-| **PHP-FPM** | Discover and inspect PHP installations based on actual native files (including older versions), view file/socket relationships, and use guarded Apply/Restore only for currently implemented 8.1/8.5 adapters. Native post-terminal PHP-FPM repair is merged in unpublished v0.1.62, with successful isolated ordinary-systemd QA for both successful and failed native WordPress setup. Complete authenticated PHP-FPM policy/automatic-repair UI and Production qualification remain outstanding (the separate primary-admin Login/Local Hosts UI has passed). |
-| **Status Pages** | Offline EN/FA branding and templates, with nonblocking readability advice for low-contrast operator color choices in unreleased source; source-scoped Nginx status-page delivery and recovery are available for their verified native configurations. Merged, unpublished v0.1.64 validates complete native Nginx source graphs and peer inventories instead of fixed site/file counts before those writes. |
-| **FastCGI Cache** | Site-specific source audit, guarded manual Cache Apply/Recheck/Restore, exact URL Clear and **site-owned** full-tree file Clear after verified physical peer isolation. Public HIT/MISS and private BYPASS depend on the actual eligible site/handler. The merged v0.1.66 native probe recognizes exact applied site-owned Cache headers on stock or wpfastcgi PHP. Real two-customer WooCommerce private-session HTTP/80 isolation and one-site WordPress/Nginx Helper post-update HTTP/80 invalidation have also passed on isolated native QA. These do not certify HTTPS, other sites, Purge All or Production. |
-| **Activity & Logs** | Operation/stage/error details, correlation IDs, scope and recovery guidance. |
+| **Overview / Monitor** | Read component availability, diagnostics and packaged versus resident **entrypoint** version; matching entrypoints do not certify every imported helper. |
+| **Website list** | Discover paginated native websites and bound domains, compare drift, and save selected-site or all-site observation baselines without changing website configuration. |
+| **Routing & Nginx** | View current local loopback aliases and remove an **exact chosen hostname with one administrator click**, with no site-selection or watcher prerequisite. Inspect site-owned VHosts and optionally manage source-verified Nginx sensitive-path protection; **Hosts removal is never unattended**. |
+| **PHP-FPM** | Inspect installed PHP files, service/pool mapping and affected sites. Guarded shared `[www]` Apply/Restore is implemented for validated **8.1/8.5** adapters; discover other installed versions rather than treating these adapters as a universal version allowlist. Separately opt in to compatible post-WordPress-setup automatic policy repair. |
+| **Status Pages** | Preview the bundled 11 English/LTR and 11 Persian/RTL offline templates, edit scoped branding, and use verified site/global Nginx delivery and Restore modes. Global unknown-host **HTTPS/443 TLS/SNI remains an Owner decision** in [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). |
+| **FastCGI Cache** | Inspect and explicitly Apply/Recheck/Restore site-owned policy; clear selected URLs or independently verified site-owned cache files. Private-session isolation and Nginx Helper integration have **bounded** non-production proofs, not generic safety certification. |
+| **Activity & Logs** | Inspect operation stage, outcome, error and Operation/Recovery IDs for diagnosis and safe reconciliation. |
 
-**Owner-approved product direction:** Keep tasks usable and straightforward.
-Do not invent hard-coded site/domain count or version limits when native
-capabilities or paginated data can be discovered. For acceptable residual
-risk, show a brief, nonmandatory pre-action note; an authorized administrator
-can continue without completing every recommendation. Real authorization,
-target correctness, and avoidance of unintended unrelated data loss remain
-essential. See the [project-wide operating principle](docs/PROJECT-SPEC.md#owner-wide-operating-principle-simplicity-and-informed-choice-2026-11-20).
-Native **0.1.69** is merged in `main` but **not publicly released**. Its
-ZIP was installed through the real aaPanel importer on isolated QA (63/63
-installed package bytes matched CI); the real site-owned Cache
-**wpfastcgi → stock** handler recovery completed Preview/Apply/Recheck/Restore
-with preserved original configuration. The genuine protected **administrator
-Browser login, Local Hosts one-click Remove, Activity correlation, and
-no-session/CSRF refusal** also passed on installed 0.1.69. These specific
-Browser tests are no longer pending; full PHP-FPM/Status Pages/Nginx UI
-acceptance and Production qualification remain separate. Follow the
-[exact QA Browser login runbook](docs/aapanel-integration.md#native-authenticated-browser-qa-runbook-aapanel-807)
-before repeating earlier login-tool diagnostics. No release or Production
-deployment is implied; verify current GitHub/CI/releases before installation.
+The separately installed, optional [WordPress Bridge](wordpress/ach-aapanel-bridge/README.md)
+(version `0.1.8` at this checkpoint) defaults to **disconnected**. After
+administrator provisioning of a generation-bound manifest it can assist
+Nginx Helper with **eligible per-URL GET/HEAD invalidation**; it does not
+install Nginx Helper, intercept its vendor **Purge All**, or provide a
+cross-site-safe recursive purge. The installed WordPress package ships its
+own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md)
-is a separate WordPress plugin whose ZIP includes a standard
-[WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt), not the
-repository-only Markdown guide. Its default state is disconnected. Once the
-operator has verified native site-owned Cache and expressly provisioned a
-generation-bound manifest, it can assist Nginx Helper's **per-URL GET/HEAD**
-invalidation for supported public posts, homepage and first-page taxonomy
-archives. It neither installs/configures Nginx Helper nor enables vendor Purge All.
+## Install and operate
 
-## Important limits
+1. For a published version, obtain the native ZIP and `SHA256SUMS.txt` from
+   [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases)
+   and verify the checksum. A locally built `main` ZIP is **unpublished**.
+   Import the native ZIP with **aaPanel → App Store → Third-party Plugins →
+   Import Plug-ins**. Install the separate Bridge ZIP through WordPress only
+   when that integration is actually needed.
+2. Open Customizer inside aaPanel; use **Overview → Refresh state** to check
+   version/worker diagnostics, and **Website list → Refresh websites** to
+   inspect the current native inventory. Select the correct site for any
+   site-dependent operation; read-only Local Hosts discovery needs no site.
+3. To remove an unwanted local loopback hostname, open **Routing & Nginx →
+   Local Hosts**, click **Refresh local aliases**, select the exact hostname,
+   then **Remove selected hostname**. The click is the authorization; no
+   extra checkbox or native WordPress witness is needed. The action only
+   targets that hostname's loopback mappings in the origin's `/etc/hosts`;
+   it does not modify public DNS. Check the refreshed list and Activity.
+4. For Cache, Status Pages, site protection, and shared PHP-FPM changes,
+   follow the relevant **Preview/Readiness → explicit scoped Apply → fresh
+   Recheck** path. Understand the specific target and shared-service effect;
+   **Restore** uses the saved recovery identity. Never blindly retry an
+   uncertain write, clear a shared Cache root, or reapply a stale preview.
+5. After importing or upgrading, check **both** installed package identity
+   and resident behavior. An older Python helper can survive package import;
+   an actual proven mismatch may require a separately authorized, **panel-only**
+   reload using the [recovery runbook](docs/aapanel-upgrade-recovery.md), not
+   an automatic Nginx/PHP restart.
 
-- **Nginx Helper `Purge All` is not certified** for shared or ambiguous physical
-  Cache roots. Native **site-owned full-tree Clear** is a different, independently
-  guarded operation. Neither should be confused with Bridge's per-URL filtering.
-- **Origin-local Hosts removal (merged, unpublished 0.1.65):** open **Routing & Nginx**
-  to see current local loopback hostnames, regardless of WordPress installation
-  result or whether aaPanel still has a matching site. Select the hostname and
-  press **Remove selected hostname**: no watcher or second approval checkbox is
-  required, and only matching loopback aliases are removed. The server's
-  own `/etc/hosts` is the evidence. This is an explicit primary-admin action,
-  not unattended cleanup, a DNS change or a universal transaction with foreign
-  writers. Legacy failed-WP witness records and historical recovery actions
-  remain accessible when previously created; they are not prerequisites.
-  Original v0.1.60 native-WP watcher remains optional and read-only for
-  diagnostic event evidence, while PHP-FPM has its separate automation.
-- **Unpublished 0.1.62 automatic FPM repair:** following explicit one-time
-  primary-admin approval of saved PHP 8.1/8.5 shared `[www]` values, a separate
-  owned `ach-customizer-fpm-auto.path`/`.timer`/`.service` tracks the
-  source-verified aaPanel native WP Toolkit start and terminal. It captures
-  FPM file identity before the native task and repairs only a changed source
-  after the exact terminal event, revalidating the **administrator-reviewed**
-  shared-site impact SHA and Monitor/policy revisions. The native writer's
-  RAM-derived numeric output and unchanged max_requests are verified
-  before each guarded write, preventing unrelated administrator edits.
-  Current site mapping is checked before syntax-validated reload and runtime
-  verification. Failed native WP initialization that removed the temporary
-  site additionally requires confirmed absence of its site/domain/binding
-  records. Prior automatic recovery is archived
-  by operation identity before repeat repair. Journal event-token
-  reconciliation preserves truthful Operation IDs after worker crashes.
-  Emergency Disable is durably queued and auto-completed if a guarded
-  reload holds the shared lock; no repeated click is necessary.
-  No ordinary installation activates this watcher; skipped starts and unrelated PHP changes do not
-  authorize writes. The exact 0.1.62 source passed isolated real aaPanel
-  8.0.7 systemd-only WordPress PHP 8.1 success and post-optimizer
-  PHP 8.5 failure automatic repair. See the
-  [native QA evidence](docs/evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json).
-  It is not a universal FPM hook or a Hosts fix. Independent exact-source
-  review and PR #102 integration passed. The **PHP-FPM-specific** authenticated Browser Apply/automatic-repair
-  acceptance and Production qualification remain separate gates. Do not deploy to Production based on isolated QA alone.
-- Per-site website roots are discovered from current native aaPanel records,
-  not assumed under `/www/wwwroot`. Confirmed QA roots include `/www/acdomains`
-  and `/www/other-sites`; unrelated aaPanel service-install prefixes and
-  custom/unsupported Nginx layouts are separately gated.
-- Source version 0.1.67 fixes the optional **global unbound HTTP/80** route:
-  native IPv4-only, IPv6-only and dual-stack wildcard listener families are
-  checked separately. Missing families are neither probed nor enabled;
-  Apply/Restore retain exact recovery and source ownership. Narrow address-only
-  listeners and IPv6 dual-mode sockets are not silently widened. No HTTPS/443 change.
-- Global **unknown-Host HTTPS/443** requires an unresolved TLS/SNI and
-  operator-policy decision; the tested HTTP/80 path does not authorize it.
-- WordPress Bridge does not cover arbitrary Host aliases, query-style or
-  noncanonical URLs, author/date/paginated archives, shared `WORDPRESS` cache
-  roots or Nginx Helper's recursive purge.
-- QA is scoped to the environments and request paths actually exercised;
-  Production deployment and destructive host changes require **separate**
-  environment-specific approval.
+The optional failed-WordPress-install **witness** is an observation-only
+advanced diagnostic, **not** a prerequisite for Local Hosts removal. Its
+historical recovery state must be preserved; it never performs automatic
+Hosts cleanup. Native PHP-FPM automatic repair is a different opt-in feature:
+its systemd watcher is not enabled by ordinary plugin installation. The
+[technical guide](docs/aapanel-integration.md) describes these distinct
+flows and their actually verified platform boundaries.
 
-## Installation, use and recovery
+## Known limits and release gates
 
-1. On an **authorized** aaPanel target, download the published native ZIP and
-   `SHA256SUMS.txt` from [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases).
-   Verify the downloaded checksum; do not treat an arbitrary branch build as
-   a public release.
-2. In aaPanel use **App Store → Third-party Plugins → Import Plug-ins**
-   to import the **native** ZIP. The separately versioned WordPress ZIP, if
-   needed, is installed through WordPress **Plugins → Add New → Upload Plugin**.
-3. Open Customizer, refresh Overview and website inventory, inspect the exact
-   selected site/version/source, then use **Preview/Check readiness → explicit
-   approval → Apply → fresh Recheck** for a supported operation. For shared
-   PHP-FPM, review **every affected site**. For Recovery, use the original
-   module and saved Recovery ID; never blindly retry an uncertain write.
-4. On a compatible, **authorized non-production** aaPanel 8.0.7/Nginx host
-   running the *new source only*, navigate to **Routing & Nginx → Native WordPress
-   failed-install witness**. Click **Inspect witness policy**, review the
-   observation-only scope, check its consent box and choose
-   **Enable failed-install witness**. The plugin-owned systemd
-   `.path`/`.timer`/`.service` units watch *future* single-site WP Toolkit
-   installations. They **never edit Hosts**, even when they identify an exact
-   orphan alias. Inspect **Activity & Logs** for the affected domain and have an
-   OS operator review `/etc/hosts` and the now-terminal installation before a
-   manual correction. **Emergency disable** stops future observation.
-   Use **Recheck historical recovery** when an older, already-applied recovery
-   is uncertain; any separate reviewed legacy Restore requires verifying the
-   Recovery ID and unchanged current file. A missed pre-terminal event is
-   never retroactively inferred as safe. If the progress record was replaced,
-   first disable, run Recheck, and use **Discard stale witness** only with a
-   distinct approval and no live native
-   task or prepared recovery. This action does not edit Hosts.
-5. After upgrade/reinstall, verify installed source **and** resident panel
-   helper behavior. aaPanel may keep older Python imports alive despite
-   matching installed ZIP bytes and even a matched entrypoint version.
-   A resident-helper mismatch disables non-emergency WP witness controls
-   while preserving Emergency disable; Activity shows a diagnostic.
-   A panel-only reload is a separately approved recovery action, not part
-   of automatic installation.
+- **Nginx Helper vendor `Purge All` is not certified** for shared or ambiguous
+  physical Cache roots. Native site-owned full-tree Clear is a different,
+  separately guarded operation. Private customer isolation, payment routes,
+  query/archive permutations, extensions and other host topologies need
+  their own evidence before broad claims.
+- Global unknown-host HTTPS/443 error-page behavior requires an unresolved
+  certificate/SNI and exposure-policy decision in [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10).
+  A working origin HTTP/80 error handler does not prove TLS handshake behavior.
+- Native PHP-FPM repair has non-production systemd success/failure evidence for
+  specific aaPanel 8.0.7 PHP 8.1/8.5 layouts, but its full authenticated
+  policy/automatic-repair UI matrix and other native service shapes remain
+  open in [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+- Site roots come from native website records, **not** a hard-coded
+  `/www/wwwroot`. Unrecognized Nginx writer/source layouts require fresh
+  inspection; no version/provider/site-count restrictions without a real
+  compatibility reason.
+- **Production installation/activation is not authorized by source CI,
+  an isolated QA pass, or a pre-release.** Publication, deployment and
+  consequential shared-service changes require their own permissions.
 
-The [native integration guide](docs/aapanel-integration.md) details the actual
-workflows and adapter boundaries. Follow the [upgrade and recovery runbook](docs/aapanel-upgrade-recovery.md)
-before any authorized lifecycle or rollback operation.
+## Development and native QA
 
-## Development
-
-Build local deterministic **unpublished** ZIPs from this repository:
+Create deterministic **unpublished** ZIPs from the repository:
 
 ```bash
 python3 -B scripts/build_plugin.py --output /tmp/ach-customizer.zip
 python3 -B scripts/build_wordpress_bridge.py --output /tmp/ach-aapanel-bridge.zip
 ```
 
-Run the same core source gates as
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+Run the source gates from [CI](.github/workflows/ci.yml):
 
 ```bash
 python3 -B -m compileall -q plugin/ach_customizer scripts tests
@@ -177,31 +114,27 @@ node --test tests/test_inventory_ui.cjs
 sh -n plugin/ach_customizer/install.sh
 ```
 
-PHP lint, embedded JavaScript parsing and ZIP builds also run in CI.
-A green source suite or locally built ZIP **does not** replace native
-installed-package/browser/recovery testing, independent review, or
-Owner-authorized integration and publication.
+CI also checks PHP syntax, embedded JavaScript parsing and deterministic ZIPs.
+Source tests do **not** replace real installed native UI/CSRF, recovery, Nginx,
+PHP, WordPress/WooCommerce and peer-site acceptance. The test guest's aaPanel
+8.0.7 protected Browser login requires the **actual post-login `#app` element**
+(not obsolete `.main-content`). Use the [verified protected login and UI
+runbook](docs/aapanel-integration.md#native-authenticated-browser-qa-runbook-aapanel-807),
+not password reset, secret export, or repeated failed Browser-tool probes.
 
-## Where project truth lives
+## Authoritative project references
 
-| Question | Canonical owner |
+| Need | Source of truth |
 | --- | --- |
-| What is the product, scope and lasting contract? | [Project specification](docs/PROJECT-SPEC.md) |
-| How do actual aaPanel adapters work and what are their limits? | [Native integration guide](docs/aapanel-integration.md) |
-| How do I log into isolated native QA without false credential failures? | [Verified protected Browser login runbook](docs/aapanel-integration.md#native-authenticated-browser-qa-runbook-aapanel-807) and [Issue #21 test receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7045862216) |
-| How is an uncertain upgrade/reload/recovery handled? | [Upgrade/recovery runbook](docs/aapanel-upgrade-recovery.md) |
-| How does the optional WordPress plugin work? | [Bridge package `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt) for the installed plugin; [repository-only advanced guide](wordpress/ach-aapanel-bridge/README.md) for operators/developers |
-| What is published now? | [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) and the source version manifests |
-| What is unfinished? | [#2 customization / PHP / Cache](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), [#10 Status Pages](https://github.com/AChWorks/ach-aapanel-customizer/issues/10), [#21 native QA](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) |
-| Which exact code, review and tests passed? | [Pull requests](https://github.com/AChWorks/ach-aapanel-customizer/pulls), [CI](https://github.com/AChWorks/ach-aapanel-customizer/actions), [QA receipts in #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) and retained [`docs/evidence/`](docs/evidence/) |
+| Purpose, accepted operating policy and constraints | [Project specification](docs/PROJECT-SPEC.md) |
+| Native adapter behavior, login and operator procedures | [Technical guide](docs/aapanel-integration.md) |
+| Uncertain ZIP upgrade, resident worker, rollback | [Upgrade/recovery runbook](docs/aapanel-upgrade-recovery.md) |
+| Exact merged implementation and checks | [Pull requests](https://github.com/AChWorks/ach-aapanel-customizer/pulls) and [CI](https://github.com/AChWorks/ach-aapanel-customizer/actions) |
+| Published ZIPs and checksums | [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) |
+| Remaining work and exact native QA | [#2 functional backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), [#10 Status Pages/TLS](https://github.com/AChWorks/ach-aapanel-customizer/issues/10), [#21 installed QA](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) |
+| Historical source-bound evidence | [`docs/evidence/`](docs/evidence/) and original GitHub PR/Issue history |
 
-**Historical published-package QA example (v0.1.51):** the exact public native 0.1.51 ZIP was
-installed on an isolated aaPanel 8.0.7 guest (**57/57** member hashes matched),
-then safely Restored after two genuine WooCommerce customers showed separate
-sessions and private cart/account/checkout BYPASS on HTTP/80 and HTTPS/443.
-See the [exact acceptance and cleanup receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6938476216).
-That result is not a claim about live payments, every extension or Production.
-
-Contribute through coherent, reviewable pull requests. Do not rewrite vendor
-aaPanel/Nginx Helper core files, invent platform compatibility, or merge,
-release or deploy through an unfulfilled project approval gate.
+The current project policy favors **simple, maintainable, operator-driven
+workflows** over arbitrary version/host limits and redundant consent steps.
+Keep real authorization, exact target ownership, recoverability, and
+independent-review/Owner Merge, Release and Production gates intact.

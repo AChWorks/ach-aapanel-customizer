@@ -621,11 +621,12 @@ Targeted fixture acceptance covers 141 native bound domains, 136 parked peer
 VHosts, 40/41 extension fragments, more than 1 MiB of sibling extension
 sources and more than 2 MiB of included native configuration; it verifies
 Apply/Recheck/Restore, last-peer ownership conflicts, stale preview refusal
-and no changes to unrelated peer bytes. Fresh native installed v0.1.64 acceptance remains a separate
-requirement; its exact-HEAD independent review and owner-authorized Merge
-were completed in PR #104.
+and no changes to unrelated peer bytes. Broader installed site-topology acceptance remains a separate
+requirement; exact-HEAD independent review and Owner-authorized Merge
+were completed in PR #104. Installed native 0.1.69 and real Cache/Hosts QA
+do not by themselves certify this module on every Nginx source graph.
 
-## One-click local Hosts alias removal (proposed v0.1.65; unpublished)
+## One-click local Hosts alias removal (merged source; verified on native 0.1.69 QA)
 
 The origin's current `/etc/hosts` is the source of truth, including after
 successful WordPress setup and when a failed setup left no aaPanel site record.
@@ -650,11 +651,13 @@ Recovery and historical, explicitly approved WP Restore remain separately
 accessible only for their earlier saved state; no new automatic cleanup
 journal, daemon, watcher, or backup subsystem is created by this feature.
 
-New source-level regressions cover successful and failed/deleted-site names,
+Source-level regressions cover successful and failed/deleted-site names,
 multiple mappings, preservation of peer aliases, invalid/non-UTF-8
 unrelated lines, symlink refusal, external change detection and the
-authenticated UI endpoint. Native installed aaPanel acceptance, public
-Release and Production deployment remain separate authorization/QA gates.
+authenticated UI endpoint. **Native installed aaPanel 8.0.7 / plugin 0.1.69**
+primary-admin one-click deletion, Activity and original Hosts byte preservation
+then passed with a real protected Browser session ([#21 receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7045862216)).
+Other versions and Production delivery remain separate gates.
 
 ## Native automatic PHP-FPM repair (merged source v0.1.62; unpublished)
 
@@ -738,7 +741,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### Independent-review R1–R4 control-flow remediation (candidate only)
+### Source-integrated R1–R4 control-flow remediation (verify installed behavior)
 
 - **Reviewed-site consent (R1):** Enable carries the exact versioned
   `impact_sha256` from saved-policy Recheck plus the saved policy and
