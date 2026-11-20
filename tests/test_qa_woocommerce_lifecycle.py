@@ -36,6 +36,7 @@ class FakeWordPress:
         self.skip_cleanup = set()
         self.fail_observe_after_remove = False
         self.prepare_response = None
+        self.permalink = ""
 
     def __call__(self, php, root, data):
         op = data["op"]
@@ -60,7 +61,12 @@ class FakeWordPress:
                                for i,name in enumerate(names)],
                     "products":[{"id":101,"name":"Product A"},{"id":102,"name":"Product B"}],
                     "cart_page":7,"checkout_page":8,"account_page":9,
-                    "permalink":"","woo":"11.2.2"}
+                    "page_paths":({"cart":"/cart/", "checkout":"/checkout/",
+                                   "account":"/my-account/"}
+                                  if self.permalink else
+                                  {"cart":"/?page_id=7", "checkout":"/?page_id=8",
+                                   "account":"/?page_id=9"}),
+                    "permalink":self.permalink,"woo":"11.2.2"}
         if op == "remove":
             removed = 0
             for name in names:
@@ -176,6 +182,52 @@ class WooQALifecycleTests(unittest.TestCase):
         self.assertFalse(self.temp_roots[0].exists())
         self.assertEqual([op for op,_ in self.wordpress.calls],
                          ["observe","prepare","remove","observe"])
+
+    def test_pretty_permalink_real_account_paths_are_not_redirects(self):
+        self.wordpress.permalink = "/%postname%/"
+        seen = []
+
+        def response(client, path, method="GET"):
+            seen.append(path)
+            logged = bool(client.cookies)
+            if path == "/":
+                if logged:
+                    return {"status":200,"cache":"BYPASS","site":"10","body":"private"}
+                count = getattr(self,"public_count",0)
+                self.public_count = count+1
+                return {"status":200,"cache":"MISS" if count==0 else "HIT",
+                        "site":"10","body":"public"}
+            if path.startswith("/?page_id="):
+                return {"status":301,"cache":"BYPASS","site":"10","body":""}
+            if path == "/my-account/":
+                marker = 1 if "synthetic-1" in str(client.cookies) else 0
+                return {"status":200,"cache":"BYPASS","site":"10",
+                        "body":qa.qa_usernames(TOKEN)[marker]}
+            if path.startswith("/?rest_route=/wc/store/v1/cart"):
+                marker = 1 if "synthetic-1" in str(client.cookies) else 0
+                return {"status":200,"cache":"BYPASS","site":"10",
+                        "body":json.dumps({"items":[{"id":101+marker}]})}
+            return {"status":200,"cache":"BYPASS","site":"10","body":"private"}
+
+        with mock.patch.object(qa.Client,"get",autospec=True,side_effect=response):
+            result = self.run_qa()
+        self.assertEqual(result["result"],"PASS")
+        self.assertEqual(self.wordpress.accounts,{})
+        self.assertIn("/my-account/",seen)
+        self.assertIn("/cart/",seen)
+        self.assertIn("/checkout/",seen)
+        self.assertFalse(any(path.startswith("/?page_id=") for path in seen))
+
+    def test_invalid_canonical_page_target_still_cleans_qa_users(self):
+        self.wordpress.prepare_response = {
+            "users":[{"id":11,"login":qa.qa_usernames(TOKEN)[0],"cookie":"a=b"},
+                     {"id":12,"login":qa.qa_usernames(TOKEN)[1],"cookie":"a=c"}],
+            "page_paths":{"cart":"//foreign.site/","checkout":"/checkout/",
+                          "account":"/my-account/"}}
+        with self.assertRaisesRegex(RuntimeError,"invalid canonical"):
+            self.run_qa()
+        self.assertEqual(self.wordpress.accounts,{})
+        self.assertFalse(self.temp_roots[-1].exists())
 
     def test_preparation_timeout_after_first_or_second_customer_is_cleaned(self):
         for count in (1,2):
