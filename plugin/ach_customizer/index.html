@@ -630,9 +630,8 @@
           <div class="ach-controls"><button type="button" id="ach-bridge-inspect" disabled>Inspect Bridge manifest</button></div>
           <p id="ach-bridge-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a website; inspect does not prove Helper activation or live Nginx workers.</p>
           <p id="ach-bridge-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: fresh Applied Cache Recheck and matching WordPress site required before provisioning.</p>
-          <label><input type="checkbox" id="ach-bridge-enable-reviewed" disabled /> I approve creating this site's native-owned WordPress Bridge mapping; this does not enable, block or certify Nginx Helper Purge All.</label>
+          <p class="ach-note">Provision creates only this selected site's generation-bound native manifest after a fresh Applied Cache Recheck. Disable removes only the selected site's managed manifest, including a stale mapping. Each button is the administrator's explicit approval; neither changes Nginx Helper settings or enables Purge All.</p>
           <div class="ach-controls"><button type="button" id="ach-bridge-enable" class="btn btn-warning" disabled>Provision URL mapping</button></div>
-          <label><input type="checkbox" id="ach-bridge-disable-reviewed" disabled /> I approve removing only this site's managed Bridge manifest.</label>
           <div class="ach-controls"><button type="button" id="ach-bridge-disable" class="btn btn-danger" disabled>Disable Bridge mapping</button></div>
         </details>
       </div>
@@ -884,7 +883,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.67'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.68'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1807,12 +1806,8 @@
         cacheUrlApprovedPath !== root.find('#ach-cache-url-path').val() ||
         root.find('#ach-cache-url-reviewed').prop('checked') !== true);
     root.find('#ach-bridge-inspect').prop('disabled', cacheActivationBusy || unready);
-    root.find('#ach-bridge-enable-reviewed').prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity);
-    root.find('#ach-bridge-enable').prop('disabled', cacheActivationBusy || unready ||
-      !cacheClearIdentity || root.find('#ach-bridge-enable-reviewed').prop('checked') !== true);
-    root.find('#ach-bridge-disable-reviewed').prop('disabled', cacheActivationBusy || unready);
-    root.find('#ach-bridge-disable').prop('disabled', cacheActivationBusy || unready ||
-      root.find('#ach-bridge-disable-reviewed').prop('checked') !== true);
+    root.find('#ach-bridge-enable').prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity);
+    root.find('#ach-bridge-disable').prop('disabled', cacheActivationBusy || unready);
     explainGate('ach-bridge-why', !cacheActivationBusy && !unready && cacheClearIdentity ? 'ready' : 'blocked',
       common || (!cacheClearIdentity ?
         'Fresh Applied Cache Recheck required for Provision. Disable is still available for a stale native manifest.' :
@@ -1890,7 +1885,7 @@
     cacheRecoveryIdentity = null;
     cacheClearIdentity = null;
     cacheUrlApprovedPath = null;
-    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed,#ach-bridge-enable-reviewed,#ach-bridge-disable-reviewed')
+    root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
       .prop('checked', false);
     root.find('#ach-bridge-result').text('Website selection changed. Inspect this site again.');
     root.find('#ach-cache-activation-result').text(
@@ -3122,7 +3117,7 @@
       response.cache_directory === '/www/server/ach-customizer-fastcgi/site-' + id &&
       typeof response.impact === 'string' && response.impact.length < 500);
   }
-  root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-bridge-enable-reviewed,#ach-bridge-disable-reviewed')
+  root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
     .on('change', cacheActivationLock);
   root.find('#ach-bridge-inspect,#ach-bridge-enable,#ach-bridge-disable').on('click', function () {
     var id = hostsSiteId(), intent = this.id;
@@ -3130,13 +3125,9 @@
     var action = intent === 'ach-bridge-enable' ? 'bridge_enable' :
       intent === 'ach-bridge-disable' ? 'bridge_disable' : 'bridge_inspect';
     var recovery = cacheClearIdentity, approval = action !== 'bridge_inspect';
-    if (action === 'bridge_enable' && (!recovery ||
-        root.find('#ach-bridge-enable-reviewed').prop('checked') !== true)) return;
-    if (action === 'bridge_disable' &&
-        root.find('#ach-bridge-disable-reviewed').prop('checked') !== true) return;
+    if (action === 'bridge_enable' && !recovery) return;
     var ticket = ++cacheActivationTicket;
     cacheActivationBusy = true;
-    root.find('#ach-bridge-enable-reviewed,#ach-bridge-disable-reviewed').prop('checked',false);
     root.find('#ach-bridge-result').text('Checking native Bridge manifest ownership and current site state...');
     cacheActivationLock();
     request('manage_cache_policy', Object.assign(cacheNativeArgs(id),{

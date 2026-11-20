@@ -805,9 +805,14 @@ native-generated site-owned manifest it reports diagnostics but does **not**
 alter Nginx Helper hooks or cache state.
 
 1. On one verified native WordPress site complete **Cache Apply → Recheck
-   Applied**, confirm physical peer separation, and separately approve
-   **Provision URL mapping**. The root-owned, generation-bound manifest in
-   `wp-content/ach-customizer-bridge/cache.php` is read-only to WordPress
+   Applied**, confirm physical peer separation, and explicitly click
+   **Provision URL mapping** for that site. The button is the administrator's
+   approval; no additional checkbox is required. **Disable Bridge mapping**
+   similarly removes only that site's native-managed manifest, including a
+   stale one, without requiring a current Applied Cache Recheck. The native
+   backend still checks primary-admin authorization, exact site identity and
+   recovery ownership where required. The root-owned, generation-bound manifest
+   in `wp-content/ach-customizer-bridge/cache.php` is read-only to WordPress
    and binds exact site/host/root, cache directory identity and Recovery ID.
 2. Nginx Helper must be installed/activated/configured by the **operator**
    for automatic `unlink_files` per-URL purging and the **same site-owned**
