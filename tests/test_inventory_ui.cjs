@@ -82,6 +82,7 @@ function loadUi() {
     '#ach-cache-url-reviewed', '#ach-cache-clear-url',
     '#ach-bridge-inspect', '#ach-bridge-result', '#ach-bridge-why',
     '#ach-bridge-enable', '#ach-bridge-disable',
+    '#ach-wp-cache-inspect', '#ach-wp-cache-setup', '#ach-wp-cache-restore', '#ach-wp-cache-result',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-reconcile-button', '#ach-reconcile-result',
     '#ach-reconcile-to-websites', '#ach-reconcile-to-cache',
@@ -399,6 +400,9 @@ function loadUi() {
       cacheUrlPath: elements.get('#ach-cache-url-path').props.value,
       bridgeEnableDisabled: elements.get('#ach-bridge-enable').props.disabled,
       bridgeDisableDisabled: elements.get('#ach-bridge-disable').props.disabled,
+      wpCacheResult: elements.get('#ach-wp-cache-result').textContent,
+      wpCacheSetupDisabled: elements.get('#ach-wp-cache-setup').props.disabled,
+      wpCacheRestoreDisabled: elements.get('#ach-wp-cache-restore').props.disabled,
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       guardResult: elements.get('#ach-guard-result').textContent,
@@ -8623,6 +8627,62 @@ test('WordPress Bridge Disable is authorized separately and stale replies cannot
   assert.doesNotMatch(ui.state().cacheActivationResult,/stale-other-site-data/);
   assert.equal(ui.statusClick('#ach-bridge-inspect')?.options?.data?.cache_action,
     'bridge_inspect');
+});
+
+test('One-click WordPress setup uses one authenticated site-scoped action and supports restore', () => {
+  assert.match(html, /id="ach-wp-cache-setup"/);
+  assert.match(html, /id="ach-wp-cache-restore"/);
+  assert.doesNotMatch(html, /id="ach-wp-cache-reviewed"/);
+  const ui=loadUi();selectHostsSite(ui);
+  assert.equal(ui.state().wpCacheSetupDisabled,false);
+  const connect=ui.statusClick('#ach-wp-cache-setup');
+  assert.match(connect.options.url,/s=manage_wordpress_cache$/);
+  assert.equal(connect.options.type,'POST');
+  assert.equal(connect.options.data.wordpress_cache_action,'setup');
+  assert.equal(connect.options.data.approved,'true');
+  assert.equal(connect.options.data.site_id,'7');
+  assert.equal(connect.options.data.expected_site_key,'site.test');
+  assert.equal(ui.state().wpCacheSetupDisabled,true);
+  const inflight=ui.requests.length;
+  ui.statusClick('#ach-wp-cache-setup');
+  assert.equal(ui.requests.length,inflight,'No duplicate one-click setup request');
+  connect.respond({
+    status:true,schema:1,state:'Connected',site_id:7,site_key:'site.test',
+    recovery_id:'f'.repeat(32),changed:true,runtime_verified:true,
+    note:'WordPress Helper connected'
+  });
+  assert.match(ui.state().wpCacheResult,/Connected/);
+  assert.match(ui.state().wpCacheResult,/WordPress Helper connected/);
+  assert.equal(ui.state().wpCacheSetupDisabled,false);
+  const restore=ui.statusClick('#ach-wp-cache-restore');
+  assert.equal(restore.options.data.wordpress_cache_action,'restore');
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond({
+    status:true,schema:1,state:'Restored',site_id:7,site_key:'site.test',
+    recovery_id:'f'.repeat(32),changed:true
+  });
+  assert.match(ui.state().wpCacheResult,/Restored/);
+  const inspect=ui.statusClick('#ach-wp-cache-inspect');
+  assert.equal(inspect.options.data.wordpress_cache_action,'inspect');
+  assert.equal(inspect.options.data.approved,'false');
+  inspect.respond({
+    status:true,schema:1,state:'Not Connected',site_id:7,site_key:'site.test',
+    read_only:true
+  });
+  assert.match(ui.state().wpCacheResult,/Not Connected/);
+});
+
+test('One-click WordPress setup refuses stale cross-site backend replies', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const action=ui.statusClick('#ach-wp-cache-setup');
+  assert.equal(action.options.data.expected_site_key,'site.test');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  action.respond({
+    status:true,schema:1,state:'Connected',site_id:7,site_key:'site.test',
+    recovery_id:'f'.repeat(32),note:'stale site connected',
+  });
+  assert.doesNotMatch(ui.state().wpCacheResult,/stale site connected/);
+  assert.doesNotMatch(ui.state().wpCacheResult,/WordPress Cache: Connected/);
 });
 
 function sensitiveGuardResponse(state='Unmanaged', changes={}) {
