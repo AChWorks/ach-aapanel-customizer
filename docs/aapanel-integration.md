@@ -907,6 +907,39 @@ certificate and operator exposure design; an HTTP/80 404 implementation cannot
 simply intercept TLS handshakes. Keep [Issue #10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
 open until that decision and subsequent scoped acceptance.
 
+## WordPress one-time Nginx Helper connection (unmerged native 0.1.70)
+
+After installing the official **Nginx Helper** and separate **ACh aaPanel
+Bridge** WordPress plugin files, the selected site's native Customizer
+**Connect WordPress Cache (once)** action activates both installed plugins
+and coordinates the site's isolated Nginx Cache zone/physical directory,
+PHP .user.ini access, RT_WP_NGINX_HELPER_CACHE_PATH in wp-config.php,
+Nginx Helper unlink_files options, and generation-bound Bridge manifest.
+This is **one click per WordPress site**, not an unattended watcher or
+a recurring per-post/per-update manual configuration. The original Nginx
+Helper frontend **Purge Current Page** and admin **Purge All** stay in use.
+
+When native aaPanel created a VHost lacking its site extension include,
+the connector adds only that line after the native Cache adapter proves the
+exact missing-include case. Existing Cache Apply validates/reloads Nginx;
+changing .user.ini reloads the selected PHP-FPM service so site worker
+access takes effect. No vendor Nginx/WordPress plugin source is rewritten.
+**Disconnect and restore** first disables vendor purge before returning to
+a potentially shared path, then restores recorded site settings and native
+Cache recovery. A root-owned site-specific journal retains incomplete work.
+
+**Bounded non-production QA:** Nginx Helper 2.4.1 and Bridge 0.1.8 were
+installed but inactive on real aaPanel 8.0.7 / WP 7.1.5. One native
+connection activated/configured both; vendor per-page purge invalidated
+only that page, vendor Purge All deleted four site-owned files while two
+SHA-pinned shared-vendor files stayed untouched, repeat Connect preserved
+file hashes, and Disconnect restored original WP/Nginx bytes. In a separate
+post-save test, the homepage invalidated but a cached noncanonical
+/sample-page/ alias remained HIT because WordPress's canonical permalink
+was /index.php/sample-page/. This is not proof of invalidation for alternate
+URL aliases, a protected Browser-button click, or HTTPS. More evidence is
+tracked in Issue #21.
+
 ## FastCGI Cache: privacy, ownership and recovery
 
 A safe per-site Nginx Cache needs an owned, separate physical tree and key

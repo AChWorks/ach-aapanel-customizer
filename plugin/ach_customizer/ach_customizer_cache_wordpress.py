@@ -446,6 +446,8 @@ def _setup_locked(site, public, *, data_dir):
     root = _site_root(site, public)
     record = _load(site, data_dir)
     cache_status = _native_record(site, public)
+    was_connected = bool(record and record["phase"] == "connected"
+                         and cache_status["state"] == "Applied")
     if cache_status["state"] == "Restored":
         if record is not None and record["phase"] != "restored":
             raise WordpressCacheError("recovery", "Complete the previous WordPress setup recovery before reconnecting")
@@ -532,7 +534,7 @@ def _setup_locked(site, public, *, data_dir):
     _save(site, record, data_dir)
     return {"schema": 1, "state": "Connected", "site_id": site["id"],
             "site_key": site["name"], "recovery_id": record["recovery_id"],
-            "changed": True, "runtime_verified": active["runtime_verified"],
+            "changed": not was_connected, "runtime_verified": active["runtime_verified"],
             "note": "Nginx Helper per-page and site-wide purging are configured for the owned site Cache."}
 
 
@@ -569,6 +571,11 @@ def inspect(site, public, *, data_dir=DATA_DIR):
         return {"schema": 1, "state": "Not Connected", "site_id": site["id"],
                 "site_key": site["name"], "read_only": True}
     runtime = _native_record(site, public)
+    if journal["phase"] == "restored" and runtime["state"] == "Restored":
+        return {"schema": 1, "state": "Not Connected",
+                "site_id": site["id"], "site_key": site["name"],
+                "read_only": True, "recovery_id": journal["recovery_id"],
+                "note": "WordPress Cache connection restored to its previous state."}
     state = "Needs Review"
     if journal["phase"] == "connected" and runtime["state"] == "Applied" and runtime["runtime_verified"]:
         conf, _ = _read_file(site["path"], WORDPRESS_CONFIG)
@@ -612,6 +619,23 @@ def _restore_locked(site, public, *, data_dir):
                 "site_id": site["id"], "site_key": site["name"], "changed": False}
     current = _native_record(site, public)
     if current["state"] == "Unmanaged" and record["phase"] == "initial":
+        _remove_bootstrapped_extension(site, record)
+        record["phase"] = "restored"
+        _save(site, record, data_dir)
+        return {"schema": 1, "state": "Restored",
+                "site_id": site["id"], "site_key": site["name"], "changed": True}
+    if current["state"] == "Restored" and current["recovery_id"] == record["recovery_id"]:
+        # A previous disconnect already finished native Cache Restore, but
+        # the final native VHost/journal checkpoint may have been interrupted.
+        config, _ = _read_file(site["path"], WORDPRESS_CONFIG)
+        ini, _ = _read_file(site["path"], USER_INI)
+        if (_extract_constant(config) != record["wp_old"]
+                or _extract_basedir(ini) != record["ini_old"]):
+            raise WordpressCacheError("recovery",
+                "WordPress configuration was not restored; inspect the site before recovery")
+        status = _php(site, record["php"], "inspect")
+        if status["options"].get("enable_purge") not in (None, False, 0):
+            raise WordpressCacheError("recovery", "Nginx Helper Purge All remains enabled")
         _remove_bootstrapped_extension(site, record)
         record["phase"] = "restored"
         _save(site, record, data_dir)

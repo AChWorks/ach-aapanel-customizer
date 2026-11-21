@@ -95,6 +95,7 @@ class WordpressConnectionTests(unittest.TestCase):
         saved = (self.config.read_bytes(), self.ini.read_bytes())
         second = wp.setup(self.site, object(), data_dir=str(self.root))
         self.assertEqual(second["state"], "Connected")
+        self.assertFalse(second["changed"])
         self.assertEqual((self.config.read_bytes(), self.ini.read_bytes()), saved)
         self.assertEqual(sum(e == ("cache", "apply") for e in self.events), 1)
         self.assertEqual(sum(e == ("cache", "bridge_enable") for e in self.events), 2)
@@ -113,6 +114,12 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertIn(("php", "restore"), self.events)
         self.assertIn(("cache", "restore"), self.events)
         self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["changed"], False)
+        with patch.object(wp, "_native_record", return_value={
+                "state": "Restored", "recovery_id": "f" * 32,
+                "runtime_verified": True}):
+            self.assertEqual(
+                wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                "Not Connected")
 
     def test_missing_helper_fails_before_any_cache_write(self):
         self.start()
