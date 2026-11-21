@@ -58,11 +58,20 @@ $previous = [];
 foreach ($keys as $key) {
     $previous[$key] = array_key_exists($key, $existing) ? $existing[$key] : null;
 }
+// Nginx Helper's activation normally grants these administrator role caps,
+// but activate_plugin() from a site-scoped CLI has no logged-in WP admin.
+$vendor_caps = ['Nginx Helper | Config', 'Nginx Helper | Purge cache'];
+$administrator = get_role('administrator');
+$original_caps = [];
+foreach ($vendor_caps as $cap) {
+    $original_caps[$cap] = $administrator ? (bool)$administrator->has_cap($cap) : false;
+}
 $present = [
     'nginx_helper' => is_plugin_active($helper),
     'bridge' => is_plugin_active($bridge),
     'options_present' => get_site_option('rt_wp_nginx_helper_options') !== false,
     'options' => $previous,
+    'admin_caps' => $original_caps,
     'constant' => defined('RT_WP_NGINX_HELPER_CACHE_PATH')
         ? RT_WP_NGINX_HELPER_CACHE_PATH : null,
 ];
@@ -75,6 +84,10 @@ if ($input['action'] === 'connect') {
         fwrite(STDERR, "Effective WordPress Nginx Helper Cache path is not the selected private site Cache\n");
         exit(15);
     }
+    if (!$administrator) {
+        fwrite(STDERR, "WordPress administrator role is unavailable for Nginx Helper\n");
+        exit(16);
+    }
     foreach ([$helper,$bridge] as $plugin) {
         if (!is_plugin_active($plugin)) {
             $error = activate_plugin($plugin);
@@ -82,6 +95,15 @@ if ($input['action'] === 'connect') {
                 fwrite(STDERR, "WordPress activation failed for ".$plugin.": ".
                     $error->get_error_message()."\n"); exit(12);
             }
+        }
+    }
+    // Grant exactly the two capabilities established by the official
+    // Nginx Helper activator; Disconnect restores their original booleans.
+    foreach ($vendor_caps as $cap) {
+        if (!$administrator->has_cap($cap)) $administrator->add_cap($cap);
+        if (!$administrator->has_cap($cap)) {
+            fwrite(STDERR, "WordPress Nginx Helper admin capability setup failed\n");
+            exit(17);
         }
     }
     $existing['cache_method'] = 'enable_fastcgi';
@@ -110,6 +132,17 @@ if ($input['action'] === 'restore') {
             ? ($saved['nginx_helper'] ?? true) : ($saved['bridge'] ?? true);
         if ($was_active === false && is_plugin_active($plugin)) {
             deactivate_plugins($plugin);
+        }
+    }
+    // Previous (0.1.73) journals did not manage role capabilities.
+    // Only a new journal with verified original booleans may restore them.
+    if (array_key_exists('admin_caps', $saved)) {
+        if (!$administrator || !is_array($saved['admin_caps'])) exit(18);
+        foreach ($vendor_caps as $cap) {
+            if (!array_key_exists($cap, $saved['admin_caps']) ||
+                !is_bool($saved['admin_caps'][$cap])) exit(18);
+            if ($saved['admin_caps'][$cap]) $administrator->add_cap($cap);
+            else $administrator->remove_cap($cap);
         }
     }
 }
@@ -601,6 +634,12 @@ def _setup_locked(site, public, *, data_dir):
         version = _active_php(site, data_dir)
 
     original_options = _php(site, version, "inspect")
+    if (record is not None and "admin_caps" not in record.get("previous", {})
+            and isinstance(original_options.get("previous", {}).get("admin_caps"), dict)):
+        # Upgrade an active legacy journal's exact baseline before any newly
+        # managed capability write, so a subsequent Disconnect can undo it.
+        record["previous"]["admin_caps"] = dict(original_options["previous"]["admin_caps"])
+        _save(site, record, data_dir)
     if record is None:
         patch = _edits(site)
         source_constant = _extract_constant(patch["wp_before"], allow_absent=True)
@@ -772,6 +811,10 @@ def inspect(site, public, *, data_dir=DATA_DIR):
                     status["options"].get("cache_method") == "enable_fastcgi" and
                     status["options"].get("enable_purge") == 1 and
                     status["options"].get("purge_method") == "unlink_files" and
+                    status.get("previous", {}).get("admin_caps", {}).get(
+                        "Nginx Helper | Config") is True and
+                    status.get("previous", {}).get("admin_caps", {}).get(
+                        "Nginx Helper | Purge cache") is True and
                     bridge_inspect(site, public, _read_managed(site, data_dir)) == "Provisioned"):
                 state = "Connected"
     return {"schema": 1, "state": state, "site_id": site["id"],
@@ -867,6 +910,10 @@ def _restore_locked(site, public, *, data_dir):
     status = _php(site, record["php"], "inspect")
     if status["options"].get("enable_purge") not in (None, False, 0):
         raise WordpressCacheError("recovery", "Nginx Helper Purge All remains enabled")
+    original_caps = record.get("previous", {}).get("admin_caps")
+    if original_caps is not None and status.get("previous", {}).get("admin_caps") != original_caps:
+        raise WordpressCacheError(
+            "recovery", "WordPress Nginx Helper administrator capabilities were not restored")
 
     if current["state"] == "Applied" and record.get("cache_owned", True):
         result = manage_cache("restore", site, public, approved=True,

@@ -198,6 +198,59 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)[0], "/nonexistent/denied")
 
+    def test_toolbar_purge_requires_valid_frontend_nonce_user_and_method(self):
+        source = f"""
+        define('ABSPATH', '/fixture/');
+        require {json.dumps(str(PLUGIN / 'includes/class-cache-invalidation.php'))};
+        $GLOBALS['authorized'] = true;
+        $GLOBALS['nonce_valid'] = true;
+        $GLOBALS['admin_request'] = false;
+        function is_admin() {{ return $GLOBALS['admin_request']; }}
+        function current_user_can($name) {{
+            return $GLOBALS['authorized'] && $name === 'Nginx Helper | Purge cache';
+        }}
+        function wp_verify_nonce($nonce, $action) {{
+            return $GLOBALS['nonce_valid'] && $nonce === 'verified-only'
+                && $action === 'nginx_helper-purge_all';
+        }}
+        $url = 'https://qa.example/story/';
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_GET = ['nginx_helper_action'=>'purge',
+                 'nginx_helper_urls'=>'current-url',
+                 '_wpnonce'=>'verified-only'];
+        $cls = \AChWorks\AaPanelBridge\CacheInvalidation::class;
+        $out = [];
+        foreach (['GET','POST'] as $method) {{
+            $_SERVER['REQUEST_METHOD'] = $method;
+            $out[] = $cls::reconcileToolbarPurge($url);
+        }}
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $GLOBALS['authorized'] = false;
+        $out[] = $cls::reconcileToolbarPurge($url);
+        $GLOBALS['authorized'] = true;
+        $GLOBALS['nonce_valid'] = false;
+        $out[] = $cls::reconcileToolbarPurge($url);
+        $GLOBALS['nonce_valid'] = true;
+        $GLOBALS['admin_request'] = true;
+        $out[] = $cls::reconcileToolbarPurge($url);
+        $GLOBALS['admin_request'] = false;
+        foreach ([
+          ['nginx_helper_action'=>'purge','nginx_helper_urls'=>'all',
+            '_wpnonce'=>'verified-only'],
+          ['nginx_helper_action'=>'purge','nginx_helper_urls'=>'current-url'],
+          ['nginx_helper_action'=>'purge','nginx_helper_urls'=>'current-url',
+            '_wpnonce'=>['bad-array']],
+        ] as $query) {{
+          $_GET = $query;
+          $out[] = $cls::reconcileToolbarPurge($url);
+        }}
+        echo json_encode($out, JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         ["https://qa.example/story/"] * 8)
+
     def test_post_save_uses_wordpress_four_argument_action_contract(self):
         # WP's wp_after_insert_post() function emits ID, WP_Post, update,
         # post_before in this order; the first parameter is NOT a WP_Post.

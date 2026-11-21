@@ -854,6 +854,20 @@ This is **one click per WordPress site**, not an unattended watcher or
 a recurring per-post/per-update manual configuration. The original Nginx
 Helper frontend **Purge Current Page** and admin **Purge All** stay in use.
 
+The native one-click also ensures the official Nginx Helper's two
+administrator-role capabilities (`Nginx Helper | Config` and
+`Nginx Helper | Purge cache`) are present; CLI activation has no
+logged-in WordPress administrator and does not reliably grant them.
+The exact original booleans are journaled before management, checked
+during Connected inspection, and restored on Disconnect. Existing
+pre-upgrade journals are upgraded before changing either capability.
+Bridge 0.1.9 maps a valid authenticated, nonce-checked frontend
+`Purge Current Page` through the same generation-bound per-URL
+GET/HEAD selector for HTTP/HTTPS cache keys, including an HTTPS public
+site backed by an HTTP-origin Nginx worker. Vendor Purge Entire Cache
+remains its own recursion, never intercepted or broadened by Bridge.
+
+
 When native aaPanel created a VHost lacking its site extension include,
 the connector adds only that line immediately after the registered site
 root, matching aaPanel native regeneration, after the Cache adapter proves the
