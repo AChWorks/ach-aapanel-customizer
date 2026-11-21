@@ -1,5 +1,14 @@
 # Native aaPanel ZIP upgrade: resident-worker recovery
 
+**Environment constraint:** When executing this runbook for the ongoing
+Customizer QA project, use only the retained Running aaPanel VM documented
+in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+Do not provision, clone, replace, stop or delete that VM, create disposable
+VM snapshots, or reset its stored admin password as a recovery shortcut.
+A guarded **panel-only reload** is distinct from stopping/replacing the VM
+and still requires the documented operator authorization.
+
+
 **Scope:** aaPanel 8.0.7 native plugin update/QA, not an automated restart
 procedure, Production authorization, or proof that Nginx/PHP workers reloaded.
 
@@ -66,7 +75,7 @@ all aaPanel versions or a blanket reason to restart after every install.
    watcher. Follow the controlled recovery procedure below **only after
    explicit target-specific authorization**.
 
-## Unpublished 0.1.62 FPM automatic watcher lifecycle
+## Optional FPM automatic watcher lifecycle (introduced in merged source 0.1.62)
 
 The independent `ach-customizer-fpm-auto` systemd path/timer/service is
 never installed by ordinary ZIP import. The primary admin must opt in

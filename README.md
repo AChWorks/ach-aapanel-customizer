@@ -7,22 +7,28 @@ or a WordPress-only plugin.
 
 ## Distribution, source and tested state
 
-| Layer | Current verified reference (2026-11-20) | What it proves |
+| Layer | Verified reference (2026-11-21; check live systems) | What it proves |
 | --- | --- | --- |
-| **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional WordPress Bridge `0.1.8` | The latest **published** package at this checkpoint, **not** Production approval |
-| **Merged source** | `main` native `0.1.69`; Bridge `0.1.8` | Unpublished development code; see the [native](plugin/ach_customizer/info.json) and [WordPress](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) version manifests |
-| **Installed native QA** | Exact `0.1.69` package installed on isolated aaPanel `8.0.7` guest; 63/63 member hashes matched, real Cache Apply/Recheck/Restore and actual admin Browser/Hosts/CSRF tests passed | Only the [exercised acceptance](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), not every worker, platform, site, HTTPS route or Production |
+| **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
+| **Merged source** | `main` native `0.1.72` after [PR #114](https://github.com/AChWorks/ach-aapanel-customizer/pull/114); Bridge `0.1.8` | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`, installed native `0.1.69` at the 2026-11-21 check | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
 source manifests, current PR/CI and the target installation before relying on
 this dated checkpoint. **Merge, publication and deployment are separate steps.**
 
-## One-time WordPress Cache connection — merged source, corrective QA candidate
+## Read this first: current work and QA ownership
+
+The **three open Issues** are the active work index: [#2 product backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), [#10 Status Pages HTTPS/443 decision](https://github.com/AChWorks/ach-aapanel-customizer/issues/10), and [#21 installed-native QA](https://github.com/AChWorks/ach-aapanel-customizer/issues/21). Read the **top-level active contract**, then current repository code/PR checks and installed QA evidence. Dated experiments in older issue comments, manifests and test receipts are **historical evidence**, never instructions to recreate obsolete VMs or reinstate cancelled features.
+
+**Owner QA environment policy:** Reuse the **same existing aaPanel VM** in [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for all remaining development. Do not create, replace, stop or delete it during development; do not create disposable VM snapshots. Authenticate with its existing guest-bound protected `service_access` reference; no routine password resets. Create only explicitly scoped, recoverable *fixtures inside that VM* and preserve other sites. Before any new native E2E, compare the installed version with the reviewed source. Public Release and Production are separately gated.
+
+## One-time WordPress Cache connection — merged source
 
 The one-click **Connect WordPress Cache (once)** workflow merged into
 `main` in [PR #113](https://github.com/AChWorks/ach-aapanel-customizer/pull/113).
-[PR #114](https://github.com/AChWorks/ach-aapanel-customizer/pull/114) is
-the **unmerged native 0.1.72 corrective candidate** for fresh aaPanel
+[PR #114](https://github.com/AChWorks/ach-aapanel-customizer/pull/114)
+**merged** the native 0.1.72 corrective implementation for fresh aaPanel
 WordPress installations. Once the official Nginx Helper and ACh aaPanel
 Bridge files are installed on a selected native WordPress site, one
 administrator click activates/configures them, applies its isolated Cache,
@@ -38,10 +44,13 @@ included both vendor purge actions, WordPress Page/Post
 changes, site/peer Cache isolation, VM restart and Disconnect/Reconnect.
 See the [Issue #21 acceptance record](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7055966635)
 and [integration guide](docs/aapanel-integration.md); HTTPS and actual
-WooCommerce customer/session flows remain **untested**. PR #114 is not
-merged; subsequent review corrections require their own exact-HEAD tests and
-were not yet reinstalled for native QA. This QA does **not** authorize
-public Release or Production.
+WooCommerce customer/session flows were **not exercised on that specific
+HTTP-only WordPress test site**. The later PR #114 remediation passed
+exact-HEAD source, regression and real embedded PHP CLI tests, **not** a
+fresh installed/browser run. In particular, this evidence is from a
+**different, now-removed QA guest**; do not transfer installed acceptance
+to the persistent VM or infer current source is installed there. Neither
+Merge nor QA authorizes public Release or Production.
 The broader open functional work remains in [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2).
 
 ## Capabilities in the merged development source
@@ -143,8 +152,8 @@ sh -n plugin/ach_customizer/install.sh
 
 CI also checks PHP syntax, embedded JavaScript parsing and deterministic ZIPs.
 Source tests do **not** replace real installed native UI/CSRF, recovery, Nginx,
-PHP, WordPress/WooCommerce and peer-site acceptance. The test guest's aaPanel
-8.0.7 protected Browser login requires the **actual post-login `#app` element**
+PHP, WordPress/WooCommerce and peer-site acceptance. The retained QA
+guest's aaPanel 8.0.7 protected Browser login requires the **actual post-login `#app` element**
 (not obsolete `.main-content`). Use the [verified protected login and UI
 runbook](docs/aapanel-integration.md#native-authenticated-browser-qa-runbook-aapanel-807),
 not password reset, secret export, or repeated failed Browser-tool probes.

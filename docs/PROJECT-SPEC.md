@@ -6,6 +6,14 @@
 - **Product:** ACh aaPanel Customizer
 - **Primary distribution:** Native, installable aaPanel plugin
 
+> **QA environment policy (Owner, 2026-11-21):** Continue all non-production
+> native development/testing on the **same retained Running VM** recorded in
+> [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+> Never create, replace, stop or delete that VM, or create disposable VM
+> snapshots during development. Existing credentials and sites persist.
+> This operating rule does not widen source compatibility or permit
+> Production rollout. Older multi-VM QA experiments are historical evidence.
+
 ## 1. Mission
 
 Create a native aaPanel plugin through which an administrator can **customize aaPanel itself, its built-in modules, installed plugins, websites, and the services they manage**, without repeatedly reapplying fragile manual edits after new-site creation, plugin changes, or aaPanel upgrades.
