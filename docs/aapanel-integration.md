@@ -162,7 +162,14 @@ If this check does not confirm Login, **do not infer a bad password or an
 identity mismatch from the helper outcome alone**. Check the response code,
 the exact guest/credential binding, current login-page DOM, whether a
 challenge/MFA is present, protected aaPanel Activity and reverse-proxy
-routing. A `browser_session_script` after an *unverified* credential-login
+routing. If the adapter is rejected *before* a login result, retain its
+request/error code and verify its declared call schema, guest/credential UUID
+binding, isolated session ownership, actual form origin and selectors before
+classifying it as a target-wide access block. A single rejected call does
+not prove that the account, runbook or whole Browser capability is unusable.
+Correct a concrete invocation or prerequisite error and retry through the
+same protected adapter; do not bypass an actual platform-policy denial.
+A `browser_session_script` after an *unverified* credential-login
 attempt may itself be rejected; close that isolated session, then use a new
 pre-login diagnostic session for read-only inspection. Never bypass the
 protected login adapter or reset credentials to work around a wrong selector.
