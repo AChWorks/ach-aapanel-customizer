@@ -858,9 +858,17 @@ The native one-click also ensures the official Nginx Helper's two
 administrator-role capabilities (`Nginx Helper | Config` and
 `Nginx Helper | Purge cache`) are present; CLI activation has no
 logged-in WordPress administrator and does not reliably grant them.
-The exact original booleans are journaled before management, checked
-during Connected inspection, and restored on Disconnect. Existing
-pre-upgrade journals are upgraded before changing either capability.
+The original **stored** role entries are journaled with their exact
+absent/false/true states before changes (distinct from WordPress's
+`role_has_cap`-filtered effective grants). A separate WordPress PHP process
+checks both stored grants and effective permissions before reporting Connected,
+and independently verifies exact persisted baseline restoration before
+completing Disconnect. Interrupted writes remain retryable from the saved
+journal, without overwriting the original snapshot. Older journals holding
+only filtered capability booleans cannot reconstruct an earlier stored
+baseline; the first new Connect records the then-current persisted entries,
+and a legacy-only Disconnect leaves those entries unchanged rather than
+blindly granting or deleting role privileges.
 Bridge 0.1.9 maps a valid authenticated, nonce-checked frontend
 `Purge Current Page` through the same generation-bound per-URL
 GET/HEAD selector for HTTP/HTTPS cache keys, including an HTTPS public

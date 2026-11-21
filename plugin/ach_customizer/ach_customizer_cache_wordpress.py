@@ -62,16 +62,28 @@ foreach ($keys as $key) {
 // but activate_plugin() from a site-scoped CLI has no logged-in WP admin.
 $vendor_caps = ['Nginx Helper | Config', 'Nginx Helper | Purge cache'];
 $administrator = get_role('administrator');
-$original_caps = [];
+$stored_caps = $administrator && is_array($administrator->capabilities)
+    ? $administrator->capabilities : [];
+$original_caps_stored = [];
+$effective_caps = [];
 foreach ($vendor_caps as $cap) {
-    $original_caps[$cap] = $administrator ? (bool)$administrator->has_cap($cap) : false;
+    // WP_Role::has_cap() runs the role_has_cap filter, not a storage read.
+    // Preserve absent vs explicitly denied vs granted role entries.
+    $value = array_key_exists($cap, $stored_caps) ? $stored_caps[$cap] : null;
+    if ($value !== null && !is_bool($value)) {
+        fwrite(STDERR, "WordPress administrator capability entry is not boolean\n");
+        exit(19);
+    }
+    $original_caps_stored[$cap] = $value;
+    $effective_caps[$cap] = $administrator ? (bool)$administrator->has_cap($cap) : false;
 }
 $present = [
     'nginx_helper' => is_plugin_active($helper),
     'bridge' => is_plugin_active($bridge),
     'options_present' => get_site_option('rt_wp_nginx_helper_options') !== false,
     'options' => $previous,
-    'admin_caps' => $original_caps,
+    'admin_caps_stored' => $original_caps_stored,
+    'admin_caps_effective' => $effective_caps,
     'constant' => defined('RT_WP_NGINX_HELPER_CACHE_PATH')
         ? RT_WP_NGINX_HELPER_CACHE_PATH : null,
 ];
@@ -97,15 +109,18 @@ if ($input['action'] === 'connect') {
             }
         }
     }
-    // Grant exactly the two capabilities established by the official
-    // Nginx Helper activator; Disconnect restores their original booleans.
+    // Only these two role entries are owned by the connector. A filtered
+    // effective grant is not a persisted role capability.
     foreach ($vendor_caps as $cap) {
-        if (!$administrator->has_cap($cap)) $administrator->add_cap($cap);
-        if (!$administrator->has_cap($cap)) {
+        if ($original_caps_stored[$cap] !== true) $administrator->add_cap($cap);
+        if (($administrator->capabilities[$cap] ?? null) !== true
+            || !$administrator->has_cap($cap)) {
             fwrite(STDERR, "WordPress Nginx Helper admin capability setup failed\n");
             exit(17);
         }
     }
+    // A separate PHP process MUST re-read stored role entries after exit;
+    // WP_Role::add_cap updates memory before writing the database option.
     $existing['cache_method'] = 'enable_fastcgi';
     $existing['purge_method'] = 'unlink_files';
     $existing['enable_purge'] = 1;
@@ -134,16 +149,25 @@ if ($input['action'] === 'restore') {
             deactivate_plugins($plugin);
         }
     }
-    // Previous (0.1.73) journals did not manage role capabilities.
-    // Only a new journal with verified original booleans may restore them.
-    if (array_key_exists('admin_caps', $saved)) {
-        if (!$administrator || !is_array($saved['admin_caps'])) exit(18);
+    // Old journals with only filtered admin_caps booleans cannot establish
+    // the original persistent role state: never replay those guesses.
+    if (array_key_exists('admin_caps_stored', $saved)) {
+        if (!$administrator || !is_array($saved['admin_caps_stored'])) exit(18);
         foreach ($vendor_caps as $cap) {
-            if (!array_key_exists($cap, $saved['admin_caps']) ||
-                !is_bool($saved['admin_caps'][$cap])) exit(18);
-            if ($saved['admin_caps'][$cap]) $administrator->add_cap($cap);
-            else $administrator->remove_cap($cap);
+            if (!array_key_exists($cap, $saved['admin_caps_stored'])) exit(18);
+            $baseline = $saved['admin_caps_stored'][$cap];
+            if ($baseline !== null && !is_bool($baseline)) exit(18);
         }
+        foreach ($vendor_caps as $cap) {
+            $baseline = $saved['admin_caps_stored'][$cap];
+            $current = array_key_exists($cap, $administrator->capabilities)
+                ? $administrator->capabilities[$cap] : null;
+            if ($current === $baseline) continue;
+            if ($baseline === null) $administrator->remove_cap($cap);
+            else $administrator->add_cap($cap, $baseline);
+        }
+        // Persisted role entries are verified by a fresh inspect process
+        // before the native recovery journal can advance.
     }
 }
 $result = [
@@ -634,11 +658,14 @@ def _setup_locked(site, public, *, data_dir):
         version = _active_php(site, data_dir)
 
     original_options = _php(site, version, "inspect")
-    if (record is not None and "admin_caps" not in record.get("previous", {})
-            and isinstance(original_options.get("previous", {}).get("admin_caps"), dict)):
-        # Upgrade an active legacy journal's exact baseline before any newly
-        # managed capability write, so a subsequent Disconnect can undo it.
-        record["previous"]["admin_caps"] = dict(original_options["previous"]["admin_caps"])
+    if (record is not None and "admin_caps_stored" not in record.get("previous", {})
+            and isinstance(original_options.get("previous", {}).get("admin_caps_stored"), dict)):
+        # An old filtered boolean cannot reconstruct a persisted baseline.
+        # For future writes, checkpoint the currently stored role entries.
+        # Never overwrite this snapshot on retry or retroactively replay old
+        # admin_caps values during Restore.
+        record["previous"]["admin_caps_stored"] = dict(
+            original_options["previous"]["admin_caps_stored"])
         _save(site, record, data_dir)
     if record is None:
         patch = _edits(site)
@@ -741,6 +768,17 @@ def _setup_locked(site, public, *, data_dir):
             "WordPress site settings drifted after the PHP reload", record["recovery_id"])
 
     _php(site, record["php"], "connect", expected_cache_path=cache)
+    # Independent PHP bootstrap detects writes that updated the in-memory
+    # WP_Role but did not durably persist its role entries.
+    role_check = _php(site, record["php"], "inspect")
+    persisted = role_check.get("previous", {}).get("admin_caps_stored", {})
+    effective = role_check.get("previous", {}).get("admin_caps_effective", {})
+    if (not isinstance(persisted, dict) or not isinstance(effective, dict)
+            or any(persisted.get(cap) is not True or effective.get(cap) is not True
+                   for cap in ("Nginx Helper | Config", "Nginx Helper | Purge cache"))):
+        raise WordpressCacheError(
+            "wordpress", "Nginx Helper administrator role grants were not persisted and usable",
+            record["recovery_id"])
     manifest = manage_cache("bridge_enable", site, public,
                             approved=True, recovery_id=record["recovery_id"])
     if manifest["state"] != "Provisioned":
@@ -811,10 +849,11 @@ def inspect(site, public, *, data_dir=DATA_DIR):
                     status["options"].get("cache_method") == "enable_fastcgi" and
                     status["options"].get("enable_purge") == 1 and
                     status["options"].get("purge_method") == "unlink_files" and
-                    status.get("previous", {}).get("admin_caps", {}).get(
-                        "Nginx Helper | Config") is True and
-                    status.get("previous", {}).get("admin_caps", {}).get(
-                        "Nginx Helper | Purge cache") is True and
+                    all(
+                        status.get("previous", {}).get("admin_caps_stored", {}).get(cap) is True
+                        and status.get("previous", {}).get("admin_caps_effective", {}).get(cap) is True
+                        for cap in ("Nginx Helper | Config", "Nginx Helper | Purge cache")
+                    ) and
                     bridge_inspect(site, public, _read_managed(site, data_dir)) == "Provisioned"):
                 state = "Connected"
     return {"schema": 1, "state": state, "site_id": site["id"],
@@ -899,6 +938,13 @@ def _restore_locked(site, public, *, data_dir):
         if actual_config != record["wp_old"] or actual_ini != record["ini_old"]:
             raise WordpressCacheError("recovery", "WordPress Restore source changed")
         _php(site, record["php"], "restore", previous=record["previous"])
+        # Do not checkpoint an in-memory-only role write as successful Restore.
+        restored = _php(site, record["php"], "inspect")
+        baseline = record.get("previous", {}).get("admin_caps_stored")
+        if baseline is not None and restored.get("previous", {}).get("admin_caps_stored") != baseline:
+            raise WordpressCacheError(
+                "recovery", "WordPress administrator role capabilities were not durably restored",
+                record["recovery_id"])
         record["phase"] = "restore_wordpress"
         _save(site, record, data_dir)
 
@@ -910,10 +956,15 @@ def _restore_locked(site, public, *, data_dir):
     status = _php(site, record["php"], "inspect")
     if status["options"].get("enable_purge") not in (None, False, 0):
         raise WordpressCacheError("recovery", "Nginx Helper Purge All remains enabled")
-    original_caps = record.get("previous", {}).get("admin_caps")
-    if original_caps is not None and status.get("previous", {}).get("admin_caps") != original_caps:
-        raise WordpressCacheError(
-            "recovery", "WordPress Nginx Helper administrator capabilities were not restored")
+    original_caps = record.get("previous", {}).get("admin_caps_stored")
+    if original_caps is not None and status.get("previous", {}).get("admin_caps_stored") != original_caps:
+        # The previous checkpoint might have been written by an old binary.
+        # Replay only the exact stored snapshot on safe retry.
+        _php(site, record["php"], "restore", previous=record["previous"])
+        status = _php(site, record["php"], "inspect")
+        if status.get("previous", {}).get("admin_caps_stored") != original_caps:
+            raise WordpressCacheError(
+                "recovery", "WordPress Nginx Helper administrator capabilities were not restored")
 
     if current["state"] == "Applied" and record.get("cache_owned", True):
         result = manage_cache("restore", site, public, approved=True,
@@ -925,9 +976,14 @@ def _restore_locked(site, public, *, data_dir):
     # Restored generation is only finalized, never signaled twice.
     record["phase"] = "restored"
     _save(site, record, data_dir)
+    legacy_role_baseline = "admin_caps_stored" not in record.get("previous", {})
     return {"schema": 1, "state": "Restored", "site_id": site["id"],
             "site_key": site["name"], "changed": True,
             "recovery_id": record["recovery_id"],
-            "note": ("Existing operator-owned native Cache was retained."
-                     if not record.get("cache_owned", True) else
-                     "Site-specific WordPress, PHP access and native Cache settings restored.")}
+            "note": (
+                "Legacy capability baseline is unknown: role entries were left unchanged; "
+                "inspect their persisted values manually."
+                if legacy_role_baseline else
+                "Existing operator-owned native Cache was retained."
+                if not record.get("cache_owned", True) else
+                "Site-specific WordPress, PHP access and native Cache settings restored.")}

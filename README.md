@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-21; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.74`); Bridge `0.1.9`. PR #114 merged the prior `0.1.72` implementation | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.75`); Bridge `0.1.9`. PR #114 merged the prior `0.1.72` implementation | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
