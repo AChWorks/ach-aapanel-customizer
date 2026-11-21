@@ -73,7 +73,19 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.81 development source (not released or installed)
+## Native 0.1.82 development source (not released or installed)
+
+The new site-local WordPress controls support manual WP_DEBUG and a real
+system WP-Cron schedule. They revalidate the selected native site's PHP
+assignment, permit only a literal unique wp-config.php setting, provide a
+source-hash-gated Apply and Recovery-ID Restore, preserve unrelated config
+lines, and never adopt a foreign cron task. System Cron is installed before
+disabling WordPress's page-load trigger. The cron task runs as the ordinary
+`www` worker, reports errors through the system logger, and can be removed
+independently of Debug. A disabled/unsupported cron service or ambiguous PHP
+source fails with an actionable reason. This is opt-in per site, not an
+automatic new-site policy; a successful source write alone is not a live
+WordPress application or cron-execution acceptance.
 
 The current feature branch adds conservative read-only WordPress/WooCommerce
 **file-based classification** to website inventory. It does not claim a live

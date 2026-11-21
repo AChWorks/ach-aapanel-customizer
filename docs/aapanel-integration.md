@@ -36,6 +36,39 @@ with site-specific, manually Applied Cache, then Restored that site to its
 original VHost. This **does not** exercise live payments/gateway callbacks,
 every extension, general vendor Purge All or other host topologies.
 
+## WordPress per-site debug and system Cron (manual)
+
+Routing & Nginx uses the same selected native Website ID, document root,
+bindings, and full-primary-admin POST checks as other site operations.
+`Recheck WordPress setting` is read-only; `Apply selected setting` is
+the explicit operator approval and `Restore saved WordPress setting`
+uses the durable site-specific Recovery ID. No automatic policy is created
+on install or when aaPanel adds a site.
+
+**Debug:** a literal single `WP_DEBUG` Boolean in `wp-config.php` may
+be changed or inserted before WordPress bootstrap. It is syntax-checked
+with the actual native PHP CLI before atomic replacement. The backup
+records only the original matched line (if any) in root-owned state; Restore
+removes or replaces the exact managed line and preserves unrelated changes
+elsewhere in the WordPress file. Dynamic/multiple PHP definitions, stale
+site identity, and foreign managed markers are refused. No live PHP setting
+is claimed until the application is separately inspected.
+
+**System WP-Cron:** a unique root-owned `/etc/cron.d/ach-customizer-wp-cron-<site_id>`
+task is created and verified before adding the literal
+`DISABLE_WP_CRON=true` setting. An active system Cron service, verified
+native PHP CLI, WordPress entrypoint and system logger are required.
+The task executes `wp-cron.php` as `www`, logs output via `logger`,
+and uses the operator-selected minute step (cron's minute field restarts
+each hour). A foreign task is never overwritten, and Restore removes
+only the task with the saved byte identity. An interrupted operation keeps
+its root-only Recovery journal; do not blindly reapply. Restoring Debug
+must not remove Cron or erase unrelated administrator config changes.
+These operations do not change WordPress URL/SSL, XML-RPC or Nginx rules.
+
+Exact native installed-runtime checks, Cron execution and the full
+site-identity/peer matrix belong to [QA Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+
 ## Unknown-SNI HTTPS/443 rejection (Owner Option A)
 
 This independent **opt-in** Status Pages operation uses a managed

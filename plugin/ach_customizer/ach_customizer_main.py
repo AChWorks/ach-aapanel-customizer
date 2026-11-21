@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.81'
+WORKER_SOURCE_VERSION = '0.1.82'
 
 _STATE_DIR = DATA_DIR
 
@@ -83,7 +83,8 @@ class ach_customizer_main:
             cache_recovery = (module == "websites" and
                               action in ("manage_cache_policy", "cache_manage",
                                          "manage_nginx_protection", "nginx_guard_manage",
-                                         "manage_abusive_scan", "abusive_scan_manage"))
+                                         "manage_abusive_scan", "abusive_scan_manage",
+                                         "wp_settings_manage", "wp_settings_uncertain"))
             hosts_recovery = (module == "websites" and
                               action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
@@ -177,7 +178,7 @@ class ach_customizer_main:
             response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "abusive_scan_", "wordpress_cache_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "abusive_scan_", "wordpress_cache_", "wp_settings_")) else
                   "lifecycle" if stage.startswith("wp_terminal_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
@@ -1358,6 +1359,85 @@ class ach_customizer_main:
             return self._fail("wordpress_cache_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("wordpress_cache_setup", exc, request_id)
+
+    def wp_settings_manage(self, args):
+        """One selected WordPress site's debug or system scheduler policy."""
+        request_id = uuid4().hex
+        action = self._argument(args, "settings_action")
+        target = ""
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            if action not in ("recheck", "apply", "restore"):
+                raise MonitorInputError("Unsupported WordPress settings action")
+            if action != "recheck" and self._argument(args, "approved") != "true":
+                raise MonitorInputError("Click Apply or Restore to authorize this exact website change")
+            import public
+            if public.get_webserver() != "nginx":
+                raise MonitorInputError("WordPress settings adapter requires native Nginx site attribution")
+            from ach_customizer_cache_wordpress import _site_lock
+            from ach_customizer_wp_settings import manage, WPSettingsError
+            from ach_customizer_state import _open_state_dir
+            from ach_customizer_status_pages import _take_lock
+            kind = self._argument(args, "settings_kind")
+            desired = self._argument(args, "desired")
+            raw_interval = self._argument(args, "interval")
+            if kind == "cron":
+                if (not isinstance(raw_interval, str) or
+                        not re.fullmatch(r"[1-9][0-9]?", raw_interval)):
+                    raise MonitorInputError("Select a valid system Cron minute step")
+                interval = int(raw_interval)
+            elif kind == "debug":
+                interval = None
+            else:
+                raise MonitorInputError("Unsupported WordPress setting")
+            public, before, current_site = self._selected_native_website(args)
+            target = str(before["id"])
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                # Match the established WordPress Cache lock order: first
+                # selected-site, then the shared settings/recovery lock.
+                # Inverting the order can deadlock Cache setup/Restore.
+                with _site_lock(before, _STATE_DIR):
+                    lock = _take_lock(fd)
+                    try:
+                        if current_site() != before:
+                            raise WPSettingsError("concurrency", "Native site changed before WordPress settings action")
+                        result = manage(
+                            action, kind, before, public,
+                            desired=desired, interval=interval, data_fd=fd,
+                            expected_source=self._argument(args, "expected_source_sha256"),
+                            expected_recovery=self._argument(args, "expected_recovery_id"),
+                        )
+                        if current_site() != before:
+                            raise WPSettingsError(
+                                "uncertain", "Native site identity changed during WordPress settings action",
+                                result.get("recovery_id"))
+                    finally:
+                        os.close(lock)
+            finally:
+                os.close(fd)
+            return self._activity_result(
+                {"status": True, "request_id": request_id,
+                 "settings_action": action, **result},
+                "websites", "wp_settings_manage", target=target,
+                level="WARNING" if result["state"] in (
+                    "Recovery Required", "Drift", "Conflict") else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("wp_settings_authorization", exc, request_id, target=target)
+        except MonitorInputError as exc:
+            return self._fail("wp_settings_preflight", exc, request_id, target=target)
+        except Exception as exc:
+            from ach_customizer_wp_settings import WPSettingsError
+            if isinstance(exc, WPSettingsError):
+                response = self._fail("wp_settings_" + exc.stage,
+                                      str(exc), request_id,
+                                      diagnostic_error=exc, target=target)
+                if exc.stage in ("uncertain", "recovery"):
+                    response["recovery_required"] = True
+                return response
+            return self._fail("wp_settings_unexpected", exc, request_id, target=target)
 
     def fpm_policy_get(self, args):
         """Read operator-saved shared PHP intent, not a live/runtime verdict."""

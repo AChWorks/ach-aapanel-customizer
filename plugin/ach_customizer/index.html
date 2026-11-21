@@ -623,6 +623,30 @@
           <p id="ach-scan-orphan-result" class="ach-status-metadata" role="status" aria-live="polite">Check for recovery journals after a website is removed.</p>
         </div>
       </div>
+      <div class="ach-note" aria-label="Selected WordPress operational settings">
+        <strong>Selected WordPress — debug and system WP-Cron (manual)</strong>
+        <p>Select a native website above. Recheck reads the site's exact WordPress source; Apply changes only one verified <code>wp-config.php</code> constant. A system WP-Cron choice also creates a root-owned cron task executing the site's own PHP, without disabling the built-in trigger until the system task is installed. A real running system cron service is required. Restore removes only the plugin-owned line and Cron task, preserving unrelated edits. Custom/dynamic WordPress defines or an existing foreign task need review rather than adoption. No setting is auto-enabled.</p>
+        <div class="ach-controls">
+          <label for="ach-wp-settings-kind">Operation</label>
+          <select id="ach-wp-settings-kind">
+            <option value="debug">WordPress debug mode</option>
+            <option value="cron">System WP-Cron scheduler</option>
+          </select>
+          <label for="ach-wp-settings-debug">WP_DEBUG</label>
+          <select id="ach-wp-settings-debug"><option value="true">Enable</option><option value="false" selected>Disable</option></select>
+          <label for="ach-wp-settings-interval">Cron minute step (resets hourly)</label>
+          <input id="ach-wp-settings-interval" type="number" min="1" max="59" step="1" value="5" disabled />
+        </div>
+        <div class="ach-controls">
+          <button type="button" id="ach-wp-settings-recheck" disabled>Recheck WordPress setting</button>
+          <button type="button" id="ach-wp-settings-apply" class="btn btn-warning" disabled>Apply selected setting</button>
+          <button type="button" id="ach-wp-settings-restore" class="btn btn-warning" disabled>Restore saved WordPress setting</button>
+        </div>
+        <p id="ach-wp-settings-why" class="ach-availability" data-state="blocked" role="status">Choose a native website and Recheck. No WordPress file has been modified.</p>
+        <details class="ach-technical-report"><summary>WordPress setting and Recovery evidence</summary>
+          <p id="ach-wp-settings-result" class="ach-status-metadata" role="status" aria-live="polite">No WordPress settings source inspected.</p>
+        </details>
+      </div>
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
       <h4>FastCGI Cache</h4>
@@ -948,7 +972,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.81'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.82'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -969,6 +993,7 @@
   var fpmPolicyKeys = ['pm.max_children','pm.start_servers','pm.min_spare_servers',
                        'pm.max_spare_servers','pm.max_requests'];
   var fpmActivePrepareTicket = 0;
+  var wpSettingsBusy = false, wpSettingsEvidence = null, wpSettingsTicket = 0;
   var statusBusy = false, statusReadBusy = false;
   var statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSavedBrand = null;
@@ -1138,7 +1163,7 @@
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'manage_nginx_protection' || method === 'wp_terminal_manage' || method === 'status_manage' || method === 'status_defaults' ||
-      method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'status_inspect' ||
+      method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'status_inspect' || method === 'wp_settings_manage' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
       method === 'fpm_policy_save' || method === 'fpm_auto_manage' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection' || method === 'manage_abusive_scan';
   }
@@ -1211,10 +1236,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|tls|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|tls|stopped)|wp_settings_manage|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'wp_settings_manage' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -1258,6 +1283,7 @@
                method === 'status_defaults' && data.default_action !== 'recheck' ||
                method === 'status_unbound' && data.unbound_action !== 'recheck' ||
                method === 'status_tls' && data.tls_action !== 'recheck' ||
+               method === 'wp_settings_manage' && data.settings_action !== 'recheck' ||
                method === 'status_stopped' && data.stopped_action !== 'recheck' ||
                method === 'fpm_policy_save' || method === 'fpm_auto_manage')) ?
               (method === 'fpm_policy_save' ?
@@ -2062,6 +2088,122 @@
     });
   });
 
+  function wpSettingsSelection() {
+    var id = hostsSiteId(), site = id && hostsPageSites.get(id);
+    var kind = root.find('#ach-wp-settings-kind').val();
+    var desired = kind === 'debug' ? root.find('#ach-wp-settings-debug').val() : 'true';
+    var interval = kind === 'cron' ? String(root.find('#ach-wp-settings-interval').val()) : '';
+    if (!site || !['debug','cron'].includes(kind) ||
+        kind === 'debug' && !['true','false'].includes(desired) ||
+        kind === 'cron' && (!/^[1-9][0-9]?$/.test(interval) || Number(interval)>59))
+      return null;
+    return {id:id,site:site,kind:kind,desired:desired,interval:interval,
+      key:JSON.stringify([id,site.name,site.snapshot,kind,desired,interval])};
+  }
+  function wpSettingsLock() {
+    var selected = wpSettingsSelection();
+    var locked = wpSettingsBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable';
+    var match = selected && wpSettingsEvidence &&
+      wpSettingsEvidence.selection === selected.key;
+    root.find('#ach-wp-settings-recheck').prop('disabled', locked || !selected);
+    root.find('#ach-wp-settings-apply').prop('disabled',
+      locked || !match || !['Source Ready','Restored'].includes(wpSettingsEvidence.state));
+    root.find('#ach-wp-settings-restore').prop('disabled',
+      locked || !match || !['Applied','Recovery Required'].includes(wpSettingsEvidence.state) ||
+      !wpSettingsEvidence.recovery);
+    root.find('#ach-wp-settings-debug').prop('disabled', wpSettingsBusy ||
+      root.find('#ach-wp-settings-kind').val() !== 'debug');
+    root.find('#ach-wp-settings-interval').prop('disabled', wpSettingsBusy ||
+      root.find('#ach-wp-settings-kind').val() !== 'cron');
+    root.find('#ach-wp-settings-kind').prop('disabled', wpSettingsBusy);
+    explainGate('ach-wp-settings-why', match && !locked ? 'ready' : 'blocked',
+      wpSettingsBusy ? 'WordPress source operation running; inspect the result before another action.' :
+      !selected ? 'Select a verified native website, an operation and valid value/interval.' :
+      !match ? 'Recheck the selected WordPress setting. Apply and Restore require fresh source/recovery evidence.' :
+      wpSettingsEvidence.state === 'Source Ready' ?
+      'Ready: Apply changes exactly one managed WordPress setting. For system Cron the scheduled task runs as www.' :
+      wpSettingsEvidence.state === 'Applied' || wpSettingsEvidence.state === 'Recovery Required' ?
+      'Saved Recovery ID available. Restore reverts only the owned setting and matching Cron task.' :
+      wpSettingsEvidence.state === 'Restored' ? 'Previous owned setting restored. Apply is available after Recheck.' :
+      'No compatible change is available. Review reported source and state.');
+  }
+  function wpSettingsInvalidate() {
+    ++wpSettingsTicket;
+    wpSettingsEvidence = null;
+    root.find('#ach-wp-settings-result').text('Selection or source changed. Recheck before WordPress Apply/Restore.');
+    wpSettingsLock();
+  }
+  function validWpSettingsResponse(r, action, selection) {
+    var sha=function(v){ return typeof v==='string' && /^[0-9a-f]{64}$/.test(v); };
+    var id=function(v){ return typeof v==='string' && /^[0-9a-f]{32}$/.test(v); };
+    if (!r || r.status!==true || r.schema!==1 || r.settings_action!==action ||
+        r.site_id!==Number(selection.id) || r.site_key!==selection.site.name ||
+        r.kind!==selection.kind || !sha(r.source_sha256) ||
+        r.recovery_id!==null && !id(r.recovery_id) ||
+        typeof r.changed!=='boolean' || r.read_only!==(action==='recheck') ||
+        typeof r.runtime_verified!=='boolean' || typeof r.reason!=='string' ||
+        typeof r.impact!=='string' || !r.impact.startsWith('Selected WordPress wp-config.php setting only') ||
+        !['Source Ready','Already Configured','Conflict','Applied','Restored','Drift','Recovery Required'].includes(r.state) ||
+        (r.interval!==null && !(Number.isSafeInteger(r.interval)&&r.interval>=1&&r.interval<=59)))
+      return false;
+    return action==='recheck' ? !r.changed :
+      action==='apply' ? r.state==='Applied' && r.changed && id(r.recovery_id) :
+      r.state==='Restored' && r.changed && id(r.recovery_id);
+  }
+  function wpSettingsRequest(action) {
+    var selected = wpSettingsSelection(), previous = wpSettingsEvidence;
+    if (wpSettingsBusy || !selected || hostsBusy || siteBusy || websitePolicyState !== 'stable')
+      return;
+    if (action!=='recheck' &&
+        (!previous || previous.selection!==selected.key ||
+          (action==='apply' && !['Source Ready','Restored'].includes(previous.state)) ||
+          (action==='restore' && (!previous.recovery ||
+           !['Applied','Recovery Required'].includes(previous.state))))) return;
+    var ticket=++wpSettingsTicket;
+    wpSettingsEvidence=null;
+    wpSettingsBusy=true;
+    root.find('#ach-wp-settings-result').text('Checking selected WordPress source and saved recovery...');
+    wpSettingsLock();
+    request('wp_settings_manage', {
+      settings_action:action,settings_kind:selected.kind,desired:selected.desired,
+      interval:selected.interval, site_id:selected.id,
+      expected_site_key:selected.site.name,
+      expected_site_snapshot:selected.site.snapshot,
+      expected_source_sha256:previous ? previous.source : '',
+      expected_recovery_id:previous ? previous.recovery : '',
+      approved:action==='recheck' ? 'false' : 'true'
+    },function(r, failure) {
+      if (ticket!==wpSettingsTicket) return;
+      wpSettingsBusy=false;
+      if (!wpSettingsSelection() || wpSettingsSelection().key!==selected.key ||
+          !validWpSettingsResponse(r,action,selected) ||
+          (action==='apply' && r.source_sha256===previous.source) ||
+          (action==='restore' && r.recovery_id!==previous.recovery)) {
+        root.find('#ach-wp-settings-result').text(
+          statusBackendFailure(action, failure, action==='recheck' ?
+            'WordPress setting inspection not confirmed. No change requested.' :
+            'WordPress write outcome uncertain. Recheck saved Recovery before retrying.'));
+      } else {
+        if (action==='recheck')
+          wpSettingsEvidence={selection:selected.key,state:r.state,source:r.source_sha256,
+                              recovery:r.recovery_id};
+        root.find('#ach-wp-settings-result').text(
+          r.state + (r.changed ? ' — source changed' : ' — no change') +
+          '\nSource SHA-256: '+r.source_sha256+
+          '\nRecovery ID: '+(r.recovery_id||'None')+
+          '\nOperation ID: '+(r.request_id||'None')+
+          '\nRuntime verified: '+(r.runtime_verified?'Yes':'Source-only; run functional QA')+
+          (r.reason?'\nReason: '+r.reason:'')+
+          '\n'+r.impact);
+      }
+      wpSettingsLock();
+    });
+  }
+  root.find('#ach-wp-settings-kind, #ach-wp-settings-debug, #ach-wp-settings-interval')
+    .on('input change', wpSettingsInvalidate);
+  root.find('#ach-wp-settings-recheck').on('click',function(){wpSettingsRequest('recheck');});
+  root.find('#ach-wp-settings-apply').on('click',function(){wpSettingsRequest('apply');});
+  root.find('#ach-wp-settings-restore').on('click',function(){wpSettingsRequest('restore');});
   function nativeHostsSnapshot(site) {
     var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
     bindings.sort(function (a, b) {
@@ -2113,6 +2255,7 @@
     cacheLock();
   }
   function resetHostsSelection(message) {
+    wpSettingsInvalidate();
     hostsManageReset();
     ++hostsTicket; // Supersede an in-flight inspection on page/navigation changes.
     hostsBusy = false;
@@ -2125,6 +2268,7 @@
     hostsLock(false);
   }
   function updateHostsSiteChoices(sites) {
+    wpSettingsInvalidate();
     hostsManageReset();
     var select = root.find('#ach-hosts-site-id').empty().val('');
     $('<option>').val('').text(sites.length ? 'Select a website on this page' : 'No websites on this page').appendTo(select);
@@ -2177,6 +2321,7 @@
       (r.state !== 'Needs Review' || r.uninspected_wildcards.length > 0);
   }
   root.find('#ach-hosts-site-id').on('input change', function () {
+    wpSettingsInvalidate();
     hostsManageReset();
     ++hostsTicket;
     root.find('#ach-hosts-result').text('Site selection changed; recheck.');

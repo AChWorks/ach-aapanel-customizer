@@ -83,6 +83,9 @@ function loadUi() {
     '#ach-bridge-inspect', '#ach-bridge-result', '#ach-bridge-why',
     '#ach-bridge-enable', '#ach-bridge-disable',
     '#ach-wp-cache-inspect', '#ach-wp-cache-setup', '#ach-wp-cache-restore', '#ach-wp-cache-result',
+    '#ach-wp-settings-kind', '#ach-wp-settings-debug', '#ach-wp-settings-interval',
+    '#ach-wp-settings-recheck', '#ach-wp-settings-apply', '#ach-wp-settings-restore',
+    '#ach-wp-settings-why', '#ach-wp-settings-result',
     '#ach-vhost-inspect-button', '#ach-vhost-result',
     '#ach-reconcile-button', '#ach-reconcile-result',
     '#ach-reconcile-to-websites', '#ach-reconcile-to-cache',
@@ -159,6 +162,8 @@ function loadUi() {
   for (const [selector, val] of [
     ['#ach-status-template','404'], ['#ach-status-locale','en'],
     ['#ach-status-scope','global'], ['#ach-status-site-id',''], ['#ach-status-delivery','extension'],
+    ['#ach-wp-settings-kind','debug'], ['#ach-wp-settings-debug','false'],
+    ['#ach-wp-settings-interval','5'],
     ['#ach-activity-level',''], ['#ach-activity-module','']
   ]) elements.get(selector).props.value = val;
   const controls = [
@@ -175,6 +180,8 @@ function loadUi() {
                     '#ach-wp-terminal-restore','#ach-wp-terminal-recheck','#ach-wp-terminal-abandon',
                     '#ach-wp-terminal-restore-reviewed'])
     elements.get(id).props.disabled = true;
+  for (const key of ['#ach-wp-settings-recheck','#ach-wp-settings-apply','#ach-wp-settings-restore'])
+    elements.get(key).props.disabled = true;
   elements.get('#ach-cache-url-path').props.value = '/';
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
@@ -487,6 +494,10 @@ function loadUi() {
       defaultSourceRecheckDisabled: elements.get('#ach-status-default-recheck').props.disabled,
       defaultSourceApplyDisabled: elements.get('#ach-status-default-apply').props.disabled,
       defaultSourceRestoreDisabled: elements.get('#ach-status-default-restore').props.disabled,
+      wpSettingsResult: elements.get('#ach-wp-settings-result').textContent,
+      wpSettingsRecheckDisabled: elements.get('#ach-wp-settings-recheck').props.disabled,
+      wpSettingsApplyDisabled: elements.get('#ach-wp-settings-apply').props.disabled,
+      wpSettingsRestoreDisabled: elements.get('#ach-wp-settings-restore').props.disabled,
       unboundResult: elements.get('#ach-status-unbound-result').textContent,
       tlsResult: elements.get('#ach-status-tls-result').textContent,
       tlsRecheckDisabled: elements.get('#ach-status-tls-recheck').props.disabled,
@@ -1851,6 +1862,75 @@ function selectHostsSite(ui, id='7', inventory=hostsInventory()) {
   ui.respond(inventory);
   ui.statusSetValue('#ach-hosts-site-id',id,'input change');
 }
+
+function wpSettingsReply(action, kind='debug', state='Source Ready', fields={}) {
+  const changed=action!=='recheck';
+  return {
+    status:true,schema:1,site_id:7,site_key:'site.test',settings_action:action,
+    kind,state,source_sha256:changed?'b'.repeat(64):'a'.repeat(64),
+    recovery_id:['Applied','Recovery Required','Restored'].includes(state)?'c'.repeat(32):null,
+    changed,read_only:!changed,runtime_verified:false,
+    interval:kind==='cron'?5:null,reason:'',
+    impact:'Selected WordPress wp-config.php setting only' +
+      (kind==='cron' ? ' plus a root-owned site-specific /etc/cron.d scheduler' : ''),
+    request_id:'d'.repeat(32), ...fields
+  };
+}
+
+test('selected WordPress debug uses fresh native site identity and exact source before Apply', () => {
+  const ui=loadUi();
+  assert.equal(ui.state().wpSettingsRecheckDisabled,true);
+  selectHostsSite(ui);
+  assert.equal(ui.state().wpSettingsRecheckDisabled,false);
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  ui.statusSetValue('#ach-wp-settings-debug','true','input change');
+  const read=ui.statusClick('#ach-wp-settings-recheck');
+  assert.match(read.options.url,/s=wp_settings_manage$/);
+  assert.equal(read.options.data.settings_action,'recheck');
+  assert.equal(read.options.data.settings_kind,'debug');
+  assert.equal(read.options.data.desired,'true');
+  assert.ok(read.options.data.expected_site_snapshot.startsWith('[7,' ));
+  read.respond(wpSettingsReply('recheck'));
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
+  const apply=ui.statusClick('#ach-wp-settings-apply');
+  assert.equal(apply.options.data.approved,'true');
+  assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
+  apply.respond(wpSettingsReply('apply','debug','Applied'));
+  assert.match(ui.state().wpSettingsResult,/Recovery ID:/);
+  const recover=ui.statusClick('#ach-wp-settings-recheck');
+  recover.respond(wpSettingsReply('recheck','debug','Applied'));
+  assert.equal(ui.state().wpSettingsRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-wp-settings-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
+  restore.respond(wpSettingsReply('restore','debug','Restored'));
+  assert.match(ui.state().wpSettingsResult,/Restored/);
+});
+
+test('system Cron interval, changed site and source uncertainty never reuse obsolete approvals', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusSetValue('#ach-wp-settings-kind','cron','input change');
+  ui.statusSetValue('#ach-wp-settings-interval','5','input change');
+  const read=ui.statusClick('#ach-wp-settings-recheck');
+  assert.equal(read.options.data.settings_kind,'cron');
+  assert.equal(read.options.data.interval,'5');
+  read.respond(wpSettingsReply('recheck','cron'));
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
+  ui.statusSetValue('#ach-wp-settings-interval','7','input change');
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  ui.statusSetValue('#ach-wp-settings-interval','5','input change');
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  const fresh=ui.statusClick('#ach-wp-settings-recheck');
+  fresh.respond(wpSettingsReply('recheck','cron'));
+  const apply=ui.statusClick('#ach-wp-settings-apply');
+  apply.reject({},'timeout');
+  assert.match(ui.state().wpSettingsResult,/outcome uncertain/i);
+  assert.equal(ui.state().wpSettingsRestoreDisabled,true);
+  const recovery=ui.statusClick('#ach-wp-settings-recheck');
+  recovery.respond(wpSettingsReply('recheck','cron','Recovery Required'));
+  assert.equal(ui.state().wpSettingsRestoreDisabled,false);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.equal(ui.state().wpSettingsRestoreDisabled,true);
+});
 
 test('101, 135 and 1001 native domains stay selectable and reach complete read-only tools', () => {
   for (const count of [101,135,1001]) {

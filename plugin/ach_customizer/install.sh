@@ -94,6 +94,8 @@ case "${1:-}" in
         echo 'ACh aaPanel Customizer: existing PHP-FPM settings may include previously applied changes; uninstall does not revert them'
         echo 'ACh aaPanel Customizer: applied website Status Pages extensions, Nginx assets and recovery journals are preserved; Restore explicitly before uninstall if needed'
         echo 'ACh aaPanel Customizer: any previously applied global HTTP/80 unbound default-server and recovery journal are preserved; Restore explicitly before uninstall if needed'
+        echo 'ACh aaPanel Customizer: any manually Applied unknown-SNI HTTPS/443 policy and saved recovery are preserved; Restore explicitly before uninstall if needed'
+        echo 'ACh aaPanel Customizer: any manually Applied WordPress Debug and system WP-Cron setting/cron task are preserved to keep site scheduling; Restore explicitly before uninstall if needed'
         echo 'ACh aaPanel Customizer: persistent operator state and recovery records are preserved'
         echo 'ACh aaPanel Customizer: reinstall the plugin or follow documented supervised recovery to restore earlier PHP-FPM settings'
         ;;
