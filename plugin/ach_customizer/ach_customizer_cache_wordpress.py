@@ -30,6 +30,10 @@ WP_CONSTANT = re.compile(
     rb"(?m)^([ \t]*define\([ \t]*['\"]RT_WP_NGINX_HELPER_CACHE_PATH['\"][ \t]*,"
     rb"[ \t]*['\"])([^'\"\r\n]+)(['\"][ \t]*\);[ \t]*\r?\n?)$")
 BASEDIR = re.compile(rb"(?m)^(open_basedir=)([^\r\n]*)(\r?\n|$)")
+WP_CONSTANT_NAME = b"RT_WP_NGINX_HELPER_CACHE_PATH"
+WP_BOOTSTRAP = re.compile(
+    rb"(?m)^[ \t]*require_once[ \t]+ABSPATH[ \t]*\.[ \t]*"
+    rb"['\"]wp-settings\.php['\"][ \t]*;[ \t]*(?:\r?\n|$)")
 # The site path and cache path are not user-supplied filesystem authorities.
 PHP_BRIDGE = r'''
 define('WP_ADMIN', true);
@@ -320,18 +324,48 @@ def _immutable(path):
     return "i" in flags
 
 
+def _replace_wp_constant(config, value):
+    """Set the one simple Helper constant, or undo our absent-source insert.
+
+    A pristine native WordPress site has no Helper constant. Insert it before
+    the actual WordPress bootstrap, never require an operator to edit paths.
+    The journal stores a None original so Disconnect removes just that line.
+    """
+    matches = list(WP_CONSTANT.finditer(config))
+    if len(matches) > 1 or (not matches and WP_CONSTANT_NAME in config):
+        raise WordpressCacheError(
+            "compatibility", "Complex or repeated Nginx Helper cache constant needs review")
+    if matches:
+        match = matches[0]
+        if value is None:
+            end = match.end()
+            if config[end:end + 2] == b"\r\n":
+                end += 2
+            elif config[end:end + 1] == b"\n":
+                end += 1
+            return config[:match.start()] + config[end:]
+        return (config[:match.start(2)] + value.encode("utf-8") +
+                config[match.end(2):])
+    if value is None:
+        return config
+    anchors = list(WP_BOOTSTRAP.finditer(config))
+    if len(anchors) != 1:
+        raise WordpressCacheError(
+            "compatibility", "Cannot locate the unique WordPress bootstrap in wp-config.php")
+    position = anchors[0].start()
+    newline = b"\r\n" if anchors[0].group(0).endswith(b"\r\n") else b"\n"
+    line = b"define('RT_WP_NGINX_HELPER_CACHE_PATH', '" + value.encode("utf-8") + b"');" + newline
+    return config[:position] + line + config[position:]
+
+
 def _edits(site, original=None):
     root = site["path"]
     cache = CACHE_ROOT + "/site-" + str(site["id"])
     config, _ = _read_file(root, WORDPRESS_CONFIG)
-    matches = list(WP_CONSTANT.finditer(config))
-    if len(matches) != 1:
-        raise WordpressCacheError("compatibility", "Expected one simple Nginx Helper cache-path constant in wp-config.php")
-    existing = matches[0].group(2).decode("utf-8")
-    if existing not in (cache, "/www/server/fastcgi_cache"):
+    existing = _extract_constant(config, allow_absent=True)
+    if existing is not None and existing not in (cache, "/www/server/fastcgi_cache"):
         raise WordpressCacheError("compatibility", "WordPress uses a custom Nginx Helper cache path; review before changing")
-    config_after = (config[:matches[0].start(2)] + cache.encode() +
-                    config[matches[0].end(2):])
+    config_after = _replace_wp_constant(config, cache)
     ini, _ = _read_file(root, USER_INI)
     base = list(BASEDIR.finditer(ini))
     if len(base) != 1:
@@ -468,7 +502,7 @@ def _source_values(site, record):
     old_config = record["wp_old"]
     old_ini = record["ini_old"]
     connected_ini = _connected_ini(record, cache)
-    actual_config = _extract_constant(config)
+    actual_config = _extract_constant(config, allow_absent=record["wp_old"] is None)
     actual_ini = _extract_basedir(ini)
     if actual_config not in (old_config, cache):
         raise WordpressCacheError(
@@ -539,7 +573,7 @@ def _setup_locked(site, public, *, data_dir):
                 _native_generation(site, data_dir, cache_status)
                 if cache_status["state"] == "Applied" else None),
             "pending_generation": None,
-            "wp_old": _extract_constant(patch["wp_before"]),
+            "wp_old": _extract_constant(patch["wp_before"], allow_absent=True),
             "ini_old": _extract_basedir(patch["ini_before"]),
             "ini_immutable": patch["ini_immutable"],
             "cache_owned": cache_status["state"] != "Applied",
@@ -598,7 +632,7 @@ def _setup_locked(site, public, *, data_dir):
             record["phase"] = "configuring"
             _save(site, record, data_dir)
         changed_config = _replace_file(
-            root, WORDPRESS_CONFIG, config, _replace_value(config, WP_CONSTANT, cache))
+            root, WORDPRESS_CONFIG, config, _replace_wp_constant(config, cache))
         changed_ini = _replace_file(
             root, USER_INI, ini, _replace_value(ini, BASEDIR, connected_ini),
             immutable=record["ini_immutable"])
@@ -644,8 +678,10 @@ def _active_php(site, data_dir):
     return record["php_version"]
 
 
-def _extract_constant(content):
+def _extract_constant(content, *, allow_absent=False):
     matches = list(WP_CONSTANT.finditer(content))
+    if not matches and allow_absent and WP_CONSTANT_NAME not in content:
+        return None
     if len(matches) != 1:
         raise WordpressCacheError("recovery", "WordPress cache-path constant changed")
     return matches[0].group(2).decode("utf-8")
@@ -754,7 +790,7 @@ def _restore_locked(site, public, *, data_dir):
         # The exact two allowed values were checked before the first write.
         changed_config = _replace_file(
             site["path"], WORDPRESS_CONFIG, config,
-            _replace_value(config, WP_CONSTANT, record["wp_old"]))
+            _replace_wp_constant(config, record["wp_old"]))
         changed_ini = _replace_file(
             site["path"], USER_INI, ini,
             _replace_value(ini, BASEDIR, record["ini_old"]),
