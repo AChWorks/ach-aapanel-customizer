@@ -174,10 +174,15 @@ def _bootstrap_site_extension(site):
     line = _site_extension_line(site)
     if raw.count(line) == 1:
         return False
-    marker = re.compile(rb"(?m)^[ \t]*#PHP-INFO-START[^\r\n]*\r?\n")
-    positions = list(marker.finditer(raw))
+    # Place the include immediately after the native site's own root line,
+    # exactly as aaPanel regenerates it. Inserting before PHP instead can
+    # leave a Restored Cache journal with spurious drift on regeneration.
+    root = re.compile(rb"(?m)^[ \t]*root[ \t]+" +
+                      re.escape(site["path"].encode()) + rb";[ \t]*\r?\n")
+    positions = list(root.finditer(raw))
     if len(positions) != 1:
-        raise WordpressCacheError("compatibility", "Native VHost PHP marker is not unique")
+        raise WordpressCacheError("compatibility",
+            "Registered native WordPress VHost root line is not unique")
     # Do not add the extension when aaPanel has competing extension includes.
     if b"/extension/" in raw or raw.count(b"include enable-php-") != 1:
         raise WordpressCacheError("compatibility", "Native extension source requires review")
@@ -191,7 +196,7 @@ def _bootstrap_site_extension(site):
         site_extension.mkdir(mode=0o755)
     if not site_extension.is_dir():
         raise WordpressCacheError("compatibility", "Native site extension is not a directory")
-    after = raw[:positions[0].start()] + line + raw[positions[0].start():]
+    after = raw[:positions[0].end()] + line + raw[positions[0].end():]
     _replace_file(VHOST_ROOT, site["name"] + ".conf", raw, after)
     # The existing native Cache Apply validates Nginx -t and performs the
     # one necessary reload; no intermediate reload is needed here.

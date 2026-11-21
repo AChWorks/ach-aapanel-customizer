@@ -183,7 +183,8 @@ class WordpressConnectionTests(unittest.TestCase):
         vhost = self.root / "vhosts"
         vhost.mkdir()
         (vhost / "extension").mkdir()
-        original = (b"server\n{\n    listen 80;\n    server_name wp.example.test;\n"
+        original = (b"server\n{\n    listen 80;\n    server_name wp.example.test;\n" +
+                    ("    root " + str(self.site_dir) + ";\n").encode() +
                     b"    #PHP-INFO-START  PHP configuration\n"
                     b"    include enable-php-85-wpfastcgi.conf;\n"
                     b"    #PHP-INFO-END\n}\n")
@@ -196,6 +197,8 @@ class WordpressConnectionTests(unittest.TestCase):
             line = b"    include " + str(vhost / "extension" / "wp.example.test" / "*.conf").encode() + b";\n"
             self.assertEqual(path.read_bytes().count(line), 1)
             self.assertEqual(path.read_bytes().replace(line, b"", 1), original)
+            self.assertLess(path.read_bytes().find(b"root "), path.read_bytes().find(line))
+            self.assertLess(path.read_bytes().find(line), path.read_bytes().find(b"#PHP-INFO-START"))
 
 if __name__ == "__main__":
     unittest.main()

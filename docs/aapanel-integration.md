@@ -920,7 +920,8 @@ a recurring per-post/per-update manual configuration. The original Nginx
 Helper frontend **Purge Current Page** and admin **Purge All** stay in use.
 
 When native aaPanel created a VHost lacking its site extension include,
-the connector adds only that line after the native Cache adapter proves the
+the connector adds only that line immediately after the registered site
+root, matching aaPanel native regeneration, after the Cache adapter proves the
 exact missing-include case. Existing Cache Apply validates/reloads Nginx;
 changing .user.ini reloads the selected PHP-FPM service so site worker
 access takes effect. No vendor Nginx/WordPress plugin source is rewritten.
