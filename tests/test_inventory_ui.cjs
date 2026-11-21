@@ -412,6 +412,9 @@ function loadUi() {
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       guardResult: elements.get('#ach-guard-result').textContent,
+      scanResult: elements.get('#ach-scan-result').textContent,
+      scanApplyDisabled: elements.get('#ach-scan-apply').props.disabled,
+      scanRestoreDisabled: elements.get('#ach-scan-restore').props.disabled,
       guardApplyDisabled: elements.get('#ach-guard-apply').props.disabled,
       guardRestoreDisabled: elements.get('#ach-guard-restore').props.disabled,
       guardPreviewDisabled: elements.get('#ach-guard-preview').props.disabled,
@@ -8689,6 +8692,81 @@ test('One-click WordPress setup refuses stale cross-site backend replies', () =>
   });
   assert.doesNotMatch(ui.state().wpCacheResult,/stale site connected/);
   assert.doesNotMatch(ui.state().wpCacheResult,/WordPress Cache: Connected/);
+});
+
+
+function scannerReport(state='Unmanaged', change={}) {
+  const active=state==='Applied', restored=state==='Restored';
+  return {
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    ruleset:'sensitive-scan-combined-v1',
+    site_id:7,site_key:'site.test',state,
+    reason:'Verified site source and selected native access log',
+    recovery_id:active||restored?'a'.repeat(32):null,
+    journal_phase:active?'applied':restored?'restored':null,
+    runtime_verified:active||restored,changed:false,read_only:true,
+    firewall_scope:'origin_wide_web_ports',log_scope:'selected_native_site',
+    vhost_sha256:'b'.repeat(64),plan_sha256:'c'.repeat(64),
+    log_path:'/www/wwwlogs/site.test.log',
+    ...change
+  };
+}
+
+test('Fail2ban scanner UI uses verified plan and Recovery ID across real site actions',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  let before=ui.requests.length;
+  ui.statusClick('#ach-scan-apply');
+  assert.equal(ui.requests.length,before);
+  const preview=ui.statusClick('#ach-scan-preview');
+  assert.match(preview.options.url,/s=manage_abusive_scan$/);
+  assert.equal(preview.options.data.scan_action,'preview');
+  assert.equal(preview.options.data.site_id,'7');
+  assert.equal(preview.options.data.approved,undefined);
+  preview.respond(scannerReport());
+  const apply=ui.statusClick('#ach-scan-apply');
+  assert.equal(apply.options.data.scan_action,'apply');
+  assert.equal(apply.options.data.expected_plan_sha256,'c'.repeat(64));
+  assert.equal(apply.options.data.approved,'true');
+  assert.equal(apply.options.data.maxretry,'6');
+  assert.equal(apply.options.data.findtime,'120');
+  assert.equal(apply.options.data.bantime,'600');
+  apply.respond(scannerReport('Applied',{
+    changed:true,read_only:false,reason:'Live Fail2ban jail active'
+  }));
+  const check=ui.statusClick('#ach-scan-recheck');
+  check.respond(scannerReport('Applied'));
+  const restore=ui.statusClick('#ach-scan-restore');
+  assert.equal(restore.options.data.scan_action,'restore');
+  assert.equal(restore.options.data.recovery_id,'a'.repeat(32));
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond(scannerReport('Restored',{
+    changed:true,read_only:false,reason:'Jail removed, no running process'
+  }));
+  assert.match(ui.state().scanResult,/State: Restored/);
+  assert.equal(ui.state().scanRestoreDisabled,true);
+  assert.equal(ui.state().scanApplyDisabled,true);
+});
+
+test('Fail2ban scanner UI rejects stale selection, changed policy and malformed restore',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  const pending=ui.statusClick('#ach-scan-preview');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(scannerReport());
+  const count=ui.requests.length;
+  ui.statusClick('#ach-scan-apply');
+  assert.equal(ui.requests.length,count,'cross-site reply must never enable scanner');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-scan-preview').respond(scannerReport());
+  ui.statusSetValue('#ach-scan-maxretry','9','input change');
+  const count2=ui.requests.length;
+  ui.statusClick('#ach-scan-apply');
+  assert.equal(ui.requests.length,count2,'changed retry policy must invalidate preview');
+  ui.statusClick('#ach-scan-recheck').respond(scannerReport('Restored',{
+    recovery_id:null,runtime_verified:false
+  }));
+  const count3=ui.requests.length;
+  ui.statusClick('#ach-scan-restore');
+  assert.equal(ui.requests.length,count3,'invalid restoration cannot authorize action');
 });
 
 function sensitiveGuardResponse(state='Unmanaged', changes={}) {

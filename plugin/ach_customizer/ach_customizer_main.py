@@ -127,6 +127,15 @@ class ach_customizer_main:
                 controlled += (WordpressCacheError,)
             except ImportError:
                 pass
+        if stage == "abusive_scan_manage":
+            # This scanner is intentionally operator-controlled. Report
+            # its typed dependency/ownership/validation failures rather than
+            # hiding actionable causes behind a generic plugin error.
+            try:
+                from ach_customizer_abusive_scan import AbuseError
+                controlled += (AbuseError,)
+            except ImportError:
+                pass
         typed_domain_detail = isinstance(error, str) and diagnostic_error is not None
         if isinstance(error, controlled) or typed_domain_detail:
             message = str(error)[:300]

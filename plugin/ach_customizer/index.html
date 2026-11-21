@@ -2781,7 +2781,12 @@
                   r.state !== (action === 'apply' ? 'Applied' : 'Restored'))) return false;
     if (r.state === 'Applied' && (!r.runtime_verified || !token(r.recovery_id) ||
         r.journal_phase !== 'applied')) return false;
-    if (r.state === 'Unmanaged' && (r.runtime_verified || r.recovery_id !== null)) return false;
+    if (r.state === 'Unmanaged' && (r.runtime_verified ||
+        r.recovery_id !== null || r.journal_phase !== null)) return false;
+    if (r.state === 'Restored' && (!r.runtime_verified || !token(r.recovery_id) ||
+        r.journal_phase !== 'restored')) return false;
+    if (r.state === 'Recovery Required' && (!token(r.recovery_id) ||
+        !['prepared','applied'].includes(r.journal_phase) || r.runtime_verified)) return false;
     return true;
   }
   function scanRequest(action) {
