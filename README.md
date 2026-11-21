@@ -10,8 +10,8 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-21; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Merged source** | `main` native `0.1.72` after [PR #114](https://github.com/AChWorks/ach-aapanel-customizer/pull/114); Bridge `0.1.8` | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
-| **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`, installed native `0.1.69` at the 2026-11-21 check | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
+| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.74`); Bridge `0.1.9`. PR #114 merged the prior `0.1.72` implementation | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
 source manifests, current PR/CI and the target installation before relying on
@@ -49,7 +49,7 @@ HTTP-only WordPress test site**. The later PR #114 remediation passed
 exact-HEAD source, regression and real embedded PHP CLI tests, **not** a
 fresh installed/browser run. In particular, this evidence is from a
 **different, now-removed QA guest**; do not transfer installed acceptance
-to the persistent VM or infer current source is installed there. Neither
+to the persistent VM or infer any newer candidate is loaded and tested there. Neither
 Merge nor QA authorizes public Release or Production.
 The broader open functional work remains in [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2).
 
@@ -66,7 +66,7 @@ The broader open functional work remains in [Issue #2](https://github.com/AChWor
 | **Activity & Logs** | Inspect operation stage, outcome, error and Operation/Recovery IDs for diagnosis and safe reconciliation. |
 
 The separately installed, optional [WordPress Bridge](wordpress/ach-aapanel-bridge/README.md)
-(version `0.1.8` at this checkpoint) defaults to **disconnected**. After
+(source version `0.1.9` at this checkpoint) defaults to **disconnected**. After
 administrator provisioning of a generation-bound manifest it can assist
 Nginx Helper with **eligible per-URL GET/HEAD invalidation**; it does not
 install Nginx Helper, intercept its vendor **Purge All**, or provide a

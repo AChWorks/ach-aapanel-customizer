@@ -33,6 +33,10 @@ final class CacheInvalidation
     {
         if (self::manifest() !== null) {
             \add_filter('rt_nginx_helper_purge_cached_file', [__CLASS__, 'selectFile'], 10, 2);
+            // A public HTTPS URL can be served by an HTTP-origin Nginx worker.
+            // Reconcile only an authorized, nonced toolbar purge through the
+            // same site-owned GET/HEAD, HTTP/HTTPS vendor-file dispatch.
+            \add_filter('rt_nginx_helper_purge_url', [__CLASS__, 'reconcileToolbarPurge'], 10, 1);
             // Gutenberg updates through REST can leave the vendor's canonical
             // homepage response stale. Reconcile only currently cached public
             // post and homepage keys after WordPress finishes persistence.
@@ -551,6 +555,34 @@ final class CacheInvalidation
             return;
         }
         self::purgePublicUrls($urls);
+    }
+
+    /**
+     * Honor the actual Nginx Helper frontend Purge Current Page control
+     * across both cache scheme variants, without a new purger or direct unlink.
+     *
+     * Vendor verifies this same WordPress nonce before invoking purge_url().
+     * Verify it again here because arbitrary plugins can invoke the URL filter
+     * independently of the vendor's action. The active dispatch guard prevents
+     * recursive filter calls while our verified vendor purger runs.
+     */
+    public static function reconcileToolbarPurge($url)
+    {
+        if (!is_string($url) || self::$activeUrlPurge !== null
+            || \is_admin() || ($_SERVER['REQUEST_METHOD'] ?? null) !== 'GET') {
+            return $url;
+        }
+        $action = $_GET['nginx_helper_action'] ?? null;
+        $selection = $_GET['nginx_helper_urls'] ?? null;
+        $nonce = $_GET['_wpnonce'] ?? null;
+        if ($action !== 'purge' || $selection !== 'current-url'
+            || !is_string($nonce) || $nonce === ''
+            || !\current_user_can('Nginx Helper | Purge cache')
+            || !\wp_verify_nonce($nonce, 'nginx_helper-purge_all')) {
+            return $url;
+        }
+        self::purgePublicUrls([$url]);
+        return $url;
     }
 
     /** The vendor callback must never see a guessed path for an invalid URL. */

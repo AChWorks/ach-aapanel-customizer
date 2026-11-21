@@ -13,7 +13,7 @@ unfinished compatibility and acceptance live in
 
 **Owner decision (2026-11-21):** Keep **one persistent Running QA VM** for this project on AI Test Server: `ach-aapanel-qa/aac-native-qa-20261118` (guest UUID and protected credential binding are recorded in [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)). **Do not create, clone, replace, stop or delete it** while development continues, and do not recreate disposable snapshots. The five obsolete QA VMs and all seven surplus snapshots were removed; see the [verified inventory and service checks](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7063214175).
 
-The retained VM has working aaPanel, WordPress, WooCommerce and other test sites. At the 2026-11-21 check its **installed** native Customizer was `0.1.69`, while GitHub `main` source was `0.1.72`; these layers must not be conflated. Make reversible, task-owned fixtures on this VM and protect peer sites. Use the existing `service_access` credential with the verified Browser adapter; avoid resetting passwords, relying on vanished guests, or interpreting an older VM-specific test as new installed acceptance. A disruptive shared-VM fault test without a safe scoped recovery path is **not yet an authorized test**. Production/Release remain separately gated.
+The retained VM has working aaPanel, WordPress, WooCommerce and other test sites. Its native Customizer was originally `0.1.69` and was subsequently upgraded to a byte-verified `0.1.72` QA ZIP; check [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for the latest installed candidate and **separate** resident-worker/browser evidence. Source, installed bytes and loaded runtime must not be conflated. Make reversible, task-owned fixtures on this VM and protect peer sites. Use the existing `service_access` credential with the verified Browser adapter; avoid resetting passwords, relying on vanished guests, or interpreting an older VM-specific test as new installed acceptance. A disruptive shared-VM fault test without a safe scoped recovery path is **not yet an authorized test**. Production/Release remain separately gated.
 
 ## Evidence versus support
 
@@ -162,7 +162,14 @@ If this check does not confirm Login, **do not infer a bad password or an
 identity mismatch from the helper outcome alone**. Check the response code,
 the exact guest/credential binding, current login-page DOM, whether a
 challenge/MFA is present, protected aaPanel Activity and reverse-proxy
-routing. A `browser_session_script` after an *unverified* credential-login
+routing. If the adapter is rejected *before* a login result, retain its
+request/error code and verify its declared call schema, guest/credential UUID
+binding, isolated session ownership, actual form origin and selectors before
+classifying it as a target-wide access block. A single rejected call does
+not prove that the account, runbook or whole Browser capability is unusable.
+Correct a concrete invocation or prerequisite error and retry through the
+same protected adapter; do not bypass an actual platform-policy denial.
+A `browser_session_script` after an *unverified* credential-login
 attempt may itself be rejected; close that isolated session, then use a new
 pre-login diagnostic session for read-only inspection. Never bypass the
 protected login adapter or reset credentials to work around a wrong selector.
@@ -847,6 +854,20 @@ This is **one click per WordPress site**, not an unattended watcher or
 a recurring per-post/per-update manual configuration. The original Nginx
 Helper frontend **Purge Current Page** and admin **Purge All** stay in use.
 
+The native one-click also ensures the official Nginx Helper's two
+administrator-role capabilities (`Nginx Helper | Config` and
+`Nginx Helper | Purge cache`) are present; CLI activation has no
+logged-in WordPress administrator and does not reliably grant them.
+The exact original booleans are journaled before management, checked
+during Connected inspection, and restored on Disconnect. Existing
+pre-upgrade journals are upgraded before changing either capability.
+Bridge 0.1.9 maps a valid authenticated, nonce-checked frontend
+`Purge Current Page` through the same generation-bound per-URL
+GET/HEAD selector for HTTP/HTTPS cache keys, including an HTTPS public
+site backed by an HTTP-origin Nginx worker. Vendor Purge Entire Cache
+remains its own recursion, never intercepted or broadened by Bridge.
+
+
 When native aaPanel created a VHost lacking its site extension include,
 the connector adds only that line immediately after the registered site
 root, matching aaPanel native regeneration, after the Cache adapter proves the
@@ -878,7 +899,7 @@ that original Cache; only the WordPress integration is removed.
 The native **0.1.72 corrective source was merged** in
 [PR #114](https://github.com/AChWorks/ach-aapanel-customizer/pull/114).
 This is **not** a published Release or Production deployment, nor proof
-that the retained persistent QA VM has upgraded from native 0.1.69.
+of any newer candidate's installed/resident status; use [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for current VM evidence.
 
 **Installed-native QA (earlier PR #114 0.1.72 HEAD `eb875fd2932e`):** On isolated aaPanel 8.0.7 /
 WordPress 7.1.5 with official Nginx Helper 2.4.1 and ACh Bridge 0.1.8,
