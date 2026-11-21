@@ -46,6 +46,7 @@ class ScannerTests(unittest.TestCase):
         self.peer.write_text("unchanged")
         self.live = False
         self.fail_reload = False
+        self.daemon = True
         self.calls = []
         self.log_sha = "3" * 64
 
@@ -59,6 +60,9 @@ class ScannerTests(unittest.TestCase):
                 return SimpleNamespace(returncode=1, stdout="", stderr="intentional")
             self.live = (self.jail / "ach-customizer-scan-23.local").exists()
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if argv[1] == "status" and len(argv) == 2:
+            return SimpleNamespace(returncode=0 if self.daemon else 255,
+                stdout="Status" if self.daemon else "", stderr="")
         if argv[1] == "status":
             return SimpleNamespace(returncode=0 if self.live else 255,
                 stdout="Status for the jail: ach-customizer-scan-23" if self.live else "",
@@ -173,6 +177,19 @@ class ScannerTests(unittest.TestCase):
                                 jail_dir=self.jail, vhost_root=self.vhosts,
                                 log_dir=self.log_dir)
         self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+
+    def test_stopped_daemon_never_creates_a_new_jail_or_recovery_state(self):
+        self.daemon = False
+        report = self.execute("preview")
+        self.assertEqual(report["state"], "Dependency Missing")
+        self.assertIn("Start the Fail2ban daemon", report["reason"])
+        with patch.object(scan, "_source_safe", return_value=(self.log_sha, "")):
+            ready_sha = scan.plan(self.site, vhost_root=self.vhosts,
+                                  log_dir=self.log_dir)
+        with self.assertRaisesRegex(scan.AbuseError, "Start the Fail2ban daemon"):
+            self.execute("apply", approved=True, expected_plan=ready_sha)
+        self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+        self.assertFalse((self.data / scan._journal_name(23)).exists())
 
     def test_filter_covers_expected_probes_and_not_generic_paths(self):
         text = scan.FILTER_TEXT

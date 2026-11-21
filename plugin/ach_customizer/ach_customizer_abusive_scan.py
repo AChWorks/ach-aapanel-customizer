@@ -304,6 +304,10 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
                 return {**report, "state": "Dependency Missing",
                         "reason": "Fail2ban configuration invalid or binary unavailable",
                         "plan_sha256": None}
+            if _client(["status"], runner=runner).returncode:
+                return {**report, "state": "Dependency Missing",
+                        "reason": "Start the Fail2ban daemon before enabling scanner protection",
+                        "plan_sha256": None}
         except AbuseError:
             return {**report, "state": "Dependency Missing",
                     "reason": "Install and enable Fail2ban before scanner protection",
@@ -362,6 +366,8 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             raise AbuseError("concurrency", "Scanner readiness changed; preview again")
         if _client(["-t"], runner=runner).returncode:
             raise AbuseError("runtime", "Existing Fail2ban configuration validation failed")
+        if _client(["status"], runner=runner).returncode:
+            raise AbuseError("dependency", "Start the Fail2ban daemon before enabling scanner protection")
         if _site_log(site, vhost_root=vhost_root, log_dir=log_dir) != (vhost_sha, log_path):
             raise AbuseError("concurrency", "Native log/VHost changed since Fail2ban preview")
         new = {
