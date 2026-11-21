@@ -36,6 +36,34 @@ with site-specific, manually Applied Cache, then Restored that site to its
 original VHost. This **does not** exercise live payments/gateway callbacks,
 every extension, general vendor Purge All or other host topologies.
 
+## Unknown-SNI HTTPS/443 rejection (Owner Option A)
+
+This independent **opt-in** Status Pages operation uses a managed
+`00.ach_customizer_unknown_tls.conf` default_server with
+`ssl_reject_handshake on` only for existing Nginx wildcard TCP/443
+listener families (IPv4/IPv6 discovered from the actual loaded source).
+Without a configured HTTPS listener, **Recheck reports Not Applicable and
+Apply cannot create a new listener**. If another default_server, explicit
+address binding, stream/QUIC listener or unverified TLS source conflicts,
+the operator receives an actionable refusal; no foreign source is edited.
+Recheck/Apply/Restore each use the existing primary-admin session, global
+unbound selection, persisted own Recovery ID, source fingerprint, managed
+file ownership and the shared Nginx configuration lock.
+
+Apply compares the previously working default TLS handshake with an
+existing configured website witness on each socket family; after the
+guarded syntax check and reload, an unknown SNI and a connection without
+SNI must be rejected, while the configured witness still negotiates TLS.
+Restore removes only the exact journal-owned configuration and verifies
+the prior handshake behavior, or a confirmed TCP refusal if the entire
+native HTTPS family was removed. Source/CI tests and an installed-browser/
+real TLS check are **distinct** evidence. On errors or uncertain reloads,
+keep the Recovery ID; Recheck before attempting Restore or any retry.
+This module does not affect HTTP/80 Status Pages, issue certificates,
+automate ACME, or change Production until separately authorized.
+Owner acceptance and unresolved installed-native testing: [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
+and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+
 ## Native packaging, identity and lifecycle
 
 The native ZIP is constructed from `plugin/ach_customizer/` by

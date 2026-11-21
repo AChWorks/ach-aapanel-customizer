@@ -303,6 +303,23 @@ The native UI must follow the installed aaPanel visual and interaction conventio
 
 Provide site selectors from validated, paginated aaPanel inventory rather than requiring operators to type raw IDs in routine workflows. Website selection for Status Pages must remain available to a full primary aaPanel administrator even if the optional Website Monitor is disabled: its dedicated, bounded native listing is read-only, independently authorized, and the selected site identity is revalidated by every relevant backend action. The Monitor website inventory keeps its separate enabled/disabled policy. Stale or incompatible inventory replies must never authorize an action. The Status Pages module retains safe offline branding/preview and read-only inspection; each implemented manual delivery/Restore adapter remains separately source-checked, authorized and proven within its supported scope, not assumed available for every target.
 
+### Owner-approved unknown-SNI HTTPS policy (2026-11-22)
+
+The Owner selected **Option A** for global unknown-domain HTTPS/443: reject
+TLS handshakes with an unknown or absent SNI name, not a branded HTTP
+error page or an arbitrary borrowed certificate. This is separately opt-in
+and applies only to already-configured Nginx HTTPS TCP wildcard listener
+families; the plugin never opens port 443, changes certificates or silently
+takes a foreign/default server. Existing named HTTPS hosts, ACME/proxy paths
+and the separate HTTP/80 unknown-Host page must remain intact. If the
+Nginx listener or default ownership cannot be proved, report the concrete
+conflict instead of widening the listener or weakening HTTPS identity.
+Apply/Restore need a fresh source comparison, explicit native administrator
+action, exact recovery record, guarded Nginx test/reload and real known
+versus unknown/no-SNI handshake checks. Code integration and nonproduction
+QA do not authorize public Release or Production rollout. Current
+acceptance and Owner decision are tracked in Issue #10.
+
 The plugin must expose a built-in Activity/Diagnostics view backed by bounded persistent structured log records. Include UTC timestamp, severity, module/action, stage/outcome/error class, target/service identity, correlation ID and relevant recovery reference. Keep useful bounded troubleshooting context without recording session tokens, credentials, request payloads or arbitrary exception messages. Preserve successful operation outcomes if audit persistence fails; surface that failure separately. Diagnose real authorizations, failures and recoveries. Use aaPanel-compatible ownership/permissions, bounded retention and configurable verbosity.
 
 **PHP compatibility:** Discover installed PHP versions and real service

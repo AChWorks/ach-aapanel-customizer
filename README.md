@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-21; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.80`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.81`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -72,6 +72,22 @@ Nginx Helper with **eligible per-URL GET/HEAD invalidation**; it does not
 install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
+
+## Native 0.1.81 development source (not released or installed)
+
+The current feature branch adds conservative read-only WordPress/WooCommerce
+**file-based classification** to website inventory. It does not claim a live
+WordPress bootstrap or WooCommerce activation from files alone; unknown
+and symlinked targets remain Unclassified. The global Status Pages
+**unknown SNI HTTPS/443 Option A** is separately opt-in. It creates an
+owned, recoverable Nginx default TLS rejection policy only when compatible
+HTTPS/443 wildcard listeners already exist, preserving named sites and
+their certificates, with real handshake checks before/after shared reload.
+It does not open a new listener, install a certificate, change HTTP/80
+Status Pages, publish a public Release or authorize Production deployment.
+The retained QA VM has no configured HTTPS/443 listener at the recorded
+baseline; source tests are not real TLS installed acceptance. See [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
+and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 
 ## P0 native 0.1.80 source workflow (not yet publicly released)
 

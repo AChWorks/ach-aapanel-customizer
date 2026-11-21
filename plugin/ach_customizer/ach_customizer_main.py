@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.80'
+WORKER_SOURCE_VERSION = '0.1.81'
 
 _STATE_DIR = DATA_DIR
 
@@ -2372,6 +2372,70 @@ class ach_customizer_main:
             return response
         except Exception as exc:
             return self._fail("status_unbound_unexpected", exc, request_id)
+
+    def status_tls(self, args):
+        """Opt-in unknown-SNI TLS rejection on existing HTTPS/443 sockets only."""
+        request_id = uuid4().hex
+        action = self._argument(args, "tls_action")
+        try:
+            self._status_primary_admin_post()
+            if (self._argument(args, "scope") != "global" or
+                    self._argument(args, "site_id") not in (None, "") or
+                    self._argument(args, "template") != "unbound" or
+                    action not in ("recheck", "apply", "restore")):
+                raise StatusPageError("Select global/unbound for TLS/SNI management")
+            if (action != "recheck" and
+                    self._argument(args, "tls_approval") !=
+                    action + "_global_tls_reject_reload"):
+                raise StatusPageError("Explicit TLS/SNI Nginx reload approval required")
+            import public
+            if public.get_webserver() != "nginx":
+                raise StatusPageError("TLS/SNI rejection requires native Nginx")
+            from ach_customizer_state import _open_state_dir
+            from ach_customizer_status_pages import _take_lock
+            from ach_customizer_status_tls import manage_tls, TLSError
+
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock = _take_lock(fd)
+                try:
+                    result = manage_tls(
+                        action, data_fd=fd,
+                        expected_source=self._argument(args, "expected_source_sha256"),
+                        expected_recovery=self._argument(args, "expected_recovery_id"),
+                    )
+                    if public.get_webserver() != "nginx":
+                        raise TLSError(
+                            "uncertain", "aaPanel web server changed during TLS management",
+                            recovery_id=result.get("recovery_id"),
+                        )
+                finally:
+                    os.close(lock)
+            finally:
+                os.close(fd)
+            response = {
+                "status": True, "request_id": request_id,
+                "operation_id": request_id, "tls_action": action,
+                "scope": "global", "site_id": None, "template": "unbound",
+                **result,
+            }
+            return self._activity_result(
+                response, "status_pages", "status_tls_" + action,
+                target="unknown-sni-https:443",
+                level="WARNING" if result["state"] in (
+                    "Conflict", "Drift", "Needs Review", "Recovery Required"
+                ) else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("status_tls_authorization", exc, request_id)
+        except StatusPageError as exc:
+            stage = getattr(exc, "stage", "preflight")
+            response = self._fail("status_tls_" + str(stage), exc, request_id)
+            if stage in ("uncertain", "postcheck", "recovery"):
+                response["recovery_required"] = True
+            return response
+        except Exception as exc:
+            return self._fail("status_tls_unexpected", exc, request_id)
 
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""

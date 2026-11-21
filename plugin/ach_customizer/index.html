@@ -787,7 +787,7 @@
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
       <h4>Status Pages · Branding &amp; delivery</h4>
-      <p class="ach-note">Choose a template and scope to preview. Save/Reset changes branding only; live Apply/Restore requires Recheck and explicit approval. Unsupported combinations are preview-only; unknown-host HTTPS/443 is not supported.</p>
+      <p class="ach-note">Choose a template and scope to preview. Save/Reset changes branding only; live Apply/Restore requires Recheck and explicit approval. Unsupported combinations are preview-only; unknown-SNI HTTPS/443 rejection is a separate optional, recoverable operation.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -897,6 +897,19 @@
         <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" aria-describedby="ach-status-unbound-restore-why" class="btn btn-warning" disabled>Restore previous HTTP default routing</button></div>
         <p id="ach-status-unbound-result" role="status" aria-live="polite">Select global/unbound and Recheck. HTTP/80 only; no TLS/443 changes.</p>
       </div>
+      <div class="ach-note" id="ach-status-tls-section" aria-label="Unknown SNI HTTPS rejection" hidden>
+        <strong>Unknown TLS hostname — reject handshake (HTTPS/443)</strong>
+        <p>Option A: reject the TLS handshake for unknown or missing SNI <em>before</em> a certificate is served. Only existing native Nginx TCP/443 wildcard listeners can be protected; no HTTPS port, IP family, certificate or website is created. Existing named HTTPS websites must continue to negotiate TLS. HTTP/80 Status Pages are independent. An existing foreign HTTPS default, address-specific listener, or unsupported QUIC/stream setup is reported as incompatible instead of overwritten.</p>
+        <p>This is a separately opted-in <strong>shared Nginx reload</strong>. Preview the current TLS listeners and Recovery state first. After Apply or Restore, compare the actual TLS handshake of unknown SNI with a known configured HTTPS hostname. A failed or interrupted operation retains a Recovery ID for Recheck.</p>
+        <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" disabled>Recheck HTTPS unknown-SNI policy</button></div>
+        <p id="ach-status-tls-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a compatible configured HTTPS/443 listener and a fresh Recheck.</p>
+        <label><input id="ach-status-tls-apply-approve" type="checkbox" /> I approve a plugin-owned unknown-SNI TLS default server on already configured HTTPS listeners and the shared Nginx reload.</label>
+        <div class="ach-controls"><button id="ach-status-tls-apply" type="button" class="btn btn-warning" disabled>Reject unknown TLS handshakes</button></div>
+        <p id="ach-status-tls-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a saved Recovery ID from Recheck.</p>
+        <label><input id="ach-status-tls-restore-approve" type="checkbox" /> I reviewed the exact TLS Recovery ID and approve restoring the original HTTPS default-server routing with shared Nginx reload.</label>
+        <div class="ach-controls"><button id="ach-status-tls-restore" type="button" class="btn btn-warning" disabled>Restore previous TLS default routing</button></div>
+        <p id="ach-status-tls-result" class="ach-status-metadata" role="status" aria-live="polite">Choose global/unbound and Recheck. No HTTPS setting has been changed.</p>
+      </div>
       <div class="ach-note" id="ach-status-stopped-section" aria-label="Stopped-site 503 management" hidden>
         <strong>Stopped website · real HTTP 503 (native SiteStop/Start)</strong>
         <p>aaPanel 8.0.7 Nginx only. Select a running website and the <code>stopped</code> template. An explicitly approved, recoverable rule is added to that native website VHost; it remains dormant while running and returns real HTTP 503 with the selected self-contained HTML after aaPanel SiteStop. The native site must be refreshed after Stop/Start before Recheck or Restore. Nginx reload is shared; unknown-domain HTTPS is unchanged. Restore removes only the verified owned rule, preserving unrelated native changes.</p>
@@ -935,7 +948,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.80'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.81'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -965,7 +978,7 @@
 
   // Transaction evidence is bound to one native-site/brand/locale snapshot.
   // It is revoked on any edit, site change, refresh, or attempted write.
-  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null, statusUnboundEvidence = null, statusStoppedEvidence = null;
+  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null, statusUnboundEvidence = null, statusTlsEvidence = null, statusStoppedEvidence = null;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
@@ -1125,7 +1138,7 @@
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'manage_nginx_protection' || method === 'wp_terminal_manage' || method === 'status_manage' || method === 'status_defaults' ||
-      method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
+      method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
       method === 'fpm_policy_save' || method === 'fpm_auto_manage' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection' || method === 'manage_abusive_scan';
   }
@@ -1198,10 +1211,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|tls|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -1244,6 +1257,7 @@
                method === 'status_manage' && data.site_action !== 'recheck' ||
                method === 'status_defaults' && data.default_action !== 'recheck' ||
                method === 'status_unbound' && data.unbound_action !== 'recheck' ||
+               method === 'status_tls' && data.tls_action !== 'recheck' ||
                method === 'status_stopped' && data.stopped_action !== 'recheck' ||
                method === 'fpm_policy_save' || method === 'fpm_auto_manage')) ?
               (method === 'fpm_policy_save' ?
@@ -3889,7 +3903,7 @@
     root.find('#ach-status-site-preflight').prop('hidden', !manage);
     root.find('#ach-status-manage-section').prop('hidden', !manage);
     root.find('#ach-status-default-section').prop('hidden', !defaults);
-    root.find('#ach-status-unbound-section').prop('hidden', !unbound);
+    root.find('#ach-status-unbound-section, #ach-status-tls-section').prop('hidden', !unbound);
     root.find('#ach-status-stopped-section').prop('hidden', !stopped);
     root.find('#ach-status-workflow-note').prop('hidden',
       manage || defaults || unbound || stopped);
@@ -3972,6 +3986,16 @@
       !unboundMatches || !['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) ||
       !statusUnboundEvidence.recovery ||
       root.find('#ach-status-unbound-restore-approve').prop('checked') !== true);
+    var tlsReady = unboundReady;
+    var tlsMatches = tlsReady && sameDefaultSelection(statusTlsEvidence);
+    root.find('#ach-status-tls-recheck').prop('disabled', !tlsReady);
+    root.find('#ach-status-tls-apply').prop('disabled',
+      !tlsMatches || !['Source Ready','Restored'].includes(statusTlsEvidence.state) ||
+      root.find('#ach-status-tls-apply-approve').prop('checked') !== true);
+    root.find('#ach-status-tls-restore').prop('disabled',
+      !tlsMatches || !['Applied','Needs Review','Recovery Required'].includes(statusTlsEvidence.state) ||
+      !statusTlsEvidence.recovery ||
+      root.find('#ach-status-tls-restore-approve').prop('checked') !== true);
     // Do not invent readiness: the messages below derive from the very same
     // evidence conditions that already gate the corresponding action buttons.
     var pending = busy ? 'A check is running. The controls will be updated after it completes.' : null;
@@ -4030,6 +4054,21 @@
         root.find('#ach-status-unbound-restore-approve').prop('checked') ?
         'Restore approval selected for the verified HTTP/80 recovery. Restore previous HTTP default routing is enabled.' :
         'Saved HTTP/80 recovery confirmed. Review it, then tick to approve Restore and a shared Nginx reload.'));
+    var tlsApply = !!(tlsMatches && ['Source Ready','Restored'].includes(statusTlsEvidence.state));
+    var tlsRestore = !!(tlsMatches &&
+      ['Applied','Needs Review','Recovery Required'].includes(statusTlsEvidence.state) &&
+      !!statusTlsEvidence.recovery);
+    explainGate('ach-status-tls-apply-why', tlsApply && !busy ? 'ready' : 'blocked',
+      pending || (!tlsApply ?
+        'Recheck HTTPS on a site with an existing compatible wildcard TCP/443 listener; no new listener will be created.' :
+        root.find('#ach-status-tls-apply-approve').prop('checked') ?
+        'Approval selected; the exact HTTPS default source will be checked and Nginx reloaded.' :
+        'TLS source ready. Review the unknown-host effect and approve the shared reload.'));
+    explainGate('ach-status-tls-restore-why', tlsRestore && !busy ? 'ready' : 'blocked',
+      pending || (!tlsRestore ? 'Recheck saved TLS Recovery ID before Restore.' :
+        root.find('#ach-status-tls-restore-approve').prop('checked') ?
+        'Approval selected for TLS Restore and a shared Nginx reload.' :
+        'Saved TLS Recovery ID available. Review and approve Restore.'));
     var stoppedApply = !!(stoppedMatches && String(selected.panel_status) === '1' &&
       ['Source Ready','Restored'].includes(statusStoppedEvidence.state));
     var stoppedRestore = !!(stoppedMatches &&
@@ -4052,11 +4091,14 @@
     statusManageEvidence = null;
     statusDefaultEvidence = null;
     statusUnboundEvidence = null;
+    statusTlsEvidence = null;
     statusStoppedEvidence = null;
     root.find('#ach-status-stopped-apply-approve, #ach-status-stopped-restore-approve').prop('checked', false);
     root.find('#ach-status-stopped-result').text('Recheck selected native stopped-site recovery; no previous Apply evidence is current.');
     root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve').prop('checked', false);
     root.find('#ach-status-unbound-result').text('Recheck global HTTP/80 routing before Apply/Restore; HTTPS is unchanged.');
+    root.find('#ach-status-tls-apply-approve, #ach-status-tls-restore-approve').prop('checked', false);
+    root.find('#ach-status-tls-result').text('Recheck unknown-SNI HTTPS/443 routing before Apply/Restore.');
     root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
       .prop('checked', false);
     root.find('#ach-status-default-result').text(
@@ -5183,6 +5225,107 @@
     manageUnboundRequest('restore');
   });
   root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve')
+    .on('change', function () { statusLock(statusBusy); });
+  function validTlsResponse(r, action) {
+    var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };
+    var id = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.mode !== 'native_unknown_tls_reject' || r.tls_action !== action ||
+        r.scope !== 'global' || r.site_id !== null || r.template !== 'unbound' ||
+        !id(r.request_id) || r.operation_id !== r.request_id ||
+        !hash(r.source_sha256) ||
+        (r.recovery_id !== null && !id(r.recovery_id)) ||
+        !['Source Ready','Not Applicable','Applied','Restored','Conflict','Drift','Recovery Required','Needs Review'].includes(r.state) ||
+        typeof r.changed !== 'boolean' || typeof r.runtime_verified !== 'boolean' ||
+        r.read_only !== (action === 'recheck') ||
+        typeof r.reason !== 'string' || !Array.isArray(r.families) ||
+        !r.families.every(function (f) { return f === 'ipv4' || f === 'ipv6'; }) ||
+        new Set(r.families).size !== r.families.length ||
+        !r.witnesses || typeof r.witnesses !== 'object' ||
+        Object.keys(r.witnesses).some(function (key) { return !r.families.includes(key) ||
+          typeof r.witnesses[key] !== 'string'; }) ||
+        r.impact !== 'Reject unknown/no-SNI on existing HTTPS/443 TCP wildcard sockets; preserve named HTTPS and HTTP/80')
+      return false;
+    return action === 'recheck' ? !r.changed :
+      action === 'apply' ? (r.state === 'Applied' && r.changed && r.runtime_verified && id(r.recovery_id)) :
+      (r.state === 'Restored' && r.changed && r.runtime_verified && id(r.recovery_id));
+  }
+  function manageTlsRequest(action) {
+    var scope = statusScope(), template = root.find('#ach-status-template').val(),
+        locale = root.find('#ach-status-locale').val();
+    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'global' ||
+        template !== 'unbound' || statusLoadedScope !== 'global:') return;
+    var previous = statusTlsEvidence;
+    if (action === 'apply' &&
+        (!sameDefaultSelection(previous) ||
+         !['Source Ready','Restored'].includes(previous.state) ||
+         root.find('#ach-status-tls-apply-approve').prop('checked') !== true)) return;
+    if (action === 'restore' &&
+        (!sameDefaultSelection(previous) ||
+         !['Applied','Needs Review','Recovery Required'].includes(previous.state) ||
+         !previous.recovery ||
+         root.find('#ach-status-tls-restore-approve').prop('checked') !== true)) return;
+    var ticket = statusTicket, revision = statusRevision, brand = statusFields();
+    statusTlsEvidence = null;
+    root.find('#ach-status-tls-apply-approve, #ach-status-tls-restore-approve').prop('checked', false);
+    root.find('#ach-status-tls-result').text(action === 'recheck' ?
+      'Inspecting existing Nginx HTTPS/443 wildcard listeners and saved TLS Recovery...' :
+      'Checking the exact TLS source and applying the approved Nginx operation...');
+    statusLock(true);
+    request('status_tls', Object.assign({}, scope, {
+      template:template, tls_action:action,
+      expected_source_sha256:previous ? previous.source : '',
+      expected_recovery_id:previous ? previous.recovery : '',
+      tls_approval:action === 'recheck' ? '' : action + '_global_tls_reject_reload'
+    }), function (r, failure) {
+      if (ticket !== statusTicket) return;
+      var same = statusLoadedScope === 'global:' && statusScope()?.scope === 'global' &&
+        JSON.stringify(statusFields()) === JSON.stringify(brand) &&
+        root.find('#ach-status-template').val() === 'unbound' &&
+        root.find('#ach-status-locale').val() === locale;
+      if (!same || !validTlsResponse(r, action) ||
+          action === 'apply' && r && (r.source_sha256 !== previous.source ||
+            r.recovery_id === previous.recovery && previous.state !== 'Restored') ||
+          action === 'restore' && r &&
+            (r.source_sha256 !== previous.source || r.recovery_id !== previous.recovery)) {
+        root.find('#ach-status-tls-result').text(statusBackendFailure(
+          action, same ? failure : null,
+          action === 'recheck' ?
+            'TLS read-only Recheck incomplete. Resolve the source/listener issue and recheck.' :
+            'TLS write outcome unknown. Recheck the exact Recovery ID before retrying.' +
+              (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '')));
+      } else {
+        if (action === 'recheck') {
+          statusTlsEvidence = {
+            ticket:ticket, revision:revision, template:'unbound', locale:locale,
+            brand:JSON.stringify(brand), state:r.state, source:r.source_sha256,
+            recovery:r.recovery_id
+          };
+        }
+        root.find('#ach-status-tls-result').text(
+          r.state + (r.changed ? ' — TLS default source changed' : ' — no configuration change') +
+          '\nExisting TLS listeners: ' + (r.families.length ? r.families.join(', ') : 'None') +
+          '\nKnown HTTPS witnesses: ' + JSON.stringify(r.witnesses) +
+          '\nSource SHA-256: ' + r.source_sha256 +
+          '\nHandshake verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
+          '\nRecovery ID: ' + (r.recovery_id || 'None') +
+          '\nRequest ID: ' + r.operation_id +
+          (r.reason ? '\nReason: ' + r.reason : '') +
+          '\nHTTPS/443 only. HTTP/80 Status Pages and named website certificates remain independently configured.');
+      }
+      statusLock(false);
+    });
+  }
+  root.find('#ach-status-tls-recheck').on('click', function () {
+    manageTlsRequest('recheck');
+  });
+  root.find('#ach-status-tls-apply').on('click', function () {
+    manageTlsRequest('apply');
+  });
+  root.find('#ach-status-tls-restore').on('click', function () {
+    manageTlsRequest('restore');
+  });
+  root.find('#ach-status-tls-apply-approve, #ach-status-tls-restore-approve')
     .on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-save').on('click', function () {
     if (statusBusy || statusRevision === null) return;
