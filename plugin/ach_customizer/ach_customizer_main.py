@@ -952,6 +952,47 @@ class ach_customizer_main:
         trusted_site_id = ""
         try:
             self._status_primary_admin_post()
+            if action in ("orphan_list", "orphan_restore"):
+                # Recovery must remain available after deleting the website,
+                # including when the Monitor has been disabled. Never accept
+                # a claimed orphan status supplied by the browser.
+                from ach_customizer_abusive_scan import manage_orphans, AbuseError
+                from ach_customizer_state import _open_state_dir
+                from ach_customizer_status_pages import _take_lock
+                import public
+
+                def native_site_absent(site_id):
+                    result = public.M("sites").where("id=?", (site_id,)).count()
+                    if type(result) is not int or result < 0:
+                        raise AbuseError("identity", "Native site absence lookup failed")
+                    return result == 0
+
+                raw_site = self._argument(args, "orphan_site_id")
+                site_id = None
+                if action == "orphan_restore":
+                    if not isinstance(raw_site, str) or not re.fullmatch(
+                            r"[1-9][0-9]{0,9}", raw_site):
+                        raise AbuseError("input", "Select a recorded native scanner site ID")
+                    site_id = int(raw_site)
+                data_fd = _open_state_dir(_STATE_DIR)
+                try:
+                    lock = _take_lock(data_fd)
+                    try:
+                        result = manage_orphans(
+                            action, data_fd=data_fd,
+                            native_site_absent=native_site_absent,
+                            site_id=site_id,
+                            recovery_id=self._argument(args, "recovery_id"),
+                            approved=self._argument(args, "approved") == "true")
+                    finally:
+                        os.close(lock)
+                finally:
+                    os.close(data_fd)
+                trusted_site_id = (str(result["site_id"])
+                                   if action == "orphan_restore" else "")
+                return self._activity_result(
+                    {"status": True, "request_id": request_id, **result},
+                    "websites", "manage_abusive_scan", target=trusted_site_id)
             self._require_enabled("site_inventory")
             if action not in ("preview", "apply", "recheck", "restore"):
                 raise MonitorInputError("Unsupported Fail2ban scanner action")

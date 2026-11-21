@@ -78,7 +78,11 @@ own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 - PHP-FPM: Save desired [www] pool values, recheck real shared-site attribution,
   then explicitly Enable automatic repair. The existing 30-second timer handles
   witnessed WordPress Toolkit optimization and additional exact aaPanel-native
-  FPM regeneration on supported service shapes. Each repair uses the saved
+  FPM regeneration on supported service shapes. Completed WordPress progress
+  does not suppress a later independent native regeneration; the same WP
+  task's source change is not independently borrowed as repair authority.
+  Active native WP/batch locks defer repairs and are rechecked at Apply.
+  Each repair uses the saved
   intent, fresh writer identity and affected-site mapping, guarded syntax/
   reload/verification and durable rollback. Foreign manual drift is not
   overwritten. Legacy enabled profiles remain WP-only until explicit re-enable.
@@ -91,6 +95,11 @@ own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
   address families; they are NOT confined to that site's log. Do not enable
   without validating proxy/CDN source attribution and ban consequences.
   Recheck/Restore manages only the owned site jail; foreign jails survive.
+  A running jail with a Prepared recovery journal remains Recovery Required
+  with its original Recovery ID. After native site deletion, Routing & Nginx
+  also offers **Find orphaned scanner jails → Restore selected orphan jail**,
+  without needing a current website or enabled Monitor. Foreign/changed jail
+  bytes are never removed.
 - See Issue #21 for exact installed and live QA proof. Source checks alone do
   not prove browser acceptance. New Release/Production remain separately gated.
 

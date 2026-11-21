@@ -137,7 +137,7 @@ class ScannerTests(unittest.TestCase):
                          expected_plan=preview["plan_sha256"])
         self.assertEqual(error.exception.stage, "uncertain")
         recovery_id = error.exception.recovery_id
-        self.assertEqual(self.execute("recheck")["state"], "Needs Review")
+        self.assertEqual(self.execute("recheck")["state"], "Recovery Required")
         self.fail_reload = False
         restored = self.execute("restore", approved=True, recovery_id=recovery_id)
         self.assertEqual(restored["state"], "Restored")
@@ -199,6 +199,141 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn(".well-known", text)
         self.assertNotIn("/oauth/", text)
         self.assertEqual(scan._policy({"maxretry": "3"})["maxretry"], 3)
+
+    def test_crash_after_live_reload_before_applied_journal_is_recoverable(self):
+        ready = self.execute("preview")
+        original = scan._save
+        def lose_ack(fd, site_id, row):
+            if row["phase"] == "applied":
+                raise OSError("simulated ack failure after live Fail2ban reload")
+            return original(fd, site_id, row)
+        with patch.object(scan, "_save", side_effect=lose_ack):
+            with self.assertRaises(scan.AbuseError) as failure:
+                self.execute("apply", approved=True,
+                             expected_plan=ready["plan_sha256"])
+        self.assertEqual(failure.exception.stage, "uncertain")
+        self.assertRegex(failure.exception.recovery_id, r"^[a-f0-9]{32}$")
+        self.assertTrue(self.live)
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            saved = scan._journal(self.fd, 23)
+        self.assertEqual(saved["phase"], "prepared")
+        recheck = self.execute("recheck")
+        self.assertEqual(recheck["state"], "Recovery Required")
+        self.assertEqual(recheck["journal_phase"], "prepared")
+        self.assertEqual(recheck["recovery_id"], saved["recovery_id"])
+        self.assertFalse(recheck["runtime_verified"])
+        restored = self.execute("restore", approved=True,
+                                recovery_id=saved["recovery_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertFalse(self.live)
+        self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+        self.assertEqual(self.peer.read_text(), "unchanged")
+
+    def test_deleted_site_orphan_inventory_and_exact_restore(self):
+        ready = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=ready["plan_sha256"])
+        self.assertTrue(self.live)
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            native_exists = lambda _id: False
+            missing = lambda item: item == 23
+            absent_list = scan.manage_orphans(
+                "orphan_list", data_fd=self.fd,
+                native_site_absent=native_exists, jail_dir=self.jail)
+            self.assertEqual(absent_list["orphans"], [])
+            listed = scan.manage_orphans(
+                "orphan_list", data_fd=self.fd,
+                native_site_absent=missing, jail_dir=self.jail)
+            self.assertEqual(len(listed["orphans"]), 1)
+            orphan = listed["orphans"][0]
+            self.assertEqual(orphan["site_id"], 23)
+            self.assertEqual(orphan["site_key"], "test.example")
+            self.assertEqual(orphan["recovery_id"], applied["recovery_id"])
+            self.assertTrue(orphan["recoverable"])
+            with self.assertRaises(scan.AbuseError):
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd, native_site_absent=missing,
+                    site_id=23, recovery_id=applied["recovery_id"], runner=self.runner,
+                    jail_dir=self.jail, approved=False)
+            with self.assertRaisesRegex(scan.AbuseError, "still exists"):
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd, native_site_absent=native_exists,
+                    site_id=23, recovery_id=applied["recovery_id"], runner=self.runner,
+                    jail_dir=self.jail, approved=True)
+            restored = scan.manage_orphans(
+                "orphan_restore", data_fd=self.fd, native_site_absent=missing,
+                site_id=23, recovery_id=applied["recovery_id"], runner=self.runner,
+                jail_dir=self.jail, approved=True)
+            self.assertEqual(restored["state"], "Restored")
+            self.assertTrue(restored["orphan_restored"])
+            self.assertFalse(self.live)
+            self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+            self.assertEqual(self.peer.read_text(), "unchanged")
+            self.assertEqual(scan.manage_orphans(
+                "orphan_list", data_fd=self.fd, native_site_absent=missing,
+                jail_dir=self.jail)["orphans"], [])
+
+    def test_foreign_shared_filter_does_not_block_exact_owned_restore(self):
+        ready = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=ready["plan_sha256"])
+        foreign_filter = self.filter / scan.FILTER_NAME
+        foreign_filter.write_text("# Another administrator's altered filter\n")
+        with self.assertRaisesRegex(scan.AbuseError, "Foreign"):
+            self.execute("apply", approved=True,
+                         expected_plan=ready["plan_sha256"])
+        changed = self.execute("recheck")
+        self.assertEqual(changed["state"], "Needs Review")
+        self.assertEqual(changed["recovery_id"], applied["recovery_id"])
+        restored = self.execute("restore", approved=True,
+                                recovery_id=applied["recovery_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertEqual(foreign_filter.read_text(),
+                         "# Another administrator's altered filter\n")
+        self.assertEqual(self.peer.read_text(), "unchanged")
+
+    def test_orphan_changed_jail_is_visible_but_not_removed(self):
+        before = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=before["plan_sha256"])
+        foreign = self.jail / "ach-customizer-scan-23.local"
+        foreign.write_text("foreign system-managed jail")
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            entries = scan.manage_orphans(
+                "orphan_list", data_fd=self.fd, native_site_absent=lambda _: True,
+                jail_dir=self.jail)["orphans"]
+            self.assertEqual(entries[0]["state"], "Needs Review")
+            self.assertFalse(entries[0]["recoverable"])
+            with self.assertRaisesRegex(scan.AbuseError, "refusing foreign"):
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd,
+                    native_site_absent=lambda _: True, site_id=23,
+                    recovery_id=applied["recovery_id"], runner=self.runner,
+                    jail_dir=self.jail, approved=True)
+        self.assertEqual(foreign.read_text(), "foreign system-managed jail")
+        self.assertEqual(self.peer.read_text(), "unchanged")
+
+    def test_native_rename_and_log_rotation_recheck_restore(self):
+        before = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=before["plan_sha256"])
+        # Normal native log reopening preserves the selected absolute
+        # filename; do not bind lifecycle to a single old inode.
+        self.log.rename(self.log_dir / "test.example.log.1")
+        self.log.write_text("")
+        self.assertEqual(self.execute("recheck")["state"], "Applied")
+        self.site["name"] = "renamed.example"
+        self.site["bound_domains"] = [{"name": "renamed.example", "port": 80}]
+        # Its native ID still exists: not an orphan merely because the name
+        # or native VHost changed. Existing journal grants exact Restore.
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            self.assertEqual(scan.manage_orphans(
+                "orphan_list", data_fd=self.fd, native_site_absent=lambda _: False,
+                jail_dir=self.jail)["orphans"], [])
+        restore = self.execute("restore", approved=True,
+                               recovery_id=applied["recovery_id"])
+        self.assertEqual(restore["state"], "Restored")
+        self.assertFalse(self.live)
 
 
 if __name__ == "__main__":

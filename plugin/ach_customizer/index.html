@@ -603,6 +603,21 @@
         <details class="ach-technical-report"><summary>Source, policy and recovery evidence</summary>
           <p id="ach-scan-result" class="ach-status-metadata" role="status">No Fail2ban protection inspected yet.</p>
         </details>
+        <div class="ach-note">
+          <strong>Recover scanner bans after deleting a website</strong>
+          <p>If aaPanel removed the original site while its scanner jail still exists,
+             find orphaned jails in the plugin recovery journal. This does not
+             require a selected website or enabled Monitor. Restore removes only
+             the exact owned jail, reloads Fail2ban and verifies that it stopped.
+             Origin-wide firewall rules can remain until this recovery completes.</p>
+          <div class="ach-controls">
+            <button id="ach-scan-orphan-list" type="button">Find orphaned scanner jails</button>
+            <label for="ach-scan-orphan-choice">Orphan journal</label>
+            <select id="ach-scan-orphan-choice" aria-label="Orphan scanner recovery journal" disabled></select>
+            <button id="ach-scan-orphan-restore" type="button" class="btn btn-warning" disabled>Restore selected orphan jail</button>
+          </div>
+          <p id="ach-scan-orphan-result" class="ach-status-metadata" role="status" aria-live="polite">Check for recovery journals after a website is removed.</p>
+        </div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
@@ -2852,6 +2867,96 @@
   root.find('#ach-scan-restore').on('click',function () {scanRequest('restore');});
   root.find('#ach-scan-maxretry,#ach-scan-findtime,#ach-scan-bantime')
     .on('input change',function () {scanReady = null; scanLock();});
+  var orphanTicket = 0, orphanBusy = false, orphanEntries = new Map();
+  function orphanLock() {
+    var choice = root.find('#ach-scan-orphan-choice').val();
+    var entry = orphanEntries.get(String(choice || ''));
+    root.find('#ach-scan-orphan-list').prop('disabled',orphanBusy);
+    root.find('#ach-scan-orphan-choice').prop('disabled',orphanBusy || !orphanEntries.size);
+    root.find('#ach-scan-orphan-restore').prop('disabled',
+      orphanBusy || !entry || entry.recoverable !== true);
+  }
+  function validOrphanInventory(r) {
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.mode !== 'native_site_abusive_scan_fail2ban' ||
+        r.ruleset !== 'sensitive-scan-combined-v1' ||
+        r.state !== 'Orphan Inventory' || r.changed !== false ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.firewall_scope !== 'origin_wide_web_ports' ||
+        r.log_scope !== 'selected_native_site' || !Array.isArray(r.orphans)) return false;
+    var seen = new Set();
+    return r.orphans.every(v => {
+      if (!v || !Number.isSafeInteger(v.site_id) || v.site_id <= 0 ||
+          typeof v.site_key !== 'string' || !v.site_key.length ||
+          !/^[a-f0-9]{32}$/.test(v.recovery_id || '') ||
+          !['prepared','applied'].includes(v.journal_phase) ||
+          !['Recovery Required','Needs Review'].includes(v.state) ||
+          typeof v.recoverable !== 'boolean' || seen.has(v.site_id)) return false;
+      seen.add(v.site_id);
+      return true;
+    });
+  }
+  function orphanRequest(action) {
+    if (orphanBusy) return;
+    var selected = root.find('#ach-scan-orphan-choice').val();
+    var owned = orphanEntries.get(String(selected || ''));
+    if (action === 'orphan_restore' && (!owned || !owned.recoverable)) return;
+    var ticket = ++orphanTicket;
+    orphanBusy = true;
+    orphanLock();
+    var payload = {scan_action:action};
+    if (action === 'orphan_restore') {
+      payload.orphan_site_id = String(owned.site_id);
+      payload.recovery_id = owned.recovery_id;
+      payload.approved = 'true';
+    }
+    root.find('#ach-scan-orphan-result').text('Checking journal and live Fail2ban ownership...');
+    request('manage_abusive_scan',payload,function(r,failure) {
+      if (ticket !== orphanTicket) return;
+      orphanBusy = false;
+      orphanEntries.clear();
+      root.find('#ach-scan-orphan-choice').empty().val('');
+      if (action === 'orphan_list' && validOrphanInventory(r)) {
+        var first = '';
+        r.orphans.forEach(v => {
+          orphanEntries.set(String(v.site_id),v);
+          var option = $('<option>').val(String(v.site_id));
+          option.text(v.site_key + ' (#' + v.site_id + ') — ' +
+            v.state + ' / ' + v.journal_phase);
+          root.find('#ach-scan-orphan-choice').append(option);
+          if (!first && v.recoverable) first = String(v.site_id);
+        });
+        if (first) root.find('#ach-scan-orphan-choice').val(first);
+        root.find('#ach-scan-orphan-result').text(
+          r.orphans.length ? r.orphans.map(v =>
+            v.site_key + ' (#' + v.site_id + '): ' + v.state +
+            '; Recovery ID ' + v.recovery_id +
+            (v.recoverable ? ' — exact jail can be restored' : ' — changed/foreign jail, do not remove')
+          ).join('\n') : 'No orphaned scanner recovery journals found.');
+      } else if (action === 'orphan_restore' && r && r.status === true &&
+                 r.schema === 1 && r.mode === 'native_site_abusive_scan_fail2ban' &&
+                 r.state === 'Restored' && r.orphan_restored === true &&
+                 r.site_id === owned.site_id &&
+                 r.recovery_id === owned.recovery_id &&
+                 r.journal_phase === 'restored' &&
+                 r.changed === true && r.read_only === false &&
+                 r.runtime_verified === true) {
+        root.find('#ach-scan-orphan-result').text(
+          'Verified orphan Restore: ' + r.site_key + ' (#' + r.site_id +
+          '). Origin-wide jail removed; Recovery ID ' + r.recovery_id +
+          '. Refresh orphan inventory for any remaining journals.');
+      } else {
+        root.find('#ach-scan-orphan-result').text(
+          cacheBackendFailure(failure,'abusive_scan_manage') ||
+          'Orphan scanner operation unconfirmed. Recheck journal and Activity before retry.');
+      }
+      orphanLock();
+    });
+  }
+  root.find('#ach-scan-orphan-list').on('click',function(){orphanRequest('orphan_list');});
+  root.find('#ach-scan-orphan-restore').on('click',function(){orphanRequest('orphan_restore');});
+  root.find('#ach-scan-orphan-choice').on('change',orphanLock);
+  orphanLock();
   function validNginxHelperAudit(h) {
     if (!h || h.schema !== 1 ||
         h.active_verified !== false || h.purge_method_verified !== false ||

@@ -295,7 +295,10 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             raise AbuseError("dependency", "Install/enable Fail2ban first")
         return {**report, "state": "Dependency Missing",
                 "reason": "Fail2ban configuration directories unavailable"}
-    if filter_existing not in (None, filter_bytes):
+    if filter_existing not in (None, filter_bytes) and action == "apply":
+        # A foreign/changed shared filter cannot authorize a new Apply.
+        # Recovery of an exact journal-owned jail remains available and
+        # never edits or removes the foreign filter.
         raise AbuseError("ownership", "Foreign Fail2ban scanner filter exists")
     if action in ("preview", "recheck"):
         try:
@@ -319,8 +322,14 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             state = "Restored"
         elif stored and stored["phase"] in ("prepared", "applied"):
             if current == _jail(site_id, stored["log_path"], stored["policy"]):
-                state = ("Applied" if filter_existing == filter_bytes
-                         and _running(jail, runner=runner) else "Needs Review")
+                # An active jail with a durable PREPARED checkpoint has not
+                # acknowledged Apply. It must remain recoverable using its
+                # original Recovery ID; the UI cannot accept it as Applied.
+                if stored["phase"] == "prepared":
+                    state = "Recovery Required"
+                else:
+                    state = ("Applied" if filter_existing == filter_bytes
+                             and _running(jail, runner=runner) else "Needs Review")
             else:
                 state = "Recovery Required"
         elif current is not None:
@@ -392,40 +401,145 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             raise AbuseError("uncertain", "Fail2ban jail did not start; Restore by Recovery ID",
                              recovery_id=new["recovery_id"])
         new["phase"] = "applied"
-        _save(data_fd, site_id, new)
+        try:
+            _save(data_fd, site_id, new)
+        except Exception as exc:
+            raise AbuseError(
+                "uncertain", "Fail2ban jail running but the applied journal commit was not confirmed; Recheck and Restore by Recovery ID",
+                recovery_id=new["recovery_id"]) from exc
         return {**report, "state": "Applied", "reason": "Native site log and Fail2ban jail active",
                 "recovery_id": new["recovery_id"], "journal_phase": "applied",
                 "runtime_verified": True, "changed": True, "plan_sha256": plan,
                 "vhost_sha256": vhost_sha, "log_path": log_path, "policy": policy}
 
-    if not stored or stored["phase"] not in ("prepared", "applied") or recovery_id != stored["recovery_id"]:
+    result = _restore_owned(site_id, stored, data_fd=data_fd,
+                            recovery_id=recovery_id, runner=runner,
+                            jail_dir=jail_dir)
+    return {**report, **result}
+
+
+def _restore_owned(site_id, stored, *, data_fd, recovery_id,
+                   runner=None, jail_dir=JAIL_DIR, still_owned=None):
+    """Retire only the exact journal-owned jail, even after site deletion.
+
+    Caller owns authorization and the root state lock. The optional
+    still_owned callback rechecks absence of a native site directly before
+    the filesystem write, so orphan recovery cannot target a revived site.
+    """
+    jail = _name(site_id)
+    if (not stored or stored["phase"] not in ("prepared", "applied")
+            or recovery_id != stored["recovery_id"]):
         raise AbuseError("recovery", "Unknown or retired Fail2ban Recovery ID")
     desired = _jail(site_id, stored["log_path"], stored["policy"])
-    if current not in (None, desired):
-        raise AbuseError("recovery", "Fail2ban jail source changed; refusing foreign removal")
-    jail_fd = _directory(jail_dir)
+    if _hash(desired) != stored["jail_sha"]:
+        raise AbuseError("recovery", "Saved scanner jail hash disagrees with recovery journal")
+    fd = _directory(jail_dir)
     try:
+        current = _read(fd, jail + ".local")
+        if current not in (None, desired):
+            raise AbuseError("recovery", "Fail2ban jail source changed; refusing foreign removal")
+        if _client(["status"], runner=runner).returncode:
+            raise AbuseError("dependency", "Start Fail2ban before retiring the owned scanner jail")
+        if still_owned is not None and still_owned(site_id) is not True:
+            raise AbuseError("identity", "Native site exists again; orphan Restore refused")
+        # Check again immediately before unlink; an unfamiliar rewrite is
+        # never treated as the previous journal-owned content.
+        if _read(fd, jail + ".local") != current:
+            raise AbuseError("recovery", "Fail2ban jail changed before Restore")
         if current is not None:
-            os.unlink(jail + ".local", dir_fd=jail_fd)
-            os.fsync(jail_fd)
+            os.unlink(jail + ".local", dir_fd=fd)
+            os.fsync(fd)
     finally:
-        os.close(jail_fd)
-    if _client(["-t"], runner=runner).returncode or _client(["reload"], runner=runner).returncode:
-        raise AbuseError("uncertain", "Fail2ban jail removal reload not confirmed; check Recovery ID",
+        os.close(fd)
+    if (_client(["-t"], runner=runner).returncode
+            or _client(["reload"], runner=runner).returncode):
+        raise AbuseError("uncertain", "Fail2ban jail removal reload not confirmed; retry with original Recovery ID",
                          recovery_id=stored["recovery_id"])
     if _running(jail, runner=runner):
         raise AbuseError("uncertain", "Fail2ban jail still running after removal; retry Restore",
                          recovery_id=stored["recovery_id"])
-    stored["phase"] = "restored"
-    _save(data_fd, site_id, stored)
-    # Keep the small shared filter: another administrator-defined jail can
-    # reference it, and its exact bytes are checked on every new Apply.
-    # Cleanup removes only the proven site-owned jail.
-    return {**report, "state": "Restored", "reason": "Exact owned jail stopped and retired",
+    updated = {**stored, "phase": "restored"}
+    try:
+        _save(data_fd, site_id, updated)
+    except Exception as exc:
+        raise AbuseError("uncertain",
+                         "Jail stopped; recovery journal update uncertain. Recheck by Recovery ID",
+                         recovery_id=stored["recovery_id"]) from exc
+    # The shared scanner filter is retained because other (possibly foreign)
+    # filters/jails may reference it; only this site-owned jail is removed.
+    return {"state": "Restored", "reason": "Exact owned jail stopped and retired",
             "recovery_id": stored["recovery_id"], "journal_phase": "restored",
             "runtime_verified": True, "changed": True,
             "vhost_sha256": stored["vhost_sha"], "log_path": stored["log_path"],
             "policy": stored["policy"]}
+
+
+_ORPHAN_FILE = re.compile(r"ach_customizer[.]abusive_scan[.]([1-9][0-9]*)[.]json\Z")
+
+
+def _orphan_rows(data_fd, *, native_site_absent, jail_dir=JAIL_DIR):
+    """Enumerate exact plugin journals, not every system Fail2ban jail."""
+    rows = []
+    fd = _directory(jail_dir)
+    try:
+        for entry in sorted(os.listdir(data_fd)):
+            match = _ORPHAN_FILE.fullmatch(entry)
+            if not match:
+                continue
+            site_id = int(match.group(1))
+            _name(site_id)
+            record = _journal(data_fd, site_id)
+            if not record or record["phase"] == "restored":
+                continue
+            absent = native_site_absent(site_id)
+            if type(absent) is not bool:
+                raise AbuseError("identity", "Native site absence was not verified")
+            if not absent:
+                continue
+            expected = _jail(site_id, record["log_path"], record["policy"])
+            actual = _read(fd, _name(site_id) + ".local")
+            recoverable = (_hash(expected) == record["jail_sha"]
+                           and actual in (None, expected))
+            rows.append({
+                "site_id": site_id, "site_key": record["site_key"],
+                "recovery_id": record["recovery_id"],
+                "journal_phase": record["phase"],
+                "state": "Recovery Required" if recoverable else "Needs Review",
+                "recoverable": recoverable,
+            })
+    finally:
+        os.close(fd)
+    return rows
+
+
+def manage_orphans(action, *, data_fd, native_site_absent,
+                   site_id=None, recovery_id=None, approved=False,
+                   runner=None, jail_dir=JAIL_DIR):
+    if action not in ("orphan_list", "orphan_restore"):
+        raise AbuseError("input", "Unknown orphan scanner operation")
+    report = {
+        "schema": SCHEMA, "mode": MODE, "ruleset": RULESET,
+        "firewall_scope": "origin_wide_web_ports",
+        "log_scope": "selected_native_site",
+        "read_only": action == "orphan_list", "changed": False,
+        "runtime_verified": False,
+    }
+    if action == "orphan_list":
+        return {**report, "state": "Orphan Inventory",
+                "orphans": _orphan_rows(data_fd,
+                    native_site_absent=native_site_absent, jail_dir=jail_dir)}
+    if approved is not True:
+        raise AbuseError("approval", "Explicit orphan Restore authorization required")
+    _name(site_id)
+    record = _journal(data_fd, site_id)
+    if native_site_absent(site_id) is not True:
+        raise AbuseError("identity", "Selected site still exists; use its normal Restore")
+    result = _restore_owned(
+        site_id, record, data_fd=data_fd, recovery_id=recovery_id,
+        runner=runner, jail_dir=jail_dir, still_owned=native_site_absent)
+    return {**report, **result, "site_id": site_id,
+            "site_key": record["site_key"], "read_only": False,
+            "orphan_restored": True}
 
 
 def plan(site, *, params=None, vhost_root=SOURCE_DIR, log_dir=LOG_DIR):

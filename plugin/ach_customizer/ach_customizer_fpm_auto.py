@@ -718,6 +718,15 @@ def _terminal_site_owned(controller, impact, progress, domain):
     return remaining_domains == 0 and remaining_bindings == 0
 
 
+def _native_operation_active():
+    """A native install/batch lock forbids independent shared FPM mutation.
+
+    Both locks are checked independently of progress-log availability: the
+    native writer may acquire either lock before publishing its first log.
+    """
+    return os.path.lexists(native.LOCK) or os.path.lexists(native.BATCH_LOCK)
+
+
 def _lifecycle_token(version, profile, lifecycle, observed_sha):
     return hashlib.sha256(json.dumps({
         "kind": "native_php_fpm_lifecycle", "version": version,
@@ -726,7 +735,8 @@ def _lifecycle_token(version, profile, lifecycle, observed_sha):
     }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None):
+def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None,
+                          observed_wp_terminal_ns=None):
     """Reconcile post-opt-in changes matching the exact installed native FPM writer.
 
     The existing 30-second timer provides polling. A changed source alone
@@ -742,6 +752,9 @@ def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None):
             try:
                 if _read_revoke(fd, version) is not None:
                     _consume_revoke_locked(fd, version)
+                    continue
+                if _native_operation_active():
+                    # Leave source/policy untouched for the next timer cycle.
                     continue
                 store = _read(fd)
                 profile = store["profiles"].get(version)
@@ -761,6 +774,23 @@ def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None):
                     continue
                 if source == lifecycle["baseline_sha256"]:
                     continue
+                if observed_wp_terminal_ns is not None:
+                    # A recently completed WP task may have generated these
+                    # bytes itself, even if its witness was never armed.
+                    # Never borrow that WP task's write as independent FPM
+                    # lifecycle authority. Only source writes strictly AFTER
+                    # the terminal timestamp may qualify this cycle.
+                    conf_fd = recovery._dir(Path(controller.config_root) /
+                                            version / "etc")
+                    try:
+                        check_bytes, check_stat = recovery._read(
+                            conf_fd, "php-fpm.conf")
+                    finally:
+                        os.close(conf_fd)
+                    if recovery._sha(check_bytes) != source:
+                        continue
+                    if check_stat.st_mtime_ns <= observed_wp_terminal_ns:
+                        continue
                 # After a worker dies following a successful host/journal
                 # fsync but before profile acknowledgement, the current file
                 # is already desired and no longer looks vendor-generated.
@@ -850,7 +880,8 @@ def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None):
 
                     def source_check():
                         try:
-                            if _read_revoke(fd, version) is not None:
+                            if (_read_revoke(fd, version) is not None
+                                    or _native_operation_active()):
                                 return None
                             if _native_vendor_values(
                                     controller.config_root, version, lifecycle) != source:
@@ -865,6 +896,8 @@ def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None):
 
                     if _read_revoke(fd, version) is not None:
                         raise FpmAutoError("Automatic PHP-FPM repair emergency-revoked")
+                    if _native_operation_active():
+                        raise FpmAutoError("Native WordPress operation active; defer FPM lifecycle")
                     result = recovery.apply(
                         controller.config_root, controller.data_dir, version, desired,
                         expected_before=plan["before_sha256"],
@@ -1154,6 +1187,16 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                     os.close(lock)
         finally:
             os.close(fd)
+    # A retained, already-completed WP progress record is not evidence of
+    # continuing native activity. Reconcile an independent FPM regeneration
+    # in this same timer cycle; never defer it for the 15-minute log TTL.
+    # For an incomplete progress record, do not infer the writer is finished
+    # merely because its lock is briefly absent.
+    if progress["status"] == 1:
+        lifecycle = _run_native_lifecycle(
+            data_dir=data_dir, controller_factory=controller_factory,
+            observed_wp_terminal_ns=progress["mtime_ns"])
+        outcomes.extend(lifecycle["services"])
     return {"state": "Processed" if outcomes else "No new owned event",
             "changed": any(r["state"] == "Applied" and not r.get("reconciled", False)
                            for r in outcomes),

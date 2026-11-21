@@ -133,6 +133,86 @@ class ScannerEntrypointTests(unittest.TestCase):
             self.assertEqual(row["target"],"9")
             self.assertEqual(row["recovery_id"],"d"*32)
 
+    def test_orphan_inventory_and_restore_bypass_missing_native_selection(self):
+        import ach_customizer_abusive_scan as scanner
+        class MissingSite:
+            def where(self, clause, args):
+                self_clause = clause
+                if self_clause != "id=?" or type(args[0]) is not int:
+                    raise AssertionError("Unexpected native site lookup")
+                return self
+            def count(self):
+                return 0
+        self.public.M = lambda name: MissingSite() if name == "sites" else None
+        entry = {"site_id":9, "site_key":SITE["name"],
+                 "recovery_id":"d"*32, "journal_phase":"prepared",
+                 "state":"Recovery Required", "recoverable":True}
+        inventory = {
+            "schema":1,"mode":scanner.MODE,"ruleset":scanner.RULESET,
+            "firewall_scope":"origin_wide_web_ports",
+            "log_scope":"selected_native_site",
+            "read_only":True,"changed":False,"runtime_verified":False,
+            "state":"Orphan Inventory","orphans":[entry],
+        }
+        restored = {
+            **inventory,"read_only":False,"changed":True,
+            "runtime_verified":True,"state":"Restored",
+            "site_id":9,"site_key":SITE["name"],
+            "recovery_id":"d"*32,"journal_phase":"restored",
+            "orphan_restored":True,"reason":"Exact jail retired",
+        }
+        with patch.object(self.plugin,"_selected_native_website") as selected, \
+             patch.object(self.plugin,"_require_enabled") as enabled, \
+             patch.object(scanner,"manage_orphans",side_effect=[inventory,restored]) as manage:
+            preview = self.plugin.manage_abusive_scan(
+                {"scan_action":"orphan_list"})
+            self.assertTrue(preview["status"],preview)
+            self.assertEqual(preview["orphans"],[entry])
+            self.assertTrue(preview["read_only"])
+            done = self.plugin.manage_abusive_scan({
+                "scan_action":"orphan_restore","orphan_site_id":"9",
+                "recovery_id":"d"*32,"approved":"true"})
+            self.assertTrue(done["status"],done)
+            self.assertTrue(done["orphan_restored"])
+            self.assertEqual(done["site_id"],9)
+            self.assertEqual(manage.call_args.args[0],"orphan_restore")
+            self.assertEqual(manage.call_args.kwargs["site_id"],9)
+            self.assertEqual(manage.call_args.kwargs["recovery_id"],"d"*32)
+            selected.assert_not_called()
+            enabled.assert_not_called()
+
+    def test_orphan_ops_auth_before_lookup_and_no_user_claimed_site_authority(self):
+        import ach_customizer_abusive_scan as scanner
+        query = types.SimpleNamespace()
+        self.public.M = lambda name: (_ for _ in ()).throw(
+            AssertionError("DB touched by unauthorized scanner"))
+        with patch.object(scanner,"manage_orphans") as manager:
+            for label,auth,method in [
+                ("secondary",{"uid":2,"login":True},"POST"),
+                ("guest",{"uid":1,"login":False},"POST"),
+                ("GET",{"uid":1,"login":True},"GET"),
+                ("temporary",{"uid":1,"login":True,"tmp_login":True},"POST")]:
+                with self.subTest(label=label):
+                    self.flask.session=auth
+                    self.flask.request.method=method
+                    for action in ("orphan_list","orphan_restore"):
+                        denied=self.plugin.manage_abusive_scan({
+                            "scan_action":action, "orphan_site_id":"9",
+                            "recovery_id":"d"*32,"approved":"true"})
+                        self.assertFalse(denied["status"])
+                        self.assertEqual(denied["stage"],"abusive_scan_authorization")
+            manager.assert_not_called()
+
+    def test_orphan_identity_must_be_numeric_and_native_db_absence_verifiable(self):
+        import ach_customizer_abusive_scan as scanner
+        with patch.object(scanner,"manage_orphans") as manager:
+            for bad in ("0","-1","9x","9; rm","99999999999",""):
+                denied=self.plugin.manage_abusive_scan({
+                    "scan_action":"orphan_restore","orphan_site_id":bad,
+                    "recovery_id":"d"*32,"approved":"true"})
+                self.assertFalse(denied["status"],bad)
+                manager.assert_not_called()
+
 
 if __name__=="__main__":
     unittest.main()

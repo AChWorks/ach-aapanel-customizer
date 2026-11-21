@@ -725,6 +725,16 @@ reloading PHP again. Emergency Disable prevents new lifecycle repairs.
 Existing enabled profiles do not silently acquire new authority; disable
 and re-enable deliberately to activate the expanded scope.
 
+A fresh, already-completed WP progress record does not suppress later
+independent PHP-FPM regeneration. The two branches are reconciled in the
+same timer invocation. A source modified by the *same* native WordPress
+operation is not interpreted as an independently completed aaPanel event:
+its filesystem mtime must be strictly later than the native terminal log
+mtime. Both native WP LOCK and BATCH_LOCK defer the independent lifecycle
+before reading the source and again at the guarded Apply verification
+boundary. This avoids a premature reload during early or batched install;
+the next timer wakeup retains the source and policy for reconciliation.
+
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,
 check the native combined access log, configure the desired retry/window/ban
@@ -734,6 +744,23 @@ using TCP/UDP 80/443, IPv4 and IPv6. Real-client log addresses from a trusted
 proxy may not be packet sources visible to the origin kernel firewall; never
 assume bans work or are safe behind CDN/proxy without an actual check.
 Normal 404s, .well-known/ACME and OAuth paths are not filter hits.
+A running scanner jail with a durable \`prepared\` journal remains
+**Recovery Required**, not a falsely acknowledged Applied state. The normal
+Recheck exposes its original Recovery ID and enables Restore.
+
+After a website has been deleted, **Find orphaned scanner jails** is
+accessible in Routing & Nginx without selecting a site or enabling Monitor.
+It enumerates only root-owned plugin recovery journals, verifies that each
+former native site ID is absent from aaPanel, and reports exact recovery
+identities. **Restore selected orphan jail** requires primary-admin POST,
+the exact journal Recovery ID, an exact owned-jail byte match and a second
+native-absence check immediately before removal. It reloads Fail2ban and
+verifies the jail stopped. Changed/foreign jail files remain untouched.
+If the site was renamed but its native ID remains, use ordinary selected-site
+Restore instead. Rotation of the site log to a new inode at the same native
+absolute path is compatible with the polling backend; moving the source
+path requires Recheck and an explicit Restore.
+
 Restore retires only the owned jail using the Recovery ID and verifies that
 the jail is no longer active; the shared filter is retained for possible
 other references. No vendor Nginx source or foreign Fail2ban jail is edited.
