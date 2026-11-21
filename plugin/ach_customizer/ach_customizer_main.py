@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.79'
+WORKER_SOURCE_VERSION = '0.1.80'
 
 _STATE_DIR = DATA_DIR
 
@@ -992,7 +992,8 @@ class ach_customizer_main:
                                    if action == "orphan_restore" else "")
                 return self._activity_result(
                     {"status": True, "request_id": request_id, **result},
-                    "websites", "manage_abusive_scan", target=trusted_site_id)
+                    "websites", "manage_abusive_scan", target=trusted_site_id,
+                    level="WARNING" if result["state"] == "Recovery Required" else "INFO")
             self._require_enabled("site_inventory")
             if action not in ("preview", "apply", "recheck", "restore"):
                 raise MonitorInputError("Unsupported Fail2ban scanner action")

@@ -48,10 +48,21 @@ class ScannerTests(unittest.TestCase):
         self.fail_reload = False
         self.daemon = True
         self.calls = []
+        self.nft_sets = set()
+        self.nft_inspection_failed = False
         self.log_sha = "3" * 64
 
     def runner(self, argv, **kw):
         self.calls.append(list(argv))
+        if argv[0] == "nft":
+            self.assertEqual(argv, ["nft", "-j", "list", "sets"])
+            if self.nft_inspection_failed:
+                return SimpleNamespace(returncode=1, stdout="", stderr="unavailable")
+            return SimpleNamespace(returncode=0, stdout=json.dumps({
+                "nftables": [{"metainfo": {"json_schema_version": 1}}] +
+                    [{"set": {"family": "inet", "table": "f2b-table",
+                              "name": name}} for name in sorted(self.nft_sets)]
+            }), stderr="")
         self.assertEqual(argv[0], "fail2ban-client")
         if argv[1] == "-t":
             return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -272,6 +283,200 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(scan.manage_orphans(
                 "orphan_list", data_fd=self.fd, native_site_absent=missing,
                 jail_dir=self.jail)["orphans"], [])
+
+    def test_deleted_site_missing_log_offline_restore_and_online_completion(self):
+        preview = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=preview["plan_sha256"])
+        self.log.unlink()
+        self.vhost.unlink()
+        (self.root / "site").rmdir()
+        self.daemon = False
+        # Fixture site and native log are gone; the DB callback also reports
+        # the native site ID absent for both independent ownership checks.
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            absent = lambda site_id: site_id == 23
+            inventory = scan.manage_orphans(
+                "orphan_list", data_fd=self.fd,
+                native_site_absent=absent, jail_dir=self.jail)
+            self.assertTrue(inventory["orphans"][0]["recoverable"])
+            pending = scan.manage_orphans(
+                "orphan_restore", data_fd=self.fd,
+                native_site_absent=absent, site_id=23,
+                recovery_id=applied["recovery_id"], approved=True,
+                runner=self.runner, jail_dir=self.jail)
+            self.assertEqual(pending["state"], "Recovery Required")
+            self.assertFalse(pending["orphan_restored"])
+            self.assertFalse(pending["runtime_verified"])
+            self.assertTrue(pending["changed"])
+            self.assertEqual(pending["recovery_id"], applied["recovery_id"])
+            self.assertEqual(pending["journal_phase"], "restore_pending")
+            self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+            self.assertEqual(json.loads((self.data / scan._journal_name(23)).read_text())["phase"], "restore_pending")
+            # Retry while daemon is down: no repeated write, no false success.
+            second = scan.manage_orphans(
+                "orphan_restore", data_fd=self.fd,
+                native_site_absent=absent, site_id=23,
+                recovery_id=applied["recovery_id"], approved=True,
+                runner=self.runner, jail_dir=self.jail)
+            self.assertFalse(second["changed"])
+            self.assertEqual(second["state"], "Recovery Required")
+            self.assertEqual(second["journal_phase"], "restore_pending")
+            self.assertFalse(second["runtime_verified"])
+            pending_list = scan.manage_orphans(
+                "orphan_list", data_fd=self.fd,
+                native_site_absent=absent, jail_dir=self.jail)
+            self.assertEqual(pending_list["orphans"][0]["recovery_id"],
+                             applied["recovery_id"])
+            self.assertEqual(pending_list["orphans"][0]["journal_phase"], "restore_pending")
+            self.assertTrue(pending_list["orphans"][0]["recoverable"])
+            self.assertEqual(self.peer.read_text(), "unchanged")
+            self.daemon = True
+            complete = scan.manage_orphans(
+                "orphan_restore", data_fd=self.fd,
+                native_site_absent=absent, site_id=23,
+                recovery_id=applied["recovery_id"], approved=True,
+                runner=self.runner, jail_dir=self.jail)
+        self.assertEqual(complete["state"], "Restored")
+        self.assertTrue(complete["runtime_verified"])
+        self.assertTrue(complete["orphan_restored"])
+        self.assertEqual(complete["journal_phase"], "restored")
+        self.assertEqual(json.loads((self.data / scan._journal_name(23)).read_text())["phase"], "restored")
+        self.assertFalse(self.live)
+        self.assertIn(["nft", "-j", "list", "sets"], self.calls)
+        self.assertEqual(self.peer.read_text(), "unchanged")
+
+    def test_offline_unlink_before_pending_checkpoint_crash_can_recover(self):
+        ready = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=ready["plan_sha256"])
+        self.log.unlink()
+        self.daemon = False
+        real_save = scan._save
+        def fail_pending_commit(fd, site_id, row):
+            if row["phase"] == "restore_pending":
+                raise OSError("simulated fsync failure after exact owned unlink")
+            return real_save(fd, site_id, row)
+        with patch.object(scan, "LOG_DIR", self.log_dir), patch.object(
+                scan, "_save", side_effect=fail_pending_commit):
+            with self.assertRaisesRegex(scan.AbuseError, "pending recovery journal") as fail:
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd,
+                    native_site_absent=lambda _: True,
+                    site_id=23, recovery_id=applied["recovery_id"],
+                    approved=True, runner=self.runner, jail_dir=self.jail)
+            self.assertEqual(fail.exception.stage, "uncertain")
+            self.assertEqual(fail.exception.recovery_id, applied["recovery_id"])
+        # An old applied journal + absent source is still a durable recovery
+        # handle, NOT proof of successful firewall cleanup.
+        self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+        current = json.loads((self.data / scan._journal_name(23)).read_text())
+        self.assertEqual(current["phase"], "applied")
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            rows = scan.manage_orphans(
+                "orphan_list", data_fd=self.fd,
+                native_site_absent=lambda _: True, jail_dir=self.jail)["orphans"]
+            self.assertEqual(rows[0]["state"], "Recovery Required")
+            self.assertTrue(rows[0]["recoverable"])
+            self.assertEqual(rows[0]["recovery_id"], applied["recovery_id"])
+            self.daemon = True
+            restored = scan.manage_orphans(
+                "orphan_restore", data_fd=self.fd,
+                native_site_absent=lambda _: True,
+                site_id=23, recovery_id=applied["recovery_id"],
+                approved=True, runner=self.runner, jail_dir=self.jail)
+        self.assertEqual(restored["state"], "Restored")
+        self.assertTrue(restored["runtime_verified"])
+        self.assertEqual(json.loads(
+            (self.data / scan._journal_name(23)).read_text())["phase"], "restored")
+
+    def test_orphan_offline_rejects_foreign_jail_and_revived_site(self):
+        preview = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=preview["plan_sha256"])
+        self.log.unlink()
+        self.daemon = False
+        jailfile = self.jail / "ach-customizer-scan-23.local"
+        old = jailfile.read_bytes()
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            with self.assertRaisesRegex(scan.AbuseError, "still exists"):
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd,
+                    native_site_absent=lambda _: False, site_id=23,
+                    recovery_id=applied["recovery_id"], approved=True,
+                    runner=self.runner, jail_dir=self.jail)
+            with self.assertRaisesRegex(scan.AbuseError, "Recovery ID"):
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd,
+                    native_site_absent=lambda _: True, site_id=23,
+                    recovery_id="0"*32, approved=True,
+                    runner=self.runner, jail_dir=self.jail)
+            jailfile.write_bytes(b"foreign rules")
+            with self.assertRaisesRegex(scan.AbuseError, "foreign"):
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd,
+                    native_site_absent=lambda _: True, site_id=23,
+                    recovery_id=applied["recovery_id"], approved=True,
+                    runner=self.runner, jail_dir=self.jail)
+            self.assertEqual(jailfile.read_bytes(), b"foreign rules")
+            self.assertEqual(json.loads((self.data / scan._journal_name(23)).read_text())["phase"], "applied")
+        self.assertNotEqual(old, b"foreign rules")
+
+    def test_orphan_held_pending_for_lingering_nftables_action(self):
+        preview = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=preview["plan_sha256"])
+        self.nft_sets = {"addr6-set-ach-customizer-scan-23-udp",
+                         "addr-set-sshd"}
+        self.log.unlink()
+        with patch.object(scan, "LOG_DIR", self.log_dir):
+            with self.assertRaisesRegex(scan.AbuseError, "still present") as failure:
+                scan.manage_orphans(
+                    "orphan_restore", data_fd=self.fd,
+                    native_site_absent=lambda _: True, site_id=23,
+                    recovery_id=applied["recovery_id"], approved=True,
+                    runner=self.runner, jail_dir=self.jail)
+            self.assertEqual(failure.exception.stage, "uncertain")
+            self.assertEqual(failure.exception.recovery_id, applied["recovery_id"])
+            self.assertEqual(json.loads((self.data / scan._journal_name(23)).read_text())["phase"], "applied")
+            self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+            # A foreign sshd set does not block completion or get modified.
+            self.nft_sets = {"addr-set-sshd"}
+            finished = scan.manage_orphans(
+                "orphan_restore", data_fd=self.fd,
+                native_site_absent=lambda _: True, site_id=23,
+                recovery_id=applied["recovery_id"], approved=True,
+                runner=self.runner, jail_dir=self.jail)
+        self.assertEqual(finished["state"], "Restored")
+        self.assertEqual(self.nft_sets, {"addr-set-sshd"})
+        self.assertEqual(self.peer.read_text(), "unchanged")
+
+    def test_unverifiable_nft_inventory_does_not_complete_journal(self):
+        preview = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=preview["plan_sha256"])
+        self.nft_inspection_failed = True
+        with self.assertRaisesRegex(scan.AbuseError, "inspection failed") as failed:
+            self.execute("restore", approved=True,
+                         recovery_id=applied["recovery_id"])
+        self.assertEqual(failed.exception.stage, "uncertain")
+        self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+        self.assertEqual(json.loads((self.data / scan._journal_name(23)).read_text())["phase"], "applied")
+        self.nft_inspection_failed = False
+        ok = self.execute("restore", approved=True,
+                          recovery_id=applied["recovery_id"])
+        self.assertEqual(ok["state"], "Restored")
+
+    def test_normal_site_restore_does_not_retire_jail_while_daemon_down(self):
+        preview = self.execute("preview")
+        applied = self.execute("apply", approved=True,
+                               expected_plan=preview["plan_sha256"])
+        self.daemon = False
+        with self.assertRaisesRegex(scan.AbuseError, "Start Fail2ban"):
+            self.execute("restore", approved=True,
+                         recovery_id=applied["recovery_id"])
+        self.assertTrue((self.jail / "ach-customizer-scan-23.local").exists())
+        self.assertEqual(json.loads((self.data / scan._journal_name(23)).read_text())["phase"], "applied")
 
     def test_foreign_shared_filter_does_not_block_exact_owned_restore(self):
         ready = self.execute("preview")

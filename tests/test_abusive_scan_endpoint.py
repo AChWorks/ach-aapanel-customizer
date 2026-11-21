@@ -181,6 +181,38 @@ class ScannerEntrypointTests(unittest.TestCase):
             selected.assert_not_called()
             enabled.assert_not_called()
 
+    def test_orphan_offline_recovery_preserves_authorized_pending_result(self):
+        class MissingSite:
+            def where(self, clause, args):
+                self.asserted = (clause, args)
+                return self
+            def count(self):
+                return 0
+        self.public.M = lambda name: MissingSite() if name == "sites" else None
+        pending = {
+            "schema":1, "mode":scan.MODE, "ruleset":scan.RULESET,
+            "state":"Recovery Required", "read_only":False,
+            "changed":True, "runtime_verified":False,
+            "recovery_id":"e"*32, "journal_phase":"restore_pending",
+            "site_id":9, "site_key":SITE["name"], "orphan_restored":False,
+            "reason":"Owned jail source retired offline; firewall unverified",
+        }
+        with patch.object(scan,"manage_orphans",return_value=pending) as manager, \
+                patch.object(self.plugin,"_selected_native_website") as selected:
+            result=self.plugin.manage_abusive_scan({
+                "scan_action":"orphan_restore","orphan_site_id":"9",
+                "recovery_id":"e"*32,"approved":"true"})
+        self.assertTrue(result["status"],result)
+        self.assertEqual(result["state"],"Recovery Required")
+        self.assertFalse(result["runtime_verified"])
+        self.assertFalse(result["orphan_restored"])
+        self.assertEqual(result["recovery_id"],"e"*32)
+        self.assertEqual(manager.call_args.kwargs["recovery_id"],"e"*32)
+        selected.assert_not_called()
+        activity=read_activity(str(self.data),module="websites")[0]
+        self.assertEqual(activity["level"],"WARNING")
+        self.assertEqual(activity["recovery_id"],"e"*32)
+
     def test_orphan_ops_auth_before_lookup_and_no_user_claimed_site_authority(self):
         import ach_customizer_abusive_scan as scanner
         query = types.SimpleNamespace()

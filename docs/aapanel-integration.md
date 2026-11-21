@@ -709,7 +709,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### P0 native PHP regeneration and scanner workflow (0.1.79 candidate)
+### P0 native PHP regeneration and scanner workflow (0.1.80 candidate)
 
 An explicit new FPM auto Enable records the selected service's original
 canonical source SHA, native RAM tier, and saved pm.max_requests before any
@@ -770,8 +770,14 @@ acknowledged event, so repeated identical vendor bytes cannot alias.
 Journal acknowledgment after a post-commit crash is checked before
 the source-baseline early exit; no second reload is authorized.
 The systemd error record now includes bounded stage and reason. The
-second successful live regeneration on installed 0.1.79 remains
-to be accepted and is not inferred from Python tests.
+exact installed 0.1.79 QA subsequently verified **both** separate,
+byte-identical native regenerations (Recovery IDs
+`5019b1188c5f4896a00cddf36546ad1c` and
+`53e495525b6748b992cafc9cbe58679c`), prior-journal
+archival, Emergency Disable and exact-byte baseline Restore; see
+[Issue #21 accepted runtime receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7069608396).
+This evidence is historical to installed 0.1.79, not proof that the
+new 0.1.80 source has been installed.
 
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,
@@ -792,8 +798,27 @@ It enumerates only root-owned plugin recovery journals, verifies that each
 former native site ID is absent from aaPanel, and reports exact recovery
 identities. **Restore selected orphan jail** requires primary-admin POST,
 the exact journal Recovery ID, an exact owned-jail byte match and a second
-native-absence check immediately before removal. It reloads Fail2ban and
-verifies the jail stopped. Changed/foreign jail files remain untouched.
+native-absence check immediately before removal. If Fail2ban is running,
+Restore validates configuration, reloads the daemon, verifies the old
+jail stopped and checks that its named IPv4/IPv6 TCP/UDP nftables sets
+are absent before a durable `Restored` acknowledgment.
+
+If aaPanel deleted the native site **and its logpath**, an owned
+Fail2ban jail can prevent the daemon itself from starting. Native
+0.1.80 supports this narrow **offline orphan recovery**: the
+administrator clicks the same Restore for that exact orphan Recovery ID,
+the plugin removes only the still-matching owned jail config, and
+records `restore_pending` in the existing journal. It does **not**
+start/restart Fail2ban, touch nftables, remove the shared filter or
+claim bans have been lifted. Start/reconnect Fail2ban after the invalid
+jail source is retired; then find the orphan again and use the same
+Recovery ID to finish verification and acknowledge `Restored`.
+If Fail2ban or nftables verification fails, an owned action still exists,
+or the recovery journal save is uncertain, the journal remains
+recoverable and the UI reports the real pending/error state. A crash
+between source unlink and `restore_pending` save is recoverable using
+the older applied journal plus the now-absent owned file. Changed/foreign
+jail files and unrelated Fail2ban/nftables entries are never removed.
 If the site was renamed but its native ID remains, use ordinary selected-site
 Restore instead. Rotation of the site log to a new inode at the same native
 absolute path is compatible with the polling backend; moving the source

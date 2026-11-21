@@ -147,7 +147,7 @@ def _journal(fd, site_id):
             or not isinstance(row["jail_sha"], str) or not _SHA.fullmatch(row["jail_sha"])
             or row["filter_sha"] != _hash(FILTER_TEXT.encode())
             or not isinstance(row["recovery_id"], str) or not _TOKEN.fullmatch(row["recovery_id"])
-            or row["phase"] not in ("prepared", "applied", "restored")
+            or row["phase"] not in ("prepared", "applied", "restore_pending", "restored")
             or not isinstance(row["policy"], dict)
             or set(row["policy"]) != set(_PARAMS)
             or any(type(row["policy"][p]) is not int or row["policy"][p] <= 0
@@ -182,6 +182,47 @@ def _client(argv, *, runner=None):
 def _running(jail, *, runner=None):
     result = _client(["status", jail], runner=runner)
     return result.returncode == 0 and ("Status for the jail:" in result.stdout)
+
+
+def _owned_nft_actions_absent(site_id, *, runner=None):
+    """Verify exact scanner nftables sets are gone; never alter firewall state.
+
+    The installed nftables Fail2ban action uses an address set named from
+    each of the two explicit TCP/UDP action names. Both IPv4 and IPv6
+    set conventions must be absent before acknowledging final Restore.
+    Failures to inspect nftables are NOT evidence that bans are gone.
+    """
+    jail = _name(site_id)
+    expected = {
+        prefix + jail + "-" + proto
+        for prefix in ("addr-set-", "addr6-set-")
+        for proto in ("tcp", "udp")
+    }
+    run = runner or subprocess.run
+    try:
+        result = run(["nft", "-j", "list", "sets"],
+                     capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AbuseError("runtime", "Cannot inspect nftables scanner actions") from exc
+    if result.returncode:
+        raise AbuseError("runtime", "nftables action inspection failed")
+    try:
+        tree = json.loads(result.stdout)
+    except (ValueError, UnicodeError) as exc:
+        raise AbuseError("runtime", "Unreadable nftables action inventory") from exc
+    if (not isinstance(tree, dict) or
+            not isinstance(tree.get("nftables"), list)):
+        raise AbuseError("runtime", "Unsupported nftables action inventory")
+    for entry in tree["nftables"]:
+        if not isinstance(entry, dict):
+            raise AbuseError("runtime", "Malformed nftables action inventory")
+        owned = entry.get("set")
+        if owned is not None:
+            if not isinstance(owned, dict) or not isinstance(owned.get("name"), str):
+                raise AbuseError("runtime", "Malformed nftables set entry")
+            if owned["name"] in expected:
+                return False
+    return True
 
 
 def _policy(values):
@@ -320,12 +361,11 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             state = "Needs Review"
         elif stored and stored["phase"] == "restored" and current is None:
             state = "Restored"
-        elif stored and stored["phase"] in ("prepared", "applied"):
+        elif stored and stored["phase"] in ("prepared", "applied", "restore_pending"):
             if current == _jail(site_id, stored["log_path"], stored["policy"]):
-                # An active jail with a durable PREPARED checkpoint has not
-                # acknowledged Apply. It must remain recoverable using its
-                # original Recovery ID; the UI cannot accept it as Applied.
-                if stored["phase"] == "prepared":
+                # Neither an interrupted Apply nor an offline source retirement
+                # proves runtime cleanup. Keep the same Recovery ID usable.
+                if stored["phase"] in ("prepared", "restore_pending"):
                     state = "Recovery Required"
                 else:
                     state = ("Applied" if filter_existing == filter_bytes
@@ -427,7 +467,7 @@ def _restore_owned(site_id, stored, *, data_fd, recovery_id,
     the filesystem write, so orphan recovery cannot target a revived site.
     """
     jail = _name(site_id)
-    if (not stored or stored["phase"] not in ("prepared", "applied")
+    if (not stored or stored["phase"] not in ("prepared", "applied", "restore_pending")
             or recovery_id != stored["recovery_id"]):
         raise AbuseError("recovery", "Unknown or retired Fail2ban Recovery ID")
     desired = _jail(site_id, stored["log_path"], stored["policy"])
@@ -438,7 +478,16 @@ def _restore_owned(site_id, stored, *, data_fd, recovery_id,
         current = _read(fd, jail + ".local")
         if current not in (None, desired):
             raise AbuseError("recovery", "Fail2ban jail source changed; refusing foreign removal")
-        if _client(["status"], runner=runner).returncode:
+        # A deleted site's missing logpath can prevent Fail2ban from
+        # starting while this exact owned jail file remains installed. The
+        # orphan-only path may retire its source offline; the journal and
+        # firewall verification MUST remain outstanding until the daemon
+        # becomes available. Normal current-site Restore still requires it.
+        try:
+            online = _client(["status"], runner=runner).returncode == 0
+        except AbuseError:
+            online = False
+        if not online and still_owned is None:
             raise AbuseError("dependency", "Start Fail2ban before retiring the owned scanner jail")
         if still_owned is not None and still_owned(site_id) is not True:
             raise AbuseError("identity", "Native site exists again; orphan Restore refused")
@@ -451,12 +500,43 @@ def _restore_owned(site_id, stored, *, data_fd, recovery_id,
             os.fsync(fd)
     finally:
         os.close(fd)
+    if not online:
+        # The same journal records a durable intermediate phase rather than
+        # suggesting the former applied jail is still active or silently
+        # claiming Restored. A crash after unlink but before this checkpoint
+        # remains recoverable from the old journal + absent owned source.
+        if stored["phase"] != "restore_pending":
+            try:
+                _save(data_fd, site_id, {**stored, "phase": "restore_pending"})
+            except Exception as exc:
+                raise AbuseError(
+                    "uncertain", "Offline jail source retired but pending recovery journal was not confirmed; retry by Recovery ID",
+                    recovery_id=stored["recovery_id"]) from exc
+        # Never reload a stopped service or claim that nftables bans are gone.
+        return {
+            "state": "Recovery Required",
+            "reason": "Owned jail source retired offline. Start Fail2ban, then retry Restore with this Recovery ID to verify jail and firewall cleanup; existing bans are unverified",
+            "recovery_id": stored["recovery_id"],
+            "journal_phase": "restore_pending", "runtime_verified": False,
+            "changed": current is not None,
+            "vhost_sha256": stored["vhost_sha"],
+            "log_path": stored["log_path"], "policy": stored["policy"],
+        }
     if (_client(["-t"], runner=runner).returncode
             or _client(["reload"], runner=runner).returncode):
         raise AbuseError("uncertain", "Fail2ban jail removal reload not confirmed; retry with original Recovery ID",
                          recovery_id=stored["recovery_id"])
     if _running(jail, runner=runner):
         raise AbuseError("uncertain", "Fail2ban jail still running after removal; retry Restore",
+                         recovery_id=stored["recovery_id"])
+    try:
+        clean_actions = _owned_nft_actions_absent(site_id, runner=runner)
+    except AbuseError as exc:
+        raise AbuseError("uncertain", str(exc) + "; runtime cleanup unverified, retry by Recovery ID",
+                         recovery_id=stored["recovery_id"]) from exc
+    if not clean_actions:
+        raise AbuseError("uncertain",
+                         "Owned nftables scanner action still present; do not claim bans removed. Resolve the action and retry by Recovery ID",
                          recovery_id=stored["recovery_id"])
     updated = {**stored, "phase": "restored"}
     try:
@@ -539,7 +619,7 @@ def manage_orphans(action, *, data_fd, native_site_absent,
         runner=runner, jail_dir=jail_dir, still_owned=native_site_absent)
     return {**report, **result, "site_id": site_id,
             "site_key": record["site_key"], "read_only": False,
-            "orphan_restored": True}
+            "orphan_restored": result["state"] == "Restored"}
 
 
 def plan(site, *, params=None, vhost_root=SOURCE_DIR, log_dir=LOG_DIR):

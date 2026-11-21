@@ -607,9 +607,13 @@
           <strong>Recover scanner bans after deleting a website</strong>
           <p>If aaPanel removed the original site while its scanner jail still exists,
              find orphaned jails in the plugin recovery journal. This does not
-             require a selected website or enabled Monitor. Restore removes only
-             the exact owned jail, reloads Fail2ban and verifies that it stopped.
-             Origin-wide firewall rules can remain until this recovery completes.</p>
+             require a selected website or enabled Monitor. If a deleted
+             site's missing log prevents Fail2ban from starting, Restore first
+             retires only its exact owned jail source offline; the Recovery ID
+             remains pending and existing bans are <strong>not verified removed</strong>.
+             Start Fail2ban, refresh the orphan list and use the same Recovery ID
+             again to verify jail and nftables action removal before it is
+             marked Restored. Foreign jails and actions are preserved.</p>
           <div class="ach-controls">
             <button id="ach-scan-orphan-list" type="button">Find orphaned scanner jails</button>
             <label for="ach-scan-orphan-choice">Orphan journal</label>
@@ -931,7 +935,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.79'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.80'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2787,7 +2791,7 @@
         typeof r.runtime_verified !== 'boolean' || typeof r.changed !== 'boolean' ||
         typeof r.read_only !== 'boolean' ||
         !(r.recovery_id === null || token(r.recovery_id)) ||
-        !(r.journal_phase === null || ['prepared','applied','restored'].includes(r.journal_phase)) ||
+        !(r.journal_phase === null || ['prepared','applied','restore_pending','restored'].includes(r.journal_phase)) ||
         !(r.plan_sha256 === undefined || r.plan_sha256 === null || hash(r.plan_sha256)) ||
         !(r.vhost_sha256 === undefined || r.vhost_sha256 === null || hash(r.vhost_sha256))) return false;
     var write = action === 'apply' || action === 'restore';
@@ -2801,7 +2805,7 @@
     if (r.state === 'Restored' && (!r.runtime_verified || !token(r.recovery_id) ||
         r.journal_phase !== 'restored')) return false;
     if (r.state === 'Recovery Required' && (!token(r.recovery_id) ||
-        !['prepared','applied'].includes(r.journal_phase) || r.runtime_verified)) return false;
+        !['prepared','applied','restore_pending'].includes(r.journal_phase) || r.runtime_verified)) return false;
     return true;
   }
   function scanRequest(action) {
@@ -2889,7 +2893,7 @@
       if (!v || !Number.isSafeInteger(v.site_id) || v.site_id <= 0 ||
           typeof v.site_key !== 'string' || !v.site_key.length ||
           !/^[a-f0-9]{32}$/.test(v.recovery_id || '') ||
-          !['prepared','applied'].includes(v.journal_phase) ||
+          !['prepared','applied','restore_pending'].includes(v.journal_phase) ||
           !['Recovery Required','Needs Review'].includes(v.state) ||
           typeof v.recoverable !== 'boolean' || seen.has(v.site_id)) return false;
       seen.add(v.site_id);
@@ -2931,7 +2935,7 @@
           r.orphans.length ? r.orphans.map(v =>
             v.site_key + ' (#' + v.site_id + '): ' + v.state +
             '; Recovery ID ' + v.recovery_id +
-            (v.recoverable ? ' — exact jail can be restored' : ' — changed/foreign jail, do not remove')
+            (v.recoverable ? ' — exact owned source recoverable; firewall verification required' : ' — changed/foreign jail, do not remove')
           ).join('\n') : 'No orphaned scanner recovery journals found.');
       } else if (action === 'orphan_restore' && r && r.status === true &&
                  r.schema === 1 && r.mode === 'native_site_abusive_scan_fail2ban' &&
@@ -2943,8 +2947,21 @@
                  r.runtime_verified === true) {
         root.find('#ach-scan-orphan-result').text(
           'Verified orphan Restore: ' + r.site_key + ' (#' + r.site_id +
-          '). Origin-wide jail removed; Recovery ID ' + r.recovery_id +
-          '. Refresh orphan inventory for any remaining journals.');
+          '). Owned jail and its nftables actions no longer observed; Recovery ID ' +
+          r.recovery_id + '. Refresh orphan inventory for any remaining journals.');
+      } else if (action === 'orphan_restore' && r && r.status === true &&
+                 r.schema === 1 && r.mode === 'native_site_abusive_scan_fail2ban' &&
+                 r.state === 'Recovery Required' && r.orphan_restored === false &&
+                 r.site_id === owned.site_id && r.recovery_id === owned.recovery_id &&
+                 ['prepared','applied','restore_pending'].includes(r.journal_phase) &&
+                 typeof r.changed === 'boolean' && r.read_only === false &&
+                 r.runtime_verified === false && typeof r.reason === 'string') {
+        root.find('#ach-scan-orphan-result').text(
+          'OFFLINE RECOVERY PENDING — ' + r.site_key + ' (#' + r.site_id +
+          '). Exact owned jail source retired or already absent. Recovery ID: ' +
+          r.recovery_id + '. Firewall bans have NOT been verified removed. ' +
+          'Start/reconnect Fail2ban, find orphaned jails again and retry Restore ' +
+          'with the same Recovery ID to complete runtime verification. ' + r.reason);
       } else {
         root.find('#ach-scan-orphan-result').text(
           cacheBackendFailure(failure,'abusive_scan_manage') ||

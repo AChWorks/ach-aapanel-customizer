@@ -8837,6 +8837,59 @@ test('Fail2ban orphan UI restores deleted-site journal without site selection',(
   assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
 });
 
+test('Fail2ban orphan UI distinguishes offline jail retirement from verified firewall Restore',()=>{
+  const ui=loadUi();
+  const token='e'.repeat(32);
+  const entry={site_id:41,site_key:'deleted.example',recovery_id:token,
+    journal_phase:'applied',state:'Recovery Required',recoverable:true};
+  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([entry]));
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,false);
+  const first=ui.statusClick('#ach-scan-orphan-restore');
+  assert.equal(first.options.data.recovery_id,token);
+  first.respond({
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    state:'Recovery Required',site_id:41,site_key:'deleted.example',
+    recovery_id:token,journal_phase:'restore_pending',changed:true,
+    read_only:false,runtime_verified:false,orphan_restored:false,
+    reason:'Owned jail source retired while Fail2ban was stopped'
+  });
+  assert.match(ui.state().scannerOrphanResult,/OFFLINE RECOVERY PENDING/);
+  assert.match(ui.state().scannerOrphanResult,/Firewall bans have NOT been verified removed/);
+  assert.match(ui.state().scannerOrphanResult,/Start\/reconnect Fail2ban/);
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
+  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([
+    {...entry, journal_phase:'restore_pending'}
+  ]));
+  const second=ui.statusClick('#ach-scan-orphan-restore');
+  assert.equal(second.options.data.recovery_id,token,'repeat exact Recovery ID after restart');
+  second.respond({
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    state:'Restored',site_id:41,site_key:'deleted.example',
+    recovery_id:token,journal_phase:'restored',changed:true,
+    read_only:false,runtime_verified:true,orphan_restored:true
+  });
+  assert.match(ui.state().scannerOrphanResult,/Verified orphan Restore/);
+});
+
+test('Fail2ban orphan UI refuses malformed false-positive offline completion',()=>{
+  const ui=loadUi();
+  const token='f'.repeat(32);
+  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([{
+    site_id:41,site_key:'deleted.example',recovery_id:token,
+    journal_phase:'prepared',state:'Recovery Required',recoverable:true
+  }]));
+  const first=ui.statusClick('#ach-scan-orphan-restore');
+  first.respond({
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    state:'Recovery Required',site_id:41,site_key:'deleted.example',
+    recovery_id:token,journal_phase:'restored',changed:true,
+    read_only:false,runtime_verified:false,orphan_restored:false,
+    reason:'This invalid result must not claim retired'
+  });
+  assert.doesNotMatch(ui.state().scannerOrphanResult,/OFFLINE RECOVERY PENDING/);
+  assert.match(ui.state().scannerOrphanResult,/unconfirmed/i);
+});
+
 test('Fail2ban orphan UI never restores foreign or malformed journals',()=>{
   const ui=loadUi();
   const noRole=ui.statusClick('#ach-scan-orphan-list');
