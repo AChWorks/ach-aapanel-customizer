@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.77'
+WORKER_SOURCE_VERSION = '0.1.78'
 
 _STATE_DIR = DATA_DIR
 
@@ -1503,13 +1503,16 @@ class ach_customizer_main:
             return self._fail("fpm_auto_authorization", exc, request_id)
         try:
             from ach_customizer_fpm_auto import inspect
-            from ach_customizer_fpm_watcher import health
+            import ach_customizer_fpm_watcher as watcher
             if action == "inspect":
                 result = inspect(version, data_dir=_STATE_DIR)
             elif action == "enable":
                 self._require_enabled("php_fpm_file_preview")
-                from ach_customizer_fpm_watcher import enable
-                result = enable(
+                if getattr(watcher, "ARMING_CONTRACT_VERSION", 0) != 2:
+                    raise watcher.FpmWatcherError(
+                        "Resident FPM watcher helper is stale after ZIP import; "
+                        "do not enable until a separately approved panel-only reload")
+                result = watcher.enable(
                     version, data_dir=_STATE_DIR,
                     expected_auto_revision=self._argument(args, "expected_auto_revision"),
                     expected_policy_revision=self._argument(args, "expected_policy_revision"),
@@ -1518,14 +1521,18 @@ class ach_customizer_main:
                     reviewed=self._argument(args, "reviewed") == "true",
                 )
             elif action == "disable":
-                from ach_customizer_fpm_watcher import disable
-                result = disable(
+                result = watcher.disable(
                     version, data_dir=_STATE_DIR,
                     expected_auto_revision=self._argument(args, "expected_auto_revision"),
                 )
             else:
                 raise MonitorInputError("Unsupported automatic PHP service action")
-            result = {**result, **health()}
+            result = {**result, **watcher.health()}
+            if (action == "inspect"
+                    and getattr(watcher, "ARMING_CONTRACT_VERSION", 0) != 2):
+                result = {**result, "watcher_ready": False,
+                          "watcher_status": ("Resident FPM watcher helper is stale; "
+                                             "separately authorize a panel-only reload")}
             return self._activity_result(
                 {"status": True, "schema": 1, "request_id": request_id, **result},
                 "php_fpm", "fpm_auto_" + action,

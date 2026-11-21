@@ -109,3 +109,33 @@ class FpmAutoApiTests(unittest.TestCase):
         self.assertFalse(res["status"])
         self.assertEqual(res["stage"],"fpm_auto_management")
         on.assert_called_once()
+
+    def test_stale_resident_watcher_blocks_enable_but_not_emergency_disable(self):
+        with patch.object(watcher, "ARMING_CONTRACT_VERSION", 0), patch.object(
+                self.plugin, "_require_enabled", return_value=None), patch.object(
+                watcher, "enable") as enable, patch.object(
+                watcher, "health", return_value={"watcher_ready": True,
+                                                 "watcher_status": "systemd running"}):
+            refused = self.plugin.fpm_auto_manage({
+                "auto_action": "enable", "php_version": "85",
+                "expected_auto_revision": "1", "expected_policy_revision": "1",
+                "expected_monitor_revision": "1", "expected_impact": "a"*64,
+                "reviewed": "true"})
+            self.assertFalse(refused["status"])
+            self.assertEqual(refused["stage"], "fpm_auto_management")
+            self.assertIn("Resident FPM watcher helper is stale", refused["msg"])
+            enable.assert_not_called()
+            observed = self.plugin.fpm_auto_manage({
+                "auto_action": "inspect", "php_version": "85"})
+            self.assertTrue(observed["status"], observed)
+            self.assertFalse(observed["watcher_ready"])
+            self.assertIn("separately authorize", observed["watcher_status"])
+            with patch.object(watcher, "disable", return_value={
+                    "version": "85", "enabled": False,
+                    "state_revision": 2, "last_state": "Disabled"}) as disable:
+                completed = self.plugin.fpm_auto_manage({
+                    "auto_action": "disable", "php_version": "85",
+                    "expected_auto_revision": "1"})
+                self.assertTrue(completed["status"], completed)
+                self.assertFalse(completed["enabled"])
+                disable.assert_called_once()

@@ -709,7 +709,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### P0 native PHP regeneration and scanner workflow (0.1.77 candidate)
+### P0 native PHP regeneration and scanner workflow (0.1.78 candidate)
 
 An explicit new FPM auto Enable records the selected service's original
 canonical source SHA, native RAM tier, and saved pm.max_requests before any
@@ -738,12 +738,23 @@ the next timer wakeup retains the source and policy for reconciliation.
 The Native 0.1.76 installed QA uncovered an activation-order race:
 after Emergency Disable and a new Enable, the freshly started systemd
 worker could observe the old disabled profile and disable its own
-timer/path before the new operator intent was saved. Native 0.1.77
-commits the reviewed profile before activating either unit, then
-verifies both units are active. If activation fails, it durably
-revokes only the newly armed version instead of reporting success.
-First Enable and post-Disable re-Enable must both be validated on
-the retained guest, not inferred from unit tests.
+timer/path before the new operator intent was saved. The 0.1.77
+source committed policy before activating either unit, but a later
+official installed 0.1.77 package still reproduced the race because
+aaPanel retained an **older imported watcher helper in memory**, even
+while the UI and Python entrypoint both reported 0.1.77.
+
+Native 0.1.78 both (a) commits the reviewed profile before starting
+the units, verifying both are active, compensating only a newly armed
+version on activation failure, and (b) requires the resident watcher
+helper to advertise the policy-first arming protocol. If aaPanel still
+uses an older helper, non-emergency Enable is refused with an explicit
+stale-helper diagnosis, and read-only Inspect cannot claim readiness.
+Emergency Disable remains available. Do not automatically restart
+the panel: only an explicitly authorized panel-only reload under the
+upgrade/recovery runbook can refresh known stale imports. First Enable
+and post-Disable re-Enable still require exact installed-native QA,
+not inference from unit tests.
 
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,

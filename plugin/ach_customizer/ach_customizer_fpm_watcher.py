@@ -53,6 +53,10 @@ PrivateTmp=no
 ExecStart=/www/server/panel/pyenv/bin/python3 /www/server/panel/plugin/ach_customizer/ach_customizer_fpm_auto.py run
 """
 UNITS = {"path": PATH_CONTENT, "timer": TIMER_CONTENT, "service": SERVICE_CONTENT}
+# Resident aaPanel processes may retain an older watcher helper after ZIP
+# import even when the loaded entrypoint matches the new UI version.
+# This is the supported source-level arming-order contract from 0.1.77.
+ARMING_CONTRACT_VERSION = 2
 
 
 class FpmWatcherError(RuntimeError):
