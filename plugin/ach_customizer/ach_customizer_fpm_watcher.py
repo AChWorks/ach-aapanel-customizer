@@ -135,30 +135,56 @@ def health(*, unit_root=UNIT_ROOT):
 def enable(version, *, data_dir=DATA_DIR, expected_auto_revision,
            expected_policy_revision, expected_monitor_revision,
            expected_impact, reviewed):
+    """Commit reviewed authority before starting its event/timer worker.
+
+    A systemd path can wake as soon as --now starts. If it sees an
+    uncommitted/disabled first profile, its ordinary run() path stops the
+    just-started units. That leaves the subsequent enabled=true profile
+    without any periodic repair. Establish durable operator intent first,
+    then start and independently verify the owned units.
+    """
     native._native_supported()
     if not Path(PANEL_PYTHON).is_file() or not Path(PLUGIN_WORKER).is_file():
         raise FpmWatcherError("Native panel Python and installed auto repair helper are required")
+    before = worker.inspect(version, data_dir=data_dir)
     existing = worker.any_enabled(data_dir=data_dir)
+    # Unit content and systemd registration are prepared before authority,
+    # but no worker/path/timer is activated until after the policy commit.
     _ensure_units()
+    _run("daemon-reload")
+    result = worker.set_enabled(
+        version, True, data_dir=data_dir,
+        expected_auto_revision=expected_auto_revision,
+        expected_policy_revision=expected_policy_revision,
+        expected_monitor_revision=expected_monitor_revision,
+        expected_impact=expected_impact,
+        reviewed=reviewed)
     try:
-        _run("daemon-reload")
         _run("enable", "--now", UNIT + ".path", UNIT + ".timer")
         _run("is-active", UNIT + ".path")
         _run("is-active", UNIT + ".timer")
-        return worker.set_enabled(version, True, data_dir=data_dir,
-                                  expected_auto_revision=expected_auto_revision,
-                                  expected_policy_revision=expected_policy_revision,
-                                  expected_monitor_revision=expected_monitor_revision,
-                                  expected_impact=expected_impact,
-                                  reviewed=reviewed)
+        return result
     except Exception:
-        if not existing and not worker.any_enabled(data_dir=data_dir):
-            try:
+        # The policy is already durable. A failed unit activation must not
+        # silently leave a newly armed service without its only worker.
+        # Compensate only this new enable; preserve other enabled versions.
+        try:
+            if not before["enabled"]:
+                worker.request_disable(version, data_dir=data_dir,
+                                       expected_auto_revision=result["state_revision"])
+        except Exception:
+            import logging
+            logging.getLogger("ach_customizer").exception(
+                "New PHP-FPM auto policy activation failed; durable emergency disable requires review")
+        try:
+            if (not worker.any_enabled(data_dir=data_dir)
+                    and not worker.any_pending_disable(data_dir=data_dir)):
                 _stop()
-            except FpmWatcherError:
-                import logging
-                logging.getLogger("ach_customizer").exception(
-                    "FPM auto repair watcher cleanup failed")
+        except Exception:
+            import logging
+            logging.getLogger("ach_customizer").exception(
+                "PHP-FPM auto unit cleanup after failed activation requires review")
+        # Do not fabricate watcher_ready or suppress the original error.
         raise
 
 

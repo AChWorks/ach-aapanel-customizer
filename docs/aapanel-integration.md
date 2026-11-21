@@ -709,7 +709,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### P0 native PHP regeneration and scanner workflow (0.1.76 candidate)
+### P0 native PHP regeneration and scanner workflow (0.1.77 candidate)
 
 An explicit new FPM auto Enable records the selected service's original
 canonical source SHA, native RAM tier, and saved pm.max_requests before any
@@ -734,6 +734,16 @@ mtime. Both native WP LOCK and BATCH_LOCK defer the independent lifecycle
 before reading the source and again at the guarded Apply verification
 boundary. This avoids a premature reload during early or batched install;
 the next timer wakeup retains the source and policy for reconciliation.
+
+The Native 0.1.76 installed QA uncovered an activation-order race:
+after Emergency Disable and a new Enable, the freshly started systemd
+worker could observe the old disabled profile and disable its own
+timer/path before the new operator intent was saved. Native 0.1.77
+commits the reviewed profile before activating either unit, then
+verifies both units are active. If activation fails, it durably
+revokes only the newly armed version instead of reporting success.
+First Enable and post-Disable re-Enable must both be validated on
+the retained guest, not inferred from unit tests.
 
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,
