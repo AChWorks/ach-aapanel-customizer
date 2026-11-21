@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 
 POOL_KEYS = (
@@ -520,6 +522,83 @@ def _bound_domains_for_sites(panel_public, sites, *, strict_native=False):
         )
 
 
+def _site_platform_profile(root_path):
+    """Read only source-file identities for a native site, never execute PHP.
+
+    Absence of well-known files does not prove a Generic or Custom site.
+    An installed WooCommerce file does not prove that the plugin is active.
+    Untrusted/symlinked/inaccessible roots simply remain unclassified.
+    """
+    unknown = ("Unclassified", "Needs Review")
+    if not isinstance(root_path, str) or not root_path.startswith("/"):
+        return unknown
+    segments = root_path.split("/")[1:]
+    if not segments or any(part in ("", ".", "..") for part in segments):
+        return unknown
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+
+    def directory(parent, name):
+        return os.open(name, flags, dir_fd=parent)
+
+    def ordinary_file(parent, name):
+        try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except OSError:
+            return False
+        return stat.S_ISREG(info.st_mode) and info.st_size > 0
+
+    try:
+        # Resolve every component without following symlinks; do not inspect
+        # WordPress contents or derive DB credentials during Website browsing.
+        fd = os.open("/", flags)
+        try:
+            for segment in segments:
+                next_fd = directory(fd, segment)
+                os.close(fd)
+                fd = next_fd
+            if not ordinary_file(fd, "wp-settings.php"):
+                return unknown
+            try:
+                inc = directory(fd, "wp-includes")
+                try:
+                    if not ordinary_file(inc, "version.php"):
+                        return unknown
+                finally:
+                    os.close(inc)
+                admin = directory(fd, "wp-admin")
+                try:
+                    if not ordinary_file(admin, "index.php"):
+                        return unknown
+                finally:
+                    os.close(admin)
+            except OSError:
+                return unknown
+            application = "WordPress"
+            classification = "WordPress files detected (runtime unverified)"
+            try:
+                content = directory(fd, "wp-content")
+                try:
+                    plugins = directory(content, "plugins")
+                    try:
+                        woo = directory(plugins, "woocommerce")
+                        try:
+                            if ordinary_file(woo, "woocommerce.php"):
+                                classification = "WordPress + WooCommerce files (activation unverified)"
+                        finally:
+                            os.close(woo)
+                    finally:
+                        os.close(plugins)
+                finally:
+                    os.close(content)
+            except OSError:
+                pass
+            return application, classification
+        finally:
+            os.close(fd)
+    except (OSError, ValueError):
+        return unknown
+
+
 def get_site_page(panel_public, page=1, page_size=25, *, strict_native=False):
     """Read native site/domain records; strict mode validates raw lifecycle data.
 
@@ -573,13 +652,18 @@ def get_site_page(panel_public, page=1, page_size=25, *, strict_native=False):
         name = site.get("name")
         if not isinstance(name, str) or not name.strip():
             raise RuntimeError("aaPanel sites query returned an invalid site name")
+        root_path = str(site.get("path") or "")
+        application, classification = (
+            ("Unclassified", "Needs Review")
+            if strict_native else _site_platform_profile(root_path)
+        )
         sites.append({
             "id": site_id,
             "name": name,
-            "document_root": str(site.get("path") or ""),
+            "document_root": root_path,
             "panel_status": "" if site.get("status") is None else str(site["status"]),
-            "application": "Unclassified",
-            "classification": "Needs Review",
+            "application": application,
+            "classification": classification,
         })
     _bound_domains_for_sites(panel_public, sites, strict_native=strict_native)
     return {"inventory_schema": INVENTORY_SCHEMA_VERSION, "page": page, "page_size": size,
