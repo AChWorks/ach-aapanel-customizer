@@ -123,11 +123,12 @@ function loadUi() {
     '#ach-status-preview-surface', '#ach-status-site-audit', '#ach-status-site-preflight',
     '#ach-status-workflow-note',
     '#ach-status-manage-section', '#ach-status-default-section',
-    '#ach-status-unbound-section', '#ach-status-stopped-section',
+    '#ach-status-unbound-section', '#ach-status-tls-section', '#ach-status-stopped-section',
     '#ach-status-save', '#ach-status-reset',
     '#ach-status-reset-why', '#ach-status-site-apply-why', '#ach-status-site-restore-why',
     '#ach-status-default-apply-why', '#ach-status-default-restore-why',
     '#ach-status-unbound-apply-why', '#ach-status-unbound-restore-why',
+    '#ach-status-tls-apply-why', '#ach-status-tls-restore-why',
     '#ach-status-stopped-apply-why', '#ach-status-stopped-restore-why',
     '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
@@ -141,6 +142,8 @@ function loadUi() {
     '#ach-status-unbound-recheck', '#ach-status-unbound-apply',
     '#ach-status-unbound-restore', '#ach-status-unbound-apply-approve',
     '#ach-status-unbound-restore-approve', '#ach-status-unbound-result',
+    '#ach-status-tls-recheck', '#ach-status-tls-apply', '#ach-status-tls-restore',
+    '#ach-status-tls-apply-approve', '#ach-status-tls-restore-approve', '#ach-status-tls-result',
     '#ach-status-stopped-recheck', '#ach-status-stopped-apply',
     '#ach-status-stopped-restore', '#ach-status-stopped-apply-approve',
     '#ach-status-stopped-restore-approve', '#ach-status-stopped-result',
@@ -467,6 +470,7 @@ function loadUi() {
         ['audit','#ach-status-site-audit'], ['preflight','#ach-status-site-preflight'],
         ['manage','#ach-status-manage-section'],
         ['defaults','#ach-status-default-section'], ['unbound','#ach-status-unbound-section'],
+        ['tls','#ach-status-tls-section'],
         ['stopped','#ach-status-stopped-section'], ['previewOnly','#ach-status-workflow-note']
       ].map(([key,id]) => [key,elements.get(id).props.hidden === false])),
       statusHash: elements.get('#ach-status-sha').textContent,
@@ -484,6 +488,10 @@ function loadUi() {
       defaultSourceApplyDisabled: elements.get('#ach-status-default-apply').props.disabled,
       defaultSourceRestoreDisabled: elements.get('#ach-status-default-restore').props.disabled,
       unboundResult: elements.get('#ach-status-unbound-result').textContent,
+      tlsResult: elements.get('#ach-status-tls-result').textContent,
+      tlsRecheckDisabled: elements.get('#ach-status-tls-recheck').props.disabled,
+      tlsApplyDisabled: elements.get('#ach-status-tls-apply').props.disabled,
+      tlsRestoreDisabled: elements.get('#ach-status-tls-restore').props.disabled,
       stoppedResult: elements.get('#ach-status-stopped-result').textContent,
       stoppedRecheckDisabled: elements.get('#ach-status-stopped-recheck').props.disabled,
       stoppedApplyDisabled: elements.get('#ach-status-stopped-apply').props.disabled,
@@ -7399,6 +7407,73 @@ test('New-site defaults revoke source evidence on branding, locale, scope change
 });
 
 
+const tlsImpact = 'Reject unknown/no-SNI on existing HTTPS/443 TCP wildcard sockets; preserve named HTTPS and HTTP/80';
+function tlsReply(action, state='Source Ready', overrides={}) {
+  const changed=action !== 'recheck';
+  return {
+    status:true, schema:1, mode:'native_unknown_tls_reject',
+    tls_action:action, scope:'global', site_id:null, template:'unbound',
+    request_id:'a'.repeat(32), operation_id:'a'.repeat(32),
+    state, source_sha256:'7'.repeat(64),
+    recovery_id:['Applied','Recovery Required','Restored','Needs Review'].includes(state)?'f'.repeat(32):null,
+    families:['ipv4'], witnesses:{ipv4:'example.test'},
+    changed, read_only:!changed, runtime_verified:changed || state==='Applied',
+    reason:'', impact:tlsImpact, ...overrides
+  };
+}
+
+test('Unknown-SNI TLS mode requires an explicit compatible Recheck and Apply/Restore approvals', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  assert.equal(ui.state().tlsRecheckDisabled,true);
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  assert.equal(ui.state().tlsRecheckDisabled,false);
+  assert.equal(ui.state().statusWorkflowVisible.tls,true);
+  const pre=ui.statusClick('#ach-status-tls-recheck');
+  assert.match(pre.options.url,/s=status_tls$/);
+  assert.equal(pre.options.timeout,45000);
+  assert.equal(pre.options.data.tls_action,'recheck');
+  pre.respond(tlsReply('recheck'));
+  assert.match(ui.state().tlsResult,/Source Ready/);
+  assert.equal(ui.state().tlsApplyDisabled,true);
+  ui.statusSetChecked('#ach-status-tls-apply-approve',true);
+  assert.equal(ui.state().tlsApplyDisabled,false);
+  const apply=ui.statusClick('#ach-status-tls-apply');
+  assert.equal(apply.options.data.expected_source_sha256,'7'.repeat(64));
+  assert.equal(apply.options.data.tls_approval,'apply_global_tls_reject_reload');
+  apply.respond(tlsReply('apply','Applied'));
+  assert.match(ui.state().tlsResult,/Applied/);
+  assert.equal(ui.state().tlsRestoreDisabled,true);
+  const current=ui.statusClick('#ach-status-tls-recheck');
+  current.respond(tlsReply('recheck','Applied'));
+  ui.statusSetChecked('#ach-status-tls-restore-approve',true);
+  assert.equal(ui.state().tlsRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-status-tls-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'f'.repeat(32));
+  assert.equal(restore.options.data.tls_approval,'restore_global_tls_reject_reload');
+  restore.respond(tlsReply('restore','Restored'));
+  assert.match(ui.state().tlsResult,/Restored/);
+  assert.equal(ui.state().tlsApplyDisabled,true);
+});
+
+test('TLS without configured 443 listener stays unavailable and any new selection revokes approval', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  ui.statusClick('#ach-status-tls-recheck').respond(tlsReply('recheck','Not Applicable',{
+    families:[],witnesses:{},reason:'No existing HTTPS/443 listener'
+  }));
+  ui.statusSetChecked('#ach-status-tls-apply-approve',true);
+  assert.equal(ui.state().tlsApplyDisabled,true);
+  assert.match(ui.state().tlsResult,/No existing HTTPS\/443 listener/);
+  ui.statusClick('#ach-status-tls-recheck').respond(tlsReply('recheck'));
+  ui.statusSetChecked('#ach-status-tls-apply-approve',true);
+  assert.equal(ui.state().tlsApplyDisabled,false);
+  ui.statusSetValue('#ach-status-locale','fa','change');
+  assert.equal(ui.state().tlsApplyDisabled,true);
+  assert.match(ui.state().tlsResult,/Recheck/);
+});
+
 const unboundImpact = 'Unknown HTTP Host on native HTTP/80 listeners only; no HTTPS or stopped-site change';
 function unboundReply(action, state='Source Ready', overrides={}) {
   const recovery='c'.repeat(32);
@@ -8090,7 +8165,7 @@ test('Status workflow shows only compatible operations and preserves recovery en
   ui.statusSetValue('#ach-status-template','new-site','change');
   expectMode(['defaults'],'global new-site');
   ui.statusSetValue('#ach-status-template','unbound','change');
-  expectMode(['unbound'],'global unbound');
+  expectMode(['unbound','tls'],'global unbound');
   assert.equal(ui.state().unboundRecheckDisabled,false);
   ui.statusSetValue('#ach-status-template','50x','change');
   expectMode(['previewOnly'],'unsupported global 50x');
