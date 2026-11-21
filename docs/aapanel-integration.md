@@ -54,6 +54,23 @@ elsewhere in the WordPress file. Dynamic/multiple PHP definitions, stale
 site identity, and foreign managed markers are refused. No live PHP setting
 is claimed until the application is separately inspected.
 
+**XML-RPC request gate:** An independent opt-in site policy creates one
+site-owned must-use WordPress plugin
+`wp-content/mu-plugins/ach-customizer-xmlrpc.php`, after confirming the
+native selected site, PHP handler, WordPress core files and live HTTP/80
+`/xmlrpc.php` baseline. The static MU-plugin checks the WordPress-defined
+`XMLRPC_REQUEST` and returns HTTP **403** with a nonsecret, generation-bound
+`X-ACh-XMLRPC-Proof` header. This is an application-level block **after
+PHP bootstrap**, not a pre-PHP Nginx/edge block. Nginx files, WordPress
+database, Cache, and unrelated MU plugins are untouched. It is recoverable
+through the same selected-site primary-admin Recheck/Apply/Restore UI; the
+journal contains the exact managed file hash and recovery identity. Original
+foreign files are never overwritten; an absent MU-plugin folder is created
+with the site's own ownership and removed after Restore only if still empty.
+Live POST/403/proof and absence after Restore are verified repeatedly.
+If the site no longer serves its expected WordPress route or the file drifts,
+report a concrete source/recovery failure, not a fictional success.
+
 **System WP-Cron:** a unique root-owned `/etc/cron.d/ach-customizer-wp-cron-<site_id>`
 task is created and verified before adding the literal
 `DISABLE_WP_CRON=true` setting. An active system Cron service, verified

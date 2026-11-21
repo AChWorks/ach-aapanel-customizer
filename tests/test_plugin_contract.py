@@ -74,6 +74,7 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_status_unbound.py', names)
                 self.assertIn('ach_customizer/ach_customizer_status_tls.py', names)
                 self.assertIn('ach_customizer/ach_customizer_wp_settings.py', names)
+                self.assertIn('ach_customizer/ach_customizer_wp_xmlrpc.py', names)
                 self.assertIn('ach_customizer/ach_customizer_status_stopped.py', names)
                 self.assertNotIn('ach_customizer/ach_customizer_status_manage.py', names)
                 self.assertNotIn('ach_customizer/ach_customizer_status_routing.py', names)

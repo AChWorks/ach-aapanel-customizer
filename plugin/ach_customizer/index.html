@@ -624,13 +624,14 @@
         </div>
       </div>
       <div class="ach-note" aria-label="Selected WordPress operational settings">
-        <strong>Selected WordPress — debug and system WP-Cron (manual)</strong>
-        <p>Select a native website above. Recheck reads the site's exact WordPress source; Apply changes only one verified <code>wp-config.php</code> constant. A system WP-Cron choice also creates a root-owned cron task executing the site's own PHP, without disabling the built-in trigger until the system task is installed. A real running system cron service is required. Restore removes only the plugin-owned line and Cron task, preserving unrelated edits. Custom/dynamic WordPress defines or an existing foreign task need review rather than adoption. No setting is auto-enabled.</p>
+        <strong>Selected WordPress — Debug, system WP-Cron and XML-RPC (manual)</strong>
+        <p>Select a native website above. Recheck reads its actual WordPress source. <strong>Debug</strong> changes only one verified <code>wp-config.php</code> constant. <strong>System WP-Cron</strong> creates an owned Cron task running as the site's <code>www</code> PHP user before disabling the page-load trigger. <strong>Block XML-RPC</strong> uses an exact site-owned WordPress must-use plugin: live <code>/xmlrpc.php</code> POST requests return HTTP 403, without modifying Nginx, other WordPress routes, the database, or any other website. Restore removes only the owned line, Cron task, or MU-plugin file for the selected operation. Foreign, ambiguous or stale source requires Recheck; no policy is automatically enabled.</p>
         <div class="ach-controls">
           <label for="ach-wp-settings-kind">Operation</label>
           <select id="ach-wp-settings-kind">
             <option value="debug">WordPress debug mode</option>
             <option value="cron">System WP-Cron scheduler</option>
+            <option value="xmlrpc">Block XML-RPC requests</option>
           </select>
           <label for="ach-wp-settings-debug">WP_DEBUG</label>
           <select id="ach-wp-settings-debug"><option value="true">Enable</option><option value="false" selected>Disable</option></select>
@@ -972,7 +973,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.83'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.84'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2091,10 +2092,12 @@
   function wpSettingsSelection() {
     var id = hostsSiteId(), site = id && hostsPageSites.get(id);
     var kind = root.find('#ach-wp-settings-kind').val();
-    var desired = kind === 'debug' ? root.find('#ach-wp-settings-debug').val() : 'true';
+    var desired = kind === 'debug' ? root.find('#ach-wp-settings-debug').val() :
+      kind === 'xmlrpc' ? 'block' : 'true';
     var interval = kind === 'cron' ? String(root.find('#ach-wp-settings-interval').val()) : '';
-    if (!site || !['debug','cron'].includes(kind) ||
+    if (!site || !['debug','cron','xmlrpc'].includes(kind) ||
         kind === 'debug' && !['true','false'].includes(desired) ||
+        kind === 'xmlrpc' && desired !== 'block' ||
         kind === 'cron' && (!/^[1-9][0-9]?$/.test(interval) || Number(interval)>59))
       return null;
     return {id:id,site:site,kind:kind,desired:desired,interval:interval,
@@ -2121,7 +2124,7 @@
       !selected ? 'Select a verified native website, an operation and valid value/interval.' :
       !match ? 'Recheck the selected WordPress setting. Apply and Restore require fresh source/recovery evidence.' :
       wpSettingsEvidence.state === 'Source Ready' ?
-      'Ready: Apply changes exactly one managed WordPress setting. For system Cron the scheduled task runs as www.' :
+      'Ready: Apply changes only the selected WordPress setting. XML-RPC uses one owned MU-plugin file; system Cron runs as www.' :
       wpSettingsEvidence.state === 'Applied' || wpSettingsEvidence.state === 'Recovery Required' ?
       'Saved Recovery ID available. Restore reverts only the owned setting and matching Cron task.' :
       wpSettingsEvidence.state === 'Restored' ? 'Previous owned setting restored. Apply is available after Recheck.' :
@@ -2142,7 +2145,10 @@
         r.recovery_id!==null && !id(r.recovery_id) ||
         typeof r.changed!=='boolean' || r.read_only!==(action==='recheck') ||
         typeof r.runtime_verified!=='boolean' || typeof r.reason!=='string' ||
-        typeof r.impact!=='string' || !r.impact.startsWith('Selected WordPress wp-config.php setting only') ||
+        typeof r.impact!=='string' ||
+        !(selection.kind === 'xmlrpc' ?
+          r.impact === 'Selected WordPress XML-RPC endpoint only; site-owned must-use plugin, no Nginx reload' :
+          r.impact.startsWith('Selected WordPress wp-config.php setting only')) ||
         !['Source Ready','Already Configured','Conflict','Applied','Restored','Drift','Recovery Required'].includes(r.state) ||
         (r.interval!==null && !(Number.isSafeInteger(r.interval)&&r.interval>=1&&r.interval<=59)))
       return false;

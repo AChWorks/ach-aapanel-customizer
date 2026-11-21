@@ -1871,11 +1871,48 @@ function wpSettingsReply(action, kind='debug', state='Source Ready', fields={}) 
     recovery_id:['Applied','Recovery Required','Restored'].includes(state)?'c'.repeat(32):null,
     changed,read_only:!changed,runtime_verified:false,
     interval:kind==='cron'?5:null,reason:'',
-    impact:'Selected WordPress wp-config.php setting only' +
+    impact:kind==='xmlrpc' ?
+      'Selected WordPress XML-RPC endpoint only; site-owned must-use plugin, no Nginx reload' :
+      'Selected WordPress wp-config.php setting only' +
       (kind==='cron' ? ' plus a root-owned site-specific /etc/cron.d scheduler' : ''),
     request_id:'d'.repeat(32), ...fields
   };
 }
+
+test('XML-RPC gate uses selected site and owned MU-plugin without a Nginx reload', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusSetValue('#ach-wp-settings-kind','xmlrpc','input change');
+  const recheck=ui.statusClick('#ach-wp-settings-recheck');
+  assert.equal(recheck.options.data.settings_kind,'xmlrpc');
+  assert.equal(recheck.options.data.desired,'block');
+  assert.equal(recheck.options.data.interval,'');
+  recheck.respond(wpSettingsReply('recheck','xmlrpc'));
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
+  const apply=ui.statusClick('#ach-wp-settings-apply');
+  assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
+  assert.equal(apply.options.data.approved,'true');
+  apply.respond(wpSettingsReply('apply','xmlrpc','Applied'));
+  assert.match(ui.state().wpSettingsResult,/XML-RPC endpoint only/);
+  ui.statusClick('#ach-wp-settings-recheck').respond(wpSettingsReply('recheck','xmlrpc','Applied'));
+  const restore=ui.statusClick('#ach-wp-settings-restore');
+  assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
+  restore.respond(wpSettingsReply('restore','xmlrpc','Restored'));
+  assert.match(ui.state().wpSettingsResult,/Restored/);
+});
+
+test('XML-RPC changes cannot reuse Debug or site evidence', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusSetValue('#ach-wp-settings-kind','debug','input change');
+  ui.statusClick('#ach-wp-settings-recheck').respond(wpSettingsReply('recheck'));
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
+  ui.statusSetValue('#ach-wp-settings-kind','xmlrpc','input change');
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  ui.statusClick('#ach-wp-settings-recheck').respond(wpSettingsReply('recheck','xmlrpc'));
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
+  ui.statusSetValue('#ach-wp-settings-kind','cron','input change');
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+});
 
 test('selected WordPress debug uses fresh native site identity and exact source before Apply', () => {
   const ui=loadUi();

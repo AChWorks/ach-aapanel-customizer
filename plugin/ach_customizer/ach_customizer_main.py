@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.83'
+WORKER_SOURCE_VERSION = '0.1.84'
 
 _STATE_DIR = DATA_DIR
 
@@ -1389,6 +1389,10 @@ class ach_customizer_main:
                 interval = int(raw_interval)
             elif kind == "debug":
                 interval = None
+            elif kind == "xmlrpc":
+                interval = None
+                if desired != "block":
+                    raise MonitorInputError("Select Block XML-RPC for this site")
             else:
                 raise MonitorInputError("Unsupported WordPress setting")
             public, before, current_site = self._selected_native_website(args)
@@ -1403,12 +1407,20 @@ class ach_customizer_main:
                     try:
                         if current_site() != before:
                             raise WPSettingsError("concurrency", "Native site changed before WordPress settings action")
-                        result = manage(
-                            action, kind, before, public,
-                            desired=desired, interval=interval, data_fd=fd,
-                            expected_source=self._argument(args, "expected_source_sha256"),
-                            expected_recovery=self._argument(args, "expected_recovery_id"),
-                        )
+                        if kind == "xmlrpc":
+                            from ach_customizer_wp_xmlrpc import manage_xmlrpc
+                            result = manage_xmlrpc(
+                                action, before, public, data_fd=fd,
+                                expected_source=self._argument(args, "expected_source_sha256"),
+                                expected_recovery=self._argument(args, "expected_recovery_id"),
+                            )
+                        else:
+                            result = manage(
+                                action, kind, before, public,
+                                desired=desired, interval=interval, data_fd=fd,
+                                expected_source=self._argument(args, "expected_source_sha256"),
+                                expected_recovery=self._argument(args, "expected_recovery_id"),
+                            )
                         if current_site() != before:
                             raise WPSettingsError(
                                 "uncertain", "Native site identity changed during WordPress settings action",

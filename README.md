@@ -73,7 +73,18 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.83 development source (not released or installed)
+## Native 0.1.84 development source (not released or installed)
+
+The same optional site-local WordPress controls also provide a **manual
+XML-RPC request block**. It uses one exact, plugin-owned WordPress must-use
+plugin, not an Nginx-global rewrite or blanket server deny rule. WordPress's
+real `xmlrpc.php` POST must return 403 with the unique current managed proof;
+all other WordPress routes continue their native behavior. Apply/Recheck and
+Restore require selected-site proof, exact file ownership, a durable Recovery
+ID and source compare; foreign MU plugins and other sites are preserved.
+When the product created a new `mu-plugins` directory it removes it on
+Restore only if empty. This only blocks requests once WordPress bootstraps;
+it is **not** claimed to stop PHP-FPM entry or all proxy/edge variants.
 
 The new site-local WordPress controls support manual WP_DEBUG and a real
 system WP-Cron schedule. They revalidate the selected native site's PHP
