@@ -973,7 +973,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.84'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.85'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2183,7 +2183,9 @@
       wpSettingsBusy=false;
       if (!wpSettingsSelection() || wpSettingsSelection().key!==selected.key ||
           !validWpSettingsResponse(r,action,selected) ||
-          (action==='apply' && r.source_sha256===previous.source) ||
+          (action==='apply' && (selected.kind==='xmlrpc' ?
+            r.source_sha256!==previous.source :
+            r.source_sha256===previous.source)) ||
           (action==='restore' && r.recovery_id!==previous.recovery)) {
         root.find('#ach-wp-settings-result').text(
           statusBackendFailure(action, failure, action==='recheck' ?
@@ -2194,7 +2196,9 @@
           wpSettingsEvidence={selection:selected.key,state:r.state,source:r.source_sha256,
                               recovery:r.recovery_id};
         root.find('#ach-wp-settings-result').text(
-          r.state + (r.changed ? ' — source changed' : ' — no change') +
+          r.state + (r.changed ?
+            (selected.kind==='xmlrpc' ? ' — XML-RPC policy changed' : ' — source changed') :
+            ' — no change') +
           '\nSource SHA-256: '+r.source_sha256+
           '\nRecovery ID: '+(r.recovery_id||'None')+
           '\nOperation ID: '+(r.request_id||'None')+

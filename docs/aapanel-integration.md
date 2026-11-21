@@ -68,6 +68,17 @@ journal contains the exact managed file hash and recovery identity. Original
 foreign files are never overwritten; an absent MU-plugin folder is created
 with the site's own ownership and removed after Restore only if still empty.
 Live POST/403/proof and absence after Restore are verified repeatedly.
+The source fingerprint deliberately excludes the separately owned MU-plugin:
+`wp-config.php` and WordPress core are **unchanged** by XML-RPC Apply.
+The native UI must therefore accept the same verified source SHA before/after
+this operation while still requiring changed=true, expected 403/proof,
+exact Recovery ID and its own explicit admin action. An installed 0.1.84
+test found and corrected a prior UI-only false `Uncertain` report: the
+backend actually applied the policy and returned `Applied`; the UI
+mistakenly assumed wp-config.php had to change. Recheck/Restore reconciled
+that original operation without a repeated Apply, and the UI validation
+was corrected in Native 0.1.85.
+
 If the site no longer serves its expected WordPress route or the file drifts,
 report a concrete source/recovery failure, not a fictional success.
 

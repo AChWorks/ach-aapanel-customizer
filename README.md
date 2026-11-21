@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.84 development source (not released or installed)
+## Native 0.1.85 development source (not released or installed)
 
 The same optional site-local WordPress controls also provide a **manual
 XML-RPC request block**. It uses one exact, plugin-owned WordPress must-use

@@ -1867,7 +1867,7 @@ function wpSettingsReply(action, kind='debug', state='Source Ready', fields={}) 
   const changed=action!=='recheck';
   return {
     status:true,schema:1,site_id:7,site_key:'site.test',settings_action:action,
-    kind,state,source_sha256:changed?'b'.repeat(64):'a'.repeat(64),
+    kind,state,source_sha256:changed && kind!=='xmlrpc'?'b'.repeat(64):'a'.repeat(64),
     recovery_id:['Applied','Recovery Required','Restored'].includes(state)?'c'.repeat(32):null,
     changed,read_only:!changed,runtime_verified:false,
     interval:kind==='cron'?5:null,reason:'',
@@ -1893,12 +1893,13 @@ test('XML-RPC gate uses selected site and owned MU-plugin without a Nginx reload
   assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
   assert.equal(apply.options.data.approved,'true');
   apply.respond(wpSettingsReply('apply','xmlrpc','Applied'));
+  assert.match(ui.state().wpSettingsResult,/Applied — XML-RPC policy changed/);
   assert.match(ui.state().wpSettingsResult,/XML-RPC endpoint only/);
   ui.statusClick('#ach-wp-settings-recheck').respond(wpSettingsReply('recheck','xmlrpc','Applied'));
   const restore=ui.statusClick('#ach-wp-settings-restore');
   assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
   restore.respond(wpSettingsReply('restore','xmlrpc','Restored'));
-  assert.match(ui.state().wpSettingsResult,/Restored/);
+  assert.match(ui.state().wpSettingsResult,/Restored — XML-RPC policy changed/);
 });
 
 test('XML-RPC changes cannot reuse Debug or site evidence', () => {
