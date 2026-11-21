@@ -709,6 +709,37 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
+### P0 native PHP regeneration and scanner workflow (0.1.76 candidate)
+
+An explicit new FPM auto Enable records the selected service's original
+canonical source SHA, native RAM tier, and saved pm.max_requests before any
+repair. The already installed systemd timer then handles both accepted
+WordPress Toolkit terminal events and post-opt-in FPM source changes whose
+four managed numeric settings match the exact verified installed aaPanel
+setFpmConfig writer. Foreign source changes remain Needs Review. For
+recognized regeneration, the saved desired values, shared-site mapping,
+Monitor status, exact source identity, recovery journal and fresh runtime
+verification must agree; failure preserves diagnostic evidence and baseline
+bytes. A completed host transaction is reconciled after a worker crash without
+reloading PHP again. Emergency Disable prevents new lifecycle repairs.
+Existing enabled profiles do not silently acquire new authority; disable
+and re-enable deliberately to activate the expanded scope.
+
+The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
+sensitive-path protection. Choose a native site with its Nginx Guard Applied,
+check the native combined access log, configure the desired retry/window/ban
+values, inspect the plan, then enable. The managed Fail2ban jail is selected
+site-log-scoped, but an nftables ban affects EVERY web service on the origin
+using TCP/UDP 80/443, IPv4 and IPv6. Real-client log addresses from a trusted
+proxy may not be packet sources visible to the origin kernel firewall; never
+assume bans work or are safe behind CDN/proxy without an actual check.
+Normal 404s, .well-known/ACME and OAuth paths are not filter hits.
+Restore retires only the owned jail using the Recovery ID and verifies that
+the jail is no longer active; the shared filter is retained for possible
+other references. No vendor Nginx source or foreign Fail2ban jail is edited.
+Only an actual installed-native HTTP/UI check can prove a particular host
+layout, not unit tests or synthetic Fail2ban traffic.
+
 ### Source-integrated R1–R4 control-flow remediation (verify installed behavior)
 
 - **Reviewed-site consent (R1):** Enable carries the exact versioned

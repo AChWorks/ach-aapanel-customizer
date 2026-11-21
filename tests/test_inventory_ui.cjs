@@ -91,6 +91,9 @@ function loadUi() {
     '#ach-guard-result', '#ach-guard-apply-why', '#ach-guard-apply-reviewed',
     '#ach-guard-apply', '#ach-guard-restore-why', '#ach-guard-restore-reviewed',
     '#ach-guard-restore',
+    '#ach-scan-preview', '#ach-scan-recheck', '#ach-scan-apply',
+    '#ach-scan-restore', '#ach-scan-summary', '#ach-scan-result',
+    '#ach-scan-maxretry', '#ach-scan-findtime', '#ach-scan-bantime',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
@@ -171,6 +174,9 @@ function loadUi() {
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
   elements.get('#ach-fpm-recovery-version').props.value = '85';
+  elements.get('#ach-scan-maxretry').props.value = '6';
+  elements.get('#ach-scan-findtime').props.value = '120';
+  elements.get('#ach-scan-bantime').props.value = '600';
   elements.get('#ach-php-runtime-check').props.disabled = true;
   const requests = [];
   let allowStatusDiscard = false;

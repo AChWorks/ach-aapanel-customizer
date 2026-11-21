@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.75'
+WORKER_SOURCE_VERSION = '0.1.76'
 
 _STATE_DIR = DATA_DIR
 
@@ -82,7 +82,8 @@ class ach_customizer_main:
             # only the request correlation, NEVER the recovery journal ID.
             cache_recovery = (module == "websites" and
                               action in ("manage_cache_policy", "cache_manage",
-                                         "manage_nginx_protection", "nginx_guard_manage"))
+                                         "manage_nginx_protection", "nginx_guard_manage",
+                                         "manage_abusive_scan", "abusive_scan_manage"))
             hosts_recovery = (module == "websites" and
                               action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
@@ -155,13 +156,19 @@ class ach_customizer_main:
                 trusted_hosts_recovery = isinstance(error, GuardError)
             except ImportError:
                 trusted_hosts_recovery = False
+        if stage == "abusive_scan_manage":
+            try:
+                from ach_customizer_abusive_scan import AbuseError
+                trusted_hosts_recovery = isinstance(error, AbuseError)
+            except ImportError:
+                trusted_hosts_recovery = False
         if (trusted_hosts_recovery and isinstance(actual_recovery, str) and
                 re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):
             response["recovery_id"] = actual_recovery
             response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "wordpress_cache_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "abusive_scan_", "wordpress_cache_")) else
                   "lifecycle" if stage.startswith("wp_terminal_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
@@ -923,6 +930,74 @@ class ach_customizer_main:
                            re.fullmatch(r"[a-z][a-z_]{0,31}", phase) else None)
             return self._fail("nginx_guard_manage", exc, request_id,
                               target=trusted_site_id, activity_stage=typed_stage)
+
+    def manage_abusive_scan(self, args):
+        """Explicit per-site log monitoring, origin-wide firewall ban/recovery.
+
+        Fail2ban is a host dependency. Selected site ownership, persisted
+        recovery, exact log source and shared-service side effects remain
+        visible; the endpoint never installs packages or edits vendor files.
+        """
+        request_id = uuid4().hex
+        action = self._argument(args, "scan_action")
+        trusted_site_id = ""
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            if action not in ("preview", "apply", "recheck", "restore"):
+                raise MonitorInputError("Unsupported Fail2ban scanner action")
+            from ach_customizer_abusive_scan import manage, AbuseError
+            from ach_customizer_nginx_security import manage_guard
+            from ach_customizer_state import _open_state_dir
+            from ach_customizer_status_pages import _take_lock
+
+            public, site, current_site = self._selected_native_website(args)
+            trusted_site_id = str(site["id"])
+            data_fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock = _take_lock(data_fd)
+                try:
+                    if current_site() != site:
+                        raise MonitorInputError("Native site changed during Fail2ban readiness")
+                    if action == "apply":
+                        # Only the verified Nginx server-level sensitive-path
+                        # guard can claim pre-PHP blocking for this site.
+                        guard = manage_guard("recheck", site, data_fd=data_fd)
+                        if guard["state"] != "Applied" or not guard["runtime_verified"]:
+                            raise AbuseError("dependency",
+                                "Enable and verify this site's Nginx sensitive-path guard first")
+                    result = manage(
+                        action, site, data_fd=data_fd,
+                        approved=self._argument(args, "approved") == "true",
+                        params={name: self._argument(args, name)
+                                for name in ("maxretry", "findtime", "bantime")
+                                if self._argument(args, name) is not None},
+                        expected_plan=self._argument(args, "expected_plan_sha256"),
+                        recovery_id=self._argument(args, "recovery_id"),
+                    )
+                    if current_site() != site:
+                        raise AbuseError("uncertain",
+                            "Native site changed; recheck exact Fail2ban recovery",
+                            recovery_id=result.get("recovery_id"))
+                finally:
+                    os.close(lock)
+            finally:
+                os.close(data_fd)
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "manage_abusive_scan", target=trusted_site_id,
+                level="WARNING" if result["state"] in
+                    ("Needs Review", "Recovery Required", "Dependency Missing") else "INFO")
+        except PermissionError as exc:
+            return self._fail("abusive_scan_authorization", exc, request_id,
+                              target=trusted_site_id)
+        except Exception as exc:
+            from ach_customizer_abusive_scan import AbuseError
+            kind = getattr(exc, "stage", None) if isinstance(exc, AbuseError) else None
+            typed = ("abusive_scan_" + kind if isinstance(kind, str) and
+                     re.fullmatch(r"[a-z][a-z_]{0,31}", kind) else None)
+            return self._fail("abusive_scan_manage", exc, request_id,
+                              target=trusted_site_id, activity_stage=typed)
 
     def inspect_native_vhost(self, args):
         """Primary-admin-only file-level Nginx vs native site record drift.

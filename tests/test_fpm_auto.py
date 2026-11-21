@@ -1316,6 +1316,97 @@ class AutoNativeFpmTests(unittest.TestCase):
             self._run()
         self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
 
+    def test_lifecycle_vendor_regeneration_without_wp_event_is_repaired_twice(self):
+        self._enable()
+        initial = worker.inspect("85", data_dir=str(self.state))
+        self.assertEqual(initial["watch_scope"],
+                         "verified_native_wp_terminal_and_fpm_lifecycle")
+        self.assertFalse(self._run()["changed"])
+        # An existing optimizer sidecar means first-install WP logic will
+        # intentionally skip; the independent native setter still updates
+        # the shared pool during later aaPanel regeneration.
+        self._mark_optimized()
+        self._vendor_reset()
+        result = self._run()
+        self.assertTrue(result["changed"], result)
+        self.assertEqual(result["services"][0]["state"], "Applied")
+        first_op = result["services"][0]["operation_id"]
+        self.assertIsNotNone(first_op)
+        from ach_customizer_monitor import preview_php_fpm
+        self.assertEqual(preview_php_fpm(
+            self.php_root, "85", DESIRED)["state"], "File Match")
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertFalse(self._run()["changed"])
+        self._vendor_reset()
+        second = self._run()
+        self.assertTrue(second["changed"], second)
+        self.assertNotEqual(second["services"][0]["operation_id"], first_op)
+        self.assertEqual(self.calls.count("reload"), 2)
+        self.assertEqual(
+            (self.state / ("ach_customizer.fpm85.auto." + first_op + ".before")
+             ).read_bytes(), VENDOR_BYTES)
+        self.assertFalse(self._run()["changed"])
+
+    def test_lifecycle_arbitrary_admin_change_is_visible_without_rewrite(self):
+        self._enable()
+        changed = BASELINE.replace(b"pm.max_children=50", b"pm.max_children=70")
+        self.config.write_bytes(changed)
+        first = self._run()
+        self.assertFalse(first["changed"])
+        self.assertEqual(first["services"][0]["state"], "Needs Review")
+        self.assertIn("nonvendor", worker.inspect(
+            "85", data_dir=str(self.state))["last_state"])
+        self.assertEqual(self.config.read_bytes(), changed)
+        self.assertEqual(self.calls.count("reload"), 0)
+        # Persistent evidence is not spammed on every 30-second poll.
+        state = worker.inspect("85", data_dir=str(self.state))
+        self.assertEqual(self._run()["services"][0]["state"], "Needs Review")
+        self.assertEqual(worker.inspect(
+            "85", data_dir=str(self.state))["state_revision"],
+            state["state_revision"])
+
+    def test_lifecycle_after_commit_crash_is_idempotently_reconciled(self):
+        self._enable()
+        self._vendor_reset()
+        real = worker.recovery.apply
+        once = [False]
+        def fail_after_commit(*args, **kwargs):
+            value = real(*args, **kwargs)
+            if not once[0]:
+                once[0] = True
+                raise OSError("simulated ack crash after applied fsync")
+            return value
+        with patch.object(worker.recovery, "apply", side_effect=fail_after_commit):
+            with self.assertRaises(OSError):
+                self._run()
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertEqual(worker.inspect("85",data_dir=str(self.state))["last_state"],
+                         "Armed")
+        resumed = self._run()
+        self.assertEqual(resumed["services"][0]["state"], "Applied")
+        self.assertTrue(resumed["services"][0]["reconciled"])
+        self.assertFalse(resumed["changed"])
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertFalse(self._run()["changed"])
+
+    def test_legacy_profile_remains_wordpress_only_until_reenabled(self):
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            store=worker._read(fd)
+            old={**store["profiles"]["85"]}
+            del old["lifecycle"]
+            worker._save(fd,{**store,"revision":store["revision"]+1,
+                             "profiles":{"85":old}})
+        finally:
+            os.close(fd)
+        self._vendor_reset()
+        self.assertFalse(self._run()["changed"])
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"), 0)
+        self.assertEqual(worker.inspect("85",data_dir=str(self.state))["watch_scope"],
+                         "verified_native_wp_terminal")
+
 
 if __name__=="__main__":
     unittest.main()
