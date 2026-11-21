@@ -100,7 +100,7 @@ do not authorize a WordPress.org Plugin Directory listing or decide
 the project's software license.
 
 The companion is **opt-in**, disconnected by default and never required
-for native aaPanel functions. Its currently implemented capability is
+for native aaPanel functions. After the native and both WordPress plugins are installed, an administrator may run **Connect WordPress Cache (once)** for a selected native WordPress site. This one authorized action configures its private physical Nginx Cache, WordPress Nginx Helper constant, selected PHP open_basedir, Helper unlink_files options and generation-aware Bridge mapping. Ordinary WordPress content changes and repeated use of the vendor's page/site purge buttons need no per-site manual path edits or continuous watcher; site sources that materially change must be reported and rechecked. The corresponding **Disconnect and restore** action recovers the managed site configuration and disables vendor purge before returning to a potentially shared aaPanel path. This one-click path does not install third-party WordPress plugins, support unverified PHP/Nginx layouts, or authorize an arbitrary shared Cache root. The normal native manual Cache Apply remains independently available. Its currently implemented capability is
 native-generation-bound, owner-verified per-URL invalidation via the
 WordPress Nginx Helper `unlink_files` integration for supported public
 post/homepage/taxonomy changes; it does not activate Nginx Helper, create

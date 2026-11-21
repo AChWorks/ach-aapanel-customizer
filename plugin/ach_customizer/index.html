@@ -601,6 +601,16 @@
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
       <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
+      <div class="ach-note" aria-label="One-time WordPress Nginx Helper connection">
+        <strong>WordPress + Nginx Helper — one-time connection</strong>
+        <p>Install the official Nginx Helper and ACh aaPanel Bridge plugins in this WordPress site, then choose Connect once. Customizer configures site-owned Nginx Cache, WordPress Cache path, PHP access, Nginx Helper unlink_files settings and Bridge URL mapping. No repeated path edits or per-post setup. Nginx and the selected PHP service may reload; peer Cache directories are preserved.</p>
+        <div class="ach-controls">
+          <button type="button" id="ach-wp-cache-inspect" disabled>Check WordPress connection</button>
+          <button type="button" id="ach-wp-cache-setup" class="btn btn-warning" disabled>Connect WordPress Cache (once)</button>
+          <button type="button" id="ach-wp-cache-restore" class="btn btn-danger" disabled>Disconnect and restore</button>
+        </div>
+        <p id="ach-wp-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native WordPress site. Connect is the one-click authorization; there is no separate checklist or approval checkbox.</p>
+      </div>
       <div class="ach-note" aria-label="Guarded site-specific FastCGI Cache activation">
         <strong>Site-owned FastCGI Cache — manual Apply / Restore</strong>
         <p>For a verified aaPanel 8.0.7 Nginx HTTP/80 site using stock PHP 8.1/8.5 or an exactly source-matched native WordPress wpfastcgi handler. A site-owned extension takes precedence over the matching native PHP location, retaining its routing and response headers; no aaPanel vendor configuration is edited. Applies an isolated zone, validates Nginx, reloads with consent and verifies the PHP route. Existing shared WORDPRESS Cache and native /purge remain untouched. Nginx Helper automatic invalidation, authenticated WooCommerce privacy and Purge All are NOT certified or enabled.</p>
@@ -883,7 +893,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.69'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.70'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1808,6 +1818,8 @@
     root.find('#ach-bridge-inspect').prop('disabled', cacheActivationBusy || unready);
     root.find('#ach-bridge-enable').prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity);
     root.find('#ach-bridge-disable').prop('disabled', cacheActivationBusy || unready);
+    root.find('#ach-wp-cache-inspect,#ach-wp-cache-setup,#ach-wp-cache-restore')
+      .prop('disabled', cacheActivationBusy || unready);
     explainGate('ach-bridge-why', !cacheActivationBusy && !unready && cacheClearIdentity ? 'ready' : 'blocked',
       common || (!cacheClearIdentity ?
         'Fresh Applied Cache Recheck required for Provision. Disable is still available for a stale native manifest.' :
@@ -3151,6 +3163,41 @@
         cacheRecoveryIdentity = null;
         cacheActivationNotice('Bridge mapping changed or was refused. Recheck Cache before another operation.');
       }
+      cacheActivationLock();
+    });
+  });
+  root.find('#ach-wp-cache-inspect,#ach-wp-cache-setup,#ach-wp-cache-restore').on('click', function () {
+    var id = hostsSiteId();
+    if (!id || cacheActivationBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var action = this.id === 'ach-wp-cache-inspect' ? 'inspect' :
+      this.id === 'ach-wp-cache-setup' ? 'setup' : 'restore';
+    var ticket = ++cacheActivationTicket;
+    cacheActivationBusy = true;
+    cacheActivationSnapshot = null;
+    cacheRecoveryIdentity = null;
+    cacheClearIdentity = null;
+    root.find('#ach-wp-cache-result').text(
+      action === 'inspect' ? 'Checking WordPress connection...' :
+      'Applying or restoring this site setup; do not repeat an uncertain action...');
+    cacheActivationLock();
+    request('manage_wordpress_cache', Object.assign(cacheNativeArgs(id), {
+      wordpress_cache_action:action, approved:action === 'inspect' ? 'false' : 'true'
+    }), function (r, failure) {
+      if (ticket !== cacheActivationTicket) return;
+      cacheActivationBusy = false;
+      var site = hostsPageSites.get(id);
+      var valid = r && r.status === true && r.schema === 1 &&
+        site && id === hostsSiteId() && r.site_id === Number(id) &&
+        r.site_key === site.name &&
+        ['Connected','Not Connected','Needs Review','Restored'].includes(r.state);
+      root.find('#ach-wp-cache-result').text(valid ?
+        'WordPress Cache: ' + r.state +
+        '\n' + (r.note || 'Inspect real Nginx Helper per-page and site-wide purging.') +
+        (r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '') :
+        'WordPress Cache operation unconfirmed. ' +
+        (cacheBackendFailure(failure, 'wordpress_cache_setup') ||
+          'Inspect Activity and the selected Cache recovery before retrying.'));
+      cacheActivationNotice('WordPress connection checked or changed. Recheck native Cache before further actions.');
       cacheActivationLock();
     });
   });

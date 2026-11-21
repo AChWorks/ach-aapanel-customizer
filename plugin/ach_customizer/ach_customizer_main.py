@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.69'
+WORKER_SOURCE_VERSION = '0.1.70'
 
 _STATE_DIR = DATA_DIR
 
@@ -120,6 +120,12 @@ class ach_customizer_main:
         controlled = (PermissionError, StateError, StatusPageError,
                       MonitorInputError, FpmApplyError, HostsInspectionError,
                       ActivityError)
+        if stage.startswith("wordpress_cache_"):
+            try:
+                from ach_customizer_cache_wordpress import WordpressCacheError
+                controlled += (WordpressCacheError,)
+            except ImportError:
+                pass
         typed_domain_detail = isinstance(error, str) and diagnostic_error is not None
         if isinstance(error, controlled) or typed_domain_detail:
             message = str(error)[:300]
@@ -155,7 +161,7 @@ class ach_customizer_main:
             response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "wordpress_cache_")) else
                   "lifecycle" if stage.startswith("wp_terminal_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
@@ -1194,6 +1200,38 @@ class ach_customizer_main:
             return self._fail("cache_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("cache_manage", exc, request_id)
+
+    def manage_wordpress_cache(self, args):
+        """One primary-admin site click connects official Nginx Helper.
+
+        This is a coordinated site setup, not a second cache purger.
+        """
+        request_id = uuid4().hex
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            action = self._argument(args, "wordpress_cache_action")
+            if action not in ("inspect", "setup", "restore"):
+                raise MonitorInputError("Unsupported WordPress Cache setup action")
+            if action != "inspect" and self._argument(args, "approved") != "true":
+                raise MonitorInputError("Select Connect or Disconnect for this site")
+            from ach_customizer_cache_wordpress import inspect, setup, restore
+            public, before, current_site = self._selected_native_website(args)
+            result = {"inspect": inspect, "setup": setup, "restore": restore}[action](
+                before, public)
+            if current_site() != before:
+                from ach_customizer_cache_wordpress import WordpressCacheError
+                raise WordpressCacheError(
+                    "concurrency", "Native WordPress site identity changed; Recheck before retry",
+                    result.get("recovery_id"))
+            return self._activity_result(
+                {"status": True, "request_id": request_id, **result},
+                "websites", "manage_wordpress_cache", target=str(before["id"]),
+                level="WARNING" if result["state"] != "Connected" else "INFO")
+        except PermissionError as exc:
+            return self._fail("wordpress_cache_authorization", exc, request_id)
+        except Exception as exc:
+            return self._fail("wordpress_cache_setup", exc, request_id)
 
     def fpm_policy_get(self, args):
         """Read operator-saved shared PHP intent, not a live/runtime verdict."""

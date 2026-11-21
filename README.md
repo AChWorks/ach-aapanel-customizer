@@ -17,6 +17,24 @@ Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customize
 source manifests, current PR/CI and the target installation before relying on
 this dated checkpoint. **Merge, publication and deployment are separate steps.**
 
+## One-time WordPress Cache connection — development candidate
+
+An **unmerged native 0.1.70 candidate** adds **Connect WordPress Cache (once)**
+for a selected native WordPress website once the official Nginx Helper and
+ACh aaPanel Bridge plugins are installed there. The single administrator
+click configures and activates them, applies that site's isolated Nginx
+Cache, adjusts PHP/WordPress paths and provisions the generation-aware
+mapping. The actual **Nginx Helper Purge Current Page** and **Purge All**
+remain the user controls: this does not build a second purge plugin or
+require a recurring watcher. **Disconnect and restore** recovers the
+site-specific setup. No routine manual file edits are required after setup.
+
+See the [native integration guide](docs/aapanel-integration.md) and
+[Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
+for exact non-production evidence and still-unverified deployment cases.
+This unmerged candidate is neither a published package nor a Production
+deployment.
+
 ## Capabilities in the merged development source
 
 | Native section | Operator tasks and important boundary |
