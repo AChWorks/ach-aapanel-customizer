@@ -293,19 +293,44 @@ def _tls_probe(family, name):
 
 
 def _probe_family(family, witness, *, rejection, absent=False, probe=None):
+    """Verify the live workers, not merely the reload command's exit code.
+
+    Nginx -s reload returns before all worker sockets settle. A first
+    post-reload handshake can be routed to the previous worker generation.
+    Require three consecutive correct fresh observations within a bounded
+    settle window; never treat a single TLS alert, TCP refusal or timeout
+    as successful Apply/Restore, and retain a diagnostic on expiration.
+    """
     fn = probe or _tls_probe
-    # No random hostname is persisted: the successful SNI is always a
-    # configured host witness; unknown SNI must be rejected by the active
-    # Nginx worker, not inferred from syntax checks.
-    for _ in range(3):
+    expected = "refused" if absent else "rejected" if rejection else "accepted"
+    deadline = time.monotonic() + 10
+    consecutive = 0
+    last_reason = "No completed TLS observation"
+    while True:
         unknown = "ach-unknown-" + uuid4().hex + ".invalid"
-        expected = "refused" if absent else "rejected" if rejection else "accepted"
-        if fn(family, unknown) != expected:
-            raise TLSError("postcheck", "Unknown SNI handshake did not match expected TLS policy")
-        if fn(family, None) != expected:
-            raise TLSError("postcheck", "Handshake without SNI did not match expected TLS policy")
-        if not absent and fn(family, witness) != "accepted":
-            raise TLSError("postcheck", "A configured HTTPS hostname lost its TLS handshake")
+        try:
+            got_unknown = fn(family, unknown)
+            got_none = fn(family, None)
+            got_known = None if absent else fn(family, witness)
+            if (got_unknown == expected and got_none == expected
+                    and (absent or got_known == "accepted")):
+                consecutive += 1
+                if consecutive >= 3:
+                    return
+                continue
+            last_reason = (
+                "unknown-SNI=" + str(got_unknown) +
+                ", no-SNI=" + str(got_none) +
+                (", named-SNI=" + str(got_known) if not absent else "")
+            )
+        except TLSError as exc:
+            last_reason = exc.stage + ": " + str(exc)[:180]
+        consecutive = 0
+        if time.monotonic() >= deadline:
+            raise TLSError("postcheck",
+                           "TLS " + family + " workers did not settle within 10 seconds; " +
+                           last_reason)
+        time.sleep(0.2)
 
 
 def _response(state, source, record, families, witnesses, *, changed=False,
@@ -408,9 +433,11 @@ def manage_tls(action, *, data_fd, expected_source=None, expected_recovery=None,
                 journal["phase"] = "applied"
                 _journal_write(data_fd, journal)
             except Exception as exc:
-                raise TLSError("uncertain",
-                               "TLS Apply outcome uncertain; inspect saved Recovery ID before retry",
-                               recovery_id=operation_id) from exc
+                raise TLSError(
+                    "uncertain",
+                    "TLS Apply uncertain after " + str(getattr(exc, "stage", type(exc).__name__)) +
+                    ": " + str(exc)[:190] + "; inspect saved Recovery ID before retry",
+                    recovery_id=operation_id) from exc
             return _response("Applied", source, journal, families, witnesses,
                              changed=True, verified=True, read_only=False)
 
@@ -451,9 +478,11 @@ def manage_tls(action, *, data_fd, expected_source=None, expected_recovery=None,
             journal["phase"] = "restored"
             _journal_write(data_fd, journal)
         except Exception as exc:
-            raise TLSError("uncertain",
-                           "TLS Restore outcome uncertain; retain Recovery ID and Recheck",
-                           recovery_id=record["operation_id"]) from exc
+            raise TLSError(
+                "uncertain",
+                "TLS Restore uncertain after " + str(getattr(exc, "stage", type(exc).__name__)) +
+                ": " + str(exc)[:190] + "; retain Recovery ID and Recheck",
+                recovery_id=record["operation_id"]) from exc
         return _response("Restored", source, journal, families, witnesses,
                          changed=True, verified=True, read_only=False)
     finally:

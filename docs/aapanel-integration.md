@@ -87,6 +87,13 @@ Apply compares the previously working default TLS handshake with an
 existing configured website witness on each socket family; after the
 guarded syntax check and reload, an unknown SNI and a connection without
 SNI must be rejected, while the configured witness still negotiates TLS.
+Nginx workers can briefly serve a previous generation after `nginx -s
+reload` succeeds. The post-reload verifier therefore waits for three
+consecutive correct real TLS handshake rounds within a bounded ten-second
+window for each IPv4/IPv6 family, retains the exact Recovery ID on failure
+and includes the original typed failure stage instead of presenting only a
+generic uncertain outcome. The first 0.1.82 installed QA caught this
+transition before the 0.1.83 correction.
 Restore removes only the exact journal-owned configuration and verifies
 the prior handshake behavior, or a confirmed TCP refusal if the entire
 native HTTPS family was removed. Source/CI tests and an installed-browser/

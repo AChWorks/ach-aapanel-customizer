@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.82 development source (not released or installed)
+## Native 0.1.83 development source (not released or installed)
 
 The new site-local WordPress controls support manual WP_DEBUG and a real
 system WP-Cron schedule. They revalidate the selected native site's PHP

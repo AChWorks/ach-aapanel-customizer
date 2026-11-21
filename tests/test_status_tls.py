@@ -124,6 +124,28 @@ class TlsPolicyTests(unittest.TestCase):
         self.assertEqual(self.named.read_bytes(), original)
         self.assertEqual(self.recheck()["state"], "Restored")
 
+    def test_reload_worker_generation_race_has_bounded_settle_and_exact_recovery(self):
+        original = self.runner.probe
+        lag = {"apply": 2, "restore": 2}
+        def delayed(family, name):
+            if name is not None and name.startswith("ach-unknown-"):
+                if self.runner.reloads == 1 and lag["apply"]:
+                    lag["apply"] -= 1
+                    return "accepted"  # old worker has not switched yet
+                if self.runner.reloads == 2 and lag["restore"]:
+                    lag["restore"] -= 1
+                    return "rejected"  # old managed worker still draining
+            return original(family, name)
+        self.runner.probe = delayed
+        applied = self.apply()
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(lag["apply"], 0)
+        self.assertEqual(self.recheck()["state"], "Applied")
+        restored = self.restore()
+        self.assertEqual(restored["state"], "Restored")
+        self.assertEqual(lag["restore"], 0)
+        self.assertFalse(self.managed.exists())
+
     def test_no_https_listener_does_not_open_a_new_port(self):
         self.named.write_text("server { listen 80; server_name example.test; }")
         state = self.recheck()
