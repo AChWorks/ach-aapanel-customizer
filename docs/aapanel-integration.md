@@ -928,6 +928,16 @@ access takes effect. No vendor Nginx/WordPress plugin source is rewritten.
 **Disconnect and restore** first disables vendor purge before returning to
 a potentially shared path, then restores recorded site settings and native
 Cache recovery. A root-owned site-specific journal retains incomplete work.
+An interrupted Connect or Disconnect can be repeated for that exact site.
+The connector accepts only the saved original and managed values when
+resuming file changes, checkpoints a pending FPM reload independently from
+WordPress-option and native Cache Restore, and never treats a fresh native
+Cache generation as owned by the previous connection. A completed Disconnect
+followed by an explicit new Connect may attach to a previously manually
+Applied Cache as **not connector-owned**; subsequent Disconnect leaves that
+native Cache in place. Changed source, foreign generation or unconfirmed
+native recovery yields Needs Review rather than changing arbitrary files.
+
 The standard native site extension include is retained if this one-click
 operation had to add it on an initial VHost: removing that innocuous empty
 include would invalidate aaPanel Cache recovery and force another manual

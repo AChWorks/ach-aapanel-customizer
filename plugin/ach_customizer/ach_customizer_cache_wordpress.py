@@ -409,33 +409,125 @@ def setup(site, public, *, data_dir=DATA_DIR):
         return _setup_locked(site, public, data_dir=data_dir)
 
 
+def _native_generation(site, data_dir, current):
+    """Resolve one verified native generation, not an arbitrary current Cache."""
+    native = _read_managed(site, data_dir)
+    expected_phase = current["state"].lower()
+    if (native is None or native["site_key"] != site["name"]
+            or native["op"] != current.get("recovery_id")
+            or native["phase"] != expected_phase):
+        raise WordpressCacheError(
+            "recovery", "Native Cache journal and observed recovery identity differ",
+            current.get("recovery_id"))
+    return native["cache_generation"]
+
+
+def _check_native_connection(site, record, current, data_dir):
+    """Never transfer connector ownership to another independently Applied Cache."""
+    if current["state"] not in ("Applied", "Restored"):
+        raise WordpressCacheError(
+            "recovery", "Native Cache is not in a verified managed state",
+            record.get("recovery_id"))
+    generation = _native_generation(site, data_dir, current)
+    if (record.get("recovery_id") is None and
+            record["phase"] == "initial" and
+            record.get("cache_owned", True) and
+            record.get("pending_generation") == generation and
+            current["state"] == "Applied"):
+        # Apply succeeded but the connector crashed before checkpointing its
+        # recovery ID. The generation was persisted before Apply and the
+        # native manager has independently verified this exact journal.
+        record["recovery_id"] = current["recovery_id"]
+        record["native_generation"] = generation
+        record["phase"] = "cache_applied"
+        _save(site, record, data_dir)
+    elif (record.get("recovery_id") != current.get("recovery_id")
+            or record.get("native_generation", generation) != generation):
+        raise WordpressCacheError(
+            "recovery", "Different native Cache generation; review the old WordPress connection before reconnecting",
+            record.get("recovery_id"))
+    if record.get("native_generation") is None:
+        # Existing site-first journal can be bound only after its saved
+        # recovery ID was matched, never from the current generation alone.
+        record["native_generation"] = generation
+        _save(site, record, data_dir)
+    return generation
+
+
+def _connected_ini(record, cache):
+    original = record["ini_old"]
+    target = cache + "/"
+    return original if target in original.split(":") else original + ":" + target
+
+
+def _source_values(site, record):
+    """Check both source values before any mutation, allowing only exact states."""
+    config, _ = _read_file(site["path"], WORDPRESS_CONFIG)
+    ini, _ = _read_file(site["path"], USER_INI)
+    cache = CACHE_ROOT + "/site-" + str(site["id"])
+    old_config = record["wp_old"]
+    old_ini = record["ini_old"]
+    connected_ini = _connected_ini(record, cache)
+    actual_config = _extract_constant(config)
+    actual_ini = _extract_basedir(ini)
+    if actual_config not in (old_config, cache):
+        raise WordpressCacheError(
+            "recovery", "WordPress Cache constant is neither the saved original nor the managed site path",
+            record.get("recovery_id"))
+    if actual_ini not in (old_ini, connected_ini):
+        raise WordpressCacheError(
+            "recovery", "PHP open_basedir is neither the saved original nor the managed site path",
+            record.get("recovery_id"))
+    return config, ini, actual_config, actual_ini, cache, connected_ini
+
+
+def _replace_value(raw, expression, value):
+    matches = list(expression.finditer(raw))
+    if len(matches) != 1:
+        raise WordpressCacheError("recovery", "WordPress source setting is no longer unique")
+    return raw[:matches[0].start(2)] + value.encode() + raw[matches[0].end(2):]
+
+
 def _setup_locked(site, public, *, data_dir):
     root = _site_root(site, public)
     record = _load(site, data_dir)
     cache_status = _native_record(site, public)
-    was_connected = bool(record and record["phase"] == "connected"
-                         and cache_status["state"] == "Applied")
+
     if record is not None and record["phase"] == "restored":
-        # Both a fully restored native Cache and a Cache that predates this
-        # connector can be connected again without removing foreign state.
-        if (cache_status["state"] == "Restored" or
-                cache_status["state"] == "Applied" and not record.get("cache_owned", True)):
-            record = None
-        else:
+        # Explicit Connect after a completed Disconnect is a NEW ownership
+        # decision. A newly manual Applied generation belongs to its operator,
+        # even when the previous connector created a different generation.
+        if cache_status["state"] == "Restored":
+            _check_native_connection(site, record, cache_status, data_dir)
+        elif (cache_status["state"] == "Applied" and
+              record.get("cache_owned", True) and
+              cache_status["recovery_id"] == record["recovery_id"]):
             raise WordpressCacheError("recovery",
-                "Native Cache recovery differs from the previous WordPress connection")
-    elif cache_status["state"] == "Restored" and record is not None:
+                "Restored WordPress journal conflicts with its still-Applied native Cache")
+        record = None
+    elif record is not None and cache_status["state"] == "Restored":
         raise WordpressCacheError("recovery",
-            "Complete the previous WordPress setup recovery before reconnecting")
+            "WordPress setup was interrupted by native Cache Restore; Disconnect before connecting",
+            record.get("recovery_id"))
+
+    if record is not None and cache_status["state"] == "Applied":
+        _check_native_connection(site, record, cache_status, data_dir)
+    elif (record is not None and cache_status["state"] == "Unmanaged"
+          and record["phase"] != "initial"):
+        raise WordpressCacheError("recovery",
+            "Native Cache disappeared while WordPress setup was in progress",
+            record.get("recovery_id"))
+
     if cache_status["state"] in ("Unmanaged", "Restored"):
         from ach_customizer_cache_audit import inspect_site_fastcgi_cache
         native = inspect_site_fastcgi_cache(public, site["id"], site["name"])
         version = native.get("php_version")
         if version not in ("81", "85"):
-            raise WordpressCacheError("compatibility", "This site's PHP handler is not supported by the installed Cache adapter")
+            raise WordpressCacheError("compatibility",
+                "Selected native WordPress PHP handler is incompatible with this Cache adapter")
     else:
         version = _active_php(site, data_dir)
-    # Check installed WordPress plugins and PHP first, before any Nginx edit.
+
     original_options = _php(site, version, "inspect")
     if record is None:
         patch = _edits(site)
@@ -443,6 +535,10 @@ def _setup_locked(site, public, *, data_dir):
             "schema": 1, "site_id": site["id"], "site_key": site["name"],
             "wp_root": root, "php": version, "phase": "initial",
             "recovery_id": cache_status.get("recovery_id"),
+            "native_generation": (
+                _native_generation(site, data_dir, cache_status)
+                if cache_status["state"] == "Applied" else None),
+            "pending_generation": None,
             "wp_old": _extract_constant(patch["wp_before"]),
             "ini_old": _extract_basedir(patch["ini_before"]),
             "ini_immutable": patch["ini_immutable"],
@@ -450,65 +546,91 @@ def _setup_locked(site, public, *, data_dir):
             "previous": original_options["previous"],
         }
         _save(site, record, data_dir)
+
     if cache_status["state"] in ("Unmanaged", "Restored"):
         try:
-            plan = preview_cache_activation(site, public)
+            plan = preview_cache_activation(
+                site, public, cache_generation=record.get("pending_generation"))
         except CacheManageError as exc:
             if exc.reason_code != "native_extension_include_missing":
                 raise
-            # Keep the standard native site extension include even after
-            # a disconnect: deleting it strands aaPanel's Cache recovery in
-            # Needs Review and causes another manual configuration step.
             _bootstrap_site_extension(site)
-            plan = preview_cache_activation(site, public)
-        if plan["native_handler"] != "wpfastcgi":
-            raise WordpressCacheError("compatibility", "Select an installed native WordPress website")
+            plan = preview_cache_activation(
+                site, public, cache_generation=record.get("pending_generation"))
+        if (plan["native_handler"] != "wpfastcgi" or
+                record["php"] != plan["php_version"]):
+            raise WordpressCacheError(
+                "compatibility", "Native PHP handler/source changed before WordPress Cache Apply")
+        # Persist the exact proposed generation BEFORE the native Apply: an
+        # interrupted success can be resumed without adopting arbitrary Cache.
+        record["pending_generation"] = plan["cache_generation"]
+        _save(site, record, data_dir)
         try:
             active = manage_cache(
                 "apply", site, public, approved=True,
                 expected_source=plan["source_sha256"],
                 expected_proposal=plan["proposal_sha256"],
                 cache_generation=plan["cache_generation"])
-            record["recovery_id"] = active["recovery_id"]
-            record["phase"] = "cache_applied"
-            _save(site, record, data_dir)
         except CacheManageError as exc:
             raise WordpressCacheError("cache", str(exc), exc.recovery_id) from exc
+        generation = _native_generation(site, data_dir, active)
+        if generation != record["pending_generation"]:
+            raise WordpressCacheError("recovery",
+                "Native Apply returned a different Cache generation", active.get("recovery_id"))
+        record["recovery_id"] = active["recovery_id"]
+        record["native_generation"] = generation
+        record["phase"] = "cache_applied"
+        _save(site, record, data_dir)
+
     active = _native_record(site, public)
     if active["state"] != "Applied" or not active["runtime_verified"]:
         raise WordpressCacheError("cache", "Native Cache Apply needs Recheck",
                                   active.get("recovery_id"))
-    record["recovery_id"] = active["recovery_id"]
+    _check_native_connection(site, record, active, data_dir)
     if record["php"] != _active_php(site, data_dir):
-        raise WordpressCacheError("cache", "Native PHP handler changed; recheck before WordPress integration")
-    patch = _edits(site)
-    if record["phase"] in ("initial", "cache_applied", "site_configured"):
-        # The original line snippets are persisted before either file edit.
-        _replace_file(root, WORDPRESS_CONFIG, patch["wp_before"], patch["wp_after"])
-        ini_changed = _replace_file(root, USER_INI, patch["ini_before"], patch["ini_after"],
-                                    immutable=record["ini_immutable"])
-        if ini_changed:
+        raise WordpressCacheError("cache",
+            "Native PHP handler changed; recheck before WordPress integration")
+
+    if record["phase"] in ("initial", "cache_applied", "configuring"):
+        config, ini, actual_config, actual_ini, cache, connected_ini = _source_values(site, record)
+        pending = record["phase"] == "configuring"
+        if not pending:
+            record["phase"] = "configuring"
+            _save(site, record, data_dir)
+        changed_config = _replace_file(
+            root, WORDPRESS_CONFIG, config, _replace_value(config, WP_CONSTANT, cache))
+        changed_ini = _replace_file(
+            root, USER_INI, ini, _replace_value(ini, BASEDIR, connected_ini),
+            immutable=record["ini_immutable"])
+        # A failed reload may leave both files already changed on retry.
+        # The saved "configuring" phase is proof that the FPM worker still
+        # needs verification; the CLI subprocess alone is not proof.
+        if (changed_config or changed_ini or
+                pending and (record["wp_old"] != cache or record["ini_old"] != connected_ini)):
             _reload_php(record["php"])
         record["phase"] = "site_configured"
         _save(site, record, data_dir)
-    else:
-        if _extract_constant(patch["wp_before"]) != CACHE_ROOT + "/site-" + str(site["id"]):
-            raise WordpressCacheError("recovery", "WordPress cache path changed since connection")
-        if CACHE_ROOT + "/site-" + str(site["id"]) + "/" not in _extract_basedir(patch["ini_before"]).split(":"):
-            raise WordpressCacheError("recovery", "PHP access to Cache directory has changed")
+    elif record["phase"] not in ("site_configured", "connected"):
+        raise WordpressCacheError("recovery", "Unknown WordPress setup checkpoint")
+
+    _, _, actual_config, actual_ini, cache, connected_ini = _source_values(site, record)
+    if actual_config != cache or actual_ini != connected_ini:
+        raise WordpressCacheError("recovery",
+            "WordPress site settings drifted after the PHP reload", record["recovery_id"])
+
     _php(site, record["php"], "connect")
     manifest = manage_cache("bridge_enable", site, public,
                             approved=True, recovery_id=record["recovery_id"])
     if manifest["state"] != "Provisioned":
         raise WordpressCacheError("bridge", "Native Bridge manifest was not provisioned",
                                   record["recovery_id"])
+    was_connected = record["phase"] == "connected"
     record["phase"] = "connected"
     _save(site, record, data_dir)
     return {"schema": 1, "state": "Connected", "site_id": site["id"],
             "site_key": site["name"], "recovery_id": record["recovery_id"],
             "changed": not was_connected, "runtime_verified": active["runtime_verified"],
             "note": "Nginx Helper per-page and site-wide purging are configured for the owned site Cache."}
-
 
 def _active_php(site, data_dir):
     from ach_customizer_cache_manage import _record_read
@@ -551,7 +673,11 @@ def inspect(site, public, *, data_dir=DATA_DIR):
                 "read_only": True, "recovery_id": journal["recovery_id"],
                 "note": "WordPress Cache connection restored to its previous state."}
     state = "Needs Review"
-    if journal["phase"] == "connected" and runtime["state"] == "Applied" and runtime["runtime_verified"]:
+    if (journal["phase"] == "connected" and runtime["state"] == "Applied"
+            and runtime["runtime_verified"]
+            and runtime.get("recovery_id") == journal.get("recovery_id")
+            and _native_generation(site, data_dir, runtime) ==
+                journal.get("native_generation")):
         conf, _ = _read_file(site["path"], WORDPRESS_CONFIG)
         ini, _ = _read_file(site["path"], USER_INI)
         cache = CACHE_ROOT + "/site-" + str(site["id"])
@@ -559,6 +685,7 @@ def inspect(site, public, *, data_dir=DATA_DIR):
             status = _php(site, journal["php"], "inspect")
             from ach_customizer_cache_bridge import inspect as bridge_inspect
             if (status["active_helper"] and status["active_bridge"] and
+                    status["options"].get("cache_method") == "enable_fastcgi" and
                     status["options"].get("enable_purge") == 1 and
                     status["options"].get("purge_method") == "unlink_files" and
                     bridge_inspect(site, public, _read_managed(site, data_dir)) == "Provisioned"):
@@ -591,79 +718,85 @@ def _restore_locked(site, public, *, data_dir):
     if record is None or record["phase"] == "restored":
         return {"schema": 1, "state": "Not Connected",
                 "site_id": site["id"], "site_key": site["name"], "changed": False}
+
     current = _native_record(site, public)
+    # If setup never reached a Cache Apply, nothing changed on the WP side.
     if current["state"] == "Unmanaged" and record["phase"] == "initial":
+        _, _, actual_config, actual_ini, _, _ = _source_values(site, record)
+        if actual_config != record["wp_old"] or actual_ini != record["ini_old"]:
+            raise WordpressCacheError(
+                "recovery", "WordPress source changed before the initial native Apply")
         record["phase"] = "restored"
         _save(site, record, data_dir)
         return {"schema": 1, "state": "Restored",
                 "site_id": site["id"], "site_key": site["name"], "changed": True}
-    if current["state"] == "Restored" and current["recovery_id"] == record["recovery_id"]:
-        # A previous disconnect already finished native Cache Restore, but
-        # the final native VHost/journal checkpoint may have been interrupted.
-        config, _ = _read_file(site["path"], WORDPRESS_CONFIG)
-        ini, _ = _read_file(site["path"], USER_INI)
-        if (_extract_constant(config) != record["wp_old"]
-                or _extract_basedir(ini) != record["ini_old"]):
-            raise WordpressCacheError("recovery",
-                "WordPress configuration was not restored; inspect the site before recovery")
-        status = _php(site, record["php"], "inspect")
-        if status["options"].get("enable_purge") not in (None, False, 0):
-            raise WordpressCacheError("recovery", "Nginx Helper Purge All remains enabled")
-        record["phase"] = "restored"
+    if current["state"] not in ("Applied", "Restored"):
+        raise WordpressCacheError("recovery",
+            "Native Cache needs independent Recheck before Disconnect",
+            record.get("recovery_id"))
+    _check_native_connection(site, record, current, data_dir)
+    config, ini, actual_config, actual_ini, cache, connected_ini = _source_values(site, record)
+    if record["phase"] in ("restore_reloaded", "restore_wordpress") and (
+            actual_config != record["wp_old"] or actual_ini != record["ini_old"]):
+        raise WordpressCacheError("recovery",
+            "WordPress files changed after the saved PHP Restore checkpoint",
+            record["recovery_id"])
+
+    if record["phase"] not in ("restoring", "restore_reloaded", "restore_wordpress"):
+        record["phase"] = "restoring"
         _save(site, record, data_dir)
-        return {"schema": 1, "state": "Restored",
-                "site_id": site["id"], "site_key": site["name"], "changed": True}
-    if current["state"] != "Applied" or current["recovery_id"] != record["recovery_id"]:
-        raise WordpressCacheError("recovery", "Cache identity changed; inspect saved recovery before disconnect")
-    _php(site, record["php"], "suspend")
-    from ach_customizer_cache_bridge import disable as bridge_disable
-    bridge_disable(site, public)
-    cache = CACHE_ROOT + "/site-" + str(site["id"])
-    for name, key, old, replacement in (
-        (WORDPRESS_CONFIG, "wp_old", record["wp_old"], cache),
-        (USER_INI, "ini_old", record["ini_old"],
-         _extract_basedir(_read_file(site["path"], USER_INI)[0])),
-    ):
-        raw, _ = _read_file(site["path"], name)
-        if name == WORDPRESS_CONFIG:
-            expression = WP_CONSTANT
-        else:
-            expression = BASEDIR
-        matches = list(expression.finditer(raw))
-        if len(matches) != 1:
-            raise WordpressCacheError("recovery", name + " is no longer source-matched")
-        before_value = matches[0].group(2)
-        if name == WORDPRESS_CONFIG:
-            if before_value.decode() != cache:
-                raise WordpressCacheError("recovery", "WordPress cache-path changed")
-            new_value = old
-        else:
-            values = before_value.decode().split(":")
-            target = cache + "/"
-            old_values = record["ini_old"].split(":")
-            if target not in values:
-                raise WordpressCacheError("recovery", "Site PHP access path changed")
-            if target not in old_values:
-                values.remove(target)
-            new_value = ":".join(values)
-        changed = (raw[:matches[0].start(2)] + new_value.encode() +
-                   raw[matches[0].end(2):])
-        _replace_file(site["path"], name, raw, changed,
-                      immutable=(name == USER_INI and record["ini_immutable"]))
-    _reload_php(record["php"])
-    _php(site, record["php"], "restore", previous=record["previous"])
-    if record.get("cache_owned", True):
+
+    if record["phase"] == "restoring":
+        _php(site, record["php"], "suspend")
+        from ach_customizer_cache_bridge import disable as bridge_disable
+        bridge_disable(site, public)
+        # Each file may be connected OR already restored by a prior attempt.
+        # The exact two allowed values were checked before the first write.
+        changed_config = _replace_file(
+            site["path"], WORDPRESS_CONFIG, config,
+            _replace_value(config, WP_CONSTANT, record["wp_old"]))
+        changed_ini = _replace_file(
+            site["path"], USER_INI, ini,
+            _replace_value(ini, BASEDIR, record["ini_old"]),
+            immutable=record["ini_immutable"])
+        # This phase remains "restoring" if reload is uncertain or fails.
+        # A retry then reloads only after revalidating the saved source values.
+        if (changed_config or changed_ini or record["wp_old"] != cache
+                or record["ini_old"] != connected_ini):
+            _reload_php(record["php"])
+        record["phase"] = "restore_reloaded"
+        _save(site, record, data_dir)
+
+    if record["phase"] == "restore_reloaded":
+        _, _, actual_config, actual_ini, _, _ = _source_values(site, record)
+        if actual_config != record["wp_old"] or actual_ini != record["ini_old"]:
+            raise WordpressCacheError("recovery", "WordPress Restore source changed")
+        _php(site, record["php"], "restore", previous=record["previous"])
+        record["phase"] = "restore_wordpress"
+        _save(site, record, data_dir)
+
+    # Verify the shared directory cannot be used by Nginx Helper Purge All
+    # before completing or replaying native Cache Restore.
+    _, _, actual_config, actual_ini, _, _ = _source_values(site, record)
+    if actual_config != record["wp_old"] or actual_ini != record["ini_old"]:
+        raise WordpressCacheError("recovery", "WordPress Restore source verification failed")
+    status = _php(site, record["php"], "inspect")
+    if status["options"].get("enable_purge") not in (None, False, 0):
+        raise WordpressCacheError("recovery", "Nginx Helper Purge All remains enabled")
+
+    if current["state"] == "Applied" and record.get("cache_owned", True):
         result = manage_cache("restore", site, public, approved=True,
                               recovery_id=record["recovery_id"])
         if result["state"] != "Restored":
-            raise WordpressCacheError("recovery", "Native Cache Restore requires review")
-    # A Cache already Applied before this one-click setup is not ours to
-    # Restore. Its native generation and site-owned Nginx files remain intact.
+            raise WordpressCacheError("recovery", "Native Cache Restore requires review",
+                                      record["recovery_id"])
+    # An independently managed Cache is not ours to restore; and an already
+    # Restored generation is only finalized, never signaled twice.
     record["phase"] = "restored"
     _save(site, record, data_dir)
     return {"schema": 1, "state": "Restored", "site_id": site["id"],
             "site_key": site["name"], "changed": True,
             "recovery_id": record["recovery_id"],
-            "note": ("Site-owned native Cache was retained because it existed before Connect."
+            "note": ("Existing operator-owned native Cache was retained."
                      if not record.get("cache_owned", True) else
                      "Site-specific WordPress, PHP access and native Cache settings restored.")}
