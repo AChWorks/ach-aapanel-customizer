@@ -231,5 +231,62 @@ class CacheEndpointTests(unittest.TestCase):
         self.assertNotIn('reason_code',other)
 
 
+    def test_wordpress_one_click_has_native_admin_gate_and_exact_site_binding(self):
+        import ach_customizer_cache_wordpress as bridge
+        answer = {"schema": 1, "state": "Connected", "site_id": 7,
+                  "site_key": "qa.test", "recovery_id": "f" * 32}
+        for auth in ({"uid": 2}, {"method": "GET"}, {"temporary": True}):
+            with self.subTest(auth=auth), \
+                 patch.dict(sys.modules, {"flask": self.flask(**auth)}), \
+                 patch.object(self.plugin, "_require_enabled"), \
+                 patch.object(self.plugin, "_selected_native_website") as choose, \
+                 patch.object(bridge, "setup") as setup:
+                response = self.plugin.manage_wordpress_cache({
+                    **self.args(), "wordpress_cache_action": "setup", "approved": "true"})
+                self.assertFalse(response["status"])
+                choose.assert_not_called()
+                setup.assert_not_called()
+        with patch.dict(sys.modules, {"flask": self.flask()}), \
+             patch.object(self.plugin, "_require_enabled"), \
+             patch.object(self.plugin, "_selected_native_website", side_effect=self.selected), \
+             patch.object(bridge, "setup", return_value=answer) as setup:
+            response = self.plugin.manage_wordpress_cache({
+                **self.args(), "wordpress_cache_action": "setup", "approved": "true",
+                "wp_root": "/etc", "cache_directory": "/www/server/fastcgi_cache",
+                "site_id_override": 999, "php_version": "unsafe"})
+            self.assertTrue(response["status"], response)
+            self.assertEqual(response["state"], "Connected")
+            setup.assert_called_once()
+            self.assertEqual(setup.call_args.args[0], self.site)
+
+    def test_wordpress_one_click_requires_selected_action_not_duplicate_checkbox(self):
+        import ach_customizer_cache_wordpress as bridge
+        with patch.dict(sys.modules, {"flask": self.flask()}), \
+             patch.object(self.plugin, "_require_enabled"), \
+             patch.object(self.plugin, "_selected_native_website", side_effect=self.selected) as choose, \
+             patch.object(bridge, "setup") as setup:
+            for payload in (
+                {**self.args(), "wordpress_cache_action": "setup", "approved": "false"},
+                {**self.args(), "wordpress_cache_action": "unknown", "approved": "true"},
+            ):
+                self.assertFalse(self.plugin.manage_wordpress_cache(payload)["status"])
+            choose.assert_not_called()
+            setup.assert_not_called()
+
+    def test_wordpress_setup_failures_report_recovery_and_precise_step(self):
+        import ach_customizer_cache_wordpress as bridge
+        problem = bridge.WordpressCacheError("wordpress", "Site .user.ini was modified",
+                                              recovery_id="f" * 32)
+        with patch.dict(sys.modules, {"flask": self.flask()}), \
+             patch.object(self.plugin, "_require_enabled"), \
+             patch.object(self.plugin, "_selected_native_website", side_effect=self.selected), \
+             patch.object(bridge, "setup", side_effect=problem):
+            response = self.plugin.manage_wordpress_cache({
+                **self.args(), "wordpress_cache_action": "setup", "approved": "true"})
+            self.assertFalse(response["status"])
+            self.assertEqual(response["stage"], "wordpress_cache_setup")
+            self.assertIn("Site .user.ini", response["msg"])
+            self.assertEqual(response["recovery_id"], "f" * 32)
+
 if __name__=='__main__':
     unittest.main()
