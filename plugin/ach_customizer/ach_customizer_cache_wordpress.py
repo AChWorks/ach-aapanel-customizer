@@ -7,7 +7,6 @@ is installed, and unrelated sites are never a purge target.
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -121,10 +120,6 @@ class WordpressCacheError(RuntimeError):
         self.recovery_id = recovery_id
 
 
-def _sha(content):
-    return hashlib.sha256(content).hexdigest()
-
-
 def _php(site, php_version, command, *, previous=None):
     root = site["path"]
     binary = "/www/server/php/" + php_version + "/bin/php"
@@ -167,12 +162,6 @@ def _site_extension_line(site):
             site["name"] + "/*.conf;\n").encode()
 
 
-def _has_site_extension(site):
-    from ach_customizer_cache_manage import VHOST_ROOT
-    raw, _ = _read_file(VHOST_ROOT, site["name"] + ".conf")
-    return raw.count(_site_extension_line(site)) == 1
-
-
 def _bootstrap_site_extension(site):
     """Fill the specific native aaPanel new-site template gap, not its PHP core.
 
@@ -184,7 +173,7 @@ def _bootstrap_site_extension(site):
     raw, _ = _read_file(VHOST_ROOT, site["name"] + ".conf")
     line = _site_extension_line(site)
     if raw.count(line) == 1:
-        return {"before_sha": None, "after_sha": _sha(raw), "changed": False}
+        return False
     marker = re.compile(rb"(?m)^[ \t]*#PHP-INFO-START[^\r\n]*\r?\n")
     positions = list(marker.finditer(raw))
     if len(positions) != 1:
@@ -206,33 +195,6 @@ def _bootstrap_site_extension(site):
     _replace_file(VHOST_ROOT, site["name"] + ".conf", raw, after)
     # The existing native Cache Apply validates Nginx -t and performs the
     # one necessary reload; no intermediate reload is needed here.
-    return {"before_sha": _sha(raw), "after_sha": _sha(after), "changed": True}
-
-
-def _remove_bootstrapped_extension(site, record):
-    """Restore only an unchanged, recorded new-site VHost insertion."""
-    if not record.get("vhost_added"):
-        return False
-    from ach_customizer_cache_manage import VHOST_ROOT, NGINX_ROOT, NGINX
-    from ach_customizer_status_extension import _nginx
-    raw, _ = _read_file(VHOST_ROOT, site["name"] + ".conf")
-    line = _site_extension_line(site)
-    if record.get("vhost_after_sha") != _sha(raw):
-        # A later aaPanel regeneration may now own that include. Preserve it
-        # rather than guessing ownership of unrelated current source.
-        return False
-    if raw.count(line) != 1:
-        raise WordpressCacheError("recovery", "Recorded native site extension changed")
-    prior = raw.replace(line, b"", 1)
-    if _sha(prior) != record.get("vhost_before_sha"):
-        raise WordpressCacheError("recovery", "Native VHost recovery fingerprint mismatch")
-    _replace_file(VHOST_ROOT, site["name"] + ".conf", raw, prior)
-    try:
-        _nginx("-t", nginx=NGINX, conf=NGINX_ROOT + "/nginx.conf")
-        _nginx("reload", nginx=NGINX, conf=NGINX_ROOT + "/nginx.conf")
-    except Exception as exc:
-        raise WordpressCacheError(
-            "recovery", "Native VHost extension Restore requires recheck") from exc
     return True
 
 
@@ -448,10 +410,18 @@ def _setup_locked(site, public, *, data_dir):
     cache_status = _native_record(site, public)
     was_connected = bool(record and record["phase"] == "connected"
                          and cache_status["state"] == "Applied")
-    if cache_status["state"] == "Restored":
-        if record is not None and record["phase"] != "restored":
-            raise WordpressCacheError("recovery", "Complete the previous WordPress setup recovery before reconnecting")
-        record = None
+    if record is not None and record["phase"] == "restored":
+        # Both a fully restored native Cache and a Cache that predates this
+        # connector can be connected again without removing foreign state.
+        if (cache_status["state"] == "Restored" or
+                cache_status["state"] == "Applied" and not record.get("cache_owned", True)):
+            record = None
+        else:
+            raise WordpressCacheError("recovery",
+                "Native Cache recovery differs from the previous WordPress connection")
+    elif cache_status["state"] == "Restored" and record is not None:
+        raise WordpressCacheError("recovery",
+            "Complete the previous WordPress setup recovery before reconnecting")
     if cache_status["state"] in ("Unmanaged", "Restored"):
         from ach_customizer_cache_audit import inspect_site_fastcgi_cache
         native = inspect_site_fastcgi_cache(public, site["id"], site["name"])
@@ -471,7 +441,7 @@ def _setup_locked(site, public, *, data_dir):
             "wp_old": _extract_constant(patch["wp_before"]),
             "ini_old": _extract_basedir(patch["ini_before"]),
             "ini_immutable": patch["ini_immutable"],
-            "vhost_added": False,
+            "cache_owned": cache_status["state"] != "Applied",
             "previous": original_options["previous"],
         }
         _save(site, record, data_dir)
@@ -481,13 +451,10 @@ def _setup_locked(site, public, *, data_dir):
         except CacheManageError as exc:
             if exc.reason_code != "native_extension_include_missing":
                 raise
-            record["vhost_added"] = True
-            _save(site, record, data_dir)
-            extension = _bootstrap_site_extension(site)
-            if extension["before_sha"] is not None:
-                record["vhost_before_sha"] = extension["before_sha"]
-                record["vhost_after_sha"] = extension["after_sha"]
-                _save(site, record, data_dir)
+            # Keep the standard native site extension include even after
+            # a disconnect: deleting it strands aaPanel's Cache recovery in
+            # Needs Review and causes another manual configuration step.
+            _bootstrap_site_extension(site)
             plan = preview_cache_activation(site, public)
         if plan["native_handler"] != "wpfastcgi":
             raise WordpressCacheError("compatibility", "Select an installed native WordPress website")
@@ -571,7 +538,9 @@ def inspect(site, public, *, data_dir=DATA_DIR):
         return {"schema": 1, "state": "Not Connected", "site_id": site["id"],
                 "site_key": site["name"], "read_only": True}
     runtime = _native_record(site, public)
-    if journal["phase"] == "restored" and runtime["state"] == "Restored":
+    if journal["phase"] == "restored" and (
+            runtime["state"] == "Restored" or
+            runtime["state"] == "Applied" and not journal.get("cache_owned", True)):
         return {"schema": 1, "state": "Not Connected",
                 "site_id": site["id"], "site_key": site["name"],
                 "read_only": True, "recovery_id": journal["recovery_id"],
@@ -619,7 +588,6 @@ def _restore_locked(site, public, *, data_dir):
                 "site_id": site["id"], "site_key": site["name"], "changed": False}
     current = _native_record(site, public)
     if current["state"] == "Unmanaged" and record["phase"] == "initial":
-        _remove_bootstrapped_extension(site, record)
         record["phase"] = "restored"
         _save(site, record, data_dir)
         return {"schema": 1, "state": "Restored",
@@ -636,7 +604,6 @@ def _restore_locked(site, public, *, data_dir):
         status = _php(site, record["php"], "inspect")
         if status["options"].get("enable_purge") not in (None, False, 0):
             raise WordpressCacheError("recovery", "Nginx Helper Purge All remains enabled")
-        _remove_bootstrapped_extension(site, record)
         record["phase"] = "restored"
         _save(site, record, data_dir)
         return {"schema": 1, "state": "Restored",
@@ -680,13 +647,18 @@ def _restore_locked(site, public, *, data_dir):
                       immutable=(name == USER_INI and record["ini_immutable"]))
     _reload_php(record["php"])
     _php(site, record["php"], "restore", previous=record["previous"])
-    result = manage_cache("restore", site, public, approved=True,
-                          recovery_id=record["recovery_id"])
-    if result["state"] != "Restored":
-        raise WordpressCacheError("recovery", "Native Cache Restore requires review")
-    _remove_bootstrapped_extension(site, record)
+    if record.get("cache_owned", True):
+        result = manage_cache("restore", site, public, approved=True,
+                              recovery_id=record["recovery_id"])
+        if result["state"] != "Restored":
+            raise WordpressCacheError("recovery", "Native Cache Restore requires review")
+    # A Cache already Applied before this one-click setup is not ours to
+    # Restore. Its native generation and site-owned Nginx files remain intact.
     record["phase"] = "restored"
     _save(site, record, data_dir)
     return {"schema": 1, "state": "Restored", "site_id": site["id"],
             "site_key": site["name"], "changed": True,
-            "recovery_id": record["recovery_id"]}
+            "recovery_id": record["recovery_id"],
+            "note": ("Site-owned native Cache was retained because it existed before Connect."
+                     if not record.get("cache_owned", True) else
+                     "Site-specific WordPress, PHP access and native Cache settings restored.")}

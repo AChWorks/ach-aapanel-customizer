@@ -927,6 +927,12 @@ access takes effect. No vendor Nginx/WordPress plugin source is rewritten.
 **Disconnect and restore** first disables vendor purge before returning to
 a potentially shared path, then restores recorded site settings and native
 Cache recovery. A root-owned site-specific journal retains incomplete work.
+The standard native site extension include is retained if this one-click
+operation had to add it on an initial VHost: removing that innocuous empty
+include would invalidate aaPanel Cache recovery and force another manual
+setup. It is **not** the active site Cache configuration. If the selected
+site had an Applied native Cache **before Connect**, Disconnect retains
+that original Cache; only the WordPress integration is removed.
 
 **Bounded non-production QA:** Nginx Helper 2.4.1 and Bridge 0.1.8 were
 installed but inactive on real aaPanel 8.0.7 / WP 7.1.5. One native

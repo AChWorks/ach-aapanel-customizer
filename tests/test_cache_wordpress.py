@@ -121,6 +121,31 @@ class WordpressConnectionTests(unittest.TestCase):
                 wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
                 "Not Connected")
 
+    def test_preexisting_native_cache_is_not_rolled_back_by_disconnect(self):
+        # A site may already have a manually Applied native Cache before
+        # WordPress Helper was installed. One-click owns only WP integration.
+        self.connected = True
+        self.start()
+        first = wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(first["state"], "Connected")
+        journal = json.loads((self.root / "ach_customizer.nginx-helper.7.json").read_text())
+        self.assertFalse(journal["cache_owned"])
+        self.assertNotIn(("cache", "apply"), self.events)
+        outcome = wp.restore(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(outcome["state"], "Restored")
+        self.assertTrue(self.connected, "Existing native Cache must remain Applied")
+        self.assertNotIn(("cache", "restore"), self.events)
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertEqual(self.ini.read_bytes(), self.original_ini)
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Not Connected")
+        # The site can reconnect without reparing or reapplying the
+        # previous native Cache generation or re-editing its owner file.
+        again = wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(again["state"], "Connected")
+        self.assertTrue(self.connected)
+        self.assertNotIn(("cache", "restore"), self.events)
+
     def test_missing_helper_fails_before_any_cache_write(self):
         self.start()
         with patch.object(wp, "_php", side_effect=wp.WordpressCacheError(
@@ -166,12 +191,11 @@ class WordpressConnectionTests(unittest.TestCase):
         path.write_bytes(original)
         with patch("ach_customizer_cache_manage.VHOST_ROOT", str(vhost)), \
              patch("ach_customizer_cache_manage._missing_extension_inventory"):
-            result = wp._bootstrap_site_extension(self.site)
-            self.assertTrue(result["changed"])
-            self.assertEqual(result["before_sha"], wp._sha(original))
+            self.assertTrue(wp._bootstrap_site_extension(self.site))
             self.assertTrue((vhost / "extension" / "wp.example.test").is_dir())
-            self.assertTrue(wp._has_site_extension(self.site))
-            self.assertEqual(path.read_bytes().count(b"/extension/wp.example.test/*.conf;"), 1)
+            line = b"    include " + str(vhost / "extension" / "wp.example.test" / "*.conf").encode() + b";\n"
+            self.assertEqual(path.read_bytes().count(line), 1)
+            self.assertEqual(path.read_bytes().replace(line, b"", 1), original)
 
 if __name__ == "__main__":
     unittest.main()
