@@ -1532,7 +1532,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                                    'and any shared Purge All settings are unchanged.'}
                 if (record is None or record['site_key'] != site['name']
                         or record['schema'] != 2 or record['phase'] != 'applied'
-                        or record.get('native_handler') != 'wpfastcgi'
+                        or record.get('native_handler', 'stock') not in ('stock', 'wpfastcgi')
                         or recovery_id != record['op']):
                     raise CacheManageError('recovery',
                         'Verified Applied native WordPress Cache and matching recovery ID required')
@@ -1695,8 +1695,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 )
                 try:
                     bridge_state = (inspect_bridge(site, public, record)
-                                    if record is not None and
-                                    record.get('native_handler') == 'wpfastcgi'
+                                    if record is not None
                                     else 'Not Provisioned')
                 except (BridgeError, OSError) as exc:
                     raise CacheManageError('recovery',

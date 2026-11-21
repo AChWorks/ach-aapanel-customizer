@@ -424,6 +424,21 @@ class WordpressConnectionTests(unittest.TestCase):
                          "Restored")
         self.assertEqual(self.config.read_bytes(), self.original_config)
 
+    def test_one_click_supports_stock_native_php_handler(self):
+        # A fresh aaPanel WordPress site can retain enable-php-85.conf.
+        self.start()
+        with patch.object(wp, "preview_cache_activation", return_value={
+                "native_handler": "stock", "php_version": "85",
+                "source_sha256": "a" * 64, "proposal_sha256": "b" * 64,
+                "cache_generation": "c" * 32}):
+            result = wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(result["state"], "Connected")
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+
     def test_pristine_native_wordpress_source_edit_can_resume_and_restore(self):
         self.original_config = self.original_config.replace(
             b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",

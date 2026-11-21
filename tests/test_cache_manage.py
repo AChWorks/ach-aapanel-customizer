@@ -351,7 +351,7 @@ class CacheManageTests(unittest.TestCase):
             cache_generation=kw.get('generation',plan['cache_generation']),
             approved=kw.get('approved',True),**self.kwargs())
 
-    def test_bridge_actions_require_applied_wordpress_recovery_and_fresh_source(self):
+    def test_bridge_actions_require_applied_site_owned_recovery_and_fresh_source(self):
         from ach_customizer_cache_bridge import BridgeError
         with patch('ach_customizer_cache_bridge.enable') as enable, \
              patch('ach_customizer_cache_bridge.disable') as disable, \
@@ -364,17 +364,15 @@ class CacheManageTests(unittest.TestCase):
                     approved=False, **self.kwargs())
             self.assertFalse(enable.called)
             result = self.apply()
-            with self.assertRaisesRegex(cache.CacheManageError,'WordPress Cache'):
-                cache.manage_cache('bridge_enable', self.site, public=object(),
-                    approved=True,recovery_id=result['recovery_id'], **self.kwargs())
-            self.assertFalse(enable.called)
             fd=cache._open_state_dir(str(self.state))
             try:
                 record=cache._record_read(fd,7)
-                record['native_handler']='wpfastcgi'
-                cache._record_save(fd,record)
             finally:
                 os.close(fd)
+            # The site-owned stock PHP Cache is a supported bridge target;
+            # there is no need to convert its native PHP handler.
+            self.assertNotIn('native_handler',record)
+            self.assertFalse(enable.called)
             with self.assertRaisesRegex(cache.CacheManageError,'matching recovery'):
                 cache.manage_cache('bridge_enable', self.site, public=object(),
                     approved=True,recovery_id='a'*32, **self.kwargs())

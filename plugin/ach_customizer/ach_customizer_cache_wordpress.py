@@ -591,7 +591,7 @@ def _setup_locked(site, public, *, data_dir):
             _bootstrap_site_extension(site)
             plan = preview_cache_activation(
                 site, public, cache_generation=record.get("pending_generation"))
-        if (plan["native_handler"] != "wpfastcgi" or
+        if (plan["native_handler"] not in ("stock", "wpfastcgi") or
                 record["php"] != plan["php_version"]):
             raise WordpressCacheError(
                 "compatibility", "Native PHP handler/source changed before WordPress Cache Apply")
