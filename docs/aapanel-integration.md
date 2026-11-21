@@ -709,7 +709,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### P0 native PHP regeneration and scanner workflow (0.1.78 candidate)
+### P0 native PHP regeneration and scanner workflow (0.1.79 candidate)
 
 An explicit new FPM auto Enable records the selected service's original
 canonical source SHA, native RAM tier, and saved pm.max_requests before any
@@ -752,9 +752,26 @@ uses an older helper, non-emergency Enable is refused with an explicit
 stale-helper diagnosis, and read-only Inspect cannot claim readiness.
 Emergency Disable remains available. Do not automatically restart
 the panel: only an explicitly authorized panel-only reload under the
-upgrade/recovery runbook can refresh known stale imports. First Enable
-and post-Disable re-Enable still require exact installed-native QA,
-not inference from unit tests.
+upgrade/recovery runbook can refresh known stale imports.
+
+The official installed Native 0.1.78 QA on the retained VM, after a
+scoped panel reload, proved policy-before-systemd Enable, both managed
+units active, native aaPanel PHP Optimization regeneration and one
+automatic guarded Apply. **A second identical regeneration then failed**:
+the event token used only old/new content hashes, which were identical
+between cycles when the source at opt-in already matched desired
+values. The worker mistook the new writer event for the previous
+committed auto journal and refused Apply; the CLI recorded only its
+exception type. Auto repair was disabled, the old journal retired
+through exact UI Recovery, and the PHP85 source restored to the
+original hash, with all peer sites healthy. Native 0.1.79 binds each
+independent event token to the explicit opt-in epoch and previously
+acknowledged event, so repeated identical vendor bytes cannot alias.
+Journal acknowledgment after a post-commit crash is checked before
+the source-baseline early exit; no second reload is authorized.
+The systemd error record now includes bounded stage and reason. The
+second successful live regeneration on installed 0.1.79 remains
+to be accepted and is not inferred from Python tests.
 
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,

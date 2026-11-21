@@ -728,10 +728,16 @@ def _native_operation_active():
 
 
 def _lifecycle_token(version, profile, lifecycle, observed_sha):
+    # Repeated native regenerations can have identical source/destination
+    # bytes. Bind each event to its explicit opt-in epoch and previous
+    # acknowledged token, not merely the two file SHA values. Both fields
+    # remain unchanged until an operation has been durably acknowledged;
+    # this also permits safe reconciliation after a post-commit crash.
     return hashlib.sha256(json.dumps({
         "kind": "native_php_fpm_lifecycle", "version": version,
         "old": lifecycle["baseline_sha256"], "new": observed_sha,
         "policy": profile["policy_sha256"],
+        "armed_ns": profile["enabled_ns"], "previous_ack": profile["last_token"],
     }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -772,25 +778,6 @@ def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None,
                                      "reason": "Native PHP source unavailable: " +
                                                type(exc).__name__, "operation_id": None})
                     continue
-                if source == lifecycle["baseline_sha256"]:
-                    continue
-                if observed_wp_terminal_ns is not None:
-                    # A recently completed WP task may have generated these
-                    # bytes itself, even if its witness was never armed.
-                    # Never borrow that WP task's write as independent FPM
-                    # lifecycle authority. Only source writes strictly AFTER
-                    # the terminal timestamp may qualify this cycle.
-                    conf_fd = recovery._dir(Path(controller.config_root) /
-                                            version / "etc")
-                    try:
-                        check_bytes, check_stat = recovery._read(
-                            conf_fd, "php-fpm.conf")
-                    finally:
-                        os.close(conf_fd)
-                    if recovery._sha(check_bytes) != source:
-                        continue
-                    if check_stat.st_mtime_ns <= observed_wp_terminal_ns:
-                        continue
                 # After a worker dies following a successful host/journal
                 # fsync but before profile acknowledgement, the current file
                 # is already desired and no longer looks vendor-generated.
@@ -803,6 +790,7 @@ def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None,
                         and journal.get("owner") == "auto"
                         and journal.get("policy_sha256") == profile["policy_sha256"]
                         and journal["after_sha256"] == source
+                        and profile["last_token"] != journal.get("event_token")
                         and journal.get("event_token") == _lifecycle_token(
                             version, profile, lifecycle, journal["before_sha256"])):
                     desired = desired_policy._load(fd)["profiles"].get(version)
@@ -827,6 +815,25 @@ def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None,
                                      "operation_id": result["operation_id"],
                                      "reconciled": True})
                     continue
+                if source == lifecycle["baseline_sha256"]:
+                    continue
+                if observed_wp_terminal_ns is not None:
+                    # A recently completed WP task may have generated these
+                    # bytes itself, even if its witness was never armed.
+                    # Never borrow that WP task's write as independent FPM
+                    # lifecycle authority. Only source writes strictly AFTER
+                    # the terminal timestamp may qualify this cycle.
+                    conf_fd = recovery._dir(Path(controller.config_root) /
+                                            version / "etc")
+                    try:
+                        check_bytes, check_stat = recovery._read(
+                            conf_fd, "php-fpm.conf")
+                    finally:
+                        os.close(conf_fd)
+                    if recovery._sha(check_bytes) != source:
+                        continue
+                    if check_stat.st_mtime_ns <= observed_wp_terminal_ns:
+                        continue
                 try:
                     if _native_vendor_values(controller.config_root, version, lifecycle) != source:
                         raise FpmAutoError("Unrecognized native PHP-FPM output")
@@ -1252,7 +1259,15 @@ def main(argv=None):
         print(json.dumps(result, sort_keys=True))
         return 0
     except Exception as exc:
-        print("ACh automatic FPM repair refused: " + type(exc).__name__, file=sys.stderr)
+        # Preserve the actionable journal/ownership/validation reason in the
+        # authorized systemd diagnostic channel. A type-only message hid a
+        # real repeated-regeneration failure on the retained native QA VM.
+        # JSON escaping keeps each failure a single bounded journal record.
+        print("ACh automatic FPM repair refused: " + json.dumps({
+            "type": type(exc).__name__,
+            "stage": str(getattr(exc, "stage", "worker"))[:48],
+            "reason": (str(exc) or type(exc).__name__)[:300],
+        }, sort_keys=True, ensure_ascii=True), file=sys.stderr)
         return 1
     finally:
         try:

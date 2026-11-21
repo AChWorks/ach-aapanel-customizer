@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-21; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.78`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.79`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## P0 native 0.1.78 source workflow (not yet publicly released)
+## P0 native 0.1.79 source workflow (not yet publicly released)
 
 - PHP-FPM: Save desired [www] pool values, recheck real shared-site attribution,
   then explicitly Enable automatic repair. The existing 30-second timer handles
@@ -90,7 +90,13 @@ own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
   arming protocol. An older resident helper is reported as stale and
   cannot claim Enabled merely because a newer ZIP is installed. Read-only
   inspection explains the required separately approved panel-only reload;
-  Emergency Disable always remains available.
+  Emergency Disable always remains available. Repeated byte-identical
+  aaPanel writer events receive distinct opt-in/previous-acknowledgment
+  tokens, with recovery journals archived between successful repairs.
+  A committed repair that lost its separate profile acknowledgment is
+  reconciled without a duplicate reload, even when the desired source
+  equals the original opt-in baseline. Worker errors expose their
+  actionable stage and reason in the systemd journal.
   Each repair uses the saved
   intent, fresh writer identity and affected-site mapping, guarded syntax/
   reload/verification and durable rollback. Foreign manual drift is not

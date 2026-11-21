@@ -1316,6 +1316,90 @@ class AutoNativeFpmTests(unittest.TestCase):
             self._run()
         self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
 
+    def test_identical_native_regeneration_after_desired_baseline_repairs_twice(self):
+        # Reproduce retained QA exactly: operator first selected values with
+        # aaPanel's native writer; auto is armed on those already-desired
+        # bytes. Each later native preset uses the SAME vendor SHA.
+        original_desired = recovery._plan(self.php_root, "85", DESIRED)[2]
+        self.config.write_bytes(original_desired)
+        self._enable()
+        first_baseline = worker.inspect("85", data_dir=str(self.state))
+        self.assertEqual(first_baseline["last_state"], "Armed")
+        self._vendor_reset()
+        first_native = self.config.read_bytes()
+        one = self._run()
+        self.assertTrue(one["changed"], one)
+        op_one = one["services"][0]["operation_id"]
+        self.assertEqual(self.config.read_bytes(), original_desired)
+        self.assertFalse(self._run()["changed"])
+
+        self._vendor_reset()
+        self.assertEqual(self.config.read_bytes(), first_native)
+        two = self._run()
+        self.assertTrue(two["changed"], two)
+        op_two = two["services"][0]["operation_id"]
+        self.assertNotEqual(op_two, op_one)
+        self.assertEqual(self.config.read_bytes(), original_desired)
+        self.assertEqual(self.calls.count("reload"), 2)
+        self.assertEqual(
+            (self.state / ("ach_customizer.fpm85.auto." + op_one + ".before")
+             ).read_bytes(), first_native)
+        self.assertFalse(self._run()["changed"])
+
+    def test_commit_ack_crash_with_desired_baseline_reconciles_without_reload(self):
+        original_desired = recovery._plan(self.php_root, "85", DESIRED)[2]
+        self.config.write_bytes(original_desired)
+        self._enable()
+        self._vendor_reset()
+        real_apply = worker.recovery.apply
+        first = [True]
+        def crash_after_host_commit(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            if first[0]:
+                first[0] = False
+                raise OSError("simulated lost event acknowledgment")
+            return result
+        with patch.object(worker.recovery, "apply", side_effect=crash_after_host_commit):
+            with self.assertRaisesRegex(OSError, "lost event"):
+                self._run()
+        self.assertEqual(self.config.read_bytes(), original_desired)
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertEqual(worker.inspect("85", data_dir=str(self.state))["last_state"],
+                         "Armed")
+        recovery_run = self._run()
+        self.assertFalse(recovery_run["changed"])
+        self.assertEqual(recovery_run["services"][0]["state"], "Applied")
+        self.assertTrue(recovery_run["services"][0]["reconciled"])
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertFalse(self._run()["changed"])
+
+    def test_cli_worker_error_preserves_stage_and_diagnostic_reason(self):
+        import contextlib
+        import io
+        err = recovery.FpmApplyError(
+            "recovery", "Prior committed operation does not match new native event")
+        output = io.StringIO()
+        with patch.object(worker, "run", side_effect=err), \
+                contextlib.redirect_stderr(output):
+            self.assertEqual(worker.main(["run"]), 1)
+        line = output.getvalue().strip()
+        self.assertIn("ACh automatic FPM repair refused: ", line)
+        payload = json.loads(line.split("refused: ", 1)[1])
+        self.assertEqual(payload["type"], "FpmApplyError")
+        self.assertEqual(payload["stage"], "recovery")
+        self.assertIn("does not match new native event", payload["reason"])
+
+    def test_lifecycle_token_changes_after_ack_or_new_opt_in_epoch(self):
+        profile = {"policy_sha256": "b"*64,
+                   "enabled_ns": 123, "last_token": None}
+        lifecycle = {"baseline_sha256": "a"*64}
+        first = worker._lifecycle_token("85", profile, lifecycle, "c"*64)
+        self.assertRegex(first, r"^[a-f0-9]{64}$")
+        self.assertNotEqual(first, worker._lifecycle_token(
+            "85", {**profile, "last_token": first}, lifecycle, "c"*64))
+        self.assertNotEqual(first, worker._lifecycle_token(
+            "85", {**profile, "enabled_ns": 456}, lifecycle, "c"*64))
+
     def test_lifecycle_vendor_regeneration_without_wp_event_is_repaired_twice(self):
         self._enable()
         initial = worker.inspect("85", data_dir=str(self.state))
