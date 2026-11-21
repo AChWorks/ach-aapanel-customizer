@@ -37,6 +37,13 @@ class WordpressConnectionTests(unittest.TestCase):
                          "options_present": False,
                          "options": {"enable_purge": None, "cache_method": None,
                                      "purge_method": None}}
+        # Persisted WP_Role entries: None=absent, False=explicit deny, True=grant.
+        # The role_has_cap filter may independently override the effective view.
+        self.admin_caps_stored = {"Nginx Helper | Config": None,
+                                  "Nginx Helper | Purge cache": None}
+        self.admin_caps_filter = {}
+        self.fail_role_persistence = False
+        self.fail_role_write_after = None
         self.connected = False
         self.native_restored = False
         self.native_id = "f" * 32
@@ -71,7 +78,11 @@ class WordpressConnectionTests(unittest.TestCase):
         self.events.append(("php", command))
         effective = (self.runtime_override if self.runtime_override is not None else
                      wp._extract_constant(self.config.read_bytes(), allow_absent=True))
-        previous = dict(self.previous, constant=effective)
+        role_view = dict(self.admin_caps_stored)
+        filtered_view = {key: bool(self.admin_caps_filter.get(key, stored))
+                         for key, stored in role_view.items()}
+        previous = dict(self.previous, constant=effective,
+                        admin_caps_stored=role_view, admin_caps_effective=filtered_view)
         if command == "inspect":
             return {"previous": previous,
                     "active_helper": self.wp_active, "active_bridge": self.wp_active,
@@ -81,6 +92,15 @@ class WordpressConnectionTests(unittest.TestCase):
                 raise wp.WordpressCacheError(
                     "wordpress", "Effective WordPress Nginx Helper Cache path differs")
             self.wp_active = True
+            for key in self.admin_caps_stored:
+                if self.admin_caps_stored[key] is not True:
+                    if not self.fail_role_persistence:
+                        self.admin_caps_stored[key] = True
+                    if self.fail_role_write_after == key:
+                        self.fail_role_write_after = None
+                        raise RuntimeError("injected interrupted persisted capability write")
+                if self.admin_caps_filter.get(key, True) is False:
+                    raise wp.WordpressCacheError("wordpress", "WordPress capability filter denies grant")
             self.options.update({"cache_method": "enable_fastcgi",
                                  "purge_method": "unlink_files",
                                  "enable_purge": 1})
@@ -89,6 +109,13 @@ class WordpressConnectionTests(unittest.TestCase):
         if command == "restore":
             self.wp_active = bool(self.previous["nginx_helper"] and
                                   self.previous["bridge"])
+            old = kwargs.get("previous", {}).get("admin_caps_stored", {})
+            for key, baseline in old.items():
+                if self.admin_caps_stored[key] != baseline and not self.fail_role_persistence:
+                    self.admin_caps_stored[key] = baseline
+                if self.fail_role_write_after == key:
+                    self.fail_role_write_after = None
+                    raise RuntimeError("injected interrupted persisted capability restore")
             self.options["enable_purge"] = 0
         return {"previous": previous,
                 "active_helper": self.wp_active, "active_bridge": self.wp_active,
@@ -141,6 +168,174 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertEqual(record["phase"], "connected")
         self.assertEqual(record["recovery_id"], "f" * 32)
         self.assertEqual(record["native_generation"], "c" * 32)
+        self.assertEqual(record["previous"]["admin_caps_stored"],
+                         {"Nginx Helper | Config": None,
+                          "Nginx Helper | Purge cache": None})
+        self.assertEqual(set(self.admin_caps_stored.values()), {True})
+
+    def test_existing_vendor_admin_capabilities_survive_disconnect(self):
+        self.admin_caps_stored["Nginx Helper | Config"] = True
+        self.admin_caps_stored["Nginx Helper | Purge cache"] = False
+        self.start()
+        self.setup_once()
+        self.assertTrue(all(self.admin_caps_stored.values()))
+        result = wp.restore(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(result["state"], "Restored")
+        self.assertEqual(self.admin_caps_stored,
+                         {"Nginx Helper | Config": True,
+                          "Nginx Helper | Purge cache": False})
+
+    def test_missing_purge_capability_detected_and_repaired_without_cache_reapply(self):
+        self.start()
+        self.setup_once()
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+        self.admin_caps_stored["Nginx Helper | Purge cache"] = False
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Needs Review")
+        applied = sum(x == ("cache", "apply") for x in self.events)
+        second = wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(second["state"], "Connected")
+        self.assertFalse(second["changed"])
+        self.assertTrue(all(self.admin_caps_stored.values()))
+        self.assertEqual(sum(x == ("cache", "apply") for x in self.events), applied)
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
+
+    def test_existing_connected_journal_upgrades_only_before_managed_cap_changes(self):
+        self.start()
+        self.setup_once()
+        journal = self.root / "ach_customizer.nginx-helper.7.json"
+        saved = json.loads(journal.read_text())
+        del saved["previous"]["admin_caps_stored"]
+        saved["previous"]["admin_caps"] = {"Nginx Helper | Config": False,
+                                          "Nginx Helper | Purge cache": False}
+        journal.write_text(json.dumps(saved))
+        self.admin_caps_stored = {"Nginx Helper | Config": False,
+                                  "Nginx Helper | Purge cache": False}
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Needs Review")
+        self.assertEqual(wp.setup(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+        self.assertEqual(set(self.admin_caps_stored.values()), {True})
+        saved = json.loads(journal.read_text())
+        self.assertEqual(set(saved["previous"]["admin_caps_stored"].values()), {False})
+        self.assertEqual(set(saved["previous"]["admin_caps"].values()), {False},
+                         "Legacy filtered baseline is retained but never applied")
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(set(self.admin_caps_stored.values()), {False})
+
+    def test_filtered_true_without_stored_grant_restores_exact_absence(self):
+        self.admin_caps_filter = {"Nginx Helper | Config": True,
+                                  "Nginx Helper | Purge cache": True}
+        self.start()
+        self.setup_once()
+        journal = json.loads((self.root / "ach_customizer.nginx-helper.7.json").read_text())
+        self.assertEqual(set(journal["previous"]["admin_caps_stored"].values()), {None})
+        self.assertEqual(set(self.admin_caps_stored.values()), {True})
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
+        self.assertEqual(set(self.admin_caps_filter.values()), {True},
+                         "Unrelated WordPress capability filters must not be changed")
+
+    def test_filtered_false_does_not_erase_preexisting_stored_true(self):
+        self.admin_caps_stored["Nginx Helper | Config"] = True
+        self.admin_caps_filter["Nginx Helper | Config"] = False
+        self.start()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "capability filter"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertTrue(self.admin_caps_stored["Nginx Helper | Config"])
+        journal = json.loads((self.root / "ach_customizer.nginx-helper.7.json").read_text())
+        self.assertIs(journal["previous"]["admin_caps_stored"]["Nginx Helper | Config"], True)
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertTrue(self.admin_caps_stored["Nginx Helper | Config"])
+        self.assertIsNone(self.admin_caps_stored["Nginx Helper | Purge cache"])
+
+    def test_role_storage_failure_cannot_be_reported_connected_and_can_retry(self):
+        self.start()
+        self.fail_role_persistence = True
+        with self.assertRaisesRegex(wp.WordpressCacheError, "not persisted and usable"):
+            self.setup_once()
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
+        journal_file = self.root / "ach_customizer.nginx-helper.7.json"
+        journal = json.loads(journal_file.read_text())
+        self.assertEqual(journal["phase"], "site_configured")
+        self.assertEqual(set(journal["previous"]["admin_caps_stored"].values()), {None})
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Needs Review")
+        self.fail_role_persistence = False
+        self.setup_once()
+        self.assertEqual(set(self.admin_caps_stored.values()), {True})
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
+
+    def test_interrupted_connect_after_first_role_write_preserves_baseline(self):
+        self.start()
+        self.fail_role_write_after = "Nginx Helper | Config"
+        with self.assertRaisesRegex(RuntimeError, "interrupted persisted capability write"):
+            self.setup_once()
+        self.assertIs(self.admin_caps_stored["Nginx Helper | Config"], True)
+        self.assertIsNone(self.admin_caps_stored["Nginx Helper | Purge cache"])
+        journal_file = self.root / "ach_customizer.nginx-helper.7.json"
+        original = json.loads(journal_file.read_text())["previous"]["admin_caps_stored"]
+        self.assertEqual(set(original.values()), {None})
+        self.setup_once()
+        self.assertEqual(set(self.admin_caps_stored.values()), {True})
+        self.assertEqual(json.loads(journal_file.read_text())["previous"]["admin_caps_stored"],
+                         original)
+        wp.restore(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
+
+    def test_interrupted_restore_after_first_role_write_is_idempotent(self):
+        self.start()
+        self.setup_once()
+        self.fail_role_write_after = "Nginx Helper | Config"
+        with self.assertRaisesRegex(RuntimeError, "interrupted persisted capability restore"):
+            wp.restore(self.site, object(), data_dir=str(self.root))
+        self.assertIsNone(self.admin_caps_stored["Nginx Helper | Config"])
+        self.assertIs(self.admin_caps_stored["Nginx Helper | Purge cache"], True)
+        journal_file = self.root / "ach_customizer.nginx-helper.7.json"
+        self.assertEqual(json.loads(journal_file.read_text())["phase"], "restore_reloaded")
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["changed"],
+                         False)
+
+    def test_failed_restored_role_write_retries_without_false_success(self):
+        self.start()
+        self.setup_once()
+        self.fail_role_persistence = True
+        with self.assertRaisesRegex(wp.WordpressCacheError, "durably restored"):
+            wp.restore(self.site, object(), data_dir=str(self.root))
+        j = json.loads((self.root / "ach_customizer.nginx-helper.7.json").read_text())
+        self.assertEqual(j["phase"], "restore_reloaded")
+        self.assertEqual(set(self.admin_caps_stored.values()), {True})
+        self.fail_role_persistence = False
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
+
+    def test_old_filtered_role_baseline_is_not_replayed_on_disconnect(self):
+        self.start()
+        self.setup_once()
+        journal_file = self.root / "ach_customizer.nginx-helper.7.json"
+        journal = json.loads(journal_file.read_text())
+        journal["previous"].pop("admin_caps_stored")
+        journal["previous"]["admin_caps"] = {"Nginx Helper | Config": False,
+                                             "Nginx Helper | Purge cache": False}
+        journal_file.write_text(json.dumps(journal))
+        # Older record cannot establish original stored state; preserve what
+        # is currently persisted instead of blindly deleting grants.
+        reply = wp.restore(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(reply["state"], "Restored")
+        self.assertIn("Legacy capability baseline is unknown", reply["note"])
+        self.assertEqual(set(self.admin_caps_stored.values()), {True})
 
     def test_one_click_disconnect_restores_original_lines_without_extra_steps(self):
         self.start()
@@ -149,6 +344,7 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertEqual(reply["state"], "Restored")
         self.assertEqual(self.config.read_bytes(), self.original_config)
         self.assertEqual(self.ini.read_bytes(), self.original_ini)
+        self.assertEqual(set(self.admin_caps_stored.values()), {None})
         self.assertIn(("php", "suspend"), self.events)
         self.assertIn(("php", "restore"), self.events)
         self.assertIn(("cache", "restore"), self.events)
@@ -434,6 +630,34 @@ class WordpressConnectionTests(unittest.TestCase):
                          "Restored")
         self.assertEqual(self.config.read_bytes(), self.original_config)
 
+    def test_active_helper_runtime_default_without_source_override_is_reversible(self):
+        # Installed Nginx Helper may define a filtered vendor fallback after
+        # WordPress loads; wp-config.php itself has no explicit Cache path.
+        self.original_config = self.original_config.replace(
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",
+            b"")
+        self.config.write_bytes(self.original_config)
+        self.previous["nginx_helper"] = True
+        self.previous["bridge"] = True
+        self.wp_active = True
+        self.start()
+
+        def vendor_default_php(site, version, command, **kwargs):
+            source = wp._extract_constant(self.config.read_bytes(), allow_absent=True)
+            self.runtime_override = "/var/run/nginx-cache" if source is None else None
+            return self.fake_php(site, version, command, **kwargs)
+
+        with patch.object(wp, "_php", side_effect=vendor_default_php):
+            connected = wp.setup(self.site, object(), data_dir=str(self.root))
+            self.assertEqual(connected["state"], "Connected")
+            self.assertEqual(wp._extract_constant(self.config.read_bytes()), self.cache)
+            self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                             "Connected")
+            restored = wp.restore(self.site, object(), data_dir=str(self.root))
+            self.assertEqual(restored["state"], "Restored")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertEqual(self.ini.read_bytes(), self.original_ini)
+
     def test_one_click_supports_stock_native_php_handler(self):
         # A fresh aaPanel WordPress site can retain enable-php-85.conf.
         self.start()
@@ -528,6 +752,28 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertFalse(self.wp_active)
         self.assertEqual(self.options["enable_purge"], 0)
 
+    def test_active_helper_never_overrides_explicit_mismatched_source(self):
+        self.previous["nginx_helper"] = True
+        self.wp_active = True
+        self.runtime_override = "/var/run/nginx-cache"
+        self.start()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "differs from its source"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertNotIn(("cache", "apply"), self.events)
+
+    def test_missing_helper_cannot_claim_dynamic_runtime_default(self):
+        self.original_config = self.original_config.replace(
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",
+            b"")
+        self.config.write_bytes(self.original_config)
+        self.runtime_override = "/var/run/nginx-cache"
+        self.start()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "differs from its source"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertNotIn(("cache", "apply"), self.events)
+
     def test_runtime_path_changes_after_reload_cannot_enable_vendor_purge(self):
         self.start()
         def wrong_runtime(_version):
@@ -587,6 +833,20 @@ define('ABSPATH', __DIR__ . '/');
 define('WP_PLUGIN_DIR', __DIR__ . '/wp-content/plugins');
 define('RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache');
 function get_site_option($key, $default = false) { return $default; }
+class TestAdminRole {
+    public $capabilities = [];
+    public function has_cap($cap) { return (bool)($this->capabilities[$cap] ?? false); }
+    public function add_cap($cap, $grant=true) {
+        $this->capabilities[$cap] = $grant;
+        file_put_contents(__DIR__ . '/vendor-actions', 'cap:' . $cap . "\n", FILE_APPEND);
+    }
+    public function remove_cap($cap) { unset($this->capabilities[$cap]); }
+}
+function get_role($role) {
+    if ($role !== 'administrator') return null;
+    static $admin = null;
+    return $admin ??= new TestAdminRole();
+}
 function is_plugin_active($plugin) { return false; }
 function is_wp_error($error) { return false; }
 function activate_plugin($plugin) {

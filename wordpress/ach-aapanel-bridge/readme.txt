@@ -1,7 +1,7 @@
 === ACh aaPanel Bridge ===
 Tags: aapanel, nginx, cache, wordpress, diagnostics
 Tested up to: 7.1
-Stable tag: 0.1.8
+Stable tag: 0.1.9
 
 Optional WordPress diagnostics and opt-in, site-owned Nginx Helper cache URL invalidation for ACh aaPanel Customizer.
 
@@ -113,6 +113,14 @@ submission, licensing and other Directory requirements are separate
 decisions and are not implied by the presence of this standard readme.txt.
 
 == Changelog ==
+
+= 0.1.9 =
+
+* Reconcile the official, authorized frontend Purge Current Page action
+  against the selected site's generation-bound HTTP/HTTPS GET/HEAD cache objects
+  through the existing verified Nginx Helper per-URL file filter.
+* Keep invalid/unauthorized purge requests and the independent vendor
+  recursive Purge Entire Cache outside that per-URL integration.
 
 = 0.1.8 =
 
