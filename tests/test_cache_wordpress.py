@@ -434,6 +434,34 @@ class WordpressConnectionTests(unittest.TestCase):
                          "Restored")
         self.assertEqual(self.config.read_bytes(), self.original_config)
 
+    def test_active_helper_runtime_default_without_source_override_is_reversible(self):
+        # Installed Nginx Helper may define a filtered vendor fallback after
+        # WordPress loads; wp-config.php itself has no explicit Cache path.
+        self.original_config = self.original_config.replace(
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",
+            b"")
+        self.config.write_bytes(self.original_config)
+        self.previous["nginx_helper"] = True
+        self.previous["bridge"] = True
+        self.wp_active = True
+        self.start()
+
+        def vendor_default_php(site, version, command, **kwargs):
+            source = wp._extract_constant(self.config.read_bytes(), allow_absent=True)
+            self.runtime_override = "/var/run/nginx-cache" if source is None else None
+            return self.fake_php(site, version, command, **kwargs)
+
+        with patch.object(wp, "_php", side_effect=vendor_default_php):
+            connected = wp.setup(self.site, object(), data_dir=str(self.root))
+            self.assertEqual(connected["state"], "Connected")
+            self.assertEqual(wp._extract_constant(self.config.read_bytes()), self.cache)
+            self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                             "Connected")
+            restored = wp.restore(self.site, object(), data_dir=str(self.root))
+            self.assertEqual(restored["state"], "Restored")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertEqual(self.ini.read_bytes(), self.original_ini)
+
     def test_one_click_supports_stock_native_php_handler(self):
         # A fresh aaPanel WordPress site can retain enable-php-85.conf.
         self.start()
@@ -527,6 +555,28 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertNotIn(("cache", "apply"), self.events)
         self.assertFalse(self.wp_active)
         self.assertEqual(self.options["enable_purge"], 0)
+
+    def test_active_helper_never_overrides_explicit_mismatched_source(self):
+        self.previous["nginx_helper"] = True
+        self.wp_active = True
+        self.runtime_override = "/var/run/nginx-cache"
+        self.start()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "differs from its source"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertNotIn(("cache", "apply"), self.events)
+
+    def test_missing_helper_cannot_claim_dynamic_runtime_default(self):
+        self.original_config = self.original_config.replace(
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",
+            b"")
+        self.config.write_bytes(self.original_config)
+        self.runtime_override = "/var/run/nginx-cache"
+        self.start()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "differs from its source"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertNotIn(("cache", "apply"), self.events)
 
     def test_runtime_path_changes_after_reload_cannot_enable_vendor_purge(self):
         self.start()

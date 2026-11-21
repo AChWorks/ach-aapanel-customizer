@@ -13,7 +13,7 @@ unfinished compatibility and acceptance live in
 
 **Owner decision (2026-11-21):** Keep **one persistent Running QA VM** for this project on AI Test Server: `ach-aapanel-qa/aac-native-qa-20261118` (guest UUID and protected credential binding are recorded in [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)). **Do not create, clone, replace, stop or delete it** while development continues, and do not recreate disposable snapshots. The five obsolete QA VMs and all seven surplus snapshots were removed; see the [verified inventory and service checks](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7063214175).
 
-The retained VM has working aaPanel, WordPress, WooCommerce and other test sites. At the 2026-11-21 check its **installed** native Customizer was `0.1.69`, while GitHub `main` source was `0.1.72`; these layers must not be conflated. Make reversible, task-owned fixtures on this VM and protect peer sites. Use the existing `service_access` credential with the verified Browser adapter; avoid resetting passwords, relying on vanished guests, or interpreting an older VM-specific test as new installed acceptance. A disruptive shared-VM fault test without a safe scoped recovery path is **not yet an authorized test**. Production/Release remain separately gated.
+The retained VM has working aaPanel, WordPress, WooCommerce and other test sites. Its native Customizer was originally `0.1.69` and was subsequently upgraded to a byte-verified `0.1.72` QA ZIP; check [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for the latest installed candidate and **separate** resident-worker/browser evidence. Source, installed bytes and loaded runtime must not be conflated. Make reversible, task-owned fixtures on this VM and protect peer sites. Use the existing `service_access` credential with the verified Browser adapter; avoid resetting passwords, relying on vanished guests, or interpreting an older VM-specific test as new installed acceptance. A disruptive shared-VM fault test without a safe scoped recovery path is **not yet an authorized test**. Production/Release remain separately gated.
 
 ## Evidence versus support
 
@@ -878,7 +878,7 @@ that original Cache; only the WordPress integration is removed.
 The native **0.1.72 corrective source was merged** in
 [PR #114](https://github.com/AChWorks/ach-aapanel-customizer/pull/114).
 This is **not** a published Release or Production deployment, nor proof
-that the retained persistent QA VM has upgraded from native 0.1.69.
+of any newer candidate's installed/resident status; use [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for current VM evidence.
 
 **Installed-native QA (earlier PR #114 0.1.72 HEAD `eb875fd2932e`):** On isolated aaPanel 8.0.7 /
 WordPress 7.1.5 with official Nginx Helper 2.4.1 and ACh Bridge 0.1.8,

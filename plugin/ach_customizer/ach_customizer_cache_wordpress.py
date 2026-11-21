@@ -604,7 +604,14 @@ def _setup_locked(site, public, *, data_dir):
     if record is None:
         patch = _edits(site)
         source_constant = _extract_constant(patch["wp_before"], allow_absent=True)
-        if original_options.get("previous", {}).get("constant") != source_constant:
+        effective_constant = original_options.get("previous", {}).get("constant")
+        # An already-active Nginx Helper may define its own default path
+        # while WordPress loads, even when wp-config.php has no definition.
+        # Our managed definition will load first; the subsequent PHP
+        # "connect" call must verify its effective site-owned path before
+        # activating any plugins or enabling purging.
+        if (effective_constant != source_constant and
+                not (source_constant is None and original_options.get("active_helper"))):
             raise WordpressCacheError(
                 "compatibility", "Effective WordPress Nginx Helper Cache path differs from its source")
         record = {
