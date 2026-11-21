@@ -709,6 +709,127 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
+### P0 native PHP regeneration and scanner workflow (0.1.80 candidate)
+
+An explicit new FPM auto Enable records the selected service's original
+canonical source SHA, native RAM tier, and saved pm.max_requests before any
+repair. The already installed systemd timer then handles both accepted
+WordPress Toolkit terminal events and post-opt-in FPM source changes whose
+four managed numeric settings match the exact verified installed aaPanel
+setFpmConfig writer. Foreign source changes remain Needs Review. For
+recognized regeneration, the saved desired values, shared-site mapping,
+Monitor status, exact source identity, recovery journal and fresh runtime
+verification must agree; failure preserves diagnostic evidence and baseline
+bytes. A completed host transaction is reconciled after a worker crash without
+reloading PHP again. Emergency Disable prevents new lifecycle repairs.
+Existing enabled profiles do not silently acquire new authority; disable
+and re-enable deliberately to activate the expanded scope.
+
+A fresh, already-completed WP progress record does not suppress later
+independent PHP-FPM regeneration. The two branches are reconciled in the
+same timer invocation. A source modified by the *same* native WordPress
+operation is not interpreted as an independently completed aaPanel event:
+its filesystem mtime must be strictly later than the native terminal log
+mtime. Both native WP LOCK and BATCH_LOCK defer the independent lifecycle
+before reading the source and again at the guarded Apply verification
+boundary. This avoids a premature reload during early or batched install;
+the next timer wakeup retains the source and policy for reconciliation.
+
+The Native 0.1.76 installed QA uncovered an activation-order race:
+after Emergency Disable and a new Enable, the freshly started systemd
+worker could observe the old disabled profile and disable its own
+timer/path before the new operator intent was saved. The 0.1.77
+source committed policy before activating either unit, but a later
+official installed 0.1.77 package still reproduced the race because
+aaPanel retained an **older imported watcher helper in memory**, even
+while the UI and Python entrypoint both reported 0.1.77.
+
+Native 0.1.78 both (a) commits the reviewed profile before starting
+the units, verifying both are active, compensating only a newly armed
+version on activation failure, and (b) requires the resident watcher
+helper to advertise the policy-first arming protocol. If aaPanel still
+uses an older helper, non-emergency Enable is refused with an explicit
+stale-helper diagnosis, and read-only Inspect cannot claim readiness.
+Emergency Disable remains available. Do not automatically restart
+the panel: only an explicitly authorized panel-only reload under the
+upgrade/recovery runbook can refresh known stale imports.
+
+The official installed Native 0.1.78 QA on the retained VM, after a
+scoped panel reload, proved policy-before-systemd Enable, both managed
+units active, native aaPanel PHP Optimization regeneration and one
+automatic guarded Apply. **A second identical regeneration then failed**:
+the event token used only old/new content hashes, which were identical
+between cycles when the source at opt-in already matched desired
+values. The worker mistook the new writer event for the previous
+committed auto journal and refused Apply; the CLI recorded only its
+exception type. Auto repair was disabled, the old journal retired
+through exact UI Recovery, and the PHP85 source restored to the
+original hash, with all peer sites healthy. Native 0.1.79 binds each
+independent event token to the explicit opt-in epoch and previously
+acknowledged event, so repeated identical vendor bytes cannot alias.
+Journal acknowledgment after a post-commit crash is checked before
+the source-baseline early exit; no second reload is authorized.
+The systemd error record now includes bounded stage and reason. The
+exact installed 0.1.79 QA subsequently verified **both** separate,
+byte-identical native regenerations (Recovery IDs
+`5019b1188c5f4896a00cddf36546ad1c` and
+`53e495525b6748b992cafc9cbe58679c`), prior-journal
+archival, Emergency Disable and exact-byte baseline Restore; see
+[Issue #21 accepted runtime receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7069608396).
+This evidence is historical to installed 0.1.79, not proof that the
+new 0.1.80 source has been installed.
+
+The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
+sensitive-path protection. Choose a native site with its Nginx Guard Applied,
+check the native combined access log, configure the desired retry/window/ban
+values, inspect the plan, then enable. The managed Fail2ban jail is selected
+site-log-scoped, but an nftables ban affects EVERY web service on the origin
+using TCP/UDP 80/443, IPv4 and IPv6. Real-client log addresses from a trusted
+proxy may not be packet sources visible to the origin kernel firewall; never
+assume bans work or are safe behind CDN/proxy without an actual check.
+Normal 404s, .well-known/ACME and OAuth paths are not filter hits.
+A running scanner jail with a durable \`prepared\` journal remains
+**Recovery Required**, not a falsely acknowledged Applied state. The normal
+Recheck exposes its original Recovery ID and enables Restore.
+
+After a website has been deleted, **Find orphaned scanner jails** is
+accessible in Routing & Nginx without selecting a site or enabling Monitor.
+It enumerates only root-owned plugin recovery journals, verifies that each
+former native site ID is absent from aaPanel, and reports exact recovery
+identities. **Restore selected orphan jail** requires primary-admin POST,
+the exact journal Recovery ID, an exact owned-jail byte match and a second
+native-absence check immediately before removal. If Fail2ban is running,
+Restore validates configuration, reloads the daemon, verifies the old
+jail stopped and checks that its named IPv4/IPv6 TCP/UDP nftables sets
+are absent before a durable `Restored` acknowledgment.
+
+If aaPanel deleted the native site **and its logpath**, an owned
+Fail2ban jail can prevent the daemon itself from starting. Native
+0.1.80 supports this narrow **offline orphan recovery**: the
+administrator clicks the same Restore for that exact orphan Recovery ID,
+the plugin removes only the still-matching owned jail config, and
+records `restore_pending` in the existing journal. It does **not**
+start/restart Fail2ban, touch nftables, remove the shared filter or
+claim bans have been lifted. Start/reconnect Fail2ban after the invalid
+jail source is retired; then find the orphan again and use the same
+Recovery ID to finish verification and acknowledge `Restored`.
+If Fail2ban or nftables verification fails, an owned action still exists,
+or the recovery journal save is uncertain, the journal remains
+recoverable and the UI reports the real pending/error state. A crash
+between source unlink and `restore_pending` save is recoverable using
+the older applied journal plus the now-absent owned file. Changed/foreign
+jail files and unrelated Fail2ban/nftables entries are never removed.
+If the site was renamed but its native ID remains, use ordinary selected-site
+Restore instead. Rotation of the site log to a new inode at the same native
+absolute path is compatible with the polling backend; moving the source
+path requires Recheck and an explicit Restore.
+
+Restore retires only the owned jail using the Recovery ID and verifies that
+the jail is no longer active; the shared filter is retained for possible
+other references. No vendor Nginx source or foreign Fail2ban jail is edited.
+Only an actual installed-native HTTP/UI check can prove a particular host
+layout, not unit tests or synthetic Fail2ban traffic.
+
 ### Source-integrated R1–R4 control-flow remediation (verify installed behavior)
 
 - **Reviewed-site consent (R1):** Enable carries the exact versioned

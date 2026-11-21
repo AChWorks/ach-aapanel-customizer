@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-21; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.75`); Bridge `0.1.9`. PR #114 merged the prior `0.1.72` implementation | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.80`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -59,8 +59,8 @@ The broader open functional work remains in [Issue #2](https://github.com/AChWor
 | --- | --- |
 | **Overview / Monitor** | Read component availability, diagnostics and packaged versus resident **entrypoint** version; matching entrypoints do not certify every imported helper. |
 | **Website list** | Discover paginated native websites and bound domains, compare drift, and save selected-site or all-site observation baselines without changing website configuration. |
-| **Routing & Nginx** | View current local loopback aliases and remove an **exact chosen hostname with one administrator click**, with no site-selection or watcher prerequisite. Inspect site-owned VHosts and optionally manage source-verified Nginx sensitive-path protection; **Hosts removal is never unattended**. |
-| **PHP-FPM** | Inspect installed PHP files, service/pool mapping and affected sites. Guarded shared `[www]` Apply/Restore is implemented for validated **8.1/8.5** adapters; discover other installed versions rather than treating these adapters as a universal version allowlist. Separately opt in to compatible post-WordPress-setup automatic policy repair. |
+| **Routing & Nginx** | View current local loopback aliases and remove an **exact chosen hostname with one administrator click**, with no site-selection or watcher prerequisite. Inspect site VHosts, apply opt-in Nginx sensitive-path protection, and manage site-log Fail2ban scanner jails with disclosed origin-wide web-port ban scope; **Hosts removal is never unattended**. |
+| **PHP-FPM** | Inspect installed PHP files, service/pool mapping and affected sites. Guarded shared `[www]` Apply/Restore is implemented for validated **8.1/8.5** adapters; discover other installed versions rather than treating these adapters as a universal version allowlist. Separately opt in to source-verified WordPress/aaPanel native PHP-FPM writer regeneration repair. |
 | **Status Pages** | Preview the bundled 11 English/LTR and 11 Persian/RTL offline templates, edit scoped branding, and use verified site/global Nginx delivery and Restore modes. Global unknown-host **HTTPS/443 TLS/SNI remains an Owner decision** in [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). |
 | **FastCGI Cache** | Inspect and explicitly Apply/Recheck/Restore site-owned policy; clear selected URLs or independently verified site-owned cache files. Private-session isolation and Nginx Helper integration have **bounded** non-production proofs, not generic safety certification. |
 | **Activity & Logs** | Inspect operation stage, outcome, error and Operation/Recovery IDs for diagnosis and safe reconciliation. |
@@ -72,6 +72,56 @@ Nginx Helper with **eligible per-URL GET/HEAD invalidation**; it does not
 install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
+
+## P0 native 0.1.80 source workflow (not yet publicly released)
+
+- PHP-FPM: Save desired [www] pool values, recheck real shared-site attribution,
+  then explicitly Enable automatic repair. The existing 30-second timer handles
+  witnessed WordPress Toolkit optimization and additional exact aaPanel-native
+  FPM regeneration on supported service shapes. Completed WordPress progress
+  does not suppress a later independent native regeneration; the same WP
+  task's source change is not independently borrowed as repair authority.
+  Active native WP/batch locks defer repairs and are rechecked at Apply.
+  At Enable, the reviewed policy is committed before systemd starts the
+  event path/timer; the worker cannot interpret a just-activated empty
+  profile as Disabled and immediately stop its own timer. A failed unit
+  activation revokes the newly armed version rather than claiming success.
+  The privileged enable endpoint also requires the loaded helper's current
+  arming protocol. An older resident helper is reported as stale and
+  cannot claim Enabled merely because a newer ZIP is installed. Read-only
+  inspection explains the required separately approved panel-only reload;
+  Emergency Disable always remains available. Repeated byte-identical
+  aaPanel writer events receive distinct opt-in/previous-acknowledgment
+  tokens, with recovery journals archived between successful repairs.
+  A committed repair that lost its separate profile acknowledgment is
+  reconciled without a duplicate reload, even when the desired source
+  equals the original opt-in baseline. Worker errors expose their
+  actionable stage and reason in the systemd journal.
+  Each repair uses the saved
+  intent, fresh writer identity and affected-site mapping, guarded syntax/
+  reload/verification and durable rollback. Foreign manual drift is not
+  overwritten. Legacy enabled profiles remain WP-only until explicit re-enable.
+- Scanner: In Routing & Nginx, first Apply the site-sensitive pre-PHP Nginx
+  guard, then Check and Enable the selected site's Fail2ban scanner. It monitors
+  that site's verified combined access log for repeated sensitive-file, backup
+  and executable-upload probes rejected as HTTP 403/404. Admin-adjustable
+  retry, window and ban duration use an installed Fail2ban/nftables service.
+  Kernel bans are origin-wide across all sites on TCP/UDP 80/443 for both
+  address families; they are NOT confined to that site's log. Do not enable
+  without validating proxy/CDN source attribution and ban consequences.
+  Recheck/Restore manages only the owned site jail; foreign jails survive.
+  A running jail with a Prepared recovery journal remains Recovery Required
+  with its original Recovery ID. After native site deletion, Routing & Nginx
+  also offers **Find orphaned scanner jails → Restore selected orphan jail**,
+  without needing a current website or enabled Monitor. Foreign/changed jail
+  bytes are never removed. If the orphan's missing log blocks Fail2ban
+  startup, the primary admin can retire only the exact journal-owned jail
+  source offline. The same Recovery ID stays in `restore_pending` and
+  firewall state is explicitly unverified; after Fail2ban starts, repeat
+  Restore to check the absent jail and owned nftables sets before committing
+  `Restored`. Never claim that an offline file unlink removed active bans.
+- See Issue #21 for exact installed and live QA proof. Source checks alone do
+  not prove browser acceptance. New Release/Production remain separately gated.
 
 ## Install and operate
 

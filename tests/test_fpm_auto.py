@@ -1316,6 +1316,277 @@ class AutoNativeFpmTests(unittest.TestCase):
             self._run()
         self.assertEqual(self.config.read_bytes(),VENDOR_BYTES)
 
+    def test_identical_native_regeneration_after_desired_baseline_repairs_twice(self):
+        # Reproduce retained QA exactly: operator first selected values with
+        # aaPanel's native writer; auto is armed on those already-desired
+        # bytes. Each later native preset uses the SAME vendor SHA.
+        original_desired = recovery._plan(self.php_root, "85", DESIRED)[2]
+        self.config.write_bytes(original_desired)
+        self._enable()
+        first_baseline = worker.inspect("85", data_dir=str(self.state))
+        self.assertEqual(first_baseline["last_state"], "Armed")
+        self._vendor_reset()
+        first_native = self.config.read_bytes()
+        one = self._run()
+        self.assertTrue(one["changed"], one)
+        op_one = one["services"][0]["operation_id"]
+        self.assertEqual(self.config.read_bytes(), original_desired)
+        self.assertFalse(self._run()["changed"])
+
+        self._vendor_reset()
+        self.assertEqual(self.config.read_bytes(), first_native)
+        two = self._run()
+        self.assertTrue(two["changed"], two)
+        op_two = two["services"][0]["operation_id"]
+        self.assertNotEqual(op_two, op_one)
+        self.assertEqual(self.config.read_bytes(), original_desired)
+        self.assertEqual(self.calls.count("reload"), 2)
+        self.assertEqual(
+            (self.state / ("ach_customizer.fpm85.auto." + op_one + ".before")
+             ).read_bytes(), first_native)
+        self.assertFalse(self._run()["changed"])
+
+    def test_commit_ack_crash_with_desired_baseline_reconciles_without_reload(self):
+        original_desired = recovery._plan(self.php_root, "85", DESIRED)[2]
+        self.config.write_bytes(original_desired)
+        self._enable()
+        self._vendor_reset()
+        real_apply = worker.recovery.apply
+        first = [True]
+        def crash_after_host_commit(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            if first[0]:
+                first[0] = False
+                raise OSError("simulated lost event acknowledgment")
+            return result
+        with patch.object(worker.recovery, "apply", side_effect=crash_after_host_commit):
+            with self.assertRaisesRegex(OSError, "lost event"):
+                self._run()
+        self.assertEqual(self.config.read_bytes(), original_desired)
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertEqual(worker.inspect("85", data_dir=str(self.state))["last_state"],
+                         "Armed")
+        recovery_run = self._run()
+        self.assertFalse(recovery_run["changed"])
+        self.assertEqual(recovery_run["services"][0]["state"], "Applied")
+        self.assertTrue(recovery_run["services"][0]["reconciled"])
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertFalse(self._run()["changed"])
+
+    def test_cli_worker_error_preserves_stage_and_diagnostic_reason(self):
+        import contextlib
+        import io
+        err = recovery.FpmApplyError(
+            "recovery", "Prior committed operation does not match new native event")
+        output = io.StringIO()
+        with patch.object(worker, "run", side_effect=err), \
+                contextlib.redirect_stderr(output):
+            self.assertEqual(worker.main(["run"]), 1)
+        line = output.getvalue().strip()
+        self.assertIn("ACh automatic FPM repair refused: ", line)
+        payload = json.loads(line.split("refused: ", 1)[1])
+        self.assertEqual(payload["type"], "FpmApplyError")
+        self.assertEqual(payload["stage"], "recovery")
+        self.assertIn("does not match new native event", payload["reason"])
+
+    def test_lifecycle_token_changes_after_ack_or_new_opt_in_epoch(self):
+        profile = {"policy_sha256": "b"*64,
+                   "enabled_ns": 123, "last_token": None}
+        lifecycle = {"baseline_sha256": "a"*64}
+        first = worker._lifecycle_token("85", profile, lifecycle, "c"*64)
+        self.assertRegex(first, r"^[a-f0-9]{64}$")
+        self.assertNotEqual(first, worker._lifecycle_token(
+            "85", {**profile, "last_token": first}, lifecycle, "c"*64))
+        self.assertNotEqual(first, worker._lifecycle_token(
+            "85", {**profile, "enabled_ns": 456}, lifecycle, "c"*64))
+
+    def test_lifecycle_vendor_regeneration_without_wp_event_is_repaired_twice(self):
+        self._enable()
+        initial = worker.inspect("85", data_dir=str(self.state))
+        self.assertEqual(initial["watch_scope"],
+                         "verified_native_wp_terminal_and_fpm_lifecycle")
+        self.assertFalse(self._run()["changed"])
+        # An existing optimizer sidecar means first-install WP logic will
+        # intentionally skip; the independent native setter still updates
+        # the shared pool during later aaPanel regeneration.
+        self._mark_optimized()
+        self._vendor_reset()
+        result = self._run()
+        self.assertTrue(result["changed"], result)
+        self.assertEqual(result["services"][0]["state"], "Applied")
+        first_op = result["services"][0]["operation_id"]
+        self.assertIsNotNone(first_op)
+        from ach_customizer_monitor import preview_php_fpm
+        self.assertEqual(preview_php_fpm(
+            self.php_root, "85", DESIRED)["state"], "File Match")
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertFalse(self._run()["changed"])
+        self._vendor_reset()
+        second = self._run()
+        self.assertTrue(second["changed"], second)
+        self.assertNotEqual(second["services"][0]["operation_id"], first_op)
+        self.assertEqual(self.calls.count("reload"), 2)
+        self.assertEqual(
+            (self.state / ("ach_customizer.fpm85.auto." + first_op + ".before")
+             ).read_bytes(), VENDOR_BYTES)
+        self.assertFalse(self._run()["changed"])
+
+    def test_lifecycle_arbitrary_admin_change_is_visible_without_rewrite(self):
+        self._enable()
+        changed = BASELINE.replace(b"pm.max_children=50", b"pm.max_children=70")
+        self.config.write_bytes(changed)
+        first = self._run()
+        self.assertFalse(first["changed"])
+        self.assertEqual(first["services"][0]["state"], "Needs Review")
+        self.assertIn("nonvendor", worker.inspect(
+            "85", data_dir=str(self.state))["last_state"])
+        self.assertEqual(self.config.read_bytes(), changed)
+        self.assertEqual(self.calls.count("reload"), 0)
+        # Persistent evidence is not spammed on every 30-second poll.
+        state = worker.inspect("85", data_dir=str(self.state))
+        self.assertEqual(self._run()["services"][0]["state"], "Needs Review")
+        self.assertEqual(worker.inspect(
+            "85", data_dir=str(self.state))["state_revision"],
+            state["state_revision"])
+
+    def test_lifecycle_after_commit_crash_is_idempotently_reconciled(self):
+        self._enable()
+        self._vendor_reset()
+        real = worker.recovery.apply
+        once = [False]
+        def fail_after_commit(*args, **kwargs):
+            value = real(*args, **kwargs)
+            if not once[0]:
+                once[0] = True
+                raise OSError("simulated ack crash after applied fsync")
+            return value
+        with patch.object(worker.recovery, "apply", side_effect=fail_after_commit):
+            with self.assertRaises(OSError):
+                self._run()
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertEqual(worker.inspect("85",data_dir=str(self.state))["last_state"],
+                         "Armed")
+        resumed = self._run()
+        self.assertEqual(resumed["services"][0]["state"], "Applied")
+        self.assertTrue(resumed["services"][0]["reconciled"])
+        self.assertFalse(resumed["changed"])
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertFalse(self._run()["changed"])
+
+    def test_legacy_profile_remains_wordpress_only_until_reenabled(self):
+        self._enable()
+        fd=worker._open_state_dir(str(self.state))
+        try:
+            store=worker._read(fd)
+            old={**store["profiles"]["85"]}
+            del old["lifecycle"]
+            worker._save(fd,{**store,"revision":store["revision"]+1,
+                             "profiles":{"85":old}})
+        finally:
+            os.close(fd)
+        self._vendor_reset()
+        self.assertFalse(self._run()["changed"])
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"), 0)
+        self.assertEqual(worker.inspect("85",data_dir=str(self.state))["watch_scope"],
+                         "verified_native_wp_terminal")
+
+    def test_recent_completed_wp_progress_does_not_delay_later_fpm_regeneration(self):
+        self._enable()
+        terminal = {"status": 1, "steps": [1, 1, 1, 1],
+                    "dev": 2, "ino": 101, "domain": "native.example",
+                    "mtime_ns": time.time_ns(), "token": "a"*64}
+        self.event = terminal
+        # Native progress uses the log's filesystem mtime, not Python's
+        # wall-clock value (which can be a few ms ahead of stat on CI).
+        proof = self.base / "finished-wp.log"
+        proof.write_text("terminal")
+        self.event["mtime_ns"] = proof.stat().st_mtime_ns
+        fd = worker._open_state_dir(str(self.state))
+        try:
+            state = worker._read(fd)
+            profile = {**state["profiles"]["85"], "last_token": terminal["token"],
+                       "last_state": "No Native FPM Optimization"}
+            worker._save(fd, {**state, "revision": state["revision"]+1,
+                              "profiles": {"85": profile}})
+        finally:
+            os.close(fd)
+        self._vendor_reset()
+        # Model the independent write after native terminal with an exact
+        # filesystem timestamp; no wall-clock scheduling/sleep dependency.
+        later = self.event["mtime_ns"] + 1_000_000_000
+        os.utime(self.config, ns=(later, later))
+        completed = self._run()
+        self.assertTrue(completed["changed"], completed)
+        self.assertEqual(completed["services"][0]["state"], "Applied")
+        self.assertEqual(self.calls.count("reload"), 1)
+        self.assertEqual(worker.inspect("85", data_dir=str(self.state))["last_state"],
+                         "Applied")
+        self.assertFalse(self._run()["changed"])
+        self.assertEqual(self.calls.count("reload"), 1)
+
+    def test_completed_wp_event_does_not_launder_its_own_fpm_change(self):
+        self._enable()
+        self._start()
+        self._vendor_reset()
+        terminal = self._terminal()
+        proof = self.base / "finished-wp.log"
+        proof.write_text("terminal")
+        self.event["mtime_ns"] = proof.stat().st_mtime_ns
+        report = self._run()
+        self.assertFalse(report["changed"])
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"), 0)
+        # The same terminal record is still fresh. A later independent
+        # aaPanel setter write is distinguishable by its filesystem mtime.
+        self.config.write_bytes(BASELINE)
+        self._vendor_reset()
+        later = self.event["mtime_ns"] + 1_000_000_000
+        os.utime(self.config, ns=(later, later))
+        result = self._run()
+        self.assertTrue(result["changed"], result)
+        self.assertEqual(self.calls.count("reload"), 1)
+
+    def test_native_locks_exclude_independent_repair_until_cleared(self):
+        for attr in ("lock_path", "batch_path"):
+            with self.subTest(native_lock=attr):
+                if attr == "lock_path":
+                    self._enable()
+                self._vendor_reset()
+                expected_source = self.config.read_bytes()
+                path = getattr(self, attr)
+                path.write_text("native job active")
+                result = self._run()
+                self.assertFalse(result["changed"])
+                self.assertEqual(self.config.read_bytes(), expected_source)
+                expected_reloads = 0 if attr == "lock_path" else 1
+                self.assertEqual(self.calls.count("reload"), expected_reloads)
+                path.unlink()
+                repaired = self._run()
+                self.assertTrue(repaired["changed"], repaired)
+                self.assertEqual(self.calls.count("reload"), expected_reloads + 1)
+                # The next subcase is a second legitimate regeneration
+                # from the preceding verified desired source.
+
+    def test_native_lock_appearing_between_prepare_and_apply_blocks_reload(self):
+        self._enable()
+        self._vendor_reset()
+        apply = worker.recovery.apply
+        def lock_midflight(*args, **kwargs):
+            self.batch_path.write_text("vendor batch started after prepare")
+            try:
+                return apply(*args, **kwargs)
+            finally:
+                self.batch_path.unlink()
+        with patch.object(worker.recovery, "apply", side_effect=lock_midflight):
+            with self.assertRaises(recovery.FpmApplyError):
+                self._run()
+        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
+        self.assertEqual(self.calls.count("reload"), 0)
+        result = self._run()
+        self.assertTrue(result["changed"])
+        self.assertEqual(self.calls.count("reload"), 1)
+
 
 if __name__=="__main__":
     unittest.main()

@@ -91,6 +91,11 @@ function loadUi() {
     '#ach-guard-result', '#ach-guard-apply-why', '#ach-guard-apply-reviewed',
     '#ach-guard-apply', '#ach-guard-restore-why', '#ach-guard-restore-reviewed',
     '#ach-guard-restore',
+    '#ach-scan-preview', '#ach-scan-recheck', '#ach-scan-apply',
+    '#ach-scan-restore', '#ach-scan-summary', '#ach-scan-result',
+    '#ach-scan-maxretry', '#ach-scan-findtime', '#ach-scan-bantime',
+    '#ach-scan-orphan-list', '#ach-scan-orphan-choice',
+    '#ach-scan-orphan-restore', '#ach-scan-orphan-result',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
@@ -171,6 +176,9 @@ function loadUi() {
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
   elements.get('#ach-fpm-recovery-version').props.value = '85';
+  elements.get('#ach-scan-maxretry').props.value = '6';
+  elements.get('#ach-scan-findtime').props.value = '120';
+  elements.get('#ach-scan-bantime').props.value = '600';
   elements.get('#ach-php-runtime-check').props.disabled = true;
   const requests = [];
   let allowStatusDiscard = false;
@@ -406,6 +414,14 @@ function loadUi() {
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       guardResult: elements.get('#ach-guard-result').textContent,
+      scanResult: elements.get('#ach-scan-result').textContent,
+      scannerOrphanResult: elements.get('#ach-scan-orphan-result').textContent,
+      scannerOrphanRestoreDisabled: elements.get('#ach-scan-orphan-restore').props.disabled,
+      scannerOrphanChoices: elements.get('#ach-scan-orphan-choice').children.map(x => ({
+        value:x.props.value, label:x.textContent
+      })),
+      scanApplyDisabled: elements.get('#ach-scan-apply').props.disabled,
+      scanRestoreDisabled: elements.get('#ach-scan-restore').props.disabled,
       guardApplyDisabled: elements.get('#ach-guard-apply').props.disabled,
       guardRestoreDisabled: elements.get('#ach-guard-restore').props.disabled,
       guardPreviewDisabled: elements.get('#ach-guard-preview').props.disabled,
@@ -8683,6 +8699,216 @@ test('One-click WordPress setup refuses stale cross-site backend replies', () =>
   });
   assert.doesNotMatch(ui.state().wpCacheResult,/stale site connected/);
   assert.doesNotMatch(ui.state().wpCacheResult,/WordPress Cache: Connected/);
+});
+
+
+function scannerReport(state='Unmanaged', change={}) {
+  const active=state==='Applied', restored=state==='Restored';
+  return {
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    ruleset:'sensitive-scan-combined-v1',
+    site_id:7,site_key:'site.test',state,
+    reason:'Verified site source and selected native access log',
+    recovery_id:active||restored?'a'.repeat(32):null,
+    journal_phase:active?'applied':restored?'restored':null,
+    runtime_verified:active||restored,changed:false,read_only:true,
+    firewall_scope:'origin_wide_web_ports',log_scope:'selected_native_site',
+    vhost_sha256:'b'.repeat(64),plan_sha256:'c'.repeat(64),
+    log_path:'/www/wwwlogs/site.test.log',
+    ...change
+  };
+}
+
+test('Fail2ban scanner UI uses verified plan and Recovery ID across real site actions',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  let before=ui.requests.length;
+  ui.statusClick('#ach-scan-apply');
+  assert.equal(ui.requests.length,before);
+  const preview=ui.statusClick('#ach-scan-preview');
+  assert.match(preview.options.url,/s=manage_abusive_scan$/);
+  assert.equal(preview.options.data.scan_action,'preview');
+  assert.equal(preview.options.data.site_id,'7');
+  assert.equal(preview.options.data.approved,undefined);
+  preview.respond(scannerReport());
+  const apply=ui.statusClick('#ach-scan-apply');
+  assert.equal(apply.options.data.scan_action,'apply');
+  assert.equal(apply.options.data.expected_plan_sha256,'c'.repeat(64));
+  assert.equal(apply.options.data.approved,'true');
+  assert.equal(apply.options.data.maxretry,'6');
+  assert.equal(apply.options.data.findtime,'120');
+  assert.equal(apply.options.data.bantime,'600');
+  apply.respond(scannerReport('Applied',{
+    changed:true,read_only:false,reason:'Live Fail2ban jail active'
+  }));
+  const check=ui.statusClick('#ach-scan-recheck');
+  check.respond(scannerReport('Applied'));
+  const restore=ui.statusClick('#ach-scan-restore');
+  assert.equal(restore.options.data.scan_action,'restore');
+  assert.equal(restore.options.data.recovery_id,'a'.repeat(32));
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond(scannerReport('Restored',{
+    changed:true,read_only:false,reason:'Jail removed, no running process'
+  }));
+  assert.match(ui.state().scanResult,/State: Restored/);
+  assert.equal(ui.state().scanRestoreDisabled,true);
+  assert.equal(ui.state().scanApplyDisabled,true);
+});
+
+test('Fail2ban scanner UI rejects stale selection, changed policy and malformed restore',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  const pending=ui.statusClick('#ach-scan-preview');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(scannerReport());
+  const count=ui.requests.length;
+  ui.statusClick('#ach-scan-apply');
+  assert.equal(ui.requests.length,count,'cross-site reply must never enable scanner');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.statusClick('#ach-scan-preview').respond(scannerReport());
+  ui.statusSetValue('#ach-scan-maxretry','9','input change');
+  const count2=ui.requests.length;
+  ui.statusClick('#ach-scan-apply');
+  assert.equal(ui.requests.length,count2,'changed retry policy must invalidate preview');
+  ui.statusClick('#ach-scan-recheck').respond(scannerReport('Restored',{
+    recovery_id:null,runtime_verified:false
+  }));
+  const count3=ui.requests.length;
+  ui.statusClick('#ach-scan-restore');
+  assert.equal(ui.requests.length,count3,'invalid restoration cannot authorize action');
+});
+
+
+test('Fail2ban prepared-but-running journal remains recoverable through normal UI',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  const r=ui.statusClick('#ach-scan-recheck');
+  r.respond(scannerReport('Recovery Required',{
+    recovery_id:'b'.repeat(32),journal_phase:'prepared',
+    runtime_verified:false,reason:'Interrupted Apply, jail is live'
+  }));
+  assert.match(ui.state().scanResult,/Recovery Required/);
+  assert.equal(ui.state().scanRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-scan-restore');
+  assert.equal(restore.options.data.recovery_id,'b'.repeat(32));
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond(scannerReport('Restored',{
+    recovery_id:'b'.repeat(32),journal_phase:'restored',
+    runtime_verified:true,changed:true,read_only:false
+  }));
+  assert.match(ui.state().scanResult,/State: Restored/);
+  assert.equal(ui.state().scanRestoreDisabled,true);
+});
+
+function scannerOrphanInventory(rows) {
+  return {
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    ruleset:'sensitive-scan-combined-v1',
+    firewall_scope:'origin_wide_web_ports',log_scope:'selected_native_site',
+    state:'Orphan Inventory',read_only:true,changed:false,
+    runtime_verified:false,orphans:rows
+  };
+}
+
+test('Fail2ban orphan UI restores deleted-site journal without site selection',()=>{
+  const ui=loadUi();
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
+  const list=ui.statusClick('#ach-scan-orphan-list');
+  assert.match(list.options.url,/s=manage_abusive_scan$/);
+  assert.equal(list.options.data.scan_action,'orphan_list');
+  assert.equal(list.options.data.site_id,undefined);
+  list.respond(scannerOrphanInventory([{
+    site_id:41,site_key:'deleted.example',recovery_id:'c'.repeat(32),
+    journal_phase:'prepared',state:'Recovery Required',recoverable:true
+  }]));
+  assert.equal(ui.state().scannerOrphanChoices.length,1);
+  assert.equal(ui.state().scannerOrphanChoices[0].value,'41');
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-scan-orphan-restore');
+  assert.equal(restore.options.data.scan_action,'orphan_restore');
+  assert.equal(restore.options.data.orphan_site_id,'41');
+  assert.equal(restore.options.data.recovery_id,'c'.repeat(32));
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond({
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    state:'Restored',site_id:41,site_key:'deleted.example',
+    recovery_id:'c'.repeat(32),journal_phase:'restored',
+    changed:true,read_only:false,runtime_verified:true,
+    orphan_restored:true
+  });
+  assert.match(ui.state().scannerOrphanResult,/Verified orphan Restore/);
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
+});
+
+test('Fail2ban orphan UI distinguishes offline jail retirement from verified firewall Restore',()=>{
+  const ui=loadUi();
+  const token='e'.repeat(32);
+  const entry={site_id:41,site_key:'deleted.example',recovery_id:token,
+    journal_phase:'applied',state:'Recovery Required',recoverable:true};
+  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([entry]));
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,false);
+  const first=ui.statusClick('#ach-scan-orphan-restore');
+  assert.equal(first.options.data.recovery_id,token);
+  first.respond({
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    state:'Recovery Required',site_id:41,site_key:'deleted.example',
+    recovery_id:token,journal_phase:'restore_pending',changed:true,
+    read_only:false,runtime_verified:false,orphan_restored:false,
+    reason:'Owned jail source retired while Fail2ban was stopped'
+  });
+  assert.match(ui.state().scannerOrphanResult,/OFFLINE RECOVERY PENDING/);
+  assert.match(ui.state().scannerOrphanResult,/Firewall bans have NOT been verified removed/);
+  assert.match(ui.state().scannerOrphanResult,/Start\/reconnect Fail2ban/);
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
+  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([
+    {...entry, journal_phase:'restore_pending'}
+  ]));
+  const second=ui.statusClick('#ach-scan-orphan-restore');
+  assert.equal(second.options.data.recovery_id,token,'repeat exact Recovery ID after restart');
+  second.respond({
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    state:'Restored',site_id:41,site_key:'deleted.example',
+    recovery_id:token,journal_phase:'restored',changed:true,
+    read_only:false,runtime_verified:true,orphan_restored:true
+  });
+  assert.match(ui.state().scannerOrphanResult,/Verified orphan Restore/);
+});
+
+test('Fail2ban orphan UI refuses malformed false-positive offline completion',()=>{
+  const ui=loadUi();
+  const token='f'.repeat(32);
+  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([{
+    site_id:41,site_key:'deleted.example',recovery_id:token,
+    journal_phase:'prepared',state:'Recovery Required',recoverable:true
+  }]));
+  const first=ui.statusClick('#ach-scan-orphan-restore');
+  first.respond({
+    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
+    state:'Recovery Required',site_id:41,site_key:'deleted.example',
+    recovery_id:token,journal_phase:'restored',changed:true,
+    read_only:false,runtime_verified:false,orphan_restored:false,
+    reason:'This invalid result must not claim retired'
+  });
+  assert.doesNotMatch(ui.state().scannerOrphanResult,/OFFLINE RECOVERY PENDING/);
+  assert.match(ui.state().scannerOrphanResult,/unconfirmed/i);
+});
+
+test('Fail2ban orphan UI never restores foreign or malformed journals',()=>{
+  const ui=loadUi();
+  const noRole=ui.statusClick('#ach-scan-orphan-list');
+  noRole.respond(scannerOrphanInventory([{
+    site_id:42,site_key:'previous.example',
+    recovery_id:'d'.repeat(32),journal_phase:'applied',
+    state:'Needs Review',recoverable:false
+  }]));
+  const count=ui.requests.length;
+  ui.statusClick('#ach-scan-orphan-restore');
+  assert.equal(ui.requests.length,count);
+  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
+  const bad=ui.statusClick('#ach-scan-orphan-list');
+  bad.respond(scannerOrphanInventory([{
+    site_id:43,site_key:'forged.example',recovery_id:'bad',
+    journal_phase:'prepared',state:'Recovery Required',recoverable:true
+  }]));
+  ui.statusClick('#ach-scan-orphan-restore');
+  assert.equal(ui.requests.length,count+1,'bad journal response cannot authorize Restore');
 });
 
 function sensitiveGuardResponse(state='Unmanaged', changes={}) {

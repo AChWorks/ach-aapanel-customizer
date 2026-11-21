@@ -581,6 +581,48 @@
         <label><input id="ach-guard-restore-reviewed" type="checkbox" disabled /> I reviewed the saved Recovery ID and approve retiring only this site's exact managed include, with shared Nginx reload.</label>
         <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Restore previous site Nginx protection</button></div>
       </div>
+      <div class="ach-note" aria-label="Fail2ban abusive scan protection">
+        <strong>Abusive-scan protection — Fail2ban (opt-in)</strong>
+        <p>Enable the site's <strong>sensitive-path Nginx guard</strong> first. This separate Fail2ban jail watches only this site's native combined access log for repeated malicious file and executable-upload probes returning 403/404. Requires installed/running system Fail2ban and nftables. It does not ban ordinary 404s, OAuth, ACME or .well-known. It never installs packages or enables itself.</p>
+        <p><strong>Firewall impact:</strong> A triggered source-IP ban applies to TCP/UDP web ports <code>80,443</code> for the <em>entire origin</em>, including other websites, not just this selected log. If traffic arrives through a CDN/proxy, verify original-client logging and ban effectiveness before enabling; blocking a shared proxy IP can affect legitimate users. A Ban never substitutes for the pre-PHP Nginx guard.</p>
+        <div class="ach-controls">
+          <label for="ach-scan-maxretry">Attempts</label>
+          <input id="ach-scan-maxretry" type="number" min="1" step="1" value="6" />
+          <label for="ach-scan-findtime">Within seconds</label>
+          <input id="ach-scan-findtime" type="number" min="1" step="1" value="120" />
+          <label for="ach-scan-bantime">Ban seconds</label>
+          <input id="ach-scan-bantime" type="number" min="1" step="1" value="600" />
+        </div>
+        <div class="ach-controls">
+          <button id="ach-scan-preview" type="button" disabled>Check Fail2ban readiness</button>
+          <button id="ach-scan-recheck" type="button" disabled>Recheck jail / recovery</button>
+          <button id="ach-scan-apply" type="button" class="btn btn-warning" disabled>Enable site scanner bans (origin firewall)</button>
+          <button id="ach-scan-restore" type="button" class="btn btn-danger" disabled>Disable and restore Fail2ban jail</button>
+        </div>
+        <p id="ach-scan-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Select a website and check Fail2ban readiness.</p>
+        <details class="ach-technical-report"><summary>Source, policy and recovery evidence</summary>
+          <p id="ach-scan-result" class="ach-status-metadata" role="status">No Fail2ban protection inspected yet.</p>
+        </details>
+        <div class="ach-note">
+          <strong>Recover scanner bans after deleting a website</strong>
+          <p>If aaPanel removed the original site while its scanner jail still exists,
+             find orphaned jails in the plugin recovery journal. This does not
+             require a selected website or enabled Monitor. If a deleted
+             site's missing log prevents Fail2ban from starting, Restore first
+             retires only its exact owned jail source offline; the Recovery ID
+             remains pending and existing bans are <strong>not verified removed</strong>.
+             Start Fail2ban, refresh the orphan list and use the same Recovery ID
+             again to verify jail and nftables action removal before it is
+             marked Restored. Foreign jails and actions are preserved.</p>
+          <div class="ach-controls">
+            <button id="ach-scan-orphan-list" type="button">Find orphaned scanner jails</button>
+            <label for="ach-scan-orphan-choice">Orphan journal</label>
+            <select id="ach-scan-orphan-choice" aria-label="Orphan scanner recovery journal" disabled></select>
+            <button id="ach-scan-orphan-restore" type="button" class="btn btn-warning" disabled>Restore selected orphan jail</button>
+          </div>
+          <p id="ach-scan-orphan-result" class="ach-status-metadata" role="status" aria-live="polite">Check for recovery journals after a website is removed.</p>
+        </div>
+      </div>
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
       <h4>FastCGI Cache</h4>
@@ -688,7 +730,7 @@
       </form>
       <div class="ach-note" aria-label="Saved shared PHP-FPM Monitor policy">
         <strong>Saved shared PHP-FPM policy</strong>
-        <p>Save five reviewed desired [www] values first, then choose whether to enable native WordPress post-install automatic repair below. Saving alone never changes the service. Automatic repair affects the entire shared PHP pool, only after a witnessed native WP Toolkit configuration change; unrelated PHP changes are not automatically overridden.</p>
+        <p>Save five reviewed desired [www] values first, then explicitly opt in. Saving alone never changes PHP. The existing timer repairs witnessed WP Toolkit changes and later PHP-FPM regeneration matching the installed aaPanel writer after rechecking site ownership. It reloads the shared PHP service; unknown/manual drift is reported as Needs Review and never silently overwritten. Previously enabled profiles stay WP-only until the operator disables and re-enables them.</p>
         <div class="ach-controls">
           <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>
           <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
@@ -703,7 +745,7 @@
         <div class="ach-scroll" aria-label="Saved-policy impacted site assignments"><table><thead><tr><th>Site ID</th><th>Native site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-fpm-policy-impact-rows"></tbody></table></div>
         <div class="ach-controls" aria-label="Automatic PHP-FPM repair">
           <button id="ach-fpm-auto-refresh" type="button" disabled>Inspect automatic repair</button>
-          <label><input type="checkbox" id="ach-fpm-auto-reviewed" disabled /> Enable repeated, verified native WP Toolkit post-terminal repair of this entire PHP shared pool</label>
+          <label><input type="checkbox" id="ach-fpm-auto-reviewed" disabled /> Enable verified WordPress and aaPanel PHP-FPM regeneration repair of this entire shared service</label>
           <button type="button" id="ach-fpm-auto-enable" disabled>Enable automatic repair</button>
           <button type="button" id="ach-fpm-auto-disable" disabled>Emergency disable automatic repair</button>
         </div>
@@ -893,7 +935,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.75'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.80'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1085,7 +1127,7 @@
       method === 'manage_nginx_protection' || method === 'wp_terminal_manage' || method === 'status_manage' || method === 'status_defaults' ||
       method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
-      method === 'fpm_policy_save' || method === 'fpm_auto_manage' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection';
+      method === 'fpm_policy_save' || method === 'fpm_auto_manage' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection' || method === 'manage_abusive_scan';
   }
   function validInventoryPage(r, expectedPage) {
     if (!r || typeof r !== 'object' || Array.isArray(r) ||
@@ -1198,6 +1240,7 @@
         if (messageTicket === requestMessageTicket && (!shouldReport || shouldReport())) {
           msg(t.error + ': ' + status +
             ((/^fpm_(apply|rollback)$/.test(method) || (method === 'manage_nginx_protection' && !['preview','recheck'].includes(data.guard_action) ||
+               method === 'manage_abusive_scan' && !['preview','recheck'].includes(data.scan_action) ||
                method === 'status_manage' && data.site_action !== 'recheck' ||
                method === 'status_defaults' && data.default_action !== 'recheck' ||
                method === 'status_unbound' && data.unbound_action !== 'recheck' ||
@@ -2570,6 +2613,7 @@
   });
   var guardBusy = false, guardTicket = 0, guardReady = null, guardRecovery = null;
   function guardReset() {
+    scanReset();
     ++guardTicket;
     guardBusy = false;
     guardReady = null;
@@ -2705,6 +2749,231 @@
   root.find('#ach-guard-apply').on('click',function () {guardRequest('apply');});
   root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
   root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').on('change',guardLock);
+  var scanBusy = false, scanTicket = 0, scanReady = null, scanRecovery = null;
+  function scanParameters() {
+    return {
+      maxretry: root.find('#ach-scan-maxretry').val(),
+      findtime: root.find('#ach-scan-findtime').val(),
+      bantime: root.find('#ach-scan-bantime').val()
+    };
+  }
+  function scanReset() {
+    ++scanTicket;
+    scanBusy = false;
+    scanReady = null;
+    scanRecovery = null;
+    root.find('#ach-scan-result').text('Site or policy changed; run a fresh Fail2ban check.');
+    inspectionSummary('scan', 'Choose a native site and check the current Fail2ban source.');
+    scanLock();
+  }
+  function scanLock() {
+    var id = hostsSiteId();
+    var blocked = scanBusy || !id || hostsBusy || siteBusy || websitePolicyState !== 'stable';
+    root.find('#ach-scan-preview,#ach-scan-recheck').prop('disabled',blocked);
+    var current = JSON.stringify(scanParameters());
+    root.find('#ach-scan-apply').prop('disabled',blocked || !scanReady ||
+      scanReady.siteId !== id || scanReady.params !== current);
+    root.find('#ach-scan-restore').prop('disabled',blocked || !scanRecovery ||
+      scanRecovery.siteId !== id);
+  }
+  function validScanReport(r,id,action) {
+    var site = hostsPageSites.get(id);
+    var hash = s => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
+    var token = s => typeof s === 'string' && /^[a-f0-9]{32}$/.test(s);
+    if (!site || !r || r.status !== true || r.schema !== 1 ||
+        r.mode !== 'native_site_abusive_scan_fail2ban' ||
+        r.ruleset !== 'sensitive-scan-combined-v1' ||
+        r.site_id !== Number(id) || r.site_key !== site.name ||
+        r.firewall_scope !== 'origin_wide_web_ports' ||
+        r.log_scope !== 'selected_native_site' ||
+        !['Unmanaged','Applied','Restored','Recovery Required','Needs Review','Dependency Missing'].includes(r.state) ||
+        typeof r.reason !== 'string' ||
+        typeof r.runtime_verified !== 'boolean' || typeof r.changed !== 'boolean' ||
+        typeof r.read_only !== 'boolean' ||
+        !(r.recovery_id === null || token(r.recovery_id)) ||
+        !(r.journal_phase === null || ['prepared','applied','restore_pending','restored'].includes(r.journal_phase)) ||
+        !(r.plan_sha256 === undefined || r.plan_sha256 === null || hash(r.plan_sha256)) ||
+        !(r.vhost_sha256 === undefined || r.vhost_sha256 === null || hash(r.vhost_sha256))) return false;
+    var write = action === 'apply' || action === 'restore';
+    if (r.read_only === write || r.changed !== write) return false;
+    if (write && (!r.runtime_verified || !token(r.recovery_id) ||
+                  r.state !== (action === 'apply' ? 'Applied' : 'Restored'))) return false;
+    if (r.state === 'Applied' && (!r.runtime_verified || !token(r.recovery_id) ||
+        r.journal_phase !== 'applied')) return false;
+    if (r.state === 'Unmanaged' && (r.runtime_verified ||
+        r.recovery_id !== null || r.journal_phase !== null)) return false;
+    if (r.state === 'Restored' && (!r.runtime_verified || !token(r.recovery_id) ||
+        r.journal_phase !== 'restored')) return false;
+    if (r.state === 'Recovery Required' && (!token(r.recovery_id) ||
+        !['prepared','applied','restore_pending'].includes(r.journal_phase) || r.runtime_verified)) return false;
+    return true;
+  }
+  function scanRequest(action) {
+    var id = hostsSiteId(), params = scanParameters();
+    if (!id || scanBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
+    var selected = action === 'apply' ? scanReady :
+                   action === 'restore' ? scanRecovery : null;
+    if ((action === 'apply' || action === 'restore') &&
+        (!selected || selected.siteId !== id ||
+         (action === 'apply' && selected.params !== JSON.stringify(params)))) return;
+    var ticket = ++scanTicket;
+    scanBusy = true;
+    scanLock();
+    inspectionSummary('scan','Checking selected native site and Fail2ban state...');
+    root.find('#ach-scan-result').text('Checking Fail2ban. After an uncertain write, Recheck the saved Recovery ID.');
+    var payload = Object.assign({scan_action:action},cacheNativeArgs(id),params);
+    if (action === 'apply') {
+      payload.approved = 'true';
+      payload.expected_plan_sha256 = selected.plan;
+    }
+    if (action === 'restore') {
+      payload.approved = 'true';
+      payload.recovery_id = selected.recovery;
+    }
+    request('manage_abusive_scan',payload,function(r,failure) {
+      if (ticket !== scanTicket) return;
+      scanBusy = false; scanReady = null; scanRecovery = null;
+      scanLock();
+      if (id !== hostsSiteId()) return;
+      if (!validScanReport(r,id,action)) {
+        inspectionSummary('scan','Fail2ban result unconfirmed. Recheck before retrying.','review');
+        root.find('#ach-scan-result').text(cacheBackendFailure(failure,'abusive_scan_manage') ||
+          'Unable to confirm selected site Fail2ban outcome; inspect Activity / Recovery ID.');
+        return;
+      }
+      if (action === 'preview' && ['Unmanaged','Restored'].includes(r.state) &&
+          /^[a-f0-9]{64}$/.test(r.plan_sha256 || '')) {
+        scanReady = {siteId:id,plan:r.plan_sha256,params:JSON.stringify(params)};
+      }
+      if (action === 'recheck' &&
+          ['Applied','Recovery Required','Needs Review'].includes(r.state) &&
+          /^[a-f0-9]{32}$/.test(r.recovery_id || '')) {
+        scanRecovery = {siteId:id,recovery:r.recovery_id};
+      }
+      scanLock();
+      inspectionSummary('scan',r.state + ': ' + r.reason,
+        ['Applied','Restored','Unmanaged'].includes(r.state) ? 'observed' : 'review');
+      root.find('#ach-scan-result').text(
+        'Native site: ' + r.site_key + ' (#' + r.site_id + ')' +
+        '\nState: ' + r.state + '\nNative access log: ' + (r.log_path || 'Unavailable') +
+        '\nVHost/source SHA: ' + (r.vhost_sha256 || 'Unverified') +
+        '\nPlan SHA: ' + (r.plan_sha256 || 'Unavailable') +
+        '\nRecovery ID: ' + (r.recovery_id || 'None') +
+        '\nJournal: ' + (r.journal_phase || 'None') +
+        '\nRunning jail verified: ' + (r.state === 'Applied' && r.runtime_verified ? 'Yes' : 'No') +
+        '\nBan scope: entire origin TCP/UDP 80,443, triggered by this site log' +
+        '\n' + r.reason);
+    });
+  }
+  root.find('#ach-scan-preview').on('click',function () {scanRequest('preview');});
+  root.find('#ach-scan-recheck').on('click',function () {scanRequest('recheck');});
+  root.find('#ach-scan-apply').on('click',function () {scanRequest('apply');});
+  root.find('#ach-scan-restore').on('click',function () {scanRequest('restore');});
+  root.find('#ach-scan-maxretry,#ach-scan-findtime,#ach-scan-bantime')
+    .on('input change',function () {scanReady = null; scanLock();});
+  var orphanTicket = 0, orphanBusy = false, orphanEntries = new Map();
+  function orphanLock() {
+    var choice = root.find('#ach-scan-orphan-choice').val();
+    var entry = orphanEntries.get(String(choice || ''));
+    root.find('#ach-scan-orphan-list').prop('disabled',orphanBusy);
+    root.find('#ach-scan-orphan-choice').prop('disabled',orphanBusy || !orphanEntries.size);
+    root.find('#ach-scan-orphan-restore').prop('disabled',
+      orphanBusy || !entry || entry.recoverable !== true);
+  }
+  function validOrphanInventory(r) {
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.mode !== 'native_site_abusive_scan_fail2ban' ||
+        r.ruleset !== 'sensitive-scan-combined-v1' ||
+        r.state !== 'Orphan Inventory' || r.changed !== false ||
+        r.read_only !== true || r.runtime_verified !== false ||
+        r.firewall_scope !== 'origin_wide_web_ports' ||
+        r.log_scope !== 'selected_native_site' || !Array.isArray(r.orphans)) return false;
+    var seen = new Set();
+    return r.orphans.every(v => {
+      if (!v || !Number.isSafeInteger(v.site_id) || v.site_id <= 0 ||
+          typeof v.site_key !== 'string' || !v.site_key.length ||
+          !/^[a-f0-9]{32}$/.test(v.recovery_id || '') ||
+          !['prepared','applied','restore_pending'].includes(v.journal_phase) ||
+          !['Recovery Required','Needs Review'].includes(v.state) ||
+          typeof v.recoverable !== 'boolean' || seen.has(v.site_id)) return false;
+      seen.add(v.site_id);
+      return true;
+    });
+  }
+  function orphanRequest(action) {
+    if (orphanBusy) return;
+    var selected = root.find('#ach-scan-orphan-choice').val();
+    var owned = orphanEntries.get(String(selected || ''));
+    if (action === 'orphan_restore' && (!owned || !owned.recoverable)) return;
+    var ticket = ++orphanTicket;
+    orphanBusy = true;
+    orphanLock();
+    var payload = {scan_action:action};
+    if (action === 'orphan_restore') {
+      payload.orphan_site_id = String(owned.site_id);
+      payload.recovery_id = owned.recovery_id;
+      payload.approved = 'true';
+    }
+    root.find('#ach-scan-orphan-result').text('Checking journal and live Fail2ban ownership...');
+    request('manage_abusive_scan',payload,function(r,failure) {
+      if (ticket !== orphanTicket) return;
+      orphanBusy = false;
+      orphanEntries.clear();
+      root.find('#ach-scan-orphan-choice').empty().val('');
+      if (action === 'orphan_list' && validOrphanInventory(r)) {
+        var first = '';
+        r.orphans.forEach(v => {
+          orphanEntries.set(String(v.site_id),v);
+          var option = $('<option>').val(String(v.site_id));
+          option.text(v.site_key + ' (#' + v.site_id + ') — ' +
+            v.state + ' / ' + v.journal_phase);
+          root.find('#ach-scan-orphan-choice').append(option);
+          if (!first && v.recoverable) first = String(v.site_id);
+        });
+        if (first) root.find('#ach-scan-orphan-choice').val(first);
+        root.find('#ach-scan-orphan-result').text(
+          r.orphans.length ? r.orphans.map(v =>
+            v.site_key + ' (#' + v.site_id + '): ' + v.state +
+            '; Recovery ID ' + v.recovery_id +
+            (v.recoverable ? ' — exact owned source recoverable; firewall verification required' : ' — changed/foreign jail, do not remove')
+          ).join('\n') : 'No orphaned scanner recovery journals found.');
+      } else if (action === 'orphan_restore' && r && r.status === true &&
+                 r.schema === 1 && r.mode === 'native_site_abusive_scan_fail2ban' &&
+                 r.state === 'Restored' && r.orphan_restored === true &&
+                 r.site_id === owned.site_id &&
+                 r.recovery_id === owned.recovery_id &&
+                 r.journal_phase === 'restored' &&
+                 r.changed === true && r.read_only === false &&
+                 r.runtime_verified === true) {
+        root.find('#ach-scan-orphan-result').text(
+          'Verified orphan Restore: ' + r.site_key + ' (#' + r.site_id +
+          '). Owned jail and its nftables actions no longer observed; Recovery ID ' +
+          r.recovery_id + '. Refresh orphan inventory for any remaining journals.');
+      } else if (action === 'orphan_restore' && r && r.status === true &&
+                 r.schema === 1 && r.mode === 'native_site_abusive_scan_fail2ban' &&
+                 r.state === 'Recovery Required' && r.orphan_restored === false &&
+                 r.site_id === owned.site_id && r.recovery_id === owned.recovery_id &&
+                 ['prepared','applied','restore_pending'].includes(r.journal_phase) &&
+                 typeof r.changed === 'boolean' && r.read_only === false &&
+                 r.runtime_verified === false && typeof r.reason === 'string') {
+        root.find('#ach-scan-orphan-result').text(
+          'OFFLINE RECOVERY PENDING — ' + r.site_key + ' (#' + r.site_id +
+          '). Exact owned jail source retired or already absent. Recovery ID: ' +
+          r.recovery_id + '. Firewall bans have NOT been verified removed. ' +
+          'Start/reconnect Fail2ban, find orphaned jails again and retry Restore ' +
+          'with the same Recovery ID to complete runtime verification. ' + r.reason);
+      } else {
+        root.find('#ach-scan-orphan-result').text(
+          cacheBackendFailure(failure,'abusive_scan_manage') ||
+          'Orphan scanner operation unconfirmed. Recheck journal and Activity before retry.');
+      }
+      orphanLock();
+    });
+  }
+  root.find('#ach-scan-orphan-list').on('click',function(){orphanRequest('orphan_list');});
+  root.find('#ach-scan-orphan-restore').on('click',function(){orphanRequest('orphan_restore');});
+  root.find('#ach-scan-orphan-choice').on('change',orphanLock);
+  orphanLock();
   function validNginxHelperAudit(h) {
     if (!h || h.schema !== 1 ||
         h.active_verified !== false || h.purge_method_verified !== false ||

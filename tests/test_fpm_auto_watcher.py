@@ -124,6 +124,66 @@ class FpmWatcherTests(unittest.TestCase):
         self.assertEqual(marker.read_text(),"do not remove")
         self.assertEqual(list(self.root.glob(service.UNIT+".*")),[])
 
+    def test_first_enable_persists_policy_before_systemd_can_wake_worker(self):
+        order = []
+        state = {"enabled": False}
+        def commit(*args, **kwargs):
+            order.append("policy_committed")
+            state["enabled"] = True
+            return {"enabled": True, "state_revision": 1}
+        def systemd(*argv):
+            order.append(argv[0])
+            if argv[0] == "enable":
+                self.assertTrue(state["enabled"],
+                    "systemd event worker must never see disabled first profile")
+        with patch.object(service.native, "_native_supported"), patch.object(
+                service, "_ensure_units"), patch.object(
+                service, "_run", side_effect=systemd), patch.object(
+                auto, "inspect", return_value={"enabled": False}), patch.object(
+                auto, "any_enabled", return_value=False), patch.object(
+                auto, "set_enabled", side_effect=commit):
+            result = service.enable(
+                "85", data_dir=str(self.root), expected_auto_revision=0,
+                expected_policy_revision=1, expected_monitor_revision=0,
+                expected_impact="a"*64, reviewed=True)
+        self.assertTrue(result["enabled"])
+        self.assertEqual(order[:3], ["daemon-reload", "policy_committed", "enable"])
+        self.assertEqual(order[3:], ["is-active", "is-active"])
+
+    def test_failed_systemd_activation_compensates_only_new_auto_intent(self):
+        order = []
+        state = {"enabled": False}
+        def commit(*args, **kwargs):
+            state["enabled"] = True
+            return {"enabled": True, "state_revision": 2}
+        def revoke(*args, **kwargs):
+            self.assertTrue(state["enabled"])
+            self.assertEqual(kwargs["expected_auto_revision"], 2)
+            state["enabled"] = False
+            order.append("revoke")
+            return {"enabled": False, "pending_disable": False}
+        def systemd(*argv):
+            if argv[0] == "enable":
+                order.append("systemd_failed")
+                raise service.FpmWatcherError("intentional systemd activation failure")
+        with patch.object(service.native, "_native_supported"), patch.object(
+                service, "_ensure_units"), patch.object(
+                service, "_run", side_effect=systemd), patch.object(
+                service, "_stop", side_effect=lambda:order.append("stop")) as stop, patch.object(
+                auto, "inspect", return_value={"enabled": False}), patch.object(
+                auto, "any_enabled", side_effect=lambda **kw:state["enabled"]), patch.object(
+                auto, "any_pending_disable", return_value=False), patch.object(
+                auto, "set_enabled", side_effect=commit), patch.object(
+                auto, "request_disable", side_effect=revoke):
+            with self.assertRaisesRegex(service.FpmWatcherError, "activation failure"):
+                service.enable(
+                    "85", data_dir=str(self.root), expected_auto_revision=0,
+                    expected_policy_revision=1, expected_monitor_revision=0,
+                    expected_impact="a"*64, reviewed=True)
+        self.assertFalse(state["enabled"])
+        self.assertEqual(order, ["systemd_failed", "revoke", "stop"])
+        stop.assert_called_once()
+
 
 if __name__=="__main__":
     unittest.main()

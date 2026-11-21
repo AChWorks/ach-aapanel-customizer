@@ -29,7 +29,7 @@ NATIVE_FPM_SETTER = "/www/server/panel/class/config.py"
 NATIVE_FPM_SETTER_SHA256 = "22f61688e0a41b6599f09d3addcea1b2dea9ce12f87ac9770a897aea32a6657d"
 AUTO_FILE = "ach_customizer.fpm-auto.json"
 MAX_AUTO_BYTES = 8192
-MAX_AUTO_PROFILES = 2  # Current verified PHP 8.1/8.5 native mutation adapters.
+MAX_AUTO_PROFILES = len(recovery.SUPPORTED_VERSIONS)
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 DIGEST = re.compile(r"[a-f0-9]{64}\Z")
@@ -89,8 +89,25 @@ def _validate(value):
     for version, profile in value["profiles"].items():
         if (version not in recovery.SUPPORTED_VERSIONS
                 or not isinstance(profile, dict)
-                or set(profile) != {"enabled", "policy_sha256", "enabled_ns",
-                                    "last_token", "last_state", "last_operation", "active"}
+                # Existing pre-lifecycle profiles retain WP-only behavior
+                # until an operator expressly disables and re-enables them.
+                or not {"enabled", "policy_sha256", "enabled_ns",
+                        "last_token", "last_state", "last_operation", "active"} <= set(profile)
+                or set(profile) - {"enabled", "policy_sha256", "enabled_ns",
+                                    "last_token", "last_state", "last_operation",
+                                    "active", "lifecycle"}
+                or ("lifecycle" in profile and (
+                    not isinstance(profile["lifecycle"], dict)
+                    or set(profile["lifecycle"]) != {"baseline_sha256",
+                                                      "baseline_max_requests",
+                                                      "memory_mib"}
+                    or not isinstance(profile["lifecycle"]["baseline_sha256"], str)
+                    or not DIGEST.fullmatch(profile["lifecycle"]["baseline_sha256"])
+                    or type(profile["lifecycle"]["memory_mib"]) is not int
+                    or profile["lifecycle"]["memory_mib"] < 1
+                    or (profile["lifecycle"]["baseline_max_requests"] is not None
+                        and (type(profile["lifecycle"]["baseline_max_requests"]) is not int
+                             or profile["lifecycle"]["baseline_max_requests"] < 0))))
                 or type(profile["enabled"]) is not bool
                 or not isinstance(profile["policy_sha256"], str)
                 or not DIGEST.fullmatch(profile["policy_sha256"])
@@ -352,7 +369,9 @@ def inspect(version, *, data_dir=DATA_DIR):
                 "last_state": ("Pending Disable" if pending else
                                profile["last_state"] if profile else "Disabled"),
                 "last_operation": profile["last_operation"] if profile else None,
-                "watch_scope": "verified_native_wp_terminal",
+                "watch_scope": ("verified_native_wp_terminal_and_fpm_lifecycle"
+                                if profile and profile.get("lifecycle")
+                                else "verified_native_wp_terminal"),
                 "auto_hosts": False}
     finally:
         os.close(fd)
@@ -441,6 +460,9 @@ def set_enabled(version, enabled, *, data_dir=DATA_DIR,
                     raise FpmAutoError(
                         "Reviewed PHP shared-site mapping or Monitor changed; recheck before enabling")
                 fingerprint = _digest(version, desired)
+                lifecycle = _lifecycle_baseline(controller.config_root, version)
+                if lifecycle["baseline_sha256"] != prepared["plan"]["before_sha256"]:
+                    raise FpmAutoError("Native PHP-FPM changed during automatic repair opt-in")
                 if previous and previous["enabled"]:
                     if previous["policy_sha256"] != fingerprint:
                         raise FpmAutoError(
@@ -449,7 +471,7 @@ def set_enabled(version, enabled, *, data_dir=DATA_DIR,
                 profile = {"enabled": True, "policy_sha256": fingerprint,
                            "enabled_ns": time.time_ns(), "last_token": None,
                            "last_state": "Armed", "last_operation": None,
-                           "active": None}
+                           "active": None, "lifecycle": lifecycle}
             else:
                 if not previous or not previous["enabled"]:
                     return inspect(version, data_dir=data_dir)
@@ -468,7 +490,9 @@ def set_enabled(version, enabled, *, data_dir=DATA_DIR,
                     "state_revision": updated["revision"],
                     "last_state": profile["last_state"],
                     "saved_policy_sha256": profile["policy_sha256"],
-                    "watch_scope": "verified_native_wp_terminal",
+                    "watch_scope": ("verified_native_wp_terminal_and_fpm_lifecycle"
+                                    if enabled and profile.get("lifecycle")
+                                    else "verified_native_wp_terminal"),
                     "scope": "shared_service", "auto_hosts": False}
         finally:
             os.close(lock)
@@ -504,6 +528,19 @@ def _file_sha(config_root, version):
         return recovery._sha(data)
     finally:
         os.close(fd)
+
+
+def _lifecycle_baseline(config_root, version):
+    """Record canonical single-pool bytes at operator opt-in, not before."""
+    fd = recovery._dir(Path(config_root) / version / "etc")
+    try:
+        source, _ = recovery._read(fd, "php-fpm.conf")
+    finally:
+        os.close(fd)
+    values = _parsed_pool(source)
+    return {"baseline_sha256": recovery._sha(source),
+            "baseline_max_requests": values.get("pm.max_requests"),
+            "memory_mib": _native_memory_mib()}
 
 
 def _native_opt_marker(config_root, version):
@@ -681,6 +718,221 @@ def _terminal_site_owned(controller, impact, progress, domain):
     return remaining_domains == 0 and remaining_bindings == 0
 
 
+def _native_operation_active():
+    """A native install/batch lock forbids independent shared FPM mutation.
+
+    Both locks are checked independently of progress-log availability: the
+    native writer may acquire either lock before publishing its first log.
+    """
+    return os.path.lexists(native.LOCK) or os.path.lexists(native.BATCH_LOCK)
+
+
+def _lifecycle_token(version, profile, lifecycle, observed_sha):
+    # Repeated native regenerations can have identical source/destination
+    # bytes. Bind each event to its explicit opt-in epoch and previous
+    # acknowledged token, not merely the two file SHA values. Both fields
+    # remain unchanged until an operation has been durably acknowledged;
+    # this also permits safe reconciliation after a post-commit crash.
+    return hashlib.sha256(json.dumps({
+        "kind": "native_php_fpm_lifecycle", "version": version,
+        "old": lifecycle["baseline_sha256"], "new": observed_sha,
+        "policy": profile["policy_sha256"],
+        "armed_ns": profile["enabled_ns"], "previous_ack": profile["last_token"],
+    }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _run_native_lifecycle(*, data_dir=DATA_DIR, controller_factory=None,
+                          observed_wp_terminal_ns=None):
+    """Reconcile post-opt-in changes matching the exact installed native FPM writer.
+
+    The existing 30-second timer provides polling. A changed source alone
+    cannot authorize a write: native writer numeric output, retained request
+    count, operator intent, site ownership and the exact CAS are mandatory.
+    Nonvendor drift is reported, never forced into the saved desired state.
+    """
+    outcomes = []
+    for version in recovery.SUPPORTED_VERSIONS:
+        fd = _open_state_dir(data_dir)
+        try:
+            lock = _exclusive_lock(fd)
+            try:
+                if _read_revoke(fd, version) is not None:
+                    _consume_revoke_locked(fd, version)
+                    continue
+                if _native_operation_active():
+                    # Leave source/policy untouched for the next timer cycle.
+                    continue
+                store = _read(fd)
+                profile = store["profiles"].get(version)
+                if not profile or not profile["enabled"] or "lifecycle" not in profile:
+                    continue
+                lifecycle = profile["lifecycle"]
+                factory = controller_factory or (lambda: ManualFpmWorkflow(data_dir=data_dir))
+                controller = factory()
+                try:
+                    source = _file_sha(controller.config_root, version)
+                except OSError as exc:
+                    # A removed PHP version cannot block another enabled
+                    # version's revocation or mutate an unrelated service.
+                    outcomes.append({"version": version, "state": "Needs Review",
+                                     "reason": "Native PHP source unavailable: " +
+                                               type(exc).__name__, "operation_id": None})
+                    continue
+                # After a worker dies following a successful host/journal
+                # fsync but before profile acknowledgement, the current file
+                # is already desired and no longer looks vendor-generated.
+                # Reconstruct the event ONLY from the exact committed schema-2
+                # journal and previously saved lifecycle baseline; do not
+                # attempt a second reload or overwrite the successful state.
+                journal = recovery._read_journal(fd, version)
+                if (journal is not None and journal["phase"] == "applied"
+                        and journal.get("schema") == 2
+                        and journal.get("owner") == "auto"
+                        and journal.get("policy_sha256") == profile["policy_sha256"]
+                        and journal["after_sha256"] == source
+                        and profile["last_token"] != journal.get("event_token")
+                        and journal.get("event_token") == _lifecycle_token(
+                            version, profile, lifecycle, journal["before_sha256"])):
+                    desired = desired_policy._load(fd)["profiles"].get(version)
+                    if desired is None or _digest(version, desired) != profile["policy_sha256"]:
+                        raise FpmAutoError("Saved PHP policy changed before lifecycle acknowledgement")
+                    prepared = controller._prepare(_args(version, desired))
+                    result = _completed_native_repair(
+                        fd, version, profile,
+                        {"token": journal["event_token"]}, controller.config_root,
+                        prepared["plan"])
+                    if result is None:
+                        raise recovery.FpmApplyError(
+                            "recovery", "Committed native lifecycle repair was not reconcilable")
+                    after = _lifecycle_baseline(controller.config_root, version)
+                    updated = {**profile, "lifecycle": after,
+                               "last_token": journal["event_token"],
+                               "last_state": result["state"],
+                               "last_operation": result["operation_id"]}
+                    _save(fd, {**store, "revision": store["revision"]+1,
+                               "profiles": {**store["profiles"], version: updated}})
+                    outcomes.append({"version": version, "state": result["state"],
+                                     "operation_id": result["operation_id"],
+                                     "reconciled": True})
+                    continue
+                if source == lifecycle["baseline_sha256"]:
+                    continue
+                if observed_wp_terminal_ns is not None:
+                    # A recently completed WP task may have generated these
+                    # bytes itself, even if its witness was never armed.
+                    # Never borrow that WP task's write as independent FPM
+                    # lifecycle authority. Only source writes strictly AFTER
+                    # the terminal timestamp may qualify this cycle.
+                    conf_fd = recovery._dir(Path(controller.config_root) /
+                                            version / "etc")
+                    try:
+                        check_bytes, check_stat = recovery._read(
+                            conf_fd, "php-fpm.conf")
+                    finally:
+                        os.close(conf_fd)
+                    if recovery._sha(check_bytes) != source:
+                        continue
+                    if check_stat.st_mtime_ns <= observed_wp_terminal_ns:
+                        continue
+                try:
+                    if _native_vendor_values(controller.config_root, version, lifecycle) != source:
+                        raise FpmAutoError("Unrecognized native PHP-FPM output")
+                except (FpmAutoError, recovery.FpmApplyError) as exc:
+                    reason = "Needs Review: nonvendor PHP-FPM drift"
+                    if profile["last_state"] != reason:
+                        changed = {**profile, "last_state": reason}
+                        _save(fd, {**store, "revision": store["revision"]+1,
+                                   "profiles": {**store["profiles"], version: changed}})
+                    outcomes.append({"version": version, "state": "Needs Review",
+                                     "reason": str(exc)[:180], "operation_id": None})
+                    continue
+                monitor = _read_at(fd)
+                if not monitor["enabled"] or not monitor["modules"]["php_fpm_file_preview"]:
+                    raise FpmAutoError("PHP-FPM Monitor disabled; lifecycle repair refused")
+                desired = desired_policy._load(fd)["profiles"].get(version)
+                if desired is None or _digest(version, desired) != profile["policy_sha256"]:
+                    raise FpmAutoError("Saved PHP-FPM policy changed; disable/re-enable repair")
+                args = _args(version, desired)
+                prepared = controller._prepare(args)
+                plan = prepared["plan"]
+                impact = prepared["shared_impact"]
+                if (plan["before_sha256"] != source
+                        or impact.get("state") != "File Mapping"
+                        or impact.get("unresolved_sites") != []
+                        or not impact.get("manual_apply_eligible")
+                        or not impact.get("matched_sites")):
+                    raise recovery.FpmApplyError(
+                        "fpm_impact", "Native shared PHP-FPM site attribution incomplete")
+                token = _lifecycle_token(version, profile, lifecycle, source)
+                recovered = _completed_native_repair(
+                    fd, version, profile, {"token": token}, controller.config_root, plan)
+                if recovered is not None:
+                    result = recovered
+                elif not plan["changes"]:
+                    result = {"state": "No Change", "operation_id": None}
+                else:
+                    latest = controller._prepare(args)
+                    if (latest["plan"] != plan or
+                            latest["impact_sha256"] != prepared["impact_sha256"] or
+                            _native_vendor_values(
+                                controller.config_root, version, lifecycle) != source):
+                        raise recovery.FpmApplyError(
+                            "fpm_conflict", "Native PHP source/site changed before repair")
+                    validate, activate, verify = controller.hooks_factory(
+                        version, plan["desired"])
+                    restored = dict(plan["desired"])
+                    for change in plan["changes"]:
+                        restored[change["setting"]] = change["actual"]
+                    _, _, verify_restored = controller.hooks_factory(version, restored)
+
+                    def source_check():
+                        try:
+                            if (_read_revoke(fd, version) is not None
+                                    or _native_operation_active()):
+                                return None
+                            if _native_vendor_values(
+                                    controller.config_root, version, lifecycle) != source:
+                                return None
+                            latest = controller._prepare(args)
+                            if (latest["plan"] != plan or
+                                    latest["impact_sha256"] != prepared["impact_sha256"]):
+                                return None
+                            return source
+                        except (FpmAutoError, recovery.FpmApplyError):
+                            return None
+
+                    if _read_revoke(fd, version) is not None:
+                        raise FpmAutoError("Automatic PHP-FPM repair emergency-revoked")
+                    if _native_operation_active():
+                        raise FpmAutoError("Native WordPress operation active; defer FPM lifecycle")
+                    result = recovery.apply(
+                        controller.config_root, controller.data_dir, version, desired,
+                        expected_before=plan["before_sha256"],
+                        expected_after=plan["after_sha256"], validate=validate,
+                        activate=activate, verify=verify, verify_restored=verify_restored,
+                        auto_policy_sha256=profile["policy_sha256"],
+                        auto_event_token=token, auto_source_verify=source_check)
+                after = _lifecycle_baseline(controller.config_root, version)
+                if after["baseline_sha256"] != plan["after_sha256"]:
+                    raise recovery.FpmApplyError(
+                        "verification", "Automatic FPM regeneration repair did not persist")
+                updated = {**profile, "lifecycle": after,
+                           "last_token": token, "last_state": result["state"],
+                           "last_operation": result["operation_id"]}
+                _save(fd, {**store, "revision": store["revision"]+1,
+                           "profiles": {**store["profiles"], version: updated}})
+                outcomes.append({"version": version, "state": result["state"],
+                                 "operation_id": result["operation_id"],
+                                 "reconciled": result.get("reconciled", False)})
+            finally:
+                os.close(lock)
+        finally:
+            os.close(fd)
+    return {"state": "Processed lifecycle" if outcomes else "No changed native FPM source",
+            "changed": any(x["state"] == "Applied" and not x.get("reconciled", False)
+                           for x in outcomes), "services": outcomes}
+
+
 def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
     """Repair only configuration drift attributable to a witnessed native task.
 
@@ -713,8 +965,9 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
     reader = terminal_reader or _native_progress
     progress = reader()
     if progress is None:
-        return {"state": "No verified native progress", "changed": False,
-                "revocation_completed": revoked}
+        result = _run_native_lifecycle(
+            data_dir=data_dir, controller_factory=controller_factory)
+        return {**result, "revocation_completed": revoked}
     outcomes = []
     for version in recovery.SUPPORTED_VERSIONS:
         fd = _open_state_dir(data_dir)
@@ -900,6 +1153,9 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                            "last_state": result["state"],
                            "last_operation": result["operation_id"],
                            "active": None}
+                if result["state"] == "Applied" and "lifecycle" in profile:
+                    updated["lifecycle"] = _lifecycle_baseline(
+                        controller.config_root, version)
                 _save(fd, {**store, "revision": store["revision"] + 1,
                            "profiles": {**store["profiles"], version: updated}})
                 outcomes.append({"version": version, "state": result["state"],
@@ -938,6 +1194,16 @@ def run(*, data_dir=DATA_DIR, controller_factory=None, terminal_reader=None):
                     os.close(lock)
         finally:
             os.close(fd)
+    # A retained, already-completed WP progress record is not evidence of
+    # continuing native activity. Reconcile an independent FPM regeneration
+    # in this same timer cycle; never defer it for the 15-minute log TTL.
+    # For an incomplete progress record, do not infer the writer is finished
+    # merely because its lock is briefly absent.
+    if progress["status"] == 1:
+        lifecycle = _run_native_lifecycle(
+            data_dir=data_dir, controller_factory=controller_factory,
+            observed_wp_terminal_ns=progress["mtime_ns"])
+        outcomes.extend(lifecycle["services"])
     return {"state": "Processed" if outcomes else "No new owned event",
             "changed": any(r["state"] == "Applied" and not r.get("reconciled", False)
                            for r in outcomes),
@@ -993,7 +1259,15 @@ def main(argv=None):
         print(json.dumps(result, sort_keys=True))
         return 0
     except Exception as exc:
-        print("ACh automatic FPM repair refused: " + type(exc).__name__, file=sys.stderr)
+        # Preserve the actionable journal/ownership/validation reason in the
+        # authorized systemd diagnostic channel. A type-only message hid a
+        # real repeated-regeneration failure on the retained native QA VM.
+        # JSON escaping keeps each failure a single bounded journal record.
+        print("ACh automatic FPM repair refused: " + json.dumps({
+            "type": type(exc).__name__,
+            "stage": str(getattr(exc, "stage", "worker"))[:48],
+            "reason": (str(exc) or type(exc).__name__)[:300],
+        }, sort_keys=True, ensure_ascii=True), file=sys.stderr)
         return 1
     finally:
         try:

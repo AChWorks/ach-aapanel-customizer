@@ -56,6 +56,7 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_cache_helper.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_bridge.py', names)
                 self.assertIn('ach_customizer/ach_customizer_nginx_security.py', names)
+                self.assertIn('ach_customizer/ach_customizer_abusive_scan.py', names)
                 self.assertIn('ach_customizer/ach_customizer_site_changes.py', names)
                 self.assertIn('ach_customizer/ach_customizer_site_reconcile.py', names)
                 self.assertIn('ach_customizer/ach_customizer_activity.py', names)
