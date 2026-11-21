@@ -17,23 +17,32 @@ Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customize
 source manifests, current PR/CI and the target installation before relying on
 this dated checkpoint. **Merge, publication and deployment are separate steps.**
 
-## One-time WordPress Cache connection — development candidate
+## One-time WordPress Cache connection — merged source, corrective QA candidate
 
-An **unmerged native 0.1.70 candidate** adds **Connect WordPress Cache (once)**
-for a selected native WordPress website once the official Nginx Helper and
-ACh aaPanel Bridge plugins are installed there. The single administrator
-click configures and activates them, applies that site's isolated Nginx
-Cache, adjusts PHP/WordPress paths and provisions the generation-aware
-mapping. The actual **Nginx Helper Purge Current Page** and **Purge All**
-remain the user controls: this does not build a second purge plugin or
-require a recurring watcher. **Disconnect and restore** recovers the
-site-specific setup. No routine manual file edits are required after setup.
+The one-click **Connect WordPress Cache (once)** workflow merged into
+`main` in [PR #113](https://github.com/AChWorks/ach-aapanel-customizer/pull/113).
+[PR #114](https://github.com/AChWorks/ach-aapanel-customizer/pull/114) is
+the **unmerged native 0.1.72 corrective candidate** for fresh aaPanel
+WordPress installations. Once the official Nginx Helper and ACh aaPanel
+Bridge files are installed on a selected native WordPress site, one
+administrator click activates/configures them, applies its isolated Cache,
+sets PHP/WordPress access and provisions the generation-aware mapping.
+The official **Purge Current Page** and **Purge All** remain the user
+controls; no replacement purge plugin or recurring watcher is added.
+**Disconnect and restore** recovers the managed setup without routine
+manual file edits.
 
-See the [native integration guide](docs/aapanel-integration.md) and
-[Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
-for exact non-production evidence and still-unverified deployment cases.
-This unmerged candidate is neither a published package nor a Production
-deployment.
+Real installed-native, authenticated **HTTP/browser acceptance** of the
+[earlier 0.1.72 candidate](https://github.com/AChWorks/ach-aapanel-customizer/commit/eb875fd2932e4ae75c3d0c045f968d51836be24f)
+included both vendor purge actions, WordPress Page/Post
+changes, site/peer Cache isolation, VM restart and Disconnect/Reconnect.
+See the [Issue #21 acceptance record](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7055966635)
+and [integration guide](docs/aapanel-integration.md); HTTPS and actual
+WooCommerce customer/session flows remain **untested**. PR #114 is not
+merged; subsequent review corrections require their own exact-HEAD tests and
+were not yet reinstalled for native QA. This QA does **not** authorize
+public Release or Production.
+The broader open functional work remains in [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2).
 
 ## Capabilities in the merged development source
 

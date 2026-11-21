@@ -497,10 +497,14 @@ def _bound_domains_for_sites(panel_public, sites, *, strict_native=False):
             if total_name_bytes > MAX_DOMAIN_TEXT_BYTES_PER_PAGE:
                 raise RuntimeError("Bound-domain response page exceeds the byte budget")
             identity = (pid, domain, port)
-            if identity in seen or row_id in seen_ids:
-                raise RuntimeError("aaPanel domain query returned a duplicate binding")
-            seen.add(identity)
+            if row_id in seen_ids:
+                raise RuntimeError("aaPanel domain query returned a duplicate row ID")
             seen_ids.add(row_id)
+            if identity in seen and strict_native:
+                raise RuntimeError("aaPanel domain query returned a duplicate binding")
+            # Read-only inventory retains each native row, including redundant
+            # domain/port bindings; strict lifecycle baselines refuse them.
+            seen.add(identity)
             bindings[pid].append({"name": domain, "port": port})
             if strict_native:
                 native_ids[pid].append(row_id)

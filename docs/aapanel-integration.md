@@ -907,7 +907,7 @@ certificate and operator exposure design; an HTTP/80 404 implementation cannot
 simply intercept TLS handshakes. Keep [Issue #10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
 open until that decision and subsequent scoped acceptance.
 
-## WordPress one-time Nginx Helper connection (unmerged native 0.1.70)
+## WordPress one-time Nginx Helper connection (merged PR #113; unmerged 0.1.72 correction)
 
 After installing the official **Nginx Helper** and separate **ACh aaPanel
 Bridge** WordPress plugin files, the selected site's native Customizer
@@ -945,17 +945,27 @@ setup. It is **not** the active site Cache configuration. If the selected
 site had an Applied native Cache **before Connect**, Disconnect retains
 that original Cache; only the WordPress integration is removed.
 
-**Bounded non-production QA:** Nginx Helper 2.4.1 and Bridge 0.1.8 were
-installed but inactive on real aaPanel 8.0.7 / WP 7.1.5. One native
-connection activated/configured both; vendor per-page purge invalidated
-only that page, vendor Purge All deleted four site-owned files while two
-SHA-pinned shared-vendor files stayed untouched, repeat Connect preserved
-file hashes, and Disconnect restored original WP/Nginx bytes. In a separate
-post-save test, the homepage invalidated but a cached noncanonical
-/sample-page/ alias remained HIT because WordPress's canonical permalink
-was /index.php/sample-page/. This is not proof of invalidation for alternate
-URL aliases, a protected Browser-button click, or HTTPS. More evidence is
-tracked in Issue #21.
+**Current status:** The one-click workflow entered `main` through
+[PR #113](https://github.com/AChWorks/ach-aapanel-customizer/pull/113).
+The corrective native **0.1.72** source is an **unmerged PR #114** candidate;
+it is not a published Release or a Production deployment.
+
+**Installed-native QA (earlier PR #114 0.1.72 HEAD `eb875fd2932e`):** On isolated aaPanel 8.0.7 /
+WordPress 7.1.5 with official Nginx Helper 2.4.1 and ACh Bridge 0.1.8,
+authenticated browser actions exercised native Connect, the vendor's
+**Purge Current Page** and confirmed **Purge Entire Cache**, real Gutenberg
+Page/Post publish/edit, canonical HTTP MISS/HIT transitions and private
+draft/authenticated bypass. Site-specific Purge All left another site's
+Cache and the shared vendor Cache byte-identical. Repeat Connect, QA VM
+Stop/Start, native Disconnect/Reconnect and exact source restoration were
+also verified. This supersedes earlier source-only/noncanonical-alias QA
+limitations **for the recorded canonical HTTP routes**, not other aliases.
+See the [exact source and acceptance matrix](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7055966635)
+and [QA cleanup caveat](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7055999902).
+**HTTPS and real WooCommerce customer/cart/checkout/session flows were not
+tested** on that HTTP-only, non-WooCommerce site. Later review-remediation
+source changes have separate automated evidence, **not a fresh installed-native
+E2E run**. Public Release and Production require separate Owner authorization.
 
 ## FastCGI Cache: privacy, ownership and recovery
 

@@ -212,11 +212,36 @@ class WebsiteDiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'domain encoding'):
             monitor.get_site_page(Panel(site, bad_unicode))
 
+    def test_readonly_preserves_redundant_native_bindings_but_strict_rejects(self):
+        site = [{'id': 3, 'name': 'site.test', 'path': '/srv/site', 'status': 1}]
+        rows = [{'id': i, 'pid': 3, 'name': 'site.test', 'port': 80}
+                for i in (10, 11)]
+        panel = Panel(site, rows)
+        observed = monitor.get_site_page(panel)['sites'][0]
+        self.assertEqual(observed['bound_domains'],
+                         [{'name': 'site.test', 'port': 80}] * 2)
+        self.assertTrue(observed['canonical_domain_bound'])
+        with self.assertRaisesRegex(RuntimeError, 'duplicate binding'):
+            monitor.get_site_page(panel, strict_native=True)
+
+    def test_readonly_rejects_repeated_native_row_identity(self):
+        sites = [
+            {'id': 3, 'name': 'site.test', 'path': '/srv/site', 'status': 1},
+            {'id': 4, 'name': 'other.test', 'path': '/srv/other', 'status': 1},
+        ]
+        rows = [
+            {'id': 10, 'pid': 3, 'name': 'site.test', 'port': 80},
+            {'id': 10, 'pid': 4, 'name': 'other.test', 'port': 80},
+        ]
+        panel = Panel(sites)
+        panel.domain_db.select = lambda: rows
+        with self.assertRaisesRegex(RuntimeError, 'duplicate row ID'):
+            monitor.get_site_page(panel)
+
     def test_domain_query_never_silently_accepts_ambiguous_or_oversized_rows(self):
         site = [{'id': 3, 'name': 'site.test'}]
         normal = {'id': 1, 'pid': 3, 'name': 'site.test', 'port': 80}
         bad_responses = [
-            [normal, dict(normal, id=2)],
             [dict(normal, name='')],
             [dict(normal, port=0)],
             [dict(normal, port='80;DROP TABLE')],

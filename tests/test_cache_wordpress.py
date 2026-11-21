@@ -1,6 +1,8 @@
 """One-click WordPress connection regression: no repeated path edits."""
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -42,6 +44,7 @@ class WordpressConnectionTests(unittest.TestCase):
         self.wp_active = False
         self.options = {"enable_purge": 0, "cache_method": "enable_fastcgi",
                         "purge_method": "unlink_files"}
+        self.runtime_override = None
         self.events = []
 
     def fake_cache(self, action, site, *args, **kwargs):
@@ -66,11 +69,17 @@ class WordpressConnectionTests(unittest.TestCase):
 
     def fake_php(self, site, version, command, **kwargs):
         self.events.append(("php", command))
+        effective = (self.runtime_override if self.runtime_override is not None else
+                     wp._extract_constant(self.config.read_bytes(), allow_absent=True))
+        previous = dict(self.previous, constant=effective)
         if command == "inspect":
-            return {"previous": self.previous,
+            return {"previous": previous,
                     "active_helper": self.wp_active, "active_bridge": self.wp_active,
                     "options": dict(self.options)}
         if command == "connect":
+            if kwargs.get("expected_cache_path") != effective:
+                raise wp.WordpressCacheError(
+                    "wordpress", "Effective WordPress Nginx Helper Cache path differs")
             self.wp_active = True
             self.options.update({"cache_method": "enable_fastcgi",
                                  "purge_method": "unlink_files",
@@ -81,7 +90,8 @@ class WordpressConnectionTests(unittest.TestCase):
             self.wp_active = bool(self.previous["nginx_helper"] and
                                   self.previous["bridge"])
             self.options["enable_purge"] = 0
-        return {"active_helper": self.wp_active, "active_bridge": self.wp_active,
+        return {"previous": previous,
+                "active_helper": self.wp_active, "active_bridge": self.wp_active,
                 "options": dict(self.options)}
 
     def native_journal(self, site, data_dir):
@@ -391,6 +401,217 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), self.original_config)
         self.assertEqual(self.ini.read_bytes(), self.original_ini)
         self.assertFalse((self.root / "ach_customizer.nginx-helper.7.json").exists())
+
+    def test_pristine_native_wordpress_without_constant_is_one_click_and_reversible(self):
+        # Native aaPanel OneClick WordPress does not preinstall the Helper path.
+        self.original_config = self.original_config.replace(
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",
+            b"")
+        self.config.write_bytes(self.original_config)
+        self.start()
+        first = wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(first["state"], "Connected")
+        self.assertEqual(wp._extract_constant(self.config.read_bytes()), self.cache)
+        self.assertEqual(self.config.read_bytes().count(wp.WP_CONSTANT_NAME), 1)
+        self.assertLess(self.config.read_bytes().find(wp.WP_CONSTANT_NAME),
+                        self.config.read_bytes().find(b"require_once ABSPATH"))
+        connected = self.config.read_bytes()
+        second = wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertFalse(second["changed"])
+        self.assertEqual(self.config.read_bytes(), connected)
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+        record = json.loads((self.root / "ach_customizer.nginx-helper.7.json").read_text())
+        self.assertIsNone(record["wp_old"])
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertEqual(self.ini.read_bytes(), self.original_ini)
+        self.assertNotIn(wp.WP_CONSTANT_NAME, self.config.read_bytes())
+        self.assertEqual(wp.setup(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+
+    def test_one_click_supports_stock_native_php_handler(self):
+        # A fresh aaPanel WordPress site can retain enable-php-85.conf.
+        self.start()
+        with patch.object(wp, "preview_cache_activation", return_value={
+                "native_handler": "stock", "php_version": "85",
+                "source_sha256": "a" * 64, "proposal_sha256": "b" * 64,
+                "cache_generation": "c" * 32}):
+            result = wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(result["state"], "Connected")
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+
+    def test_pristine_native_wordpress_source_edit_can_resume_and_restore(self):
+        self.original_config = self.original_config.replace(
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",
+            b"")
+        self.config.write_bytes(self.original_config)
+        self.start()
+        real_edit = wp._replace_file
+        already = [False]
+        def interrupt(*args, **kwargs):
+            changed = real_edit(*args, **kwargs)
+            if changed and args[1] == wp.WORDPRESS_CONFIG and not already[0]:
+                already[0] = True
+                raise RuntimeError("simulated interruption after wp-config edit")
+            return changed
+        with patch.object(wp, "_replace_file", side_effect=interrupt):
+            with self.assertRaisesRegex(RuntimeError, "simulated interruption"):
+                wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(self.config.read_bytes().count(wp.WP_CONSTANT_NAME), 1)
+        self.assertEqual(wp.setup(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+        self.assertEqual(self.config.read_bytes().count(wp.WP_CONSTANT_NAME), 1)
+        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
+                         "Restored")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+
+    def test_native_wordpress_bootstrap_and_malformed_constant_fail_without_change(self):
+        original = self.config.read_bytes()
+        scenarios = [
+            b"<?php\ndefine('DB_PASSWORD', 'secret');\n",
+            b"<?php\ndefine('RT_WP_NGINX_HELPER_CACHE_PATH', getenv('PATH'));\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n",
+            original.replace(b"require_once ABSPATH",
+                             b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\nrequire_once ABSPATH")
+        ]
+        for contents in scenarios:
+            with self.subTest(contents=contents[:45]):
+                self.config.write_bytes(contents)
+                with patch.object(wp, "_immutable", return_value=False):
+                    with self.assertRaises(wp.WordpressCacheError):
+                        wp._edits(self.site)
+                self.assertEqual(self.config.read_bytes(), contents)
+
+    def test_native_wordpress_crlf_bootstrap_roundtrip(self):
+        config = b"<?php\r\ndefine('DB_PASSWORD', 'unchanged');\r\nrequire_once ABSPATH . 'wp-settings.php';\r\n"
+        target = wp._replace_wp_constant(config, self.cache)
+        self.assertIn(b"');\r\nrequire_once", target)
+        self.assertEqual(wp._replace_wp_constant(target, None, managed_cache=self.cache), config)
+
+    def test_dynamic_and_literal_constant_are_rejected_before_any_cache_apply(self):
+        dynamic = (b"define(\n  'RT_WP_NGINX_HELPER_CACHE_PATH',\n"
+                   b"  '/www/server/' . 'fastcgi_cache'\n);\n")
+        original = self.original_config
+        self.config.write_bytes(original.replace(
+            b"require_once ABSPATH", dynamic + b"require_once ABSPATH"))
+        self.start()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "Complex or repeated"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertFalse(self.connected)
+        self.assertFalse(self.wp_active)
+        self.assertEqual(self.options["enable_purge"], 0)
+
+    def test_literal_definition_in_php_multiline_comment_is_not_live(self):
+        self.config.write_bytes(
+            b"<?php\n/*\n"
+            b"define('RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache');\n"
+            b"*/\nrequire_once ABSPATH . 'wp-settings.php';\n")
+        with patch.object(wp, "_immutable", return_value=False):
+            with self.assertRaisesRegex(wp.WordpressCacheError, "inside a PHP comment"):
+                wp._edits(self.site)
+
+    def test_runtime_source_mismatch_is_refused_before_native_cache_apply(self):
+        self.runtime_override = "/www/server/elsewhere"
+        self.start()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "differs from its source"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertNotIn(("cache", "apply"), self.events)
+        self.assertFalse(self.wp_active)
+        self.assertEqual(self.options["enable_purge"], 0)
+
+    def test_runtime_path_changes_after_reload_cannot_enable_vendor_purge(self):
+        self.start()
+        def wrong_runtime(_version):
+            self.runtime_override = "/www/server/fastcgi_cache"
+        with patch.object(wp, "_reload_php", side_effect=wrong_runtime):
+            with self.assertRaisesRegex(wp.WordpressCacheError, "Effective WordPress"):
+                wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertTrue(self.connected)
+        self.assertFalse(self.wp_active)
+        self.assertEqual(self.options["enable_purge"], 0)
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Needs Review")
+        self.runtime_override = None
+        self.assertEqual(wp.setup(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+
+    def test_connected_inspection_requires_effective_runtime_cache_path(self):
+        self.start()
+        self.setup_once()
+        self.runtime_override = "/www/server/fastcgi_cache"
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Needs Review")
+        self.runtime_override = None
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Connected")
+
+    def test_pristine_disconnect_never_removes_operator_reformatted_definition(self):
+        self.original_config = self.original_config.replace(
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache' );\n",
+            b"")
+        self.config.write_bytes(self.original_config)
+        self.start()
+        self.setup_once()
+        self.config.write_bytes(self.config.read_bytes().replace(
+            b"define('RT_WP_NGINX_HELPER_CACHE_PATH', '",
+            b"define( 'RT_WP_NGINX_HELPER_CACHE_PATH', '"))
+        changed = self.config.read_bytes()
+        with self.assertRaisesRegex(wp.WordpressCacheError, "Connector-managed"):
+            wp.restore(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(self.config.read_bytes(), changed)
+        self.assertEqual(self.options["enable_purge"], 1)
+
+    @unittest.skipUnless(shutil.which("php"), "PHP CLI unavailable")
+    def test_embedded_php_refuses_wrong_runtime_cache_before_vendor_actions(self):
+        # Exercise the real embedded PHP guard with a tiny isolated WP fixture,
+        # not a mocked Python check or a live WordPress/database installation.
+        root = self.site_dir
+        (root / "wp-admin" / "includes").mkdir(parents=True)
+        (root / "wp-admin" / "includes" / "plugin.php").write_text("<?php\n")
+        for plugin in ("nginx-helper/nginx-helper.php",
+                       "ach-aapanel-bridge/ach-aapanel-bridge.php"):
+            path = root / "wp-content" / "plugins" / plugin
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("<?php\n")
+        (root / "wp-load.php").write_text("""<?php
+define('ABSPATH', __DIR__ . '/');
+define('WP_PLUGIN_DIR', __DIR__ . '/wp-content/plugins');
+define('RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache');
+function get_site_option($key, $default = false) { return $default; }
+function is_plugin_active($plugin) { return false; }
+function is_wp_error($error) { return false; }
+function activate_plugin($plugin) {
+    file_put_contents(__DIR__ . '/vendor-actions', 'activate:' . $plugin . "\\n", FILE_APPEND);
+    return null;
+}
+function update_site_option($key, $value) {
+    file_put_contents(__DIR__ . '/vendor-actions', 'update', FILE_APPEND);
+}
+""")
+        result = subprocess.run(
+            [shutil.which("php"), "-r", wp.PHP_BRIDGE], cwd=root,
+            input=json.dumps({"action": "connect", "expected_cache_path": self.cache}),
+            capture_output=True, text=True, check=False, timeout=15)
+        self.assertEqual(result.returncode, 15, result.stderr)
+        self.assertIn("Effective WordPress", result.stderr)
+        self.assertFalse((root / "vendor-actions").exists())
+        result = subprocess.run(
+            [shutil.which("php"), "-r", wp.PHP_BRIDGE], cwd=root,
+            input=json.dumps({"action": "connect",
+                              "expected_cache_path": "/www/server/fastcgi_cache"}),
+            capture_output=True, text=True, check=False, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("activate:nginx-helper", (root / "vendor-actions").read_text())
+        self.assertIn("update", (root / "vendor-actions").read_text())
 
     def test_custom_cache_path_must_not_be_overwritten(self):
         self.config.write_bytes(self.original_config.replace(
