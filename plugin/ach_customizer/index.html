@@ -566,6 +566,7 @@
         <strong>Site-sensitive file protection — opt-in</strong>
         <p>Use the verified aaPanel 8.0.7 Nginx site extension (not .htaccess) to stop nested .env/.htaccess, backup-directory downloads and PHP execution from upload/media/tmp paths before PHP-FPM. Native site root is detected automatically; no /www/wwwroot assumption. Ordinary .well-known/OAuth/ACME URLs remain eligible. This rule does not claim every upload layout or HTTPS reverse-proxy path is covered.</p>
         <p>A supported source is required. Apply creates one recoverable site-owned include, syntax-tests and reloads shared Nginx, then checks real HTTP/80 guard paths over three consecutive rounds. Restore is a separately approved Nginx reload. Neither option is automatic; source changes or interrupted operations require Recheck.</p>
+        <label><input type="checkbox" id="ach-guard-block-xmlrpc" /> Also block <code>/xmlrpc.php</code> at Nginx before PHP-FPM (optional; disable when an application requires XML-RPC). This uses the <em>same site guard and Recovery ID</em>, not a background watcher or second Nginx policy. Do not layer it with Customizer's separate WordPress MU-plugin XML-RPC verifier on the same site.</label>
         <div class="ach-controls">
           <button id="ach-guard-preview" type="button" disabled>Check sensitive-path protection readiness</button>
           <button id="ach-guard-recheck" type="button" disabled>Recheck protection / recovery</button>
@@ -624,14 +625,15 @@
         </div>
       </div>
       <div class="ach-note" aria-label="Selected WordPress operational settings">
-        <strong>Selected WordPress — Debug, system WP-Cron and XML-RPC (manual)</strong>
-        <p>Select a native website above. Recheck reads its actual WordPress source. <strong>Debug</strong> changes only one verified <code>wp-config.php</code> constant. <strong>System WP-Cron</strong> creates an owned Cron task running as the site's <code>www</code> PHP user before disabling the page-load trigger. <strong>Block XML-RPC</strong> uses an exact site-owned WordPress must-use plugin: live <code>/xmlrpc.php</code> POST requests return HTTP 403, without modifying Nginx, other WordPress routes, the database, or any other website. Restore removes only the owned line, Cron task, or MU-plugin file for the selected operation. Foreign, ambiguous or stale source requires Recheck; no policy is automatically enabled.</p>
+        <strong>Selected WordPress — HTTPS URLs, Debug, Cron and XML-RPC (manual)</strong>
+        <p>Select a native website above. Recheck reads its actual WordPress source. <strong>Debug</strong> changes only one verified <code>wp-config.php</code> constant. <strong>System WP-Cron</strong> creates an owned Cron task running as the site's <code>www</code> PHP user before disabling the page-load trigger. <strong>Block XML-RPC</strong> uses an exact site-owned WordPress must-use plugin: live <code>/xmlrpc.php</code> POST requests return HTTP 403. <strong>WordPress HTTPS URLs</strong> is an explicit one-time update of the existing <code>home</code>/<code>siteurl</code> database options from HTTP to HTTPS, preserving recognized hostname and path; it does not install SSL, change DNS/Nginx or run a background sync. <strong>Enable and verify HTTPS/certificates for this site before Apply</strong> or WordPress administrative pages may become unreachable. The URL preview and Recovery ID appear below. Restore reverses only the exact owned setting, Cron task, MU-plugin file, or URL options. Foreign, overridden or changed source requires manual Recheck; no policy is automatically enabled.</p>
         <div class="ach-controls">
           <label for="ach-wp-settings-kind">Operation</label>
           <select id="ach-wp-settings-kind">
             <option value="debug">WordPress debug mode</option>
             <option value="cron">System WP-Cron scheduler</option>
             <option value="xmlrpc">Block XML-RPC requests</option>
+            <option value="https">WordPress HTTPS home/siteurl</option>
           </select>
           <label for="ach-wp-settings-debug">WP_DEBUG</label>
           <select id="ach-wp-settings-debug"><option value="true">Enable</option><option value="false" selected>Disable</option></select>
@@ -973,7 +975,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.85'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.86'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2093,11 +2095,12 @@
     var id = hostsSiteId(), site = id && hostsPageSites.get(id);
     var kind = root.find('#ach-wp-settings-kind').val();
     var desired = kind === 'debug' ? root.find('#ach-wp-settings-debug').val() :
-      kind === 'xmlrpc' ? 'block' : 'true';
+      kind === 'xmlrpc' ? 'block' : kind === 'https' ? 'https' : 'true';
     var interval = kind === 'cron' ? String(root.find('#ach-wp-settings-interval').val()) : '';
-    if (!site || !['debug','cron','xmlrpc'].includes(kind) ||
+    if (!site || !['debug','cron','xmlrpc','https'].includes(kind) ||
         kind === 'debug' && !['true','false'].includes(desired) ||
         kind === 'xmlrpc' && desired !== 'block' ||
+        kind === 'https' && desired !== 'https' ||
         kind === 'cron' && (!/^[1-9][0-9]?$/.test(interval) || Number(interval)>59))
       return null;
     return {id:id,site:site,kind:kind,desired:desired,interval:interval,
@@ -2124,9 +2127,9 @@
       !selected ? 'Select a verified native website, an operation and valid value/interval.' :
       !match ? 'Recheck the selected WordPress setting. Apply and Restore require fresh source/recovery evidence.' :
       wpSettingsEvidence.state === 'Source Ready' ?
-      'Ready: Apply changes only the selected WordPress setting. XML-RPC uses one owned MU-plugin file; system Cron runs as www.' :
+      'Ready: Apply changes only the selected WordPress setting. HTTPS URLs update home/siteurl once; XML-RPC uses one MU-plugin, Cron runs as www.' :
       wpSettingsEvidence.state === 'Applied' || wpSettingsEvidence.state === 'Recovery Required' ?
-      'Saved Recovery ID available. Restore reverts only the owned setting and matching Cron task.' :
+      'Saved Recovery ID available. Restore reverts only the selected setting, HTTPS URLs, MU-plugin or Cron task.' :
       wpSettingsEvidence.state === 'Restored' ? 'Previous owned setting restored. Apply is available after Recheck.' :
       'No compatible change is available. Review reported source and state.');
   }
@@ -2139,6 +2142,12 @@
   function validWpSettingsResponse(r, action, selection) {
     var sha=function(v){ return typeof v==='string' && /^[0-9a-f]{64}$/.test(v); };
     var id=function(v){ return typeof v==='string' && /^[0-9a-f]{32}$/.test(v); };
+    var urlPair=function(p) {
+      return p && typeof p==='object' && typeof p.home==='string' &&
+        typeof p.siteurl==='string' &&
+        ['http://','https://'].some(function(s){return p.home.startsWith(s);}) &&
+        ['http://','https://'].some(function(s){return p.siteurl.startsWith(s);});
+    };
     if (!r || r.status!==true || r.schema!==1 || r.settings_action!==action ||
         r.site_id!==Number(selection.id) || r.site_key!==selection.site.name ||
         r.kind!==selection.kind || !sha(r.source_sha256) ||
@@ -2148,8 +2157,11 @@
         typeof r.impact!=='string' ||
         !(selection.kind === 'xmlrpc' ?
           r.impact === 'Selected WordPress XML-RPC endpoint only; site-owned must-use plugin, no Nginx reload' :
+          selection.kind === 'https' ?
+          r.impact === 'Selected WordPress home/siteurl database options only; converts HTTP to HTTPS, no DNS/Nginx/certificate changes' &&
+          urlPair(r.urls_before) && urlPair(r.urls_target) :
           r.impact.startsWith('Selected WordPress wp-config.php setting only')) ||
-        !['Source Ready','Already Configured','Conflict','Applied','Restored','Drift','Recovery Required'].includes(r.state) ||
+        !['Source Ready','Already Configured','Conflict','Applied','Restored','Drift','Recovery Required','Needs Review'].includes(r.state) ||
         (r.interval!==null && !(Number.isSafeInteger(r.interval)&&r.interval>=1&&r.interval<=59)))
       return false;
     return action==='recheck' ? !r.changed :
@@ -2204,6 +2216,12 @@
           '\nOperation ID: '+(r.request_id||'None')+
           '\nRuntime verified: '+(r.runtime_verified?'Yes':'Source-only; run functional QA')+
           (r.reason?'\nReason: '+r.reason:'')+
+          (selected.kind==='https' ?
+            '\nCurrent home: '+r.urls_before.home+
+            '\nCurrent siteurl: '+r.urls_before.siteurl+
+            '\nTarget home: '+r.urls_target.home+
+            '\nTarget siteurl: '+r.urls_target.siteurl+
+            '\nPublic HTTPS reachability/certificate: NOT checked by this database operation' : '')+
           '\n'+r.impact);
       }
       wpSettingsLock();
@@ -2787,7 +2805,7 @@
     guardBusy = false;
     guardReady = null;
     guardRecovery = null;
-    root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').prop('checked',false);
+    root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed,#ach-guard-block-xmlrpc').prop('checked',false);
     root.find('#ach-guard-result').text('Website selection or source changed; run a fresh protection check.');
     inspectionSummary('guard', 'Select a website and inspect its current Nginx security source.');
     guardLock();
@@ -2797,7 +2815,9 @@
     var blocked = guardBusy || !id || hostsBusy || siteBusy ||
       websitePolicyState !== 'stable';
     root.find('#ach-guard-preview,#ach-guard-recheck').prop('disabled',blocked);
-    var applyAllowed = !blocked && !!guardReady && guardReady.siteId === id;
+    root.find('#ach-guard-block-xmlrpc').prop('disabled',guardBusy || hostsBusy || siteBusy);
+    var applyAllowed = !blocked && !!guardReady && guardReady.siteId === id &&
+      guardReady.xmlrpc === (root.find('#ach-guard-block-xmlrpc').prop('checked') === true);
     var restoreAllowed = !blocked && !!guardRecovery && guardRecovery.siteId === id;
     root.find('#ach-guard-apply-reviewed').prop('disabled',!applyAllowed);
     root.find('#ach-guard-apply').prop('disabled',!applyAllowed ||
@@ -2817,7 +2837,9 @@
     var hash = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
     var token = v => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v);
     if (!native || !r || r.status !== true || r.schema !== 1 ||
-        r.mode !== 'native_site_sensitive_paths' || r.ruleset !== 'nested-sensitive-v2' ||
+        r.mode !== 'native_site_sensitive_paths' ||
+        !['nested-sensitive-v2','nested-sensitive-xmlrpc-v3'].includes(r.ruleset) ||
+        r.block_xmlrpc !== (r.ruleset==='nested-sensitive-xmlrpc-v3') ||
         r.site_id !== Number(id) || r.site_key !== native.name ||
         typeof r.site_root !== 'string' ||
         r.site_root !== JSON.parse(native.snapshot)[2] ||
@@ -2866,7 +2888,11 @@
     root.find('#ach-guard-result').text(action === 'apply' || action === 'restore' ?
       'Guarded Nginx operation in progress. A timeout does not imply rollback; inspect recovery.' :
       'Inspecting native site source and managed protection state…');
-    var payload = Object.assign({guard_action:action},cacheNativeArgs(id));
+    var payload = Object.assign({
+      guard_action:action,
+      guard_block_xmlrpc:(isApply ? selected.xmlrpc :
+        root.find('#ach-guard-block-xmlrpc').prop('checked')===true) ? 'true' : 'false'
+    },cacheNativeArgs(id));
     if (isApply) {
       payload.approved = 'true';
       payload.expected_vhost_sha256 = selected.vhost;
@@ -2892,7 +2918,8 @@
       }
       if ((action === 'preview' && ['Unmanaged','Restored'].includes(r.state)) &&
           r.vhost_sha256 && r.proposal_sha256) {
-        guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256};
+        guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256,
+                      xmlrpc:r.block_xmlrpc};
       }
       if (action === 'recheck' && ['Applied','Recovery Required'].includes(r.state) &&
           /^[0-9a-f]{32}$/.test(r.recovery_id || '')) {
@@ -2906,6 +2933,7 @@
         '\nDocument root: ' + r.site_root + '\nProtection: ' + r.state +
         '\nVHost SHA-256: ' + (r.vhost_sha256 || 'Unverified') +
         '\nPolicy SHA-256: ' + r.proposal_sha256 +
+        '\nNginx pre-PHP XML-RPC block: ' + (r.block_xmlrpc?'Selected':'Not selected') +
         '\nRecovery ID: ' + (r.recovery_id || 'None') +
         '\nJournal phase: ' + (r.journal_phase || 'None') +
         '\nLive HTTP/80 guard nonce verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
@@ -2918,6 +2946,12 @@
   root.find('#ach-guard-apply').on('click',function () {guardRequest('apply');});
   root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
   root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').on('change',guardLock);
+  root.find('#ach-guard-block-xmlrpc').on('change',function () {
+    guardReady=null;
+    root.find('#ach-guard-apply-reviewed').prop('checked',false);
+    root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
+    guardLock();
+  });
   var scanBusy = false, scanTicket = 0, scanReady = null, scanRecovery = null;
   function scanParameters() {
     return {

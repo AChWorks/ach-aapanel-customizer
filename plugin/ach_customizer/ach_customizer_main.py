@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.85'
+WORKER_SOURCE_VERSION = '0.1.86'
 
 _STATE_DIR = DATA_DIR
 
@@ -888,6 +888,9 @@ class ach_customizer_main:
             # Browser-provided IDs are never trusted for failed pre-selection.
             trusted_site_id = str(before["id"])
             approved = self._argument(args, "approved") == "true"
+            xmlrpc_choice = self._argument(args, "guard_block_xmlrpc", "false")
+            if xmlrpc_choice not in ("true", "false"):
+                raise MonitorInputError("Choose an explicit XML-RPC Nginx guard option")
             # A globally shared native document root cannot justify an
             # isolated per-site protection claim. Reject before any write.
             if action in ("apply", "restore"):
@@ -910,6 +913,7 @@ class ach_customizer_main:
                         expected_vhost=self._argument(args, "expected_vhost_sha256"),
                         expected_proposal=self._argument(args, "expected_proposal_sha256"),
                         expected_recovery=self._argument(args, "recovery_id"),
+                        block_xmlrpc=xmlrpc_choice == "true",
                     )
                     if current_site() != before:
                         raise GuardError(
@@ -1393,6 +1397,10 @@ class ach_customizer_main:
                 interval = None
                 if desired != "block":
                     raise MonitorInputError("Select Block XML-RPC for this site")
+            elif kind == "https":
+                interval = None
+                if desired != "https":
+                    raise MonitorInputError("Select HTTPS URLs for this site")
             else:
                 raise MonitorInputError("Unsupported WordPress setting")
             public, before, current_site = self._selected_native_website(args)
@@ -1410,6 +1418,13 @@ class ach_customizer_main:
                         if kind == "xmlrpc":
                             from ach_customizer_wp_xmlrpc import manage_xmlrpc
                             result = manage_xmlrpc(
+                                action, before, public, data_fd=fd,
+                                expected_source=self._argument(args, "expected_source_sha256"),
+                                expected_recovery=self._argument(args, "expected_recovery_id"),
+                            )
+                        elif kind == "https":
+                            from ach_customizer_wp_urls import manage_urls
+                            result = manage_urls(
                                 action, before, public, data_fd=fd,
                                 expected_source=self._argument(args, "expected_source_sha256"),
                                 expected_recovery=self._argument(args, "expected_recovery_id"),

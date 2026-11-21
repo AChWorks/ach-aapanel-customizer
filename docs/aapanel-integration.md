@@ -36,7 +36,7 @@ with site-specific, manually Applied Cache, then Restored that site to its
 original VHost. This **does not** exercise live payments/gateway callbacks,
 every extension, general vendor Purge All or other host topologies.
 
-## WordPress per-site debug and system Cron (manual)
+## WordPress per-site HTTPS URLs, Debug, system Cron and XML-RPC (manual)
 
 Routing & Nginx uses the same selected native Website ID, document root,
 bindings, and full-primary-admin POST checks as other site operations.
@@ -44,6 +44,28 @@ bindings, and full-primary-admin POST checks as other site operations.
 the explicit operator approval and `Restore saved WordPress setting`
 uses the durable site-specific Recovery ID. No automatic policy is created
 on install or when aaPanel adds a site.
+
+**One-time WordPress HTTPS `home`/`siteurl`:** On a single selected native
+WordPress site, a primary administrator selects **WordPress HTTPS home/siteurl**
+and runs Recheck to inspect the **actual WordPress database options** and
+one proposed HTTP-to-HTTPS conversion. It preserves each already-registered
+native hostname, URL path and existing HTTPS URL; it removes an explicit
+`:80` port, but never edits external DNS, certificates, Nginx or WordPress
+configuration files. Set up and check working site HTTPS **before** clicking
+Apply to avoid locking out WordPress administration. The custom PHP bridge
+uses the selected native PHP CLI as `www` and WordPress's own `update_option`;
+WP-CLI is not installed or required. This action refuses multisite, PHP
+`WP_HOME`/`WP_SITEURL` overrides, foreign/filtered or unknown host values.
+Its journal records the original and target options and the exact Recovery ID.
+An interrupted partial DB update can be **Rechecked and Restored** only while
+each field still equals its own original or managed target; foreign edits
+are not overwritten. A later independent WP_DEBUG edit or PHP assignment
+change does not invalidate an otherwise safe option-pair Restore. A fresh
+WordPress/PHP subprocess verifies actual option persistence, **not public
+HTTPS reachability, certificate validity, redirects or other-site behavior**.
+After an outside change, manually Recheck; no watcher or automated URL sync
+is created. Restored operations can be reapplied against newly inspected
+site URLs.
 
 **Debug:** a literal single `WP_DEBUG` Boolean in `wp-config.php` may
 be changed or inserted before WordPress bootstrap. It is syntax-checked
@@ -96,6 +118,21 @@ These operations do not change WordPress URL/SSL, XML-RPC or Nginx rules.
 
 Exact native installed-runtime checks, Cron execution and the full
 site-identity/peer matrix belong to [QA Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+
+**Optional pre-PHP Nginx XML-RPC block:** The same existing Nginx
+sensitive-path Guard has an optional **Also block `/xmlrpc.php` before PHP-FPM**
+checkbox. The default remains the existing `nested-sensitive-v2` policy.
+When explicitly chosen, the complete site guard uses one
+`nested-sensitive-xmlrpc-v3` rule set, **the same site-owned Nginx include,
+source-checked Preview/Apply/Recheck/Restore and original Recovery journal**.
+The additional server-rewrite condition blocks `/xmlrpc.php` before any PHP
+location dispatch; the live local proof covers eleven guarded paths instead
+of ten. Existing v2 journals/Restore remain valid, even if a new option is
+selected later. No watcher or global rule. The independently available
+WordPress MU-plugin XML-RPC gate is application-level and its live proof
+must not be treated as confirmation of the Nginx variant; avoid stacking the
+two managed gates on the same site. Native installed HTTP POST/GET and peer
+tests belong to Issue #21; passing source tests alone is not installed proof.
 
 ## Unknown-SNI HTTPS/443 rejection (Owner Option A)
 

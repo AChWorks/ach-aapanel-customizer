@@ -31,11 +31,14 @@ MAX_JOURNAL = 4096
 MAX_INCLUDE = 8192
 PROOF_BODY = "ACh-Guard-Proof-"
 RULESET = "nested-sensitive-v2"
+RULESET_XMLRPC = "nested-sensitive-xmlrpc-v3"
+RULESETS = (RULESET, RULESET_XMLRPC)
 PROOF_KINDS = (
     "root_env", "nested_env", "wp_env", "nested_htaccess",
     "backup_dir", "wp_backup_dir", "uploaded_php", "wp_uploaded_php",
     "media_php", "tmp_php",
 )
+XMLRPC_PROOF_KINDS = PROOF_KINDS + ("xmlrpc",)
 # Path syntax is verified against the current aaPanel native record, never
 # reconstructed from a name, URL, browser-selected path or global site root.
 ROOT = re.compile(r"/[a-zA-Z0-9/_.-]{1,1023}\Z")
@@ -102,9 +105,11 @@ def _public_proof(op):
     return PROOF_BODY + hashlib.sha256(("site-guard-v2:" + op).encode("ascii")).hexdigest()[:32]
 
 
-def _include(op):
+def _include(op, ruleset=RULESET):
     if not isinstance(op, str) or not TOKEN.fullmatch(op):
         raise GuardError("identity", "Invalid Nginx guard generation")
+    if ruleset not in RULESETS:
+        raise GuardError("input", "Unsupported Nginx security rule selection")
     # Server-rewrite if+return blocks execute before Nginx location selection.
     # They cannot be bypassed by an existing ^~ /wp-content/uploads/ prefix,
     # whereas regex locations alone would lose to a matching ^~ location.
@@ -116,9 +121,13 @@ def _include(op):
         "(^|/)(?:backups?|db-backup|db_dumps?)(?:/|$)",
         "(^|/)(?:uploads|media|tmp)/[^?#]*[.](?:php[0-9]?|phtml|phar)(?:/|$)",
     )
+    if ruleset == RULESET_XMLRPC:
+        # Server rewrite phase executes before php's ^~ or regex location
+        # dispatch. $uri omits the query string; all methods are rejected.
+        patterns += ("^/xmlrpc[.]php$",)
     parts = [
         "# Managed by ACh aaPanel Customizer; do not edit manually.",
-        "# Scoped pre-PHP defense. Rule set: " + RULESET,
+        "# Scoped pre-PHP defense. Rule set: " + ruleset,
     ]
     for pattern in patterns:
         parts.extend((
@@ -132,10 +141,10 @@ def _include(op):
     return result
 
 
-def _proposal_sha():
-    # Deterministic approval binds the rule semantics, independent of the
-    # per-activation nonce generated only when Apply is authorized.
-    return _sha(_include("0" * 32))
+def _proposal_sha(ruleset=RULESET):
+    # Deterministic approval binds the rule semantics and selected XML-RPC
+    # option, independent of the per-activation nonce.
+    return _sha(_include("0" * 32, ruleset))
 
 
 def _read_journal(data_fd, site_id):
@@ -157,12 +166,12 @@ def _read_journal(data_fd, site_id):
             or not isinstance(record["site_root"], str)
             or not ROOT.fullmatch(record["site_root"])
             or "//" in record["site_root"] or ".." in record["site_root"].split("/")
-            or record["ruleset"] != RULESET
+            or record["ruleset"] not in RULESETS
             or not isinstance(record["op"], str) or not TOKEN.fullmatch(record["op"])
             or record["phase"] not in ("prepared", "applied", "restored")
             or any(not isinstance(record[k], str) or not HASH.fullmatch(record[k])
                    for k in ("bindings_sha", "vhost_sha", "include_sha"))
-            or _sha(_include(record["op"])) != record["include_sha"]):
+            or _sha(_include(record["op"], record["ruleset"])) != record["include_sha"]):
         raise GuardError("recovery", "Invalid or altered native security recovery journal")
     return record
 
@@ -186,7 +195,7 @@ def _save_journal(data_fd, record):
 
 
 def _probe_path(op, kind):
-    if kind not in PROOF_KINDS or not TOKEN.fullmatch(op):
+    if kind not in XMLRPC_PROOF_KINDS or not TOKEN.fullmatch(op):
         raise GuardError("input", "Unsupported security probe")
     # Use actual high-risk native path prefixes. Prefixing everything with
     # one synthetic top-level folder would MISS a more-specific Nginx ^~
@@ -203,6 +212,7 @@ def _probe_path(op, kind):
         "wp_uploaded_php": "/wp-content/uploads/" + suffix + "/proof.php",
         "media_php": "/media/" + suffix + "/proof.phtml",
         "tmp_php": "/tmp/" + suffix + "/proof.php",
+        "xmlrpc": "/xmlrpc.php",
     }[kind]
 
 
@@ -235,12 +245,15 @@ def _probe(site, op, kind, *, port=80):
         conn.close()
 
 
-def _verified(site, op, *, present, probe=None):
+def _verified(site, op, *, present, probe=None, ruleset=RULESET):
+    if ruleset not in RULESETS:
+        raise GuardError("recovery", "Unknown managed Nginx security rule set")
     fn = probe or _probe
+    kinds = XMLRPC_PROOF_KINDS if ruleset == RULESET_XMLRPC else PROOF_KINDS
     deadline = time.monotonic() + 9
     consecutive = 0
     while True:
-        results = [fn(site, op, kind) for kind in PROOF_KINDS]
+        results = [fn(site, op, kind) for kind in kinds]
         valid = (all(code == 403 and header == op for code, header in results)
                  if present else all(header != op for _, header in results))
         consecutive = consecutive + 1 if valid else 0
@@ -336,13 +349,16 @@ def _source_safe(site, *, vhost_root, nginx_conf):
 
 
 def _report(site, *, state, source_sha=None, journal=None, changed=False,
-            runtime_verified=False, reason="", read_only=True):
+            runtime_verified=False, reason="", read_only=True, ruleset=RULESET):
+    effective = (journal["ruleset"] if journal and
+                 journal["phase"] in ("prepared", "applied") else ruleset)
     return {
         "schema": SCHEMA, "site_id": site["id"], "site_key": site["name"],
-        "site_root": site["path"], "mode": MODE, "ruleset": RULESET,
+        "site_root": site["path"], "mode": MODE, "ruleset": effective,
+        "block_xmlrpc": effective == RULESET_XMLRPC,
         "state": state, "reason": reason, "read_only": read_only,
         "changed": changed, "runtime_verified": runtime_verified,
-        "vhost_sha256": source_sha, "proposal_sha256": _proposal_sha(),
+        "vhost_sha256": source_sha, "proposal_sha256": _proposal_sha(effective),
         "recovery_id": journal["op"] if journal else None,
         "journal_phase": journal["phase"] if journal else None,
         "automatic_enforcement": False,
@@ -353,14 +369,15 @@ def manage_guard(action, site, *, data_fd, approved=False,
                  expected_vhost=None, expected_proposal=None,
                  expected_recovery=None, vhost_root=VHOST_ROOT,
                  nginx=NGINX, nginx_conf=NGINX_CONF, runner=None,
-                 probe=None):
+                 probe=None, block_xmlrpc=False):
     """Manage under caller's full-primary-admin, current-site state lock.
 
     Caller must validate the selected native site before and after this
     function. Preview/Recheck never publishes or reloads configuration.
     """
-    if action not in ("preview", "apply", "recheck", "restore"):
-        raise GuardError("input", "Unsupported native Nginx protection action")
+    if action not in ("preview", "apply", "recheck", "restore") or type(block_xmlrpc) is not bool:
+        raise GuardError("input", "Unsupported native Nginx protection action/option")
+    selected_ruleset = RULESET_XMLRPC if block_xmlrpc else RULESET
     bindings_sha = _site_identity(site)
     _owned_dir(data_fd)
     record = _read_journal(data_fd, site["id"])
@@ -371,7 +388,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
         if action in ("apply", "restore"):
             raise GuardError("identity", "Stopped native website cannot change Nginx policy")
         return _report(site, state="Suspended" if record else "Needs Review",
-                       journal=record, reason="Native website is stopped; inspect saved recovery")
+                       journal=record, reason="Native website is stopped; inspect saved recovery",
+                       ruleset=selected_ruleset)
     try:
         source_sha, extension_dir = _source_safe(
             site, vhost_root=vhost_root, nginx_conf=nginx_conf)
@@ -379,7 +397,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
         if action in ("apply", "restore") or record is None:
             raise
         return _report(site, state="Needs Review", journal=record,
-                       reason="Native VHost/include source changed; existing recovery retained")
+                       reason="Native VHost/include source changed; existing recovery retained",
+                       ruleset=selected_ruleset)
 
     extension_fd = _directory(extension_dir)
     try:
@@ -392,12 +411,19 @@ def manage_guard(action, site, *, data_fd, approved=False,
             record["site_root"] != site["path"] or
             record["bindings_sha"] != bindings_sha or
             record["vhost_sha"] != source_sha))
-        if changed_source:
+        # A *fully restored* record no longer owns a live source. Once the
+        # selected native VHost/include graph is freshly inspected and no
+        # managed file exists, a later aaPanel regeneration must not prevent
+        # an administrator's one-time manual re-Apply. Never relax this for
+        # prepared/applied journals or an unexpected existing include.
+        if changed_source and not (
+                record["phase"] == "restored" and current is None):
             if action in ("apply", "restore"):
                 raise GuardError(
                     "identity", "Native site/VHost changed; preserved security recovery requires review")
             return _report(site, state="Needs Review", source_sha=source_sha,
-                           journal=record, reason="Site identity, root, bindings or native source drifted")
+                           journal=record, reason="Site identity, root, bindings or native source drifted",
+                           ruleset=selected_ruleset)
 
         if action in ("preview", "recheck"):
             if record is None:
@@ -408,13 +434,15 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 state = "Restored" if current is None else "Needs Review"
                 if current is None:
                     try:
-                        _verified(site, record["op"], present=False, probe=probe)
+                        _verified(site, record["op"], present=False, probe=probe,
+                                  ruleset=record["ruleset"])
                     except (GuardError, OSError):
                         state = "Needs Review"
             elif (record["phase"] == "applied" and current is not None
                   and _sha(current) == record["include_sha"]):
                 try:
-                    _verified(site, record["op"], present=True, probe=probe)
+                    _verified(site, record["op"], present=True, probe=probe,
+                              ruleset=record["ruleset"])
                     state = "Applied"
                 except (GuardError, OSError):
                     state = "Needs Review"
@@ -423,13 +451,13 @@ def manage_guard(action, site, *, data_fd, approved=False,
             reason = {
                 "Unmanaged": "Native VHost is eligible; no managed security policy is active",
                 "Restored": "Previous managed rule has been retired and nonce is absent",
-                "Applied": "All ten pre-location sensitive-path probes served HTTP 403 with the active proof",
+                "Applied": "All selected pre-location Nginx probes served HTTP 403 with the active proof",
                 "Recovery Required": "An interrupted Apply/Restore needs explicit inspected recovery",
                 "Needs Review": "Foreign/stale source, mismatch or unavailable runtime proof",
             }.get(state, "Native site not eligible")
             return _report(site, state=state, source_sha=source_sha,
                            journal=record, runtime_verified=state in ("Applied", "Restored"),
-                           reason=reason)
+                           reason=reason, ruleset=selected_ruleset)
 
         # Neither a successful Nginx -t nor HTTP proof makes a write safe
         # if the generated native source is not still the reviewed source.
@@ -439,16 +467,17 @@ def manage_guard(action, site, *, data_fd, approved=False,
             if current is not None or record and record["phase"] != "restored":
                 raise GuardError("concurrency", "Existing native security rule is foreign or needs recovery")
             if (expected_vhost != source_sha or
-                    expected_proposal != _proposal_sha()):
+                    expected_proposal != _proposal_sha(selected_ruleset)):
                 raise GuardError("concurrency", "Selected security plan or VHost changed since Preview")
             if record:
-                _verified(site, record["op"], present=False, probe=probe)
+                _verified(site, record["op"], present=False, probe=probe,
+                          ruleset=record["ruleset"])
             op = uuid4().hex
-            include_bytes = _include(op)
+            include_bytes = _include(op, selected_ruleset)
             created = {
                 "schema": SCHEMA, "site_id": site["id"], "site_key": site["name"],
                 "site_root": site["path"], "bindings_sha": bindings_sha,
-                "ruleset": RULESET, "op": op, "phase": "prepared",
+                "ruleset": selected_ruleset, "op": op, "phase": "prepared",
                 "vhost_sha": source_sha, "include_sha": _sha(include_bytes),
             }
             _save_journal(data_fd, created)
@@ -484,7 +513,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
                     recovery_id=op) from exc
             try:
                 _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
-                _verified(site, op, present=True, probe=probe)
+                _verified(site, op, present=True, probe=probe,
+                          ruleset=selected_ruleset)
                 if _source_safe(site, vhost_root=vhost_root,
                                 nginx_conf=nginx_conf)[0] != source_sha:
                     raise GuardError("concurrency", "Native include source changed during guard activation")
@@ -501,7 +531,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
                     recovery_id=op) from exc
             return _report(site, state="Applied", source_sha=source_sha,
                            journal=created, changed=True, runtime_verified=True,
-                           reason="All ten pre-location probes verified on live Nginx", read_only=False)
+                           reason="All selected pre-location probes verified on live Nginx",
+                           read_only=False, ruleset=selected_ruleset)
 
         if (not record or expected_recovery != record["op"] or
                 record["phase"] not in ("prepared", "applied")):
@@ -522,7 +553,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
         try:
             _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
             _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
-            _verified(site, record["op"], present=False, probe=probe)
+            _verified(site, record["op"], present=False, probe=probe,
+                      ruleset=record["ruleset"])
             if _source_safe(site, vhost_root=vhost_root,
                             nginx_conf=nginx_conf)[0] != source_sha:
                 raise GuardError("concurrency", "Native source drifted during security Restore")
@@ -542,7 +574,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 # No longer included; journal contains exact immutable rule
                 # identity. Cleanup never removes an unknown extension.
                 if _bounded_file(extension_fd, retired_name,
-                                 limit=MAX_INCLUDE, permissions=0o600) == _include(record["op"]):
+                                 limit=MAX_INCLUDE, permissions=0o600) == _include(
+                                     record["op"], record["ruleset"]):
                     os.unlink(retired_name, dir_fd=extension_fd)
                     os.fsync(extension_fd)
             except OSError:

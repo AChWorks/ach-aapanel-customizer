@@ -80,6 +80,26 @@ Earlier checklists and proposed complexity must be re-evaluated against this
 principle. Recording it does not imply other runtime controls have changed.
 
 
+### Owner decision: manual-first site reconciliation (2026-11-22)
+
+For complicated or infrequent changes made outside Customizer (native aaPanel
+website regeneration, domain/SSL/PHP assignment, WordPress URLs, Nginx source
+or unsupported site layouts), the authorized administrator can **manually
+refresh/Recheck the affected site and Apply/Restore the specific policy once**.
+If the change does not affect an enabled Customizer policy, no Customizer
+action is necessary. Accurate source/runtime/drift status and actionable
+Recovery remain mandatory; an external edit never licenses overwriting foreign
+settings, certificates, sites or data.
+
+**Do not create new persistent watchers, generic self-healing, automatic
+reconfiguration, unsupported source adapters, or recurring scans** merely to
+avoid this manual workflow. Existing explicitly accepted PHP-FPM automatic
+repair and the WordPress Cache/Bridge normal event behavior continue unchanged.
+A new automatic mechanism requires separately evidenced benefit and Owner
+acceptance. Success for an uncommon supported configuration can be
+**Recheck -> one-time guarded Apply/Restore -> verify** rather than a
+forever-running synchronization service. See Issue #2 for the active backlog.
+
 ### Owner decision: direct local Hosts removal (2026-11-20)
 
 Unattended /etc/hosts cleanup after WordPress setup is **no longer a product
@@ -164,9 +184,11 @@ or broad file types by default. Every active security policy needs fresh
 source ownership, guarded apply/reload, live response proof, durable recovery,
 separate approval for Restore and drift awareness. Exact URL probes are
 not universal proof of full HTTP/2/3, CDN/HTTPS or all custom site aliases.
-Security policy starts disabled until primary-admin opt-in. A successfully
-applied per-request guard is different from automated recovery after aaPanel
-regeneration; the latter is still an independent required lifecycle outcome.
+Security policy starts disabled until primary-admin opt-in. After native
+aaPanel regenerates a selected-site source, **manual Recheck followed by
+one-time guarded Apply/Restore** is the accepted reconciliation route;
+a separate automatic Nginx-regeneration watcher is not required. Existing
+approved PHP-FPM auto-repair remains a distinct, unchanged capability.
 
 ### Owner-confirmed operational acceptance priority (2026-11-18)
 

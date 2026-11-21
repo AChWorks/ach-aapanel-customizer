@@ -91,6 +91,7 @@ function loadUi() {
     '#ach-reconcile-to-websites', '#ach-reconcile-to-cache',
     '#ach-reconcile-to-php', '#ach-reconcile-to-status',
     '#ach-guard-preview', '#ach-guard-recheck', '#ach-guard-summary',
+    '#ach-guard-block-xmlrpc',
     '#ach-guard-result', '#ach-guard-apply-why', '#ach-guard-apply-reviewed',
     '#ach-guard-apply', '#ach-guard-restore-why', '#ach-guard-restore-reviewed',
     '#ach-guard-restore',
@@ -1873,8 +1874,17 @@ function wpSettingsReply(action, kind='debug', state='Source Ready', fields={}) 
     interval:kind==='cron'?5:null,reason:'',
     impact:kind==='xmlrpc' ?
       'Selected WordPress XML-RPC endpoint only; site-owned must-use plugin, no Nginx reload' :
+      kind==='https' ?
+      'Selected WordPress home/siteurl database options only; converts HTTP to HTTPS, no DNS/Nginx/certificate changes' :
       'Selected WordPress wp-config.php setting only' +
       (kind==='cron' ? ' plus a root-owned site-specific /etc/cron.d scheduler' : ''),
+    ...(kind==='https' ? {
+      urls_before:state==='Applied' ? {home:'http://site.test/',siteurl:'http://site.test/wp'} :
+        state==='Restored' ? {home:'https://site.test/',siteurl:'https://site.test/wp'} :
+        {home:'http://site.test/',siteurl:'http://site.test/wp'},
+      urls_target:state==='Restored' ? {home:'http://site.test/',siteurl:'http://site.test/wp'} :
+        {home:'https://site.test/',siteurl:'https://site.test/wp'}
+    } : {}),
     request_id:'d'.repeat(32), ...fields
   };
 }
@@ -1900,6 +1910,59 @@ test('XML-RPC gate uses selected site and owned MU-plugin without a Nginx reload
   assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
   restore.respond(wpSettingsReply('restore','xmlrpc','Restored'));
   assert.match(ui.state().wpSettingsResult,/Restored — XML-RPC policy changed/);
+});
+
+test('HTTPS URLs use selected-site manual Preview, one-time Apply and exact Restore', () => {
+  const ui=loadUi();
+  selectHostsSite(ui);
+  ui.statusSetValue('#ach-wp-settings-kind','https','input change');
+  const initial=ui.statusClick('#ach-wp-settings-recheck');
+  assert.equal(initial.options.data.settings_kind,'https');
+  assert.equal(initial.options.data.desired,'https');
+  initial.respond(wpSettingsReply('recheck','https'));
+  assert.match(ui.state().wpSettingsResult,/Current home: http:\/\/site.test\//);
+  assert.match(ui.state().wpSettingsResult,/Target siteurl: https:\/\/site.test\/wp/);
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
+  const apply=ui.statusClick('#ach-wp-settings-apply');
+  assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
+  assert.equal(apply.options.data.approved,'true');
+  apply.respond(wpSettingsReply('apply','https','Applied'));
+  assert.match(ui.state().wpSettingsResult,/Applied/);
+  ui.statusClick('#ach-wp-settings-recheck').respond(
+    wpSettingsReply('recheck','https','Applied',{source_sha256:'b'.repeat(64)}));
+  assert.equal(ui.state().wpSettingsRestoreDisabled,false);
+  const restore=ui.statusClick('#ach-wp-settings-restore');
+  assert.equal(restore.options.data.expected_source_sha256,'b'.repeat(64));
+  assert.equal(restore.options.data.expected_recovery_id,'c'.repeat(32));
+  restore.respond(wpSettingsReply('restore','https','Restored',
+    {source_sha256:'a'.repeat(64)}));
+  assert.match(ui.state().wpSettingsResult,/Restored/);
+});
+
+test('Malformed HTTPS URL evidence never enables a write', () => {
+  const ui=loadUi(); selectHostsSite(ui);
+  ui.statusSetValue('#ach-wp-settings-kind','https','input change');
+  ui.statusClick('#ach-wp-settings-recheck').respond(wpSettingsReply(
+    'recheck','https','Source Ready',{urls_target:{home:null,siteurl:'https://site.test/'}}));
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  assert.match(ui.state().wpSettingsResult,/not confirmed/i);
+  const fresh=ui.statusClick('#ach-wp-settings-recheck');
+  fresh.respond(wpSettingsReply('recheck','https'));
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
+  ui.statusSetValue('#ach-wp-settings-kind','debug','input change');
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+});
+
+test('WordPress XML-RPC live-probe Needs Review remains visible without authorizing Apply',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusSetValue('#ach-wp-settings-kind','xmlrpc','input change');
+  ui.statusClick('#ach-wp-settings-recheck').respond(wpSettingsReply(
+    'recheck','xmlrpc','Needs Review',
+    {reason:'WordPress XML-RPC response failed the managed proof'}));
+  assert.match(ui.state().wpSettingsResult,/Needs Review/);
+  assert.match(ui.state().wpSettingsResult,/response failed the managed proof/);
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  assert.equal(ui.state().wpSettingsRestoreDisabled,true);
 });
 
 test('XML-RPC changes cannot reuse Debug or site evidence', () => {
@@ -9109,7 +9172,8 @@ function sensitiveGuardResponse(state='Unmanaged', changes={}) {
   return {
     status:true,schema:1,site_id:7,site_key:'site.test',
     site_root:'/www/site.test',mode:'native_site_sensitive_paths',
-    ruleset:'nested-sensitive-v2',state,reason:'Native source and exclusive include verified',
+    ruleset:'nested-sensitive-v2',block_xmlrpc:false,
+    state,reason:'Native source and exclusive include verified',
     read_only:true,changed:false,runtime_verified:active||retired,
     vhost_sha256:'a'.repeat(64),proposal_sha256:'b'.repeat(64),
     recovery_id:active||retired?'c'.repeat(32):null,
@@ -9158,6 +9222,50 @@ test('Sensitive-file Nginx guard requires fresh source plus distinct Apply and R
   }));
   assert.equal(ui.state().guardRestoreDisabled,true);
   assert.equal(ui.state().guardApplyDisabled,true);
+  assert.match(ui.state().guardResult,/Protection: Restored/);
+});
+
+test('Optional pre-PHP XML-RPC uses the existing guard, invalidates stale Preview and preserves Recovery',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  const initial=ui.statusClick('#ach-guard-preview');
+  assert.equal(initial.options.data.guard_block_xmlrpc,'false');
+  initial.respond(sensitiveGuardResponse());
+  ui.statusSetChecked('#ach-guard-apply-reviewed',true);
+  assert.equal(ui.state().guardApplyDisabled,false);
+  ui.statusSetChecked('#ach-guard-block-xmlrpc',true);
+  assert.equal(ui.state().guardApplyDisabled,true,
+    'changing the Nginx ruleset invalidates the previously approved proposal');
+  const updated=ui.statusClick('#ach-guard-preview');
+  assert.equal(updated.options.data.guard_block_xmlrpc,'true');
+  updated.respond(sensitiveGuardResponse('Unmanaged',{
+    ruleset:'nested-sensitive-xmlrpc-v3',block_xmlrpc:true,
+    proposal_sha256:'d'.repeat(64)
+  }));
+  ui.statusSetChecked('#ach-guard-apply-reviewed',true);
+  assert.equal(ui.state().guardApplyDisabled,false);
+  const apply=ui.statusClick('#ach-guard-apply');
+  assert.equal(apply.options.data.guard_block_xmlrpc,'true');
+  assert.equal(apply.options.data.expected_proposal_sha256,'d'.repeat(64));
+  apply.respond(sensitiveGuardResponse('Applied',{
+    ruleset:'nested-sensitive-xmlrpc-v3',block_xmlrpc:true,
+    proposal_sha256:'d'.repeat(64),
+    read_only:false,changed:true
+  }));
+  assert.match(ui.state().guardResult,/pre-PHP XML-RPC block: Selected/);
+  const recheck=ui.statusClick('#ach-guard-recheck');
+  recheck.respond(sensitiveGuardResponse('Applied',{
+    ruleset:'nested-sensitive-xmlrpc-v3',block_xmlrpc:true,
+    proposal_sha256:'d'.repeat(64)
+  }));
+  ui.statusSetChecked('#ach-guard-block-xmlrpc',false);
+  ui.statusSetChecked('#ach-guard-restore-reviewed',true);
+  assert.equal(ui.state().guardRestoreDisabled,false,
+    'changing a future selected option must not prevent exact recovery of the active variant');
+  const restore=ui.statusClick('#ach-guard-restore');
+  assert.equal(restore.options.data.recovery_id,'c'.repeat(32));
+  restore.respond(sensitiveGuardResponse('Restored',{
+    read_only:false,changed:true,journal_phase:'restored'
+  }));
   assert.match(ui.state().guardResult,/Protection: Restored/);
 });
 
