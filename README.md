@@ -10,8 +10,8 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-22; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Merged development source** | Native `0.1.91` integrated into `main` by [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118) (merge `8c1aca8e2e8b7f78ea419043a9d0e1021c7abf70`); Bridge `0.1.9` unchanged | [Exact candidate CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/44975680996) passed (1,207 Python, 380 UI); [installed 0.1.91 QA on the retained VM](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7072889806) passed for its tested paths. **No public 0.1.91 Release or Production deployment is claimed.** |
-| **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
+| **Merged development source** | Native **`0.1.97`** integrated by independently approved, Owner-authorized [PR #121](https://github.com/AChWorks/ach-aapanel-customizer/pull/121), merge `4f2e99669d0e9d043dd42322fd53d9faa362f343`, exact TREE `7d24571644a911ab2f15d3dfbe2fafdebaad60fb`; Bridge **`0.1.9` unchanged** | [Reviewed candidate CI #44988160297](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/44988160297) and [merged-main CI #45020921495](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/45020921495) **SUCCESS** (1,213 Python / 384 UI). Same candidate ZIP officially installed and byte-verified in retained QA VM (69/69), with 16/16 populated table layouts, 56/56 expanded responsive cases and 6/6 keyboard cases; see [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21). **No public Native 0.1.97 Release or Production deployment is claimed.** |
+| **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`, officially installed Native **`0.1.97`**, package SHA256 `ddf5fa3680550b788cee14849d7a539d38343644809c956ac3d476c3f2be6893`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) holds the resident version/69-file hash verification | **One persistent Running VM**, not a fresh guest. Accepted data-driven layout, host/site health and historical source boundaries belong to [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21); retain this exact guest during development. |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
 source manifests, current PR/CI and the target installation before relying on
@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.91 merged source: basic website file protection, no duplicate directory-index rule
+## Historical Native 0.1.91 milestone: website file protection, no duplicate directory-index rule
 
 On the retained native aaPanel VM, a synthetic directory without an index
 already returned HTTP 403 (Nginx autoindex disabled). No duplicate listing
@@ -151,7 +151,7 @@ source fails with an actionable reason. This is opt-in per site, not an
 automatic new-site policy; a successful source write alone is not a live
 WordPress application or cron-execution acceptance.
 
-The current feature branch adds conservative read-only WordPress/WooCommerce
+The merged development source includes conservative read-only WordPress/WooCommerce
 **file-based classification** to website inventory. It does not claim a live
 WordPress bootstrap or WooCommerce activation from files alone; unknown
 and symlinked targets remain Unclassified. The global Status Pages
