@@ -139,6 +139,10 @@
   #ach-customizer .ach-help dt { font-weight:600; }
   #ach-customizer .ach-help dd { margin:0; }
   #ach-customizer .ach-help p { margin:10px 0 0; color:var(--ach-muted); }
+  /* Inline configuration names/short paths are single readable tokens.
+     The shipped markup contains no long inline <code> payloads; long evidence
+     stays in the separately scrollable technical report instead. */
+  #ach-customizer .ach-view code { white-space:nowrap; }
 
   #ach-customizer .ach-sidebar button {
     appearance:none; display:block; width:100%; min-height:40px; padding:10px 20px;
@@ -998,7 +1002,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.93'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.94'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',

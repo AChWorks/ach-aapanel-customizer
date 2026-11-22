@@ -148,6 +148,7 @@ class PackageContractTests(unittest.TestCase):
         self.assertIn('class="ach-guard-option"', html)
         self.assertIn('id="ach-guard-block-xmlrpc" /><span>', html)
         self.assertIn('grid-template-columns:16px minmax(0,1fr)', html)
+        self.assertIn('#ach-customizer .ach-view code { white-space:nowrap; }', html)
         self.assertIn('<summary>What changes when I enable this?</summary>', html)
         self.assertIn('Check protection readiness', html)
         self.assertIn('Recheck current protection', html)
