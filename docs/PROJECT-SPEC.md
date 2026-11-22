@@ -1,6 +1,6 @@
 # ACh aaPanel Customizer — Project Specification
 
-- **Status:** Canonical product intent — staged development with reviewed pre-release packages; Production deployment remains separately gated
+- **Status:** Canonical product intent; actual published packages belong to GitHub Releases and Production deployment remains separately gated
 - **Repository:** `AChWorks/ach-aapanel-customizer`
 - **Owner:** AChWorks
 - **Product:** ACh aaPanel Customizer
@@ -121,7 +121,7 @@ the required workflow.
 
 ### Optional WordPress companion
 
-The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Coordinated pre-releases can attach both artifacts after their respective review and release authorization; installation and Production deployment remain separate actions.
+The native aaPanel plugin remains a standalone aaPanel product. An operator may also install **ACh aaPanel Bridge**, a separate, optional ordinary WordPress plugin (slug `ach-aapanel-bridge`) maintained **in this repository** under `wordpress/ach-aapanel-bridge/`. The companion has its **own independent version** and installable ZIP; do not embed it in the native aaPanel ZIP or make WordPress mandatory for ordinary aaPanel features. Coordinated Releases can attach both artifacts after their respective review and publication authorization; installation and Production deployment remain separate actions.
 The WordPress installable ZIP must include a platform-standard
 `readme.txt` (with its `Stable tag` matching the main PHP entrypoint
 version). The longer repository-only Markdown guide must not replace
@@ -491,6 +491,13 @@ The distribution target is one aaPanel-compatible, versioned plugin package, inc
 - Preserve operator configuration, managed-target identities, policy state, logs/recovery records as appropriate, and required backups.
 - Treat schema migrations and code activation as verifiable lifecycle steps; failures must be diagnosable and recoverable or safely stopped.
 - Detect changes in aaPanel's plugin APIs or target configuration syntax; prevent incompatible enforcement after upgrading either side.
+
+**Stable-version boundary:** Earlier experimental Customizer QA and development
+pre-releases do not impose backward-compatibility migrations on the first
+Stable package. Starting with that published Stable baseline, future updates
+must preserve supported operator configuration, active contracts and owned
+recovery records, or provide an explicitly verified migration/recovery path.
+This does not turn a third-party or unsupported writer into a supported one.
 
 ### Uninstall and reset
 
