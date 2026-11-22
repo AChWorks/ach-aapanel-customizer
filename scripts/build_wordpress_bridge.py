@@ -19,6 +19,7 @@ FILES = (
     "includes/class-cache-invalidation.php",
     "includes/class-plugin.php",
     "readme.txt",
+    "LICENSE",
 )
 
 # ZIP member timestamps depend on source bytes, not wall-clock time.
@@ -45,12 +46,14 @@ def build(output: str | Path) -> dict[str, str]:
     # exact bytes checked below must be the bytes placed in the archive.
     payloads = {}
     for name in FILES:
-        source = PLUGIN / name
+        source = ROOT / name if name == "LICENSE" else PLUGIN / name
         if source.is_symlink() or not source.is_file():
             raise ValueError(f"Missing or unsafe WordPress companion source: {name}")
         payloads[name] = source.read_bytes()
     header = payloads[ENTRY].decode("utf-8")
     if (_header(header, "Plugin Name") != "ACh aaPanel Bridge" or
+            _header(header, "License") != "MPL-2.0" or
+            _header(header, "License URI") != "https://www.mozilla.org/en-US/MPL/2.0/" or
             _header(header, "Text Domain") != SLUG or
             _header(header, "Update URI") !=
             "https://github.com/AChWorks/ach-aapanel-customizer/tree/main/wordpress/ach-aapanel-bridge"):
@@ -65,8 +68,13 @@ def build(output: str | Path) -> dict[str, str]:
     stable_tags = re.findall(r"(?m)^Stable tag:[ \t]*([^\r\n]+)$", readme)
     if len(stable_tags) != 1 or stable_tags[0].strip() != version:
         raise ValueError("WordPress readme.txt Stable tag does not match PHP plugin Version")
+    if (len(re.findall(r"(?m)^License: MPL-2\.0$", readme)) != 1 or
+            len(re.findall(r"(?m)^License URI: https://www\.mozilla\.org/en-US/MPL/2\.0/$",
+                           readme)) != 1):
+        raise ValueError("WordPress readme.txt MPL-2.0 license declaration is missing or inconsistent")
     destination = Path(output).resolve()
-    if any(destination == (PLUGIN / name).resolve() for name in FILES):
+    if any(destination == (ROOT / name if name == "LICENSE" else PLUGIN / name).resolve()
+           for name in FILES):
         raise ValueError("WordPress ZIP output must not overwrite a package source file")
     destination.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(destination, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:

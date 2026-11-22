@@ -1,7 +1,9 @@
 === ACh aaPanel Bridge ===
 Tags: aapanel, nginx, cache, wordpress, diagnostics
 Tested up to: 7.1
-Stable tag: 0.1.9
+Stable tag: 0.1.10
+License: MPL-2.0
+License URI: https://www.mozilla.org/en-US/MPL/2.0/
 
 Optional WordPress diagnostics and opt-in, site-owned Nginx Helper cache URL invalidation for ACh aaPanel Customizer.
 
@@ -113,6 +115,11 @@ submission, licensing and other Directory requirements are separate
 decisions and are not implied by the presence of this standard readme.txt.
 
 == Changelog ==
+
+= 0.1.10 =
+
+* Declare MPL-2.0 in WordPress plugin metadata and ship the complete license
+  with the standalone ZIP. Functional WordPress Cache behavior is unchanged.
 
 = 0.1.9 =
 

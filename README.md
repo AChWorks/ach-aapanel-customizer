@@ -40,6 +40,19 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 
 **Verified reference, not a universal support promise:** non-production **aaPanel 8.0.7**, Nginx, PHP-FPM **8.1/8.5** on representative sites. Other aaPanel/Nginx/PHP writer layouts are inspected by capability, not arbitrarily rejected by version, but a write requires a supported real source/ownership contract. See [installed-native QA evidence, exact candidate and remaining coverage](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), [feature/compatibility backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [TLS/Status Pages scope](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). **Publishing a Stable Release is not a claim of comprehensive Production certification or permission to deploy to Production.**
 
+## License
+
+**Mozilla Public License 2.0 (MPL-2.0)** governs the original project source,
+including the native aaPanel plugin and the separately distributed WordPress
+Bridge, unless an individual file explicitly carries different terms. Read the
+[complete MPL-2.0 license](LICENSE). Both independently built installer ZIPs
+include that same license text. The MPL requires modified covered source files
+to remain available under its terms when distributed; it permits combination
+with other software through its file-level copyleft and its unmodified
+Secondary Licenses provision. Existing releases and their original contents
+remain unchanged; check the exact Release assets for the terms shipped in
+that version.
+
 ## Development and verification
 
 The native and WordPress packages are independent deterministic ZIPs:

@@ -14,6 +14,7 @@ different question:
 | Native Cache provisioning, ownership, recovery and operator prerequisites | [Native integration guide](../../docs/aapanel-integration.md#optional-wordpress-bridge-operator-prerequisites) |
 | Lasting product scope and safety constraints | [Project specification](../../docs/PROJECT-SPEC.md) |
 | Published ZIP version and checksum | [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) |
+| Source license and distribution requirements | [MPL-2.0](../../LICENSE); the full text ships as `LICENSE` in the standalone ZIP |
 | Reviewable changes, open gaps and installed acceptance | [PRs](https://github.com/AChWorks/ach-aapanel-customizer/pulls), [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2), [QA Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) |
 
 ## Source layout and invariants
@@ -49,7 +50,7 @@ python3 -B scripts/build_wordpress_bridge.py --output /tmp/ach-aapanel-bridge.zi
 ```
 
 The archive must contain one `ach-aapanel-bridge/` directory, the main
-PHP file, three PHP helpers and **`readme.txt`**; it must not ship
+PHP file, three PHP helpers, **`readme.txt` and `LICENSE`**; it must not ship
 `README.md`, build fixtures, cache artifacts or an updater. The builder
 refuses a missing/redirected readme, mismatched `Stable tag` and any
 output path that would overwrite a source package member. Package members
@@ -65,5 +66,7 @@ Nginx Helper, PHP-FPM and native host acceptance belongs to
 [QA Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
 and must not be claimed from isolated PHP stubs or a ZIP hash alone.
 An internal development ZIP is not a published release or Production
-installation. WordPress.org Plugin Directory listing and software
-licensing remain separate decisions, not implied by this readme format.
+installation. WordPress.org Plugin Directory listing remains a separate decision,
+not implied by this readme format. The Bridge declares `MPL-2.0` in its
+WordPress header and `readme.txt` without opting out of MPL secondary
+license compatibility with GNU GPL projects.

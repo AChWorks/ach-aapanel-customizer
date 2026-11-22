@@ -5,6 +5,10 @@
 - **Owner:** AChWorks
 - **Product:** ACh aaPanel Customizer
 - **Primary distribution:** Native, installable aaPanel plugin
+- **Owner-selected source license:** Mozilla Public License 2.0 (`MPL-2.0`);
+  preserve separately attributed third-party terms, GPL secondary-license
+  compatibility, and copies of the complete license in both ZIP packages.
+  Previously published archive bytes are not rewritten by a licensing change.
 
 > **QA environment policy (Owner, 2026-11-21):** Continue all non-production
 > native development/testing on the **same retained Running VM** recorded in
