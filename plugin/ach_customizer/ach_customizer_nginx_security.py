@@ -679,19 +679,27 @@ def manage_guard(action, site, *, data_fd, approved=False,
             except (ExtensionError, OSError) as exc:
                 if retired_here:
                     try:
-                        # Only the exact inode moved by this operation may
-                        # return to the live filename. Never move an injected
-                        # symlink, replacement inode or untrusted entry into
-                        # Nginx's *.conf include. Do not overwrite a new live
-                        # entry introduced by another writer.
-                        _bounded_file(extension_fd, retired_name,
-                                      limit=MAX_INCLUDE, permissions=0o600)
+                        # A rollback reintroduces a *.conf included by Nginx.
+                        # Inode identity and trusted metadata alone cannot
+                        # authorize that: the SAME inode may have been edited
+                        # in place after retirement. Only the original exact
+                        # journal-owned bytes may be made live again.
+                        rollback_bytes = _bounded_file(
+                            extension_fd, retired_name,
+                            limit=MAX_INCLUDE, permissions=0o600)
+                        if (rollback_bytes is None
+                                or rollback_bytes != expected_retired
+                                or _sha(rollback_bytes) != record["include_sha"]):
+                            raise GuardError(
+                                "concurrency", "Retired Guard content changed; "
+                                "cannot safely restore original filename")
                         rollback_stat = os.stat(
                             retired_name, dir_fd=extension_fd, follow_symlinks=False)
                         if (rollback_stat.st_dev, rollback_stat.st_ino) != moved_identity:
                             raise GuardError(
                                 "concurrency", "Retired Guard inode replaced; "
                                 "cannot safely restore original filename")
+                        # Never replace a concurrently created live entry.
                         _rename_noreplace(extension_fd, retired_name, filename)
                         os.fsync(extension_fd)
                     except Exception as rollback:

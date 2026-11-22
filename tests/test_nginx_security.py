@@ -588,7 +588,7 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertEqual(json.loads((self.state / guard._journal(
             self.site["id"])).read_text())["phase"], "applied")
 
-    def _assert_foreign_guard_swap_is_rolled_back(self, timing):
+    def _assert_foreign_guard_swap_is_retained_without_reload(self, timing):
         applied = self.operate("apply")
         checked = self.operate("recheck")
         original_rename = guard._rename_noreplace
@@ -603,6 +603,8 @@ class NativeSecurityTests(unittest.TestCase):
                     self.fragment.write_bytes(foreign)
                 original_rename(fd, before, after)
                 if timing == "after":
+                    # In-place corruption: same original moved inode, still
+                    # root-owned with the same safe file mode.
                     (self.ext / after).write_bytes(foreign)
                 return
             return original_rename(fd, before, after)
@@ -613,21 +615,62 @@ class NativeSecurityTests(unittest.TestCase):
                 self.operate("restore", recovery=applied["recovery_id"],
                              source=checked["vhost_sha256"])
         self.assertTrue(triggered)
-        self.assertEqual(error.exception.stage, "concurrency")
-        self.assertEqual(self.fragment.read_bytes(), foreign)
-        self.assertFalse((self.ext / guard._retained(
-            self.site["id"], applied["recovery_id"])).exists())
+        self.assertEqual(error.exception.stage, "uncertain")
+        self.assertEqual(error.exception.recovery_id, applied["recovery_id"])
+        self.assertFalse(self.fragment.exists(),
+                         "Altered retained bytes must NEVER enter live *.conf")
+        retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+        self.assertEqual(retained.read_bytes(), foreign,
+                         "Preserve foreign bytes for explicit manual inspection")
         self.assertEqual(len([x for x in self.commands if "reload" in x]), reloads)
         self.assertEqual(json.loads((self.state / guard._journal(
             self.site["id"])).read_text())["phase"], "applied")
         self.assertEqual(self.operate("recheck")["state"], "Needs Review")
         self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
 
-    def test_foreign_guard_swapped_before_rename_rolls_back_without_reload(self):
-        self._assert_foreign_guard_swap_is_rolled_back("before")
+    def test_foreign_guard_swapped_before_rename_is_retained_without_reload(self):
+        self._assert_foreign_guard_swap_is_retained_without_reload("before")
 
-    def test_foreign_guard_swapped_after_rename_rolls_back_without_reload(self):
-        self._assert_foreign_guard_swap_is_rolled_back("after")
+    def test_foreign_guard_swapped_after_rename_is_retained_without_reload(self):
+        self._assert_foreign_guard_swap_is_retained_without_reload("after")
+
+    def test_transient_retirement_read_failure_rolls_back_exact_owned_file_safely(self):
+        applied = self.operate("apply")
+        checked = self.operate("recheck")
+        expected = self.fragment.read_bytes()
+        retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+        original_read = guard._bounded_file
+        injected = False
+
+        def fail_once_after_rename(fd, name, **kwargs):
+            nonlocal injected
+            if name == retained.name and retained.exists() and not injected:
+                injected = True
+                raise guard.ExtensionError(
+                    "concurrency", "Simulated transient read failure after retirement")
+            return original_read(fd, name, **kwargs)
+
+        reloads = len([x for x in self.commands if "reload" in x])
+        with patch.object(guard, "_bounded_file", side_effect=fail_once_after_rename):
+            with self.assertRaises(guard.GuardError) as error:
+                self.operate("restore", recovery=applied["recovery_id"],
+                             source=checked["vhost_sha256"])
+        self.assertTrue(injected)
+        self.assertEqual(error.exception.stage, "concurrency")
+        self.assertEqual(error.exception.recovery_id, applied["recovery_id"])
+        self.assertEqual(self.fragment.read_bytes(), expected,
+                         "Only the exact journal-owned fragment may return")
+        self.assertFalse(retained.exists())
+        self.assertEqual(len([x for x in self.commands if "reload" in x]), reloads)
+        self.assertEqual(json.loads((self.state / guard._journal(
+            self.site["id"])).read_text())["phase"], "applied")
+        rechecked = self.operate("recheck")
+        self.assertEqual(rechecked["state"], "Applied")
+        self.assertEqual(self.operate(
+            "restore", recovery=applied["recovery_id"],
+            source=rechecked["vhost_sha256"])["state"], "Restored")
+        self.assertFalse(self.fragment.exists())
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
 
     def test_retained_guard_changed_during_final_syntax_does_not_reload(self):
         applied = self.operate("apply")
