@@ -301,7 +301,7 @@ function loadUi() {
   function $(value) {
     if (value === '#ach-customizer') return selection([root]);
     if (value && typeof value === 'object' && value.handlers) return selection([value]);
-    if (typeof value === 'string' && /^<(tr|td|option)\b/.test(value)) {
+    if (typeof value === 'string' && /^<(tr|td|option|time|span)\b/.test(value)) {
       return selection([fakeNode(value.slice(1).split(/\W/)[0])]);
     }
     throw new Error('Unexpected unscoped jQuery target: ' + String(value));
@@ -701,7 +701,14 @@ function loadUi() {
     respondControl, state, requests,
     clickNext: () => trigger(elements.get('#ach-next'), 'click'),
     clickPrevious: () => trigger(elements.get('#ach-prev'), 'click'),
-    activityRows: () => elements.get('#ach-activity-rows').children.map(tr => tr.children.map(td => td.textContent)),
+    activityRows: () => {
+      const textOf = node => node.textContent + node.children.map(textOf).join('');
+      return elements.get('#ach-activity-rows').children.map(tr => tr.children.map(textOf));
+    },
+    activityTimeCells: () => elements.get('#ach-activity-rows').children.map(tr => {
+      const time = tr.children[0]?.children[0];
+      return {datetime:time?.attributes.datetime, lines:time?.children.map(span => span.textContent) || []};
+    }),
     activityMessage: () => elements.get('#ach-activity-result').textContent,
     activityFilter: (selector, value) => {
       elements.get(selector).props.value = value;
@@ -5209,6 +5216,30 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
   assert.match(html, /<h4 class="ach-sr-only">Overview<\/h4>/);
+});
+
+test('Dense Activity and Website tables preserve readable column widths', () => {
+  assert.match(html, /\.ach-scroll > table \{ min-width:640px; \}/);
+  assert.match(html, /\.ach-scroll > table\.ach-website-table,/);
+  assert.match(html, /\.ach-scroll > table\.ach-activity-table \{ min-width:760px; \}/);
+  assert.match(html, /class="ach-website-table"/);
+  assert.match(html, /\.ach-activity-table \{ table-layout:fixed; \}/);
+  assert.match(html, /\.ach-activity-table td:nth-child\(2\) \{ white-space:nowrap; \}/);
+});
+
+test('Activity records show a complete WARNING label and a semantic two-line UTC time', () => {
+  const ui=loadUi();
+  const req=ui.openActivity();
+  req.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[{
+    schema:1,time_utc:'2026-11-22T04:57:40+00:00',level:'WARNING',module:'websites',
+    action:'preview_cache_safety',stage:'complete',outcome:'Needs Review',target:'1',
+    detail:'',error_class:'',operation_id:'a'.repeat(32),recovery_id:''
+  }]});
+  assert.deepEqual(ui.activityTimeCells(), [{
+    datetime:'2026-11-22T04:57:40+00:00',lines:['2026-11-22','04:57:40+00:00']
+  }]);
+  assert.equal(ui.activityRows()[0][1],'WARNING');
+  assert.equal(ui.activityRows()[0][4],'a'.repeat(32));
 });
 
 test('Activity panel filters read-only structured events and uses text rendering', () => {
