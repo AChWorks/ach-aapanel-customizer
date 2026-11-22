@@ -626,11 +626,9 @@
           <p id="ach-guard-result" class="ach-status-metadata" role="status">No native protection inspection yet.</p>
         </details>
         <p id="ach-guard-apply-why" class="ach-availability" data-state="blocked" role="status">Select a website and check readiness before enabling protection.</p>
-        <label><input id="ach-guard-apply-reviewed" type="checkbox" disabled /> I checked this site's proposed changes and approve the shared Nginx reload.</label>
         <div class="ach-controls"><button id="ach-guard-apply" type="button" class="btn btn-warning" disabled>Enable protection (reload Nginx)</button></div>
         <p id="ach-guard-restore-why" class="ach-availability" data-state="blocked" role="status">Select a website and Recheck to see whether Restore is available.</p>
-        <label><input id="ach-guard-restore-reviewed" type="checkbox" disabled /> I reviewed the saved recovery and approve restoring this site's protection (Nginx reloads).</label>
-        <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Restore previous protection</button></div>
+        <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Remove managed Guard (reload Nginx)</button></div>
       </div>
       <div class="ach-note" aria-label="Fail2ban abusive scan protection">
         <strong>Abusive-scan protection — Fail2ban (opt-in)</strong>
@@ -1067,7 +1065,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.97'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.98'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2897,7 +2895,7 @@
     guardBusy = false;
     guardReady = null;
     guardRecovery = null;
-    root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed,#ach-guard-block-xmlrpc').prop('checked',false);
+    root.find('#ach-guard-block-xmlrpc').prop('checked',false);
     root.find('#ach-guard-result').text('Website selection or source changed; run a fresh protection check.');
     inspectionSummary('guard', 'Select a website and inspect its current Nginx security source.');
     guardLock();
@@ -2911,18 +2909,14 @@
     var applyAllowed = !blocked && !!guardReady && guardReady.siteId === id &&
       guardReady.xmlrpc === (root.find('#ach-guard-block-xmlrpc').prop('checked') === true);
     var restoreAllowed = !blocked && !!guardRecovery && guardRecovery.siteId === id;
-    root.find('#ach-guard-apply-reviewed').prop('disabled',!applyAllowed);
-    root.find('#ach-guard-apply').prop('disabled',!applyAllowed ||
-      root.find('#ach-guard-apply-reviewed').prop('checked') !== true);
-    root.find('#ach-guard-restore-reviewed').prop('disabled',!restoreAllowed);
-    root.find('#ach-guard-restore').prop('disabled',!restoreAllowed ||
-      root.find('#ach-guard-restore-reviewed').prop('checked') !== true);
+    root.find('#ach-guard-apply').prop('disabled',!applyAllowed);
+    root.find('#ach-guard-restore').prop('disabled',!restoreAllowed);
     explainGate('ach-guard-apply-why',applyAllowed?'ready':'blocked',
       !applyAllowed ? 'Locked: select a native website and run a fresh Unmanaged/Restored readiness check.' :
-      'Source and fixed policy plan verified. Review the shared Nginx reload and approve this exact site.');
+      'Ready: enabling protection changes this selected site and reloads shared Nginx.');
     explainGate('ach-guard-restore-why',restoreAllowed?'ready':'blocked',
       !restoreAllowed ? 'Locked: run a fresh Recheck of this site with an Applied or Recovery Required saved operation.' :
-      'Recovery ID found. Review the site and approve retiring its exact managed include.');
+      'Ready: Restore retires this exact owned protection and reloads shared Nginx.');
   }
   function validGuardReport(r,id,action) {
     var native = hostsPageSites.get(id);
@@ -2956,8 +2950,17 @@
     if (r.state === 'Restored' &&
         (!r.runtime_verified || !token(r.recovery_id) ||
          r.journal_phase !== 'restored' || !hash(r.vhost_sha256))) return false;
+    // Only the backend's explicit native-drift or interrupted-Restore scope
+    // permits an applied journal to report recoverable instead of Applied.
+    // Neither state proves the active Nginx workers still enforce Guard.
+    if (r.recovery_scope !== undefined &&
+        !(['native_source_drift','interrupted_restore'].includes(r.recovery_scope) &&
+          r.state === 'Recovery Required' && r.journal_phase === 'applied')) return false;
     if (r.state === 'Recovery Required' &&
-        (!token(r.recovery_id) || r.journal_phase !== 'prepared' ||
+        (!token(r.recovery_id) ||
+         !(r.journal_phase === 'prepared' ||
+           (r.journal_phase === 'applied' &&
+            ['native_source_drift','interrupted_restore'].includes(r.recovery_scope))) ||
          !hash(r.vhost_sha256))) return false;
     if (r.state === 'Unmanaged' &&
         (r.recovery_id !== null || r.journal_phase !== null ||
@@ -2971,8 +2974,9 @@
     if (!id || guardBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var isApply = action === 'apply', isRestore = action === 'restore';
     var selected = isApply ? guardReady : isRestore ? guardRecovery : null;
-    if ((isApply || isRestore) && (!selected || selected.siteId !== id ||
-        root.find(isApply ? '#ach-guard-apply-reviewed' : '#ach-guard-restore-reviewed').prop('checked') !== true)) return;
+    // Button action is the administrator's explicit consent; no second
+    // checkbox is needed after a fresh, scoped readiness or Recovery check.
+    if ((isApply || isRestore) && (!selected || selected.siteId !== id)) return;
     var ticket = ++guardTicket;
     guardBusy = true;
     guardLock();
@@ -2993,16 +2997,17 @@
     if (isRestore) {
       payload.approved = 'true';
       payload.recovery_id = selected.recovery;
+      payload.expected_vhost_sha256 = selected.vhost;
     }
     request('manage_nginx_protection',payload,function (r,failure) {
       if (ticket !== guardTicket) return;
       guardBusy = false;
       guardReady = null;
       guardRecovery = null;
-      root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').prop('checked',false);
       guardLock();
       if (id !== hostsSiteId()) return;
-      if (!r || !validGuardReport(r,id,action)) {
+      if (!r || !validGuardReport(r,id,action) ||
+          ((isApply || isRestore) && r.vhost_sha256 !== selected.vhost)) {
         inspectionSummary('guard','Protection result was refused or could not be verified; Recheck before another action.','review');
         root.find('#ach-guard-result').text(cacheBackendFailure(failure,'nginx_guard_manage') ||
           'Unconfirmed native Nginx protection result; inspect saved recovery and Activity before retry.');
@@ -3015,7 +3020,7 @@
       }
       if (action === 'recheck' && ['Applied','Recovery Required'].includes(r.state) &&
           /^[0-9a-f]{32}$/.test(r.recovery_id || '')) {
-        guardRecovery = {siteId:id,recovery:r.recovery_id};
+        guardRecovery = {siteId:id,recovery:r.recovery_id,vhost:r.vhost_sha256};
       }
       guardLock();
       inspectionSummary('guard',r.state + ': ' + r.reason,
@@ -3028,7 +3033,11 @@
         '\nNginx pre-PHP XML-RPC block: ' + (r.block_xmlrpc?'Selected':'Not selected') +
         '\nRecovery ID: ' + (r.recovery_id || 'None') +
         '\nJournal phase: ' + (r.journal_phase || 'None') +
-        '\nLive HTTP/80 guard nonce verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
+        '\n' + (r.runtime_verified && r.state === 'Applied' ?
+          'Managed Guard nonce present: Verified' :
+          r.runtime_verified && r.state === 'Restored' ?
+          'Former Guard nonce absent: Verified' :
+          'Runtime verification: Not confirmed') +
         '\nAutomatic enforcement: No\n' + r.reason +
         '\nAfter changes, run Recheck. HTTPS, WAF and custom application exceptions require independent QA.');
     });
@@ -3037,10 +3046,8 @@
   root.find('#ach-guard-recheck').on('click',function () {guardRequest('recheck');});
   root.find('#ach-guard-apply').on('click',function () {guardRequest('apply');});
   root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
-  root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').on('change',guardLock);
   root.find('#ach-guard-block-xmlrpc').on('change',function () {
     guardReady=null;
-    root.find('#ach-guard-apply-reviewed').prop('checked',false);
     root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
     guardLock();
   });

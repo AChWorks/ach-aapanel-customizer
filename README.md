@@ -13,6 +13,17 @@ or a WordPress-only plugin.
 | **Merged development source** | Native **`0.1.97`** integrated by independently approved, Owner-authorized [PR #121](https://github.com/AChWorks/ach-aapanel-customizer/pull/121), merge `4f2e99669d0e9d043dd42322fd53d9faa362f343`, exact TREE `7d24571644a911ab2f15d3dfbe2fafdebaad60fb`; Bridge **`0.1.9` unchanged** | [Reviewed candidate CI #44988160297](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/44988160297) and [merged-main CI #45020921495](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/45020921495) **SUCCESS** (1,213 Python / 384 UI). Same candidate ZIP officially installed and byte-verified in retained QA VM (69/69), with 16/16 populated table layouts, 56/56 expanded responsive cases and 6/6 keyboard cases; see [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21). **No public Native 0.1.97 Release or Production deployment is claimed.** |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`, officially installed Native **`0.1.97`**, package SHA256 `ddf5fa3680550b788cee14849d7a539d38343644809c956ac3d476c3f2be6893`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) holds the resident version/69-file hash verification | **One persistent Running VM**, not a fresh guest. Accepted data-driven layout, host/site health and historical source boundaries belong to [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21); retain this exact guest during development. |
 
+**Unmerged Native 0.1.98 source candidate (not yet installed):** the
+selected-site Nginx Guard now distinguishes an exact owned rule recoverable
+after live native VHost/domain drift from altered, ambiguous or cross-site
+source. It requires an operator-driven `Recheck -> Restore`, with Restore
+bound to the exact reviewed Nginx source SHA; an interrupted Restore with one
+exact retained fragment can also be completed without VHost drift. A fresh
+`Preview -> Apply` is needed on the changed source. The action button itself
+is administrator consent; there is no redundant second checkbox. No watcher, automatic
+repair, foreign-source overwrite or new production qualification. Refer to
+the native integration guide and current PR checks for exact acceptance.
+
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
 source manifests, current PR/CI and the target installation before relying on
 this dated checkpoint. **Merge, publication and deployment are separate steps.**

@@ -432,13 +432,33 @@ def manage_guard(action, site, *, data_fd, approved=False,
             record["site_root"] != site["path"] or
             record["bindings_sha"] != bindings_sha or
             record["vhost_sha"] != source_sha))
-        # A *fully restored* record no longer owns a live source. Once the
-        # selected native VHost/include graph is freshly inspected and no
-        # managed file exists, a later aaPanel regeneration must not prevent
-        # an administrator's one-time manual re-Apply. Never relax this for
-        # prepared/applied journals or an unexpected existing include.
-        if changed_source and not (
-                record["phase"] == "restored" and current is None):
+        # A fully restored record no longer owns a live source; permit a
+        # fresh operator-reviewed Apply after native regeneration.
+        restored_no_include = bool(
+            record and record["phase"] == "restored" and current is None)
+        # Inspect the same live/retained ownership state for every active
+        # journal, not only when the native VHost happened to change.
+        retained = None
+        live_owned = retained_owned = False
+        if record and record["phase"] in ("prepared", "applied"):
+            retained = _bounded_file(
+                extension_fd, _retained(site["id"], record["op"]),
+                limit=MAX_INCLUDE, permissions=0o600)
+            live_owned = (current is not None and retained is None
+                          and _sha(current) == record["include_sha"])
+            retained_owned = (current is None and retained is not None
+                              and _sha(retained) == record["include_sha"])
+
+        # Same-site/root native source drift may permit only an explicit
+        # retirement of the one exact owned rule. It never approves the
+        # new source or silently reapplies protection.
+        drift_restore_ready = bool(
+            changed_source and record["phase"] in ("prepared", "applied")
+            and record["site_key"] == site["name"]
+            and record["site_root"] == site["path"]
+            and record["vhost_sha"] != source_sha
+            and (live_owned or retained_owned))
+        if changed_source and not (restored_no_include or drift_restore_ready):
             if action in ("apply", "restore"):
                 raise GuardError(
                     "identity", "Native site/VHost changed; preserved security recovery requires review")
@@ -446,11 +466,27 @@ def manage_guard(action, site, *, data_fd, approved=False,
                            journal=record, reason="Site identity, root, bindings or native source drifted",
                            ruleset=selected_ruleset)
 
+        if action in ("preview", "recheck") and drift_restore_ready:
+            report = _report(
+                site, state="Recovery Required", source_sha=source_sha,
+                journal=record, ruleset=selected_ruleset,
+                reason="Native VHost source changed while this exact owned guard remains; "
+                       "explicitly Restore its Recovery ID before a fresh Preview/Apply")
+            if record["phase"] == "applied":
+                # Frontend validates the exact scope before exposing Restore;
+                # unverified drift must never be displayed as healthy Applied.
+                report["recovery_scope"] = "native_source_drift"
+            return report
+
         if action in ("preview", "recheck"):
             if record is None:
                 state = "Unmanaged" if current is None else "Needs Review"
             elif record["phase"] == "prepared":
-                state = "Recovery Required"
+                # The durable journal may precede publication, or one exact
+                # live/retained fragment may survive interrupted publication.
+                state = ("Recovery Required" if (
+                    live_owned or retained_owned or
+                    (current is None and retained is None)) else "Needs Review")
             elif record["phase"] == "restored":
                 state = "Restored" if current is None else "Needs Review"
                 if current is None:
@@ -459,8 +495,9 @@ def manage_guard(action, site, *, data_fd, approved=False,
                                   ruleset=record["ruleset"])
                     except (GuardError, OSError):
                         state = "Needs Review"
-            elif (record["phase"] == "applied" and current is not None
-                  and _sha(current) == record["include_sha"]):
+            elif record["phase"] == "applied" and retained_owned:
+                state = "Recovery Required"
+            elif record["phase"] == "applied" and live_owned:
                 try:
                     _verified(site, record["op"], present=True, probe=probe,
                               ruleset=record["ruleset"])
@@ -476,9 +513,25 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 "Recovery Required": "An interrupted Apply/Restore needs explicit inspected recovery",
                 "Needs Review": "Foreign/stale source, mismatch or unavailable runtime proof",
             }.get(state, "Native site not eligible")
-            return _report(site, state=state, source_sha=source_sha,
-                           journal=record, runtime_verified=state in ("Applied", "Restored"),
-                           reason=reason, ruleset=selected_ruleset)
+            if state == "Recovery Required" and record["phase"] == "applied":
+                reason = ("Interrupted Restore retained the exact owned Guard file; "
+                          "explicitly Restore the saved Recovery ID")
+            report = _report(site, state=state, source_sha=source_sha,
+                             journal=record, runtime_verified=state in ("Applied", "Restored"),
+                             reason=reason, ruleset=selected_ruleset)
+            if state == "Recovery Required" and record["phase"] == "applied":
+                report["recovery_scope"] = "interrupted_restore"
+            return report
+
+        # Bind Restore to the exact inspected source, not merely the
+        # original journal SHA or the selected native site snapshot.
+        if action == "restore" and (
+                not isinstance(expected_vhost, str)
+                or not HASH.fullmatch(expected_vhost)
+                or expected_vhost != source_sha):
+            raise GuardError(
+                "concurrency", "Native Nginx source changed or Recheck evidence is missing; "
+                "Recheck this site before Restore")
 
         # Neither a successful Nginx -t nor HTTP proof makes a write safe
         # if the generated native source is not still the reviewed source.
@@ -561,24 +614,138 @@ def manage_guard(action, site, *, data_fd, approved=False,
         retired_name = _retained(site["id"], record["op"])
         retained_bytes = _bounded_file(extension_fd, retired_name,
                                        limit=MAX_INCLUDE, permissions=0o600)
+        # Native aaPanel writers do not share our lock. Validate both the
+        # reviewed VHost/sibling sources and the exact Guard filenames again
+        # after the initial syntax test, before any rename or service reload.
+        if _source_safe(site, vhost_root=vhost_root,
+                        nginx_conf=nginx_conf)[0] != expected_vhost:
+            raise GuardError(
+                "concurrency", "Native Nginx source changed after Recheck; "
+                "Recheck this site before Restore")
+        live_now = _bounded_file(extension_fd, filename,
+                                 limit=MAX_INCLUDE, permissions=0o600)
+        retained_now = _bounded_file(extension_fd, retired_name,
+                                     limit=MAX_INCLUDE, permissions=0o600)
+        if live_now != current or retained_now != retained_bytes:
+            raise GuardError(
+                "concurrency", "Managed Nginx Guard changed during Restore; "
+                "Recheck file ownership before retrying")
         if current is None:
             if retained_bytes is not None and _sha(retained_bytes) != record["include_sha"]:
                 raise GuardError("recovery", "Retained security config has changed")
             if retained_bytes is None and record["phase"] != "prepared":
                 raise GuardError("recovery", "Applied security config missing without owned retained file")
-        else:
-            if _sha(current) != record["include_sha"] or retained_bytes is not None:
-                raise GuardError("recovery", "Managed security config altered or ambiguous")
-            _rename_noreplace(extension_fd, filename, retired_name)
-            os.fsync(extension_fd)
+        elif _sha(current) != record["include_sha"] or retained_bytes is not None:
+            raise GuardError("recovery", "Managed security config altered or ambiguous")
+
+        expected_retired = current if current is not None else retained_bytes
+        retired_here = False
+        moved_identity = None
+        if current is not None:
+            try:
+                original_stat = os.stat(filename, dir_fd=extension_fd,
+                                        follow_symlinks=False)
+                moved_identity = (original_stat.st_dev, original_stat.st_ino)
+                _rename_noreplace(extension_fd, filename, retired_name)
+                retired_here = True
+                os.fsync(extension_fd)
+            except Exception as exc:
+                # A rename or directory-sync failure may already have moved
+                # the exact file. Keep its journal and Recovery ID intact.
+                raise GuardError(
+                    "uncertain", "Guard retirement could not be confirmed; "
+                    "Recheck saved Recovery ID before another action",
+                    recovery_id=record["op"]) from exc
+
+        def confirm_retirement():
+            # The managed Guard is intentionally absent from the VHost SHA.
+            # A separate byte-exact check must therefore cover this file,
+            # including replacement immediately around renameat2.
+            live = _bounded_file(extension_fd, filename,
+                                 limit=MAX_INCLUDE, permissions=0o600)
+            retired = _bounded_file(extension_fd, retired_name,
+                                    limit=MAX_INCLUDE, permissions=0o600)
+            if live is not None or retired != expected_retired:
+                raise GuardError("concurrency", "Guard file changed after retirement")
+            if retired_here:
+                info = os.stat(retired_name, dir_fd=extension_fd,
+                               follow_symlinks=False)
+                if (info.st_dev, info.st_ino) != moved_identity:
+                    raise GuardError("concurrency", "Guard file identity changed at retirement")
+
+        def check_before_reload():
+            try:
+                confirm_retirement()
+            except (ExtensionError, OSError) as exc:
+                if retired_here:
+                    try:
+                        # A rollback reintroduces a *.conf included by Nginx.
+                        # Inode identity and trusted metadata alone cannot
+                        # authorize that: the SAME inode may have been edited
+                        # in place after retirement. Only the original exact
+                        # journal-owned bytes may be made live again.
+                        rollback_bytes = _bounded_file(
+                            extension_fd, retired_name,
+                            limit=MAX_INCLUDE, permissions=0o600)
+                        if (rollback_bytes is None
+                                or rollback_bytes != expected_retired
+                                or _sha(rollback_bytes) != record["include_sha"]):
+                            raise GuardError(
+                                "concurrency", "Retired Guard content changed; "
+                                "cannot safely restore original filename")
+                        rollback_stat = os.stat(
+                            retired_name, dir_fd=extension_fd, follow_symlinks=False)
+                        if (rollback_stat.st_dev, rollback_stat.st_ino) != moved_identity:
+                            raise GuardError(
+                                "concurrency", "Retired Guard inode replaced; "
+                                "cannot safely restore original filename")
+                        # Never replace a concurrently created live entry.
+                        _rename_noreplace(extension_fd, retired_name, filename)
+                        os.fsync(extension_fd)
+                    except Exception as rollback:
+                        raise GuardError(
+                            "uncertain", "Unverified Guard retirement and safe "
+                            "pathname recovery unavailable; inspect both files "
+                            "using the saved Recovery ID (no Nginx reload)",
+                            recovery_id=record["op"]) from rollback
+                raise GuardError(
+                    "concurrency", "Guard ownership changed during retirement; "
+                    "no Nginx reload was attempted. Recheck saved Recovery ID",
+                    recovery_id=record["op"]) from exc
+
+        # Check immediately after rename, then again after the FINAL syntax
+        # test. A successful nginx -t alone cannot approve a later VHost
+        # edit or a modified retained Guard.
+        check_before_reload()
         try:
             _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
+        except Exception as exc:
+            raise GuardError(
+                "uncertain", "Final Nginx syntax check failed after Guard retirement; "
+                "no reload was attempted. Recheck saved Recovery ID",
+                recovery_id=record["op"]) from exc
+        check_before_reload()
+        try:
+            final_source_sha = _source_safe(
+                site, vhost_root=vhost_root, nginx_conf=nginx_conf)[0]
+        except (ExtensionError, OSError) as exc:
+            raise GuardError(
+                "uncertain", "Native Nginx source became unreadable after Guard retirement; "
+                "no reload was attempted. Recheck saved Recovery ID",
+                recovery_id=record["op"]) from exc
+        if final_source_sha != expected_vhost:
+            raise GuardError(
+                "uncertain", "Native source changed during final Nginx syntax check; "
+                "no reload was attempted. Recheck saved Recovery ID",
+                recovery_id=record["op"])
+        try:
             _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
             _verified(site, record["op"], present=False, probe=probe,
                       ruleset=record["ruleset"])
             if _source_safe(site, vhost_root=vhost_root,
                             nginx_conf=nginx_conf)[0] != source_sha:
                 raise GuardError("concurrency", "Native source drifted during security Restore")
+            confirm_retirement()
         except Exception as exc:
             raise GuardError(
                 "uncertain", "Security Restore unconfirmed; inspect saved recovery before retrying",

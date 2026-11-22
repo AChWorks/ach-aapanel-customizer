@@ -471,7 +471,7 @@ native `extension/<site>/*.conf` include graph**; `/www/wwwroot` is never a
 site-root assumption. The supported implementation targets the source-matched
 aaPanel 8.0.7 Nginx/HTTP-80 layout; no blanket Nginx-version claim.
 
-**Protection semantics:** After a fresh Preview and explicit one-site approval,
+**Protection semantics:** After a fresh Preview and explicit one-site **Enable** action,
 an immutable policy fragment is atomically installed into that site's existing
 Nginx extension directory, validated with `nginx -t` and applied with a
 shared-service reload. Four fixed, server-rewrite `if ($uri ~* ...)` +
@@ -515,11 +515,41 @@ distinguish `Unmanaged`, `Applied`, `Recovery Required`, `Needs Review`
 and `Restored`. An uncertain Apply must NOT be automatically retried;
 an explicit saved Recovery ID permits narrowly retiring the owned include,
 revalidating and reloading Nginx, and checking that its proof disappeared.
-Changed site ID/root/domain, native VHost or another extension invalidates
-stale approvals. Other files, users and site configurations are not modified.
+A native site ID/key or Document Root change, foreign/tampered guard,
+invalid extension ownership/include, or an unresolved source conflict still
+blocks writes with `Needs Review`. A native domain/VHost/extension change
+always invalidates old **Apply** approval: the operator must Recheck. If the
+*same native site and root* still have an exclusively imported, byte-exact
+Customizer guard fragment (or its single exact retained file from an
+interrupted Restore), Recheck reports **Recovery Required**, including
+`native_source_drift` for a previously `applied` journal. This is **not**
+a claim that the new native source or all aliases have been verified as
+protected. After reviewing the site, the administrator may explicitly
+Restore that one Recovery ID without undoing the foreign domain/VHost
+change. Restore requires the **exact Nginx source SHA returned by the last
+successful Recheck**; another VHost or sibling-extension edit rejects stale
+approval before retiring the owned file or reloading shared Nginx. Even without
+VHost drift, an `applied` journal with only its single byte-exact retained
+file reports **Recovery Required** (`interrupted_restore`) and enables manual
+Restore. A simultaneous live/retained pair, altered or missing owned file
+must never be reported healthy Applied. Restore rechecks both managed
+filenames immediately before retirement, verifies exact moved bytes and
+file identity after no-clobber rename, and revalidates both the retained rule
+and complete native source **after the final Nginx syntax check and before
+shared reload**. Only byte-exact, journal-owned content with the original
+moved inode may be rolled back to the live include path using no-clobber rename.
+Altered content stays in the retained path for explicit manual inspection;
+the unchanged journal and Recovery ID remain available. Late source drift
+leaves the exact retained rule recoverable without a reload. After reload, nonce absence, source stability
+and retained ownership are verified before acknowledging Restored. External
+aaPanel writers do not share this plugin lock: the checks narrow, but cannot
+atomically eliminate, the last check-to-reload race. Fresh **Preview -> Apply**
+is a separate operator choice. No watcher, background repair or automatic
+reapplication is added.
+
+Other files, users and site configurations are not modified.
 After uninstall, saved policy/recovery may still be active: reinstall and
-use guarded Restore rather than delete Nginx files manually. No background
-enforcement/automatic regeneration repair is yet implemented.
+use guarded Restore rather than delete Nginx files manually.
 
 **Evidence boundary:** QA source-only and real manager transaction tests were
 run on the **new** isolated aaPanel 8.0.7 machine, including
