@@ -38,6 +38,7 @@
     /* Spacing tokens: controls (sm), independent stack items (md), major breaks (lg).
        Never position unrelated bordered sections by guessing sibling margins. */
     --ach-space-xs:4px; --ach-space-sm:8px; --ach-space-md:12px; --ach-space-lg:20px;
+    --ach-control-height:32px;
     color:var(--ach-text); background:var(--ach-surface); width:100%;
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
     font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
@@ -251,7 +252,7 @@
   #ach-customizer .ach-main input:not([type="checkbox"]),
   #ach-customizer .ach-main select,
   #ach-customizer .ach-main textarea {
-    appearance:auto; min-width:0; max-width:100%; min-height:32px; height:auto;
+    appearance:auto; min-width:0; max-width:100%; min-height:var(--ach-control-height); height:auto;
     padding:5px 10px; border:1px solid #d4dade; border-radius:8px;
     background:#fff; color:var(--ach-text); font:inherit; line-height:max(20px,1.25em);
     transition:border-color .12s ease, box-shadow .12s ease;
@@ -274,7 +275,7 @@
   #ach-customizer .ach-switches input { margin:0; }
   #ach-customizer .ach-main button {
     appearance:none; display:inline-flex; align-items:center; justify-content:center;
-    min-height:32px; max-width:100%; padding:5px 12px; border:1px solid #cbd3d8;
+    min-height:var(--ach-control-height); max-width:100%; padding:5px 12px; border:1px solid #cbd3d8;
     border-radius:8px; background:#fff; color:#374151; font:inherit; line-height:20px;
     white-space:normal; text-align:center; cursor:pointer;
     transition:background-color .12s ease, border-color .12s ease;
@@ -319,6 +320,10 @@
   #ach-customizer .ach-scroll > table.ach-website-table,
   #ach-customizer .ach-scroll > table.ach-activity-table { min-width:760px; }
   #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:var(--ach-space-sm); margin:var(--ach-space-md) 0 0; }
+  /* A labeled field is taller than an action button. In mixed flex rows,
+     align the actual select/input and button bottoms, not the center of
+     each field's label-plus-input box. Button-only toolbars stay centered. */
+  #ach-customizer .ach-controls:has(> .ach-inline-field) { align-items:flex-end; }
   /* Keep each control paired with its label when a row wraps. Separating
      label and input as independent flex items orphaned several fields. */
   #ach-customizer .ach-controls > .ach-inline-field {
@@ -330,6 +335,8 @@
   }
   #ach-customizer .ach-controls > .ach-inline-field > :is(input:not([type="checkbox"]),select) {
     display:block; width:100%; min-width:0; max-width:none;
+    /* Anchor inputs to the common line bottom if one label wraps. */
+    margin-top:auto;
   }
   #ach-customizer .ach-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
   #ach-customizer .ach-toolbar [role="status"] {
@@ -1065,7 +1072,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.98'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.99'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
