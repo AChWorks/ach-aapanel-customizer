@@ -9347,7 +9347,6 @@ test('Sensitive-file Nginx guard rejects read-only state and recovery inconsiste
     ui.statusClick('#ach-guard-recheck').respond(report);
     assert.equal(ui.state().guardApplyDisabled,true,JSON.stringify(report));
     assert.equal(ui.state().guardRestoreDisabled,true,JSON.stringify(report));
-      assert.equal(ui.state().guardRestoreDisabled,true,JSON.stringify(report));
     assert.doesNotMatch(ui.state().guardResult,/Protection: (Applied|Restored)/);
     assert.match(ui.state().guardResult,/unconfirmed|result was refused/i);
   }
@@ -9394,7 +9393,6 @@ test('Sensitive-file Nginx guard rejects malformed optimistic success and stale 
     const ui=loadUi();selectHostsSite(ui);
     ui.statusClick('#ach-guard-preview').respond(sensitiveGuardResponse('Unmanaged',change));
     assert.equal(ui.state().guardApplyDisabled,true,JSON.stringify(change));
-      assert.equal(ui.state().guardApplyDisabled,true,JSON.stringify(change));
     assert.match(ui.state().guardResult,/unconfirmed|result was refused/i);
   }
   const ui=loadUi();selectHostsSite(ui);
