@@ -129,6 +129,44 @@ class PackageContractTests(unittest.TestCase):
         self.assertIn('Monitor observes without changing services or enabling automatic repair.', main)
         self.assertIn('optional PHP-FPM repair is enabled separately.', main)
 
+    def test_checkbox_text_flow_and_guard_option_remain_readable(self):
+        import re
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        # A label with text + code + emphasis must not make each fragment
+        # a separate flex item that collapses into vertical letter columns.
+        generic = re.search(
+            r'#ach-customizer \.ach-main label:has\(> input\[type="checkbox"\]\)\s*\{([^}]+)\}',
+            html)
+        self.assertIsNotNone(generic)
+        self.assertIn('display:block', generic.group(1))
+        self.assertNotIn('inline-flex', generic.group(1))
+        note = re.search(
+            r'#ach-customizer \.ach-main \.ach-note > label:has\(> input\[type="checkbox"\]\)\s*\{([^}]+)\}',
+            html)
+        self.assertIsNotNone(note)
+        self.assertIn('display:block', note.group(1))
+        self.assertIn('class="ach-guard-option"', html)
+        self.assertIn('id="ach-guard-block-xmlrpc" /><span>', html)
+        self.assertIn('grid-template-columns:16px minmax(0,1fr)', html)
+        self.assertIn('<summary>What changes when I enable this?</summary>', html)
+        self.assertIn('Check protection readiness', html)
+        self.assertIn('Recheck current protection', html)
+        # Each formerly detached flex label/select pair is one wrapping
+        # field, across Routing, PHP-FPM, and Activity.
+        for control_id in (
+            'ach-hosts-alias-select', 'ach-scan-maxretry',
+            'ach-scan-findtime', 'ach-scan-bantime',
+            'ach-scan-orphan-choice', 'ach-wp-settings-kind',
+            'ach-wp-settings-debug', 'ach-wp-settings-interval',
+            'ach-php-version', 'ach-activity-level', 'ach-activity-module',
+        ):
+            field = re.search(
+                r'<div class="ach-inline-field">\s*'
+                r'<label for="' + re.escape(control_id) +
+                r'">.*?</label>\s*<(?:input|select)\s+id="' +
+                re.escape(control_id) + r'"', html, re.S)
+            self.assertIsNotNone(field, control_id)
+
     def test_installer_guards_cleanup_and_does_not_mutate_services(self):
         shell = (PACKAGE / 'install.sh').read_text(encoding='utf-8')
         helper = (PACKAGE / 'ach_customizer_cleanup.py').read_text(encoding='utf-8')
