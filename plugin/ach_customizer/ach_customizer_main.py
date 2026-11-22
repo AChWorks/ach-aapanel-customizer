@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.80'
+WORKER_SOURCE_VERSION = '0.1.91'
 
 _STATE_DIR = DATA_DIR
 
@@ -83,7 +83,8 @@ class ach_customizer_main:
             cache_recovery = (module == "websites" and
                               action in ("manage_cache_policy", "cache_manage",
                                          "manage_nginx_protection", "nginx_guard_manage",
-                                         "manage_abusive_scan", "abusive_scan_manage"))
+                                         "manage_abusive_scan", "abusive_scan_manage",
+                                         "wp_settings_manage", "wp_settings_uncertain"))
             hosts_recovery = (module == "websites" and
                               action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
@@ -177,7 +178,7 @@ class ach_customizer_main:
             response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "abusive_scan_", "wordpress_cache_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "abusive_scan_", "wordpress_cache_", "wp_settings_")) else
                   "lifecycle" if stage.startswith("wp_terminal_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
@@ -739,8 +740,8 @@ class ach_customizer_main:
     def wp_terminal_manage(self, args):
         """Primary-admin control of read-only WP failure observation.
 
-        New events never edit Hosts or PHP-FPM; historical journal Recheck
-        and separately approved legacy Restore remain distinct paths.
+        The witness only observes native setup and records a diagnostic;
+        it never repairs Hosts or PHP-FPM.
         """
         request_id = uuid4().hex
         try:
@@ -755,8 +756,8 @@ class ach_customizer_main:
                         "a controlled aaPanel reload requires operator approval."), request_id)
                 response["reason_code"] = "resident_wp_helper_stale"
                 return response
-            inspect, restore = terminal.inspect, terminal.restore
-            recheck_recovery, abandon_witness = terminal.recheck_recovery, terminal.abandon_witness
+            inspect = terminal.inspect
+            recheck_witness, abandon_witness = terminal.recheck_witness, terminal.abandon_witness
             if action == "inspect":
                 result = inspect(data_dir=_STATE_DIR)
                 level = "DEBUG"
@@ -774,17 +775,12 @@ class ach_customizer_main:
                 result = disable(data_dir=_STATE_DIR)
                 level = "WARNING"
             elif action == "recheck":
-                result = recheck_recovery(data_dir=_STATE_DIR)
+                result = recheck_witness(data_dir=_STATE_DIR)
                 level = "INFO" if result["state"] not in ("Needs Review", "Active or Unknown") else "WARNING"
             elif action == "abandon":
                 if self._argument(args, "reviewed") != "true":
                     raise MonitorInputError("Explicit stale WP witness abandonment approval is required")
                 result = abandon_witness(data_dir=_STATE_DIR)
-                level = "WARNING"
-            elif action == "restore":
-                if self._argument(args, "reviewed") != "true":
-                    raise MonitorInputError("Explicit recovery approval is required")
-                result = restore(self._argument(args, "recovery_id"), data_dir=_STATE_DIR)
                 level = "WARNING"
             else:
                 raise MonitorInputError("Unsupported native WordPress terminal operation")
@@ -887,6 +883,9 @@ class ach_customizer_main:
             # Browser-provided IDs are never trusted for failed pre-selection.
             trusted_site_id = str(before["id"])
             approved = self._argument(args, "approved") == "true"
+            xmlrpc_choice = self._argument(args, "guard_block_xmlrpc", "false")
+            if xmlrpc_choice not in ("true", "false"):
+                raise MonitorInputError("Choose an explicit XML-RPC Nginx guard option")
             # A globally shared native document root cannot justify an
             # isolated per-site protection claim. Reject before any write.
             if action in ("apply", "restore"):
@@ -909,6 +908,7 @@ class ach_customizer_main:
                         expected_vhost=self._argument(args, "expected_vhost_sha256"),
                         expected_proposal=self._argument(args, "expected_proposal_sha256"),
                         expected_recovery=self._argument(args, "recovery_id"),
+                        block_xmlrpc=xmlrpc_choice == "true",
                     )
                     if current_site() != before:
                         raise GuardError(
@@ -1358,6 +1358,108 @@ class ach_customizer_main:
             return self._fail("wordpress_cache_authorization", exc, request_id)
         except Exception as exc:
             return self._fail("wordpress_cache_setup", exc, request_id)
+
+    def wp_settings_manage(self, args):
+        """One selected WordPress site's debug or system scheduler policy."""
+        request_id = uuid4().hex
+        action = self._argument(args, "settings_action")
+        target = ""
+        try:
+            self._status_primary_admin_post()
+            self._require_enabled("site_inventory")
+            if action not in ("recheck", "apply", "restore"):
+                raise MonitorInputError("Unsupported WordPress settings action")
+            if action != "recheck" and self._argument(args, "approved") != "true":
+                raise MonitorInputError("Click Apply or Restore to authorize this exact website change")
+            import public
+            if public.get_webserver() != "nginx":
+                raise MonitorInputError("WordPress settings adapter requires native Nginx site attribution")
+            from ach_customizer_cache_wordpress import _site_lock
+            from ach_customizer_wp_settings import manage, WPSettingsError
+            from ach_customizer_state import _open_state_dir
+            from ach_customizer_status_pages import _take_lock
+            kind = self._argument(args, "settings_kind")
+            desired = self._argument(args, "desired")
+            raw_interval = self._argument(args, "interval")
+            if kind == "cron":
+                if (not isinstance(raw_interval, str) or
+                        not re.fullmatch(r"[1-9][0-9]?", raw_interval)):
+                    raise MonitorInputError("Select a valid system Cron minute step")
+                interval = int(raw_interval)
+            elif kind == "debug":
+                interval = None
+            elif kind == "xmlrpc":
+                interval = None
+                if desired != "block":
+                    raise MonitorInputError("Select Block XML-RPC for this site")
+            elif kind == "https":
+                interval = None
+                if desired != "https":
+                    raise MonitorInputError("Select HTTPS URLs for this site")
+            else:
+                raise MonitorInputError("Unsupported WordPress setting")
+            public, before, current_site = self._selected_native_website(args)
+            target = str(before["id"])
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                # Match the established WordPress Cache lock order: first
+                # selected-site, then the shared settings/recovery lock.
+                # Inverting the order can deadlock Cache setup/Restore.
+                with _site_lock(before, _STATE_DIR):
+                    lock = _take_lock(fd)
+                    try:
+                        if current_site() != before:
+                            raise WPSettingsError("concurrency", "Native site changed before WordPress settings action")
+                        if kind == "xmlrpc":
+                            from ach_customizer_wp_xmlrpc import manage_xmlrpc
+                            result = manage_xmlrpc(
+                                action, before, public, data_fd=fd,
+                                expected_source=self._argument(args, "expected_source_sha256"),
+                                expected_recovery=self._argument(args, "expected_recovery_id"),
+                            )
+                        elif kind == "https":
+                            from ach_customizer_wp_urls import manage_urls
+                            result = manage_urls(
+                                action, before, public, data_fd=fd,
+                                expected_source=self._argument(args, "expected_source_sha256"),
+                                expected_recovery=self._argument(args, "expected_recovery_id"),
+                            )
+                        else:
+                            result = manage(
+                                action, kind, before, public,
+                                desired=desired, interval=interval, data_fd=fd,
+                                expected_source=self._argument(args, "expected_source_sha256"),
+                                expected_recovery=self._argument(args, "expected_recovery_id"),
+                            )
+                        if current_site() != before:
+                            raise WPSettingsError(
+                                "uncertain", "Native site identity changed during WordPress settings action",
+                                result.get("recovery_id"))
+                    finally:
+                        os.close(lock)
+            finally:
+                os.close(fd)
+            return self._activity_result(
+                {"status": True, "request_id": request_id,
+                 "settings_action": action, **result},
+                "websites", "wp_settings_manage", target=target,
+                level="WARNING" if result["state"] in (
+                    "Recovery Required", "Drift", "Conflict") else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("wp_settings_authorization", exc, request_id, target=target)
+        except MonitorInputError as exc:
+            return self._fail("wp_settings_preflight", exc, request_id, target=target)
+        except Exception as exc:
+            from ach_customizer_wp_settings import WPSettingsError
+            if isinstance(exc, WPSettingsError):
+                response = self._fail("wp_settings_" + exc.stage,
+                                      str(exc), request_id,
+                                      diagnostic_error=exc, target=target)
+                if exc.stage in ("uncertain", "recovery"):
+                    response["recovery_required"] = True
+                return response
+            return self._fail("wp_settings_unexpected", exc, request_id, target=target)
 
     def fpm_policy_get(self, args):
         """Read operator-saved shared PHP intent, not a live/runtime verdict."""
@@ -2372,6 +2474,70 @@ class ach_customizer_main:
             return response
         except Exception as exc:
             return self._fail("status_unbound_unexpected", exc, request_id)
+
+    def status_tls(self, args):
+        """Opt-in unknown-SNI TLS rejection on existing HTTPS/443 sockets only."""
+        request_id = uuid4().hex
+        action = self._argument(args, "tls_action")
+        try:
+            self._status_primary_admin_post()
+            if (self._argument(args, "scope") != "global" or
+                    self._argument(args, "site_id") not in (None, "") or
+                    self._argument(args, "template") != "unbound" or
+                    action not in ("recheck", "apply", "restore")):
+                raise StatusPageError("Select global/unbound for TLS/SNI management")
+            if (action != "recheck" and
+                    self._argument(args, "tls_approval") !=
+                    action + "_global_tls_reject_reload"):
+                raise StatusPageError("Explicit TLS/SNI Nginx reload approval required")
+            import public
+            if public.get_webserver() != "nginx":
+                raise StatusPageError("TLS/SNI rejection requires native Nginx")
+            from ach_customizer_state import _open_state_dir
+            from ach_customizer_status_pages import _take_lock
+            from ach_customizer_status_tls import manage_tls, TLSError
+
+            fd = _open_state_dir(_STATE_DIR)
+            try:
+                lock = _take_lock(fd)
+                try:
+                    result = manage_tls(
+                        action, data_fd=fd,
+                        expected_source=self._argument(args, "expected_source_sha256"),
+                        expected_recovery=self._argument(args, "expected_recovery_id"),
+                    )
+                    if public.get_webserver() != "nginx":
+                        raise TLSError(
+                            "uncertain", "aaPanel web server changed during TLS management",
+                            recovery_id=result.get("recovery_id"),
+                        )
+                finally:
+                    os.close(lock)
+            finally:
+                os.close(fd)
+            response = {
+                "status": True, "request_id": request_id,
+                "operation_id": request_id, "tls_action": action,
+                "scope": "global", "site_id": None, "template": "unbound",
+                **result,
+            }
+            return self._activity_result(
+                response, "status_pages", "status_tls_" + action,
+                target="unknown-sni-https:443",
+                level="WARNING" if result["state"] in (
+                    "Conflict", "Drift", "Needs Review", "Recovery Required"
+                ) else "INFO",
+            )
+        except PermissionError as exc:
+            return self._fail("status_tls_authorization", exc, request_id)
+        except StatusPageError as exc:
+            stage = getattr(exc, "stage", "preflight")
+            response = self._fail("status_tls_" + str(stage), exc, request_id)
+            if stage in ("uncertain", "postcheck", "recovery"):
+                response["recovery_required"] = True
+            return response
+        except Exception as exc:
+            return self._fail("status_tls_unexpected", exc, request_id)
 
     def status_save(self, args):
         """Persist operator branding only; never apply to any website."""

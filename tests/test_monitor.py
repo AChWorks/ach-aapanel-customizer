@@ -130,6 +130,45 @@ class WebsiteDiscoveryTests(unittest.TestCase):
         self.assertEqual(data['sites'][0]['panel_status'], '1')
         self.assertEqual(panel.db.calls, [('order', 'id asc'), ('limit', '2,3'), ('field', 'id,name,path,status'), ('select',)])
 
+    def test_profile_discovers_wordpress_files_without_claiming_runtime(self):
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base) / "custom" / "site"
+            (root / "wp-includes").mkdir(parents=True)
+            (root / "wp-admin").mkdir()
+            for path in ("wp-settings.php", "wp-includes/version.php", "wp-admin/index.php"):
+                (root / path).write_text("<?php")
+            panel = Panel([{"id": 7, "name": "wp.example", "path": str(root), "status": 1}])
+            actual = monitor.get_site_page(panel)["sites"][0]
+            self.assertEqual(actual["application"], "WordPress")
+            self.assertIn("runtime unverified", actual["classification"])
+            (root / "wp-content/plugins/woocommerce").mkdir(parents=True)
+            (root / "wp-content/plugins/woocommerce/woocommerce.php").write_text("<?php")
+            woo = monitor.get_site_page(panel)["sites"][0]
+            self.assertIn("WooCommerce files", woo["classification"])
+            self.assertIn("activation unverified", woo["classification"])
+            (root / "wp-includes/version.php").unlink()
+            self.assertEqual(monitor.get_site_page(panel)["sites"][0]["classification"],
+                             "Needs Review")
+            # Lifecycle baseline only reads authoritative native DB fields.
+            with patch.object(monitor, "_site_platform_profile", side_effect=AssertionError("filesystem probe")):
+                strict = monitor.get_site_page(panel, strict_native=True)
+            self.assertEqual(strict["sites"][0]["classification"], "Needs Review")
+
+    def test_profile_refuses_symlinked_and_untrusted_roots(self):
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base) / "site"
+            (root / "wp-includes").mkdir(parents=True)
+            (root / "wp-admin").mkdir()
+            for name in ("wp-settings.php", "wp-includes/version.php", "wp-admin/index.php"):
+                (root / name).write_text("<?php")
+            alias = Path(base) / "alias"
+            alias.symlink_to(root, target_is_directory=True)
+            self.assertEqual(monitor._site_platform_profile(str(alias))[1], "Needs Review")
+            self.assertEqual(monitor._site_platform_profile(str(root) + "/../site")[1], "Needs Review")
+            self.assertEqual(monitor._site_platform_profile(str(root) + "/wp-includes")[1], "Needs Review")
+            self.assertEqual(monitor._site_platform_profile("/missing/untrusted")[1], "Needs Review")
+
+
     def test_site_disabled_status_is_preserved(self):
         panel = Panel([{'id': 1, 'name': 'static.example', 'path': '/srv/www/static', 'status': 0}])
         self.assertEqual(monitor.get_site_page(panel)['sites'][0]['panel_status'], '0')

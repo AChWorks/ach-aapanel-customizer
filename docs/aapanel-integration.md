@@ -36,6 +36,142 @@ with site-specific, manually Applied Cache, then Restored that site to its
 original VHost. This **does not** exercise live payments/gateway callbacks,
 every extension, general vendor Purge All or other host topologies.
 
+## WordPress per-site HTTPS URLs, Debug, system Cron and XML-RPC (manual)
+
+Routing & Nginx uses the same selected native Website ID, document root,
+bindings, and full-primary-admin POST checks as other site operations.
+`Recheck WordPress setting` is read-only; `Apply selected setting` is
+the explicit operator approval and `Restore saved WordPress setting`
+uses the durable site-specific Recovery ID. No automatic policy is created
+on install or when aaPanel adds a site.
+
+**One-time WordPress HTTPS `home`/`siteurl`:** On a single selected native
+WordPress site, a primary administrator selects **WordPress HTTPS home/siteurl**
+and runs Recheck to inspect the **actual WordPress database options** and
+one proposed HTTP-to-HTTPS conversion. It preserves each already-registered
+native hostname, URL path and existing HTTPS URL; it removes an explicit
+`:80` port, but never edits external DNS, certificates, Nginx or WordPress
+configuration files. Set up and check working site HTTPS **before** clicking
+Apply to avoid locking out WordPress administration. The custom PHP bridge
+uses the selected native PHP CLI as `www` and WordPress's own `update_option`;
+WP-CLI is not installed or required. This action refuses multisite, PHP
+`WP_HOME`/`WP_SITEURL` overrides, foreign/filtered or unknown host values.
+Its journal records the original and target options and the exact Recovery ID.
+An interrupted partial DB update can be **Rechecked and Restored** only while
+each field still equals its own original or managed target; foreign edits
+are not overwritten. A later independent WP_DEBUG edit or PHP assignment
+change does not invalidate an otherwise safe option-pair Restore. A fresh
+WordPress/PHP subprocess verifies actual option persistence, **not public
+HTTPS reachability, certificate validity, redirects or other-site behavior**.
+After an outside change, manually Recheck; no watcher or automated URL sync
+is created. Restored operations can be reapplied against newly inspected
+site URLs.
+
+**Debug:** a literal single `WP_DEBUG` Boolean in `wp-config.php` may
+be changed or inserted before WordPress bootstrap. It is syntax-checked
+with the actual native PHP CLI before atomic replacement. The backup
+records only the original matched line (if any) in root-owned state; Restore
+removes or replaces the exact managed line and preserves unrelated changes
+elsewhere in the WordPress file. Dynamic/multiple PHP definitions, including comma-separated global `const`
+declarations of the managed key, and additional pre-bootstrap `include` or
+`require` sources are refused with an actionable compatibility error.
+Unrelated constants, inert comments/strings, stale site identity and foreign
+managed markers are handled without silently asserting effective runtime state. No live PHP setting
+is claimed until the application is separately inspected.
+
+**XML-RPC request gate:** An independent opt-in site policy creates one
+site-owned must-use WordPress plugin
+`wp-content/mu-plugins/ach-customizer-xmlrpc.php`, after confirming the
+native selected site, PHP handler, WordPress core files and live HTTP/80
+`/xmlrpc.php` baseline. The static MU-plugin checks the WordPress-defined
+`XMLRPC_REQUEST` and returns HTTP **403** with a nonsecret, generation-bound
+`X-ACh-XMLRPC-Proof` header. This is an application-level block **after
+PHP bootstrap**, not a pre-PHP Nginx/edge block. Nginx files, WordPress
+database, Cache, and unrelated MU plugins are untouched. It is recoverable
+through the same selected-site primary-admin Recheck/Apply/Restore UI; the
+journal contains the exact managed file hash and recovery identity. Original
+foreign files are never overwritten; an absent MU-plugin folder is created
+with the site's own ownership and removed after Restore only if still empty.
+Live POST/403/proof and absence after Restore are verified repeatedly.
+The source fingerprint deliberately excludes the separately owned MU-plugin:
+`wp-config.php` and WordPress core are **unchanged** by XML-RPC Apply.
+The native UI must therefore accept the same verified source SHA before/after
+this operation while still requiring changed=true, expected 403/proof,
+exact Recovery ID and its own explicit admin action. An installed 0.1.84
+test found and corrected a prior UI-only false `Uncertain` report: the
+backend actually applied the policy and returned `Applied`; the UI
+mistakenly assumed wp-config.php had to change. Recheck/Restore reconciled
+that original operation without a repeated Apply, and the UI validation
+was corrected in Native 0.1.85.
+
+If the site no longer serves its expected WordPress route or the file drifts,
+report a concrete source/recovery failure, not a fictional success.
+
+**System WP-Cron:** a unique root-owned `/etc/cron.d/ach-customizer-wp-cron-<site_id>`
+task is created and verified before adding the literal
+`DISABLE_WP_CRON=true` setting. An active system Cron service, verified
+native PHP CLI, WordPress entrypoint and system logger are required.
+The task executes `wp-cron.php` as `www`, logs output via `logger`,
+and uses the operator-selected minute step (cron's minute field restarts
+each hour). A foreign task is never overwritten, and Restore removes
+only the task with the saved byte identity. An interrupted operation keeps
+its root-only Recovery journal; do not blindly reapply. Restoring Debug
+must not remove Cron or erase unrelated administrator config changes.
+These operations do not change WordPress URL/SSL, XML-RPC or Nginx rules.
+
+Exact native installed-runtime checks, Cron execution and the full
+site-identity/peer matrix belong to [QA Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+
+**Optional pre-PHP Nginx XML-RPC block:** The existing selected-site Nginx
+sensitive-file Guard has an optional **Also block `/xmlrpc.php` before PHP-FPM**
+checkbox. Its current default ruleset is `site-sensitive-files-v1`; when
+selected, the full site guard uses `site-sensitive-files-xmlrpc-v1`.
+Both options use the **same site-owned Nginx include and current-generation
+Recovery journal**, with source-checked Preview/Apply/Recheck/Restore.
+The extra server-rewrite condition blocks `/xmlrpc.php` before PHP
+location dispatch. Live local proof checks 14 Guard paths by default and
+15 with XML-RPC. No previous pre-Stable ruleset adapters or migration path
+are supported. No watcher or global rule. The separately available WordPress
+MU-plugin XML-RPC gate runs at the application layer; its proof is not proof
+of the Nginx variant, and both gates need not be stacked on the same site.
+Native installed HTTP POST/GET and peer tests belong to Issue #21; source
+tests alone are not installed proof.
+
+## Unknown-SNI HTTPS/443 rejection (Owner Option A)
+
+This independent **opt-in** Status Pages operation uses a managed
+`00.ach_customizer_unknown_tls.conf` default_server with
+`ssl_reject_handshake on` only for existing Nginx wildcard TCP/443
+listener families (IPv4/IPv6 discovered from the actual loaded source).
+Without a configured HTTPS listener, **Recheck reports Not Applicable and
+Apply cannot create a new listener**. If another default_server, explicit
+address binding, stream/QUIC listener or unverified TLS source conflicts,
+the operator receives an actionable refusal; no foreign source is edited.
+Recheck/Apply/Restore each use the existing primary-admin session, global
+unbound selection, persisted own Recovery ID, source fingerprint, managed
+file ownership and the shared Nginx configuration lock.
+
+Apply compares the previously working default TLS handshake with an
+existing configured website witness on each socket family; after the
+guarded syntax check and reload, an unknown SNI and a connection without
+SNI must be rejected, while the configured witness still negotiates TLS.
+Nginx workers can briefly serve a previous generation after `nginx -s
+reload` succeeds. The post-reload verifier therefore waits for three
+consecutive correct real TLS handshake rounds within a bounded ten-second
+window for each IPv4/IPv6 family, retains the exact Recovery ID on failure
+and includes the original typed failure stage instead of presenting only a
+generic uncertain outcome. The first 0.1.82 installed QA caught this
+transition before the 0.1.83 correction.
+Restore removes only the exact journal-owned configuration and verifies
+the prior handshake behavior, or a confirmed TCP refusal if the entire
+native HTTPS family was removed. Source/CI tests and an installed-browser/
+real TLS check are **distinct** evidence. On errors or uncertain reloads,
+keep the Recovery ID; Recheck before attempting Restore or any retry.
+This module does not affect HTTP/80 Status Pages, issue certificates,
+automate ACME, or change Production until separately authorized.
+Owner acceptance and unresolved installed-native testing: [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
+and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+
 ## Native packaging, identity and lifecycle
 
 The native ZIP is constructed from `plugin/ach_customizer/` by
@@ -325,7 +461,7 @@ Full authenticated PHP-FPM automatic-repair UI acceptance and Production
 qualification remain
 separate.
 
-## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
+## Selected-site Nginx sensitive-path guard (Draft 0.1.91; pre-stable current contract)
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
@@ -338,24 +474,36 @@ aaPanel 8.0.7 Nginx/HTTP-80 layout; no blanket Nginx-version claim.
 **Protection semantics:** After a fresh Preview and explicit one-site approval,
 an immutable policy fragment is atomically installed into that site's existing
 Nginx extension directory, validated with `nginx -t` and applied with a
-shared-service reload. Three fixed, server-rewrite `if ($uri ~* ...)` +
+shared-service reload. Four fixed, server-rewrite `if ($uri ~* ...)` +
 `return 403` conditions block nested sensitive dotfiles (including
 `.env`, `.htaccess`, `.user.ini`), accesses below common backup directory
-names and PHP/PHTML/PHAR requests below common uploads/media/tmp directories.
-These **server rewrite-phase** returns run before Nginx Location selection:
+names, PHP/PHTML/PHAR requests below common uploads/media/tmp directories,
+and common **website-local files** such as `wp-content/debug.log`,
+`error_log`, `backup.sql`, `*.sql.gz` and `wp-config.php.bak`.
+Optional Nginx XML-RPC adds one fixed rule in the same policy. The
+pre-stable candidate uses only `site-sensitive-files-v1` or
+`site-sensitive-files-xmlrpc-v1`; obsolete QA rulesets have no runtime
+adapters. These **server rewrite-phase** returns run before Nginx Location selection:
 native `location ^~ /wp-content/uploads/` cannot silently bypass the filter.
 Safe `if` usage is limited to static server-scope **return-only** directives;
 no rewrite or application PHP is executed. The response includes a
 per-generation proof in a short body on matched requests (not in benign
-response headers); exact HTTP/80 403+proof is observed on ten bounded paths
-over three consecutive fresh request batches. This verifies *those* paths,
+response headers); exact HTTP/80 403+proof is observed on fourteen bounded
+paths (fifteen with XML-RPC) over three consecutive fresh request batches.
+This verifies *those* paths,
 not arbitrary path aliases or origin HTTPS/cached edge behavior.
 
 **Exceptions and scope:** No restriction is added to legitimate `.well-known`
 ACME/OAuth paths, the site homepage, ordinary public static downloads, or other
-sites. The policy is intentionally **not** a global block on all .zip/.sql,
-a replacement for Fail2ban, or complete protection for every custom upload/
-backup directory. A site with unsupported VHost/include, symlinked Document Root,
+sites. Default Nginx already prevents directory listing where `autoindex`
+is off: a directory without an index returned HTTP 403 on the retained
+aaPanel VM. Customizer does **not** add another autoindex rule or override
+foreign `location` declarations that explicitly enable it. This new Guard
+does reject raw SQL database dumps, but deliberately does **not** block all
+ZIP archives, ordinary downloads or public static files. It is not a
+replacement for Fail2ban or complete protection for every renamed backup,
+custom upload directory or alternative web server.
+A site with unsupported VHost/include, symlinked Document Root,
 missing native identity, unrecognized owner, changed foreign include or
 incompatible active Nginx workers must fail closed with `Needs Review` rather
 than claim protection. Custom shared Nginx/global security rules need
@@ -454,28 +602,20 @@ enable this observer.
 **Recoverability:** Private root-owned `*.manual-review.json` records,
 atomic no-clobber publication, fsync and delivery receipts keep the
 manual-review event visible through Activity failure, restart or log
-rotation without replaying a Hosts write. Older applied/prepared
-**automatic-cleanup** journals are historical operator state, not
-permissions to repeat automatic removal. Their Recheck is read-only for
-Hosts, and a legacy Restore needs separate primary-admin authorization,
-an unchanged source and its original Recovery ID. Do not discard foreign,
-malformed or uncertain records merely to clear an alert.
+rotation without replaying a Hosts write. The current read-only witness
+can Recheck a genuinely active native setup and clear its temporary baseline
+after a verified terminal event. There is **no old automatic-cleanup journal
+adapter or legacy Hosts Restore**. Actual one-click Local Hosts removal
+is a separate current capability with its own current Recovery ID.
 
 **If a canonical evidence record is malformed:** Stop/disable the witness
 through its supported controls, inspect the exact Operation ID and original
 native task/locks, and under separately authorized root maintenance preserve
 a byte-identical protected copy before moving **only that record** to a
 private non-overwriting quarantine path. Reinspect first; never delete
-another operation's report, the original forensic copy or a recovery
-journal. The UI distinguishes policy Enabled from watcher Ready and
+another operation's report, the original forensic copy or another
+current-operation report. The UI distinguishes policy Enabled from watcher Ready and
 provides Emergency Disable independently from stale non-emergency helpers.
-
-Detailed historical implementation concerns (formerly ~120 lines,
-including `F_SETLEASE` no-loss reasoning, exact Outbox mechanics and
-source-version tests) remain inspectable in the
-[pre-consolidation technical guide at the merged source commit](https://github.com/AChWorks/ach-aapanel-customizer/blob/bea6e772e1a1b6cd92bbd931ab760bacd13b6374/docs/aapanel-integration.md).
-That history is **not** a current request for new VMs, auto-cleanup,
-privileged password recovery or Production changes.
 
 ## Simplification and operator choice (merged source v0.1.63; unpublished)
 
@@ -500,7 +640,7 @@ A second cross-layer limit audit additionally removes stale frontend
 ceilings on large Hosts/VHost/Cache peer results, the 32-installation/128-root
 PHP inventory limits, artificial Linux process/FD count stops, the 32-profile
 Monitor-only PHP intent cap, the 32-fragment Nginx/PHP source reader caps,
-and the 64-event historical WordPress recovery count stop. Inspection
+and obsolete WordPress historical repair counters. Inspection
 of installed older PHP versions and newer aaPanel Nginx sources uses
 observed readable files rather than version-text bans. The explicitly
 implemented 8.1/8.5 PHP-FPM and Cache write adapters, native WP watcher
@@ -581,10 +721,11 @@ descriptor-relative source/identity check immediately before atomic replace
 detects most external edits; a simultaneously writing uncoordinated OS
 process is **not** covered by a universal transaction. If the alias is
 already absent, the action reports that state and the UI refreshes. Source
-writes remain full-primary-admin-only. Existing advanced selected-site
-Recovery and historical, explicitly approved WP Restore remain separately
-accessible only for their earlier saved state; no new automatic cleanup
-journal, daemon, watcher, or backup subsystem is created by this feature.
+writes remain full-primary-admin-only. The currently supported advanced selected-site Hosts Recovery remains
+available for exact operations created through that active manual workflow.
+The retired pre-Stable automatic WordPress Hosts cleanup Restore is **not**
+available or supported. No new cleanup journal, daemon, watcher or backup
+subsystem is created by one-click removal.
 
 Source-level regressions cover successful and failed/deleted-site names,
 multiple mappings, preservation of peer aliases, invalid/non-UTF-8
@@ -722,8 +863,10 @@ Monitor status, exact source identity, recovery journal and fresh runtime
 verification must agree; failure preserves diagnostic evidence and baseline
 bytes. A completed host transaction is reconciled after a worker crash without
 reloading PHP again. Emergency Disable prevents new lifecycle repairs.
-Existing enabled profiles do not silently acquire new authority; disable
-and re-enable deliberately to activate the expanded scope.
+Only current lifecycle-bearing profiles are supported for automatic repair;
+each new Enable requires fresh explicit operator intent and the current source
+identity. Former pre-Stable profiles and their WordPress-only fallback are
+not supported or silently upgraded.
 
 A fresh, already-completed WP progress record does not suppress later
 independent PHP-FPM regeneration. The two branches are reconciled in the
@@ -782,7 +925,25 @@ new 0.1.80 source has been installed.
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,
 check the native combined access log, configure the desired retry/window/ban
-values, inspect the plan, then enable. The managed Fail2ban jail is selected
+values, inspect the plan, then enable.
+
+**Native log-integrity preflight (Native 0.1.87 source):** a matching
+`access_log` path is not trusted merely because a root-owned file exists.
+The log's parent directory and the log file must be root-controlled,
+without group/other write: a PHP `www` process can rename/replace even
+a `root:root 0644` log inside a `www`-writable directory. On the retained
+aaPanel 8.0.7 guest, `/www/wwwlogs` is `www:www 0700` and does
+**not** meet this origin-wide firewall trust prerequisite. A specific
+`Needs Review` reason identifies the problem; new Scanner Apply is refused.
+The plugin does **not** automatically chown/chmod this shared aaPanel
+log directory, overwrite foreign logs or disable unrelated jails. Inspect
+native writer, rotation and log owner before any explicitly approved
+system-wide adjustment. Existing scanner Restore/orphan recovery is
+independent of new Apply. Customizer Activity/Recovery journals remain
+root-owned `0600` and do not consume native access logs. This safety
+check is not proof of trusted CDN/proxy client-IP attribution.
+
+The managed Fail2ban jail is selected
 site-log-scoped, but an nftables ban affects EVERY web service on the origin
 using TCP/UDP 80/443, IPv4 and IPv6. Real-client log addresses from a trusted
 proxy may not be packet sources visible to the origin kernel firewall; never
@@ -985,11 +1146,10 @@ absent/false/true states before changes (distinct from WordPress's
 checks both stored grants and effective permissions before reporting Connected,
 and independently verifies exact persisted baseline restoration before
 completing Disconnect. Interrupted writes remain retryable from the saved
-journal, without overwriting the original snapshot. Older journals holding
-only filtered capability booleans cannot reconstruct an earlier stored
-baseline; the first new Connect records the then-current persisted entries,
-and a legacy-only Disconnect leaves those entries unchanged rather than
-blindly granting or deleting role privileges.
+journal, without overwriting the original snapshot. Only current journals with a complete persisted `admin_caps_stored`
+baseline are accepted. Missing, filtered-only or otherwise incomplete
+journals fail before another WordPress/PHP/Cache mutation; no migration
+or guessed-role fallback is implemented.
 Bridge 0.1.9 maps a valid authenticated, nonce-checked frontend
 `Purge Current Page` through the same generation-bound per-URL
 GET/HEAD selector for HTTP/HTTPS cache keys, including an HTTPS public

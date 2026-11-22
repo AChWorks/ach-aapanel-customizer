@@ -37,7 +37,6 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
         self.assertFalse(result["enabled"])
         self.assertIs(result["auto_hosts"],False)
         self.assertEqual(result["scope"],"failed_native_single_site_wp_toolkit")
-        self.assertEqual(result["last_recovery"],None)
 
     def test_enable_requires_native_version_and_explicit_review(self):
         with patch("ach_customizer_wp_watcher.enable") as enable:
@@ -54,22 +53,24 @@ class WordPressTerminalEndpointTests(unittest.TestCase):
             self.assertEqual(accepted["enabled"],True)
             enable.assert_called_once()
 
-    def test_disable_is_available_without_review_and_restore_has_its_own_approval(self):
-        with patch("ach_customizer_wp_watcher.disable",return_value={"enabled":False}) as disable, \
-                patch("ach_customizer_wp_terminal.restore",return_value={"state":"Restored","recovery_id":"b"*32}) as restore:
-            response=self.plugin.wp_terminal_manage({"terminal_action":"disable"})
+    def test_disable_is_available_and_historical_restore_is_not_supported(self):
+        with patch("ach_customizer_wp_watcher.disable",
+                   return_value={"enabled": False}) as disable:
+            response = self.plugin.wp_terminal_manage({"terminal_action": "disable"})
             self.assertTrue(response["status"])
             disable.assert_called_once()
-            refused=self.plugin.wp_terminal_manage({"terminal_action":"restore","recovery_id":"b"*32})
-            self.assertFalse(refused["status"])
-            restore.assert_not_called()
-            accepted=self.plugin.wp_terminal_manage({"terminal_action":"restore","recovery_id":"b"*32,"reviewed":"true"})
-            self.assertTrue(accepted["status"])
-            restore.assert_called_once_with("b"*32,data_dir=MODULE._STATE_DIR)
+        for approved in (False, True):
+            with self.subTest(approved=approved):
+                args = {"terminal_action": "restore", "recovery_id": "b" * 32}
+                if approved:
+                    args["reviewed"] = "true"
+                refused = self.plugin.wp_terminal_manage(args)
+                self.assertFalse(refused["status"])
+                self.assertIn("Unsupported", refused.get("msg", ""))
 
     def test_abandon_requires_distinct_review_and_recheck_never_edits(self):
         with patch("ach_customizer_wp_terminal.abandon_witness",return_value={"state":"Witness Abandoned"}) as abandon, \
-                patch("ach_customizer_wp_terminal.recheck_recovery",return_value={"state":"No Recovery"}) as recheck:
+                patch("ach_customizer_wp_terminal.recheck_witness",return_value={"state":"No Witness"}) as recheck:
             denied=self.plugin.wp_terminal_manage({"terminal_action":"abandon"})
             self.assertFalse(denied["status"])
             abandon.assert_not_called()

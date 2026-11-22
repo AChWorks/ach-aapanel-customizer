@@ -80,6 +80,26 @@ Earlier checklists and proposed complexity must be re-evaluated against this
 principle. Recording it does not imply other runtime controls have changed.
 
 
+### Owner decision: manual-first site reconciliation (2026-11-22)
+
+For complicated or infrequent changes made outside Customizer (native aaPanel
+website regeneration, domain/SSL/PHP assignment, WordPress URLs, Nginx source
+or unsupported site layouts), the authorized administrator can **manually
+refresh/Recheck the affected site and Apply/Restore the specific policy once**.
+If the change does not affect an enabled Customizer policy, no Customizer
+action is necessary. Accurate source/runtime/drift status and actionable
+Recovery remain mandatory; an external edit never licenses overwriting foreign
+settings, certificates, sites or data.
+
+**Do not create new persistent watchers, generic self-healing, automatic
+reconfiguration, unsupported source adapters, or recurring scans** merely to
+avoid this manual workflow. Existing explicitly accepted PHP-FPM automatic
+repair and the WordPress Cache/Bridge normal event behavior continue unchanged.
+A new automatic mechanism requires separately evidenced benefit and Owner
+acceptance. Success for an uncommon supported configuration can be
+**Recheck -> one-time guarded Apply/Restore -> verify** rather than a
+forever-running synchronization service. See Issue #2 for the active backlog.
+
 ### Owner decision: direct local Hosts removal (2026-11-20)
 
 Unattended /etc/hosts cleanup after WordPress setup is **no longer a product
@@ -93,8 +113,10 @@ cleanup, a second review checkbox or a version-pinned WP writer. It does not
 edit DNS, unrelated names or network/peer hosts. Retain primary-admin access,
 exact hostname targeting and basic file integrity, but do not invent extra
 prerequisite/recovery layers or prevent an informed Remove because no native
-site exists. Keep only genuine historical recovery paths for older applied
-state; never silently delete their retained records. An OS-level edit is not
+site exists. Preserve current-generation manual Hosts Recovery and its owned records.
+Retired pre-Stable automatic WordPress Hosts cleanup Restore is not a
+supported operator action. Retained old QA records are forensic evidence,
+not a mandate to keep obsolete compatibility code. An OS-level edit is not
 the required workflow.
 
 ### Optional WordPress companion
@@ -155,18 +177,56 @@ stale previews, cache manifests and recoveries; never silently replace it
 with a default path. Certify each module with representative real custom-root
 behavior rather than inferring compatibility from inventory alone.
 
+**Pre-stable internal compatibility policy:** No official production
+installation of ACh aaPanel Customizer exists. **Apply this decision across
+all Customizer subsystems** (Status Pages, Nginx Guard, PHP-FPM, Cache,
+WordPress operations, website management, UI and recovery): remove previous
+Customizer version/schema/ruleset recovery shims, historic automatic Hosts
+Restore paths, and old role/profiles baseline guesses. Only preserve current
+capabilities and the durability/Restore guarantees for operations created
+by the current candidate. Names such as aaPanel's `class_v2` and native
+Nginx Helper's older cache paths are **external vendor/source contracts**,
+not old Customizer adapters; assess them by real active use.
+Real aaPanel vendor sources, supported PHP/WordPress versions,
+third-party plugin contracts and user-created site files are
+external compatibility requirements and must not be removed under this
+policy. The persistent QA VM is for testing, not a compatibility customer.
+
 An opt-in site-specific Nginx sensitive-path policy should deny known
 sensitive dotfile, backup-directory and upload-PHP requests *before* PHP-FPM
 work. Prefer source-verified server-rewrite `if` + `return 403` rather than
 a regex-only `location` policy which `^~` Nginx prefixes could bypass.
-Do not break legitimate `.well-known` ACME/OAuth, public assets, peer sites,
-or broad file types by default. Every active security policy needs fresh
+Do not break legitimate `.well-known` ACME/OAuth, public assets, peer sites
+or ordinary downloads. When native Nginx already disables directory listing,
+do **not** duplicate that policy. A small fixed pre-PHP rule may block common
+website-local `debug.log`/`error_log`, WordPress config backups, raw SQL
+dumps and `.bak` artifacts. Do not globally block ZIP files or add a site
+crawler, watcher, ownership rewrite or another plugin. Before the first
+Stable release, prefer one current source/journal contract; the retained QA
+VM must explicitly retire its old test-only state before exercising a
+new incompatible policy.
+Every active security policy needs fresh
 source ownership, guarded apply/reload, live response proof, durable recovery,
 separate approval for Restore and drift awareness. Exact URL probes are
 not universal proof of full HTTP/2/3, CDN/HTTPS or all custom site aliases.
-Security policy starts disabled until primary-admin opt-in. A successfully
-applied per-request guard is different from automated recovery after aaPanel
-regeneration; the latter is still an independent required lifecycle outcome.
+Security policy starts disabled until primary-admin opt-in. A site
+freshly created by aaPanel can lack its Nginx `extension/<site>/*.conf`
+include; do not silently edit such a VHost during ordinary inspection.
+Show the exact missing-include prerequisite for a one-time operator-owned
+correction. The optional Fail2ban scanner consumes native access logs to
+make **origin-wide** root firewall decisions: the log file AND its parent
+directory must be protected against non-root writing, replacement and
+forgery. A `root`-owned file alone inside a `www`-writable directory is
+insufficient. Refuse new Scanner Apply with an actionable diagnostic when
+the source is untrusted; do not change aaPanel's shared log directory
+ownership automatically or remove existing recoverable jails. This boundary
+does not pretend that aaPanel's ordinary `www`-writable access logs are
+tamper-proof or that a trusted CDN client-IP ban can be enforced at the
+origin. After native
+aaPanel regenerates a selected-site source, **manual Recheck followed by
+one-time guarded Apply/Restore** is the accepted reconciliation route;
+a separate automatic Nginx-regeneration watcher is not required. Existing
+approved PHP-FPM auto-repair remains a distinct, unchanged capability.
 
 ### Owner-confirmed operational acceptance priority (2026-11-18)
 
@@ -211,12 +271,11 @@ non-emergency watcher controls must verify the **loaded helper** contract
 and fail closed if stale, while keeping Emergency disable accessible.
 A panel reload is separately authorized, never triggered by import.
 
-**Historical requirement superseded 2026-11-20:** the earlier P0
-automatic post-terminal Hosts cleanup is explicitly **cancelled**; current
-Hosts acceptance requires one-click in-plugin removal from the actual file.
-Legacy witness/journal text below is implementation history, not a new
-automatic-cleanup requirement. **Merged source 0.1.62** added an independently
-opt-in, service-scoped PHP 8.1/8.5 auto-repair worker. It records a trusted
+**Current Hosts/FPM behavior:** Failed WordPress provisioning is
+observation-only; the user explicitly selects any unwanted alias for
+one-click Hosts removal. The legacy automatic Hosts-cleanup path and its
+journals have no runtime adapter. An independent opt-in PHP 8.1/8.5
+automatic-repair worker watches verified native PHP-FPM regeneration. It records a trusted
 pre-terminal native WP progress identity and FPM file fingerprint, requires a
 matching later successful/failed terminal and changed FPM source, then
 rechecks saved admin intent and shared-site mapping before guarded
@@ -234,31 +293,17 @@ revocation even when a guarded operation holds the shared lock longer than
 the request timeout, then completes autonomously at the next safe worker
 boundary; it never silently leaves future authority active after a
 successfully acknowledged final Disable.
-Live native aaPanel 8.0.7 systemd-only QA on two isolated guests now
-proves a successful WordPress PHP 8.1 first-time optimizer reset and a
-failed-installation/removed-site PHP 8.5 reset both repaired to saved
-shared policy, with service and peer-site checks. Independent exact-candidate
-review, native authenticated **PHP-FPM policy/automatic-repair UI** QA,
-broader compatibility proof and Production approval remain separate OPEN
-gates. This does not re-open the independently proven primary-admin Login,
-Local Hosts one-click action or CSRF/no-session denial acceptance on the
-installed 0.1.69 QA guest (see Issue #21). The read-only Hosts
-witness is not an automatic recurrence-prevention deliverable. An exact
-no-loss removal cannot rely on Linux F_SETLEASE alone: a lease can be forcibly
-revoked after the timeout while the holder is suspended, and an intervening
-uncoordinated writer can append data before ftruncate. Extra userland
-hash/stat/lease checks do not make that truncation atomic. Only an independently
-verified transactional writer-coordination design and subsequent Owner
-approval could reauthorize automatic deletion.
+Exact previous FPM runtime acceptance is recorded in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+The current witness and Hosts action do not attempt automatic Hosts cleanup;
+no old kernel-lease append-Restore code or compatibility tests remain. Native
+auto PHP-FPM repair retains its own scoped source/recovery verification.
 
-Historical applied/prepared recovery journals remain supported: read-only,
-idempotent Recheck differentiates a true prepared Restore from an exact alias
-reappend by an unrelated actor; the latter must say Needs Review without
-claiming a successful Restore. Separately approved legacy Restore uses
-O_APPEND write semantics, so forced lease expiry cannot cause an offset-based
-overwrite of competing appended lines; uncertain results retain the recovery
-journal and require Recheck. Distinguish Enabled observation policy, actual
-watcher readiness and typed last worker result in UI and Activity.
+The current WordPress witness is observation-only, with no automatic
+Hosts edit and no historical append-only Restore. A matching terminal
+progress record may close a current active witness, while an unproven task
+remains Needs Review until explicitly discarded. Distinguish Enabled
+observation policy, actual watcher readiness and typed last worker result
+in UI and Activity.
 The Hosts witness alone does **not** authorize generic alias cleanup,
 batch WP install mutation, or shared PHP-FPM auto-enforcement. The separate
 0.1.62 FPM worker is opt-in and has its own narrower native-writer boundary.
@@ -302,6 +347,23 @@ The primary workflows must be understandable without editing Nginx, PHP, or Word
 The native UI must follow the installed aaPanel visual and interaction conventions, particularly the Nginx plugin's left navigation and independently scrollable content. Operators must not need browser zoom-out to reach controls. The supported acceptance viewports include 1280x720, 1366x768 and 1920x1080 at 100% browser zoom, plus narrow and reduced-height cases. Preserve keyboard/focus semantics, explicit loading/empty/error/recovery states, scope awareness and clear separation of Monitor, Preview, guarded Manual Apply and unsupported capabilities.
 
 Provide site selectors from validated, paginated aaPanel inventory rather than requiring operators to type raw IDs in routine workflows. Website selection for Status Pages must remain available to a full primary aaPanel administrator even if the optional Website Monitor is disabled: its dedicated, bounded native listing is read-only, independently authorized, and the selected site identity is revalidated by every relevant backend action. The Monitor website inventory keeps its separate enabled/disabled policy. Stale or incompatible inventory replies must never authorize an action. The Status Pages module retains safe offline branding/preview and read-only inspection; each implemented manual delivery/Restore adapter remains separately source-checked, authorized and proven within its supported scope, not assumed available for every target.
+
+### Owner-approved unknown-SNI HTTPS policy (2026-11-22)
+
+The Owner selected **Option A** for global unknown-domain HTTPS/443: reject
+TLS handshakes with an unknown or absent SNI name, not a branded HTTP
+error page or an arbitrary borrowed certificate. This is separately opt-in
+and applies only to already-configured Nginx HTTPS TCP wildcard listener
+families; the plugin never opens port 443, changes certificates or silently
+takes a foreign/default server. Existing named HTTPS hosts, ACME/proxy paths
+and the separate HTTP/80 unknown-Host page must remain intact. If the
+Nginx listener or default ownership cannot be proved, report the concrete
+conflict instead of widening the listener or weakening HTTPS identity.
+Apply/Restore need a fresh source comparison, explicit native administrator
+action, exact recovery record, guarded Nginx test/reload and real known
+versus unknown/no-SNI handshake checks. Code integration and nonproduction
+QA do not authorize public Release or Production rollout. Current
+acceptance and Owner decision are tracked in Issue #10.
 
 The plugin must expose a built-in Activity/Diagnostics view backed by bounded persistent structured log records. Include UTC timestamp, severity, module/action, stage/outcome/error class, target/service identity, correlation ID and relevant recovery reference. Keep useful bounded troubleshooting context without recording session tokens, credentials, request payloads or arbitrary exception messages. Preserve successful operation outcomes if audit persistence fails; surface that failure separately. Diagnose real authorizations, failures and recoveries. Use aaPanel-compatible ownership/permissions, bounded retention and configurable verbosity.
 

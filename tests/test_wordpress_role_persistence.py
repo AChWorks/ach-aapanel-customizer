@@ -209,14 +209,14 @@ class WordPressPersistedRolePHPTests(unittest.TestCase):
         self.assertEqual(restored.returncode, 0, restored.stderr)
         self.assertFalse(self.load("role.json"))
 
-    def test_legacy_filtered_metadata_does_not_change_persisted_grants(self):
+    def test_missing_current_persisted_role_baseline_is_rejected(self):
         self.save("role.json", {"Nginx Helper | Config": True})
         saved = self.inspect()
         del saved["admin_caps_stored"]
         saved["admin_caps"] = {"Nginx Helper | Config": False,
                                "Nginx Helper | Purge cache": False}
         restored, _ = self.restore(saved)
-        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertEqual(restored.returncode, 18, restored.stderr)
         self.assertEqual(self.load("role.json"), {"Nginx Helper | Config": True})
 
 

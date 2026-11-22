@@ -503,21 +503,15 @@
         <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> Enable optional detailed failed-install diagnostics. Alias removal above works even without this watcher; it never edits /etc/hosts automatically.</label>
         <div class="ach-controls">
           <button type="button" id="ach-wp-terminal-refresh">Inspect witness policy</button>
-          <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck historical recovery</button>
+          <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck current witness</button>
           <button type="button" id="ach-wp-terminal-enable" class="btn btn-warning" disabled>Enable failed-install witness</button>
           <button type="button" id="ach-wp-terminal-disable" disabled>Emergency disable</button>
         </div>
         <p id="ach-wp-terminal-recheck-result" role="status" aria-live="polite"></p>
         <details class="ach-help"><summary>Resolve an irrecoverable stale witness</summary>
-          <p>Only after Emergency disable and a failed Recheck, you may discard a witness of a previous operation that no longer has a verifiable native progress record. This does not edit /etc/hosts or override any prepared recovery journal. Never discard a witness while native WordPress setup is active.</p>
+          <p>After Emergency disable, an unverified witness can be discarded by explicit approval only when the native task is no longer active. This never edits /etc/hosts or any WordPress files.</p>
           <label><input id="ach-wp-terminal-abandon-reviewed" type="checkbox" /> I verified that setup is no longer active and accept discarding this unverified witness without editing Hosts.</label>
           <button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" disabled>Discard stale witness</button>
-        </details>
-        <details class="ach-help"><summary>Restore a historical applied cleanup</summary>
-          <p>Legacy, separately approved Restore deliberately re-adds the old exact alias. An append-only guarded write is attempted only when the saved post-cleanup file still matches; independent writers can make the outcome uncertain, requiring Recheck. No new automatic cleanup recovery is created in this read-only witness mode.</p>
-          <p id="ach-wp-terminal-recovery">No historical recovery inspected.</p>
-          <label><input id="ach-wp-terminal-restore-reviewed" type="checkbox" disabled /> I reviewed the saved Recovery ID and want to restore the exact original Hosts bytes.</label>
-          <div class="ach-controls"><button type="button" id="ach-wp-terminal-restore" class="btn btn-warning" disabled>Restore historical Hosts cleanup</button></div>
         </details>
       </div>
       <hr />
@@ -564,8 +558,9 @@
       <hr />
       <div class="ach-note" aria-label="Native site sensitive-path protection">
         <strong>Site-sensitive file protection — opt-in</strong>
-        <p>Use the verified aaPanel 8.0.7 Nginx site extension (not .htaccess) to stop nested .env/.htaccess, backup-directory downloads and PHP execution from upload/media/tmp paths before PHP-FPM. Native site root is detected automatically; no /www/wwwroot assumption. Ordinary .well-known/OAuth/ACME URLs remain eligible. This rule does not claim every upload layout or HTTPS reverse-proxy path is covered.</p>
+        <p>Use the existing site-owned Nginx Guard to block nested .env/.htaccess, backup-directory downloads, common error/debug logs, raw SQL/database dumps, WordPress config backups and PHP execution from uploads/media/tmp before PHP-FPM. Ordinary directory browsing is already disabled by default in Nginx; no extra rule is added if it is already off. This is not a site-file scanner, and public images, ordinary downloads and .well-known/OAuth/ACME remain available. A custom location enabling autoindex or an unrecognized file name needs a separate site-specific review.</p>
         <p>A supported source is required. Apply creates one recoverable site-owned include, syntax-tests and reloads shared Nginx, then checks real HTTP/80 guard paths over three consecutive rounds. Restore is a separately approved Nginx reload. Neither option is automatic; source changes or interrupted operations require Recheck.</p>
+        <label><input type="checkbox" id="ach-guard-block-xmlrpc" /> Also block <code>/xmlrpc.php</code> at Nginx before PHP-FPM (optional; disable when an application requires XML-RPC). This uses the <em>same site guard and Recovery ID</em>, not a background watcher or second Nginx policy. Do not layer it with Customizer's separate WordPress MU-plugin XML-RPC verifier on the same site.</label>
         <div class="ach-controls">
           <button id="ach-guard-preview" type="button" disabled>Check sensitive-path protection readiness</button>
           <button id="ach-guard-recheck" type="button" disabled>Recheck protection / recovery</button>
@@ -622,6 +617,32 @@
           </div>
           <p id="ach-scan-orphan-result" class="ach-status-metadata" role="status" aria-live="polite">Check for recovery journals after a website is removed.</p>
         </div>
+      </div>
+      <div class="ach-note" aria-label="Selected WordPress operational settings">
+        <strong>Selected WordPress — HTTPS URLs, Debug, Cron and XML-RPC (manual)</strong>
+        <p>Select a native website above. Recheck reads its actual WordPress source. <strong>Debug</strong> changes only one verified <code>wp-config.php</code> constant. <strong>System WP-Cron</strong> creates an owned Cron task running as the site's <code>www</code> PHP user before disabling the page-load trigger. <strong>Block XML-RPC</strong> uses an exact site-owned WordPress must-use plugin: live <code>/xmlrpc.php</code> POST requests return HTTP 403. <strong>WordPress HTTPS URLs</strong> is an explicit one-time update of the existing <code>home</code>/<code>siteurl</code> database options from HTTP to HTTPS, preserving recognized hostname and path; it does not install SSL, change DNS/Nginx or run a background sync. <strong>Enable and verify HTTPS/certificates for this site before Apply</strong> or WordPress administrative pages may become unreachable. The URL preview and Recovery ID appear below. Restore reverses only the exact owned setting, Cron task, MU-plugin file, or URL options. Foreign, overridden or changed source requires manual Recheck; no policy is automatically enabled.</p>
+        <div class="ach-controls">
+          <label for="ach-wp-settings-kind">Operation</label>
+          <select id="ach-wp-settings-kind">
+            <option value="debug">WordPress debug mode</option>
+            <option value="cron">System WP-Cron scheduler</option>
+            <option value="xmlrpc">Block XML-RPC requests</option>
+            <option value="https">WordPress HTTPS home/siteurl</option>
+          </select>
+          <label for="ach-wp-settings-debug">WP_DEBUG</label>
+          <select id="ach-wp-settings-debug"><option value="true">Enable</option><option value="false" selected>Disable</option></select>
+          <label for="ach-wp-settings-interval">Cron minute step (resets hourly)</label>
+          <input id="ach-wp-settings-interval" type="number" min="1" max="59" step="1" value="5" disabled />
+        </div>
+        <div class="ach-controls">
+          <button type="button" id="ach-wp-settings-recheck" disabled>Recheck WordPress setting</button>
+          <button type="button" id="ach-wp-settings-apply" class="btn btn-warning" disabled>Apply selected setting</button>
+          <button type="button" id="ach-wp-settings-restore" class="btn btn-warning" disabled>Restore saved WordPress setting</button>
+        </div>
+        <p id="ach-wp-settings-why" class="ach-availability" data-state="blocked" role="status">Choose a native website and Recheck. No WordPress file has been modified.</p>
+        <details class="ach-technical-report"><summary>WordPress setting and Recovery evidence</summary>
+          <p id="ach-wp-settings-result" class="ach-status-metadata" role="status" aria-live="polite">No WordPress settings source inspected.</p>
+        </details>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
@@ -787,7 +808,7 @@
     </section>
     <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
       <h4>Status Pages · Branding &amp; delivery</h4>
-      <p class="ach-note">Choose a template and scope to preview. Save/Reset changes branding only; live Apply/Restore requires Recheck and explicit approval. Unsupported combinations are preview-only; unknown-host HTTPS/443 is not supported.</p>
+      <p class="ach-note">Choose a template and scope to preview. Save/Reset changes branding only; live Apply/Restore requires Recheck and explicit approval. Unsupported combinations are preview-only; unknown-SNI HTTPS/443 rejection is a separate optional, recoverable operation.</p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -897,6 +918,19 @@
         <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" aria-describedby="ach-status-unbound-restore-why" class="btn btn-warning" disabled>Restore previous HTTP default routing</button></div>
         <p id="ach-status-unbound-result" role="status" aria-live="polite">Select global/unbound and Recheck. HTTP/80 only; no TLS/443 changes.</p>
       </div>
+      <div class="ach-note" id="ach-status-tls-section" aria-label="Unknown SNI HTTPS rejection" hidden>
+        <strong>Unknown TLS hostname — reject handshake (HTTPS/443)</strong>
+        <p>Option A: reject the TLS handshake for unknown or missing SNI <em>before</em> a certificate is served. Only existing native Nginx TCP/443 wildcard listeners can be protected; no HTTPS port, IP family, certificate or website is created. Existing named HTTPS websites must continue to negotiate TLS. HTTP/80 Status Pages are independent. An existing foreign HTTPS default, address-specific listener, or unsupported QUIC/stream setup is reported as incompatible instead of overwritten.</p>
+        <p>This is a separately opted-in <strong>shared Nginx reload</strong>. Preview the current TLS listeners and Recovery state first. After Apply or Restore, compare the actual TLS handshake of unknown SNI with a known configured HTTPS hostname. A failed or interrupted operation retains a Recovery ID for Recheck.</p>
+        <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" disabled>Recheck HTTPS unknown-SNI policy</button></div>
+        <p id="ach-status-tls-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a compatible configured HTTPS/443 listener and a fresh Recheck.</p>
+        <label><input id="ach-status-tls-apply-approve" type="checkbox" /> I approve a plugin-owned unknown-SNI TLS default server on already configured HTTPS listeners and the shared Nginx reload.</label>
+        <div class="ach-controls"><button id="ach-status-tls-apply" type="button" class="btn btn-warning" disabled>Reject unknown TLS handshakes</button></div>
+        <p id="ach-status-tls-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a saved Recovery ID from Recheck.</p>
+        <label><input id="ach-status-tls-restore-approve" type="checkbox" /> I reviewed the exact TLS Recovery ID and approve restoring the original HTTPS default-server routing with shared Nginx reload.</label>
+        <div class="ach-controls"><button id="ach-status-tls-restore" type="button" class="btn btn-warning" disabled>Restore previous TLS default routing</button></div>
+        <p id="ach-status-tls-result" class="ach-status-metadata" role="status" aria-live="polite">Choose global/unbound and Recheck. No HTTPS setting has been changed.</p>
+      </div>
       <div class="ach-note" id="ach-status-stopped-section" aria-label="Stopped-site 503 management" hidden>
         <strong>Stopped website · real HTTP 503 (native SiteStop/Start)</strong>
         <p>aaPanel 8.0.7 Nginx only. Select a running website and the <code>stopped</code> template. An explicitly approved, recoverable rule is added to that native website VHost; it remains dormant while running and returns real HTTP 503 with the selected self-contained HTML after aaPanel SiteStop. The native site must be refreshed after Stop/Start before Recheck or Restore. Nginx reload is shared; unknown-domain HTTPS is unchanged. Restore removes only the verified owned rule, preserving unrelated native changes.</p>
@@ -935,7 +969,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.80'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.91'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -956,6 +990,7 @@
   var fpmPolicyKeys = ['pm.max_children','pm.start_servers','pm.min_spare_servers',
                        'pm.max_spare_servers','pm.max_requests'];
   var fpmActivePrepareTicket = 0;
+  var wpSettingsBusy = false, wpSettingsEvidence = null, wpSettingsTicket = 0;
   var statusBusy = false, statusReadBusy = false;
   var statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSavedBrand = null;
@@ -965,7 +1000,7 @@
 
   // Transaction evidence is bound to one native-site/brand/locale snapshot.
   // It is revoked on any edit, site change, refresh, or attempted write.
-  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null, statusUnboundEvidence = null, statusStoppedEvidence = null;
+  var statusProbeEvidence = null, statusManageEvidence = null, statusDefaultEvidence = null, statusUnboundEvidence = null, statusTlsEvidence = null, statusStoppedEvidence = null;
   var statusSites = [], statusSitePage = 1, statusSitesBusy = false, statusSitesMore = false, statusSitesTicket = 0;
   var statusSitesTrusted = false;
   var activityBusy = false, activityTicket = 0, requestMessageTicket = 0;
@@ -1125,7 +1160,7 @@
       method === 'get_php_versions' || method === 'status_save' ||
       method === 'status_probe' || method === 'save_site_baseline' ||
       method === 'manage_nginx_protection' || method === 'wp_terminal_manage' || method === 'status_manage' || method === 'status_defaults' ||
-      method === 'status_unbound' || method === 'status_stopped' || method === 'status_inspect' ||
+      method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'status_inspect' || method === 'wp_settings_manage' ||
       method === 'fpm_apply' || method === 'fpm_rollback' ||
       method === 'fpm_policy_save' || method === 'fpm_auto_manage' || method === 'wp_terminal_manage' || method === 'manage_cache_policy' || method === 'manage_nginx_protection' || method === 'manage_abusive_scan';
   }
@@ -1198,10 +1233,10 @@
     // their own view, subject to each view's selection/version checks.
     var messageTicket = ++requestMessageTicket;
     // Read-only navigation updates the per-panel status, not a global banner.
-    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|stopped)|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
+    if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|tls|stopped)|wp_settings_manage|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_stopped' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'wp_settings_manage' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -1244,6 +1279,8 @@
                method === 'status_manage' && data.site_action !== 'recheck' ||
                method === 'status_defaults' && data.default_action !== 'recheck' ||
                method === 'status_unbound' && data.unbound_action !== 'recheck' ||
+               method === 'status_tls' && data.tls_action !== 'recheck' ||
+               method === 'wp_settings_manage' && data.settings_action !== 'recheck' ||
                method === 'status_stopped' && data.stopped_action !== 'recheck' ||
                method === 'fpm_policy_save' || method === 'fpm_auto_manage')) ?
               (method === 'fpm_policy_save' ?
@@ -2048,6 +2085,147 @@
     });
   });
 
+  function wpSettingsSelection() {
+    var id = hostsSiteId(), site = id && hostsPageSites.get(id);
+    var kind = root.find('#ach-wp-settings-kind').val();
+    var desired = kind === 'debug' ? root.find('#ach-wp-settings-debug').val() :
+      kind === 'xmlrpc' ? 'block' : kind === 'https' ? 'https' : 'true';
+    var interval = kind === 'cron' ? String(root.find('#ach-wp-settings-interval').val()) : '';
+    if (!site || !['debug','cron','xmlrpc','https'].includes(kind) ||
+        kind === 'debug' && !['true','false'].includes(desired) ||
+        kind === 'xmlrpc' && desired !== 'block' ||
+        kind === 'https' && desired !== 'https' ||
+        kind === 'cron' && (!/^[1-9][0-9]?$/.test(interval) || Number(interval)>59))
+      return null;
+    return {id:id,site:site,kind:kind,desired:desired,interval:interval,
+      key:JSON.stringify([id,site.name,site.snapshot,kind,desired,interval])};
+  }
+  function wpSettingsLock() {
+    var selected = wpSettingsSelection();
+    var locked = wpSettingsBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable';
+    var match = selected && wpSettingsEvidence &&
+      wpSettingsEvidence.selection === selected.key;
+    root.find('#ach-wp-settings-recheck').prop('disabled', locked || !selected);
+    root.find('#ach-wp-settings-apply').prop('disabled',
+      locked || !match || !['Source Ready','Restored'].includes(wpSettingsEvidence.state));
+    root.find('#ach-wp-settings-restore').prop('disabled',
+      locked || !match || !['Applied','Recovery Required'].includes(wpSettingsEvidence.state) ||
+      !wpSettingsEvidence.recovery);
+    root.find('#ach-wp-settings-debug').prop('disabled', wpSettingsBusy ||
+      root.find('#ach-wp-settings-kind').val() !== 'debug');
+    root.find('#ach-wp-settings-interval').prop('disabled', wpSettingsBusy ||
+      root.find('#ach-wp-settings-kind').val() !== 'cron');
+    root.find('#ach-wp-settings-kind').prop('disabled', wpSettingsBusy);
+    explainGate('ach-wp-settings-why', match && !locked ? 'ready' : 'blocked',
+      wpSettingsBusy ? 'WordPress source operation running; inspect the result before another action.' :
+      !selected ? 'Select a verified native website, an operation and valid value/interval.' :
+      !match ? 'Recheck the selected WordPress setting. Apply and Restore require fresh source/recovery evidence.' :
+      wpSettingsEvidence.state === 'Source Ready' ?
+      'Ready: Apply changes only the selected WordPress setting. HTTPS URLs update home/siteurl once; XML-RPC uses one MU-plugin, Cron runs as www.' :
+      wpSettingsEvidence.state === 'Applied' || wpSettingsEvidence.state === 'Recovery Required' ?
+      'Saved Recovery ID available. Restore reverts only the selected setting, HTTPS URLs, MU-plugin or Cron task.' :
+      wpSettingsEvidence.state === 'Restored' ? 'Previous owned setting restored. Apply is available after Recheck.' :
+      'No compatible change is available. Review reported source and state.');
+  }
+  function wpSettingsInvalidate() {
+    ++wpSettingsTicket;
+    wpSettingsEvidence = null;
+    root.find('#ach-wp-settings-result').text('Selection or source changed. Recheck before WordPress Apply/Restore.');
+    wpSettingsLock();
+  }
+  function validWpSettingsResponse(r, action, selection) {
+    var sha=function(v){ return typeof v==='string' && /^[0-9a-f]{64}$/.test(v); };
+    var id=function(v){ return typeof v==='string' && /^[0-9a-f]{32}$/.test(v); };
+    var urlPair=function(p) {
+      return p && typeof p==='object' && typeof p.home==='string' &&
+        typeof p.siteurl==='string' &&
+        ['http://','https://'].some(function(s){return p.home.startsWith(s);}) &&
+        ['http://','https://'].some(function(s){return p.siteurl.startsWith(s);});
+    };
+    if (!r || r.status!==true || r.schema!==1 || r.settings_action!==action ||
+        r.site_id!==Number(selection.id) || r.site_key!==selection.site.name ||
+        r.kind!==selection.kind || !sha(r.source_sha256) ||
+        r.recovery_id!==null && !id(r.recovery_id) ||
+        typeof r.changed!=='boolean' || r.read_only!==(action==='recheck') ||
+        typeof r.runtime_verified!=='boolean' || typeof r.reason!=='string' ||
+        typeof r.impact!=='string' ||
+        !(selection.kind === 'xmlrpc' ?
+          r.impact === 'Selected WordPress XML-RPC endpoint only; site-owned must-use plugin, no Nginx reload' :
+          selection.kind === 'https' ?
+          r.impact === 'Selected WordPress home/siteurl database options only; converts HTTP to HTTPS, no DNS/Nginx/certificate changes' &&
+          urlPair(r.urls_before) && urlPair(r.urls_target) :
+          r.impact.startsWith('Selected WordPress wp-config.php setting only')) ||
+        !['Source Ready','Already Configured','Conflict','Applied','Restored','Drift','Recovery Required','Needs Review'].includes(r.state) ||
+        (r.interval!==null && !(Number.isSafeInteger(r.interval)&&r.interval>=1&&r.interval<=59)))
+      return false;
+    return action==='recheck' ? !r.changed :
+      action==='apply' ? r.state==='Applied' && r.changed && id(r.recovery_id) :
+      r.state==='Restored' && r.changed && id(r.recovery_id);
+  }
+  function wpSettingsRequest(action) {
+    var selected = wpSettingsSelection(), previous = wpSettingsEvidence;
+    if (wpSettingsBusy || !selected || hostsBusy || siteBusy || websitePolicyState !== 'stable')
+      return;
+    if (action!=='recheck' &&
+        (!previous || previous.selection!==selected.key ||
+          (action==='apply' && !['Source Ready','Restored'].includes(previous.state)) ||
+          (action==='restore' && (!previous.recovery ||
+           !['Applied','Recovery Required'].includes(previous.state))))) return;
+    var ticket=++wpSettingsTicket;
+    wpSettingsEvidence=null;
+    wpSettingsBusy=true;
+    root.find('#ach-wp-settings-result').text('Checking selected WordPress source and saved recovery...');
+    wpSettingsLock();
+    request('wp_settings_manage', {
+      settings_action:action,settings_kind:selected.kind,desired:selected.desired,
+      interval:selected.interval, site_id:selected.id,
+      expected_site_key:selected.site.name,
+      expected_site_snapshot:selected.site.snapshot,
+      expected_source_sha256:previous ? previous.source : '',
+      expected_recovery_id:previous ? previous.recovery : '',
+      approved:action==='recheck' ? 'false' : 'true'
+    },function(r, failure) {
+      if (ticket!==wpSettingsTicket) return;
+      wpSettingsBusy=false;
+      if (!wpSettingsSelection() || wpSettingsSelection().key!==selected.key ||
+          !validWpSettingsResponse(r,action,selected) ||
+          (action==='apply' && (selected.kind==='xmlrpc' ?
+            r.source_sha256!==previous.source :
+            r.source_sha256===previous.source)) ||
+          (action==='restore' && r.recovery_id!==previous.recovery)) {
+        root.find('#ach-wp-settings-result').text(
+          statusBackendFailure(action, failure, action==='recheck' ?
+            'WordPress setting inspection not confirmed. No change requested.' :
+            'WordPress write outcome uncertain. Recheck saved Recovery before retrying.'));
+      } else {
+        if (action==='recheck')
+          wpSettingsEvidence={selection:selected.key,state:r.state,source:r.source_sha256,
+                              recovery:r.recovery_id};
+        root.find('#ach-wp-settings-result').text(
+          r.state + (r.changed ?
+            (selected.kind==='xmlrpc' ? ' — XML-RPC policy changed' : ' — source changed') :
+            ' — no change') +
+          '\nSource SHA-256: '+r.source_sha256+
+          '\nRecovery ID: '+(r.recovery_id||'None')+
+          '\nOperation ID: '+(r.request_id||'None')+
+          '\nRuntime verified: '+(r.runtime_verified?'Yes':'Source-only; run functional QA')+
+          (r.reason?'\nReason: '+r.reason:'')+
+          (selected.kind==='https' ?
+            '\nCurrent home: '+r.urls_before.home+
+            '\nCurrent siteurl: '+r.urls_before.siteurl+
+            '\nTarget home: '+r.urls_target.home+
+            '\nTarget siteurl: '+r.urls_target.siteurl+
+            '\nPublic HTTPS reachability/certificate: NOT checked by this database operation' : '')+
+          '\n'+r.impact);
+      }
+      wpSettingsLock();
+    });
+  }
+  root.find('#ach-wp-settings-kind, #ach-wp-settings-debug, #ach-wp-settings-interval')
+    .on('input change', wpSettingsInvalidate);
+  root.find('#ach-wp-settings-recheck').on('click',function(){wpSettingsRequest('recheck');});
+  root.find('#ach-wp-settings-apply').on('click',function(){wpSettingsRequest('apply');});
+  root.find('#ach-wp-settings-restore').on('click',function(){wpSettingsRequest('restore');});
   function nativeHostsSnapshot(site) {
     var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
     bindings.sort(function (a, b) {
@@ -2099,6 +2277,7 @@
     cacheLock();
   }
   function resetHostsSelection(message) {
+    wpSettingsInvalidate();
     hostsManageReset();
     ++hostsTicket; // Supersede an in-flight inspection on page/navigation changes.
     hostsBusy = false;
@@ -2111,6 +2290,7 @@
     hostsLock(false);
   }
   function updateHostsSiteChoices(sites) {
+    wpSettingsInvalidate();
     hostsManageReset();
     var select = root.find('#ach-hosts-site-id').empty().val('');
     $('<option>').val('').text(sites.length ? 'Select a website on this page' : 'No websites on this page').appendTo(select);
@@ -2163,6 +2343,7 @@
       (r.state !== 'Needs Review' || r.uninspected_wildcards.length > 0);
   }
   root.find('#ach-hosts-site-id').on('input change', function () {
+    wpSettingsInvalidate();
     hostsManageReset();
     ++hostsTicket;
     root.find('#ach-hosts-result').text('Site selection changed; recheck.');
@@ -2618,7 +2799,7 @@
     guardBusy = false;
     guardReady = null;
     guardRecovery = null;
-    root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').prop('checked',false);
+    root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed,#ach-guard-block-xmlrpc').prop('checked',false);
     root.find('#ach-guard-result').text('Website selection or source changed; run a fresh protection check.');
     inspectionSummary('guard', 'Select a website and inspect its current Nginx security source.');
     guardLock();
@@ -2628,7 +2809,9 @@
     var blocked = guardBusy || !id || hostsBusy || siteBusy ||
       websitePolicyState !== 'stable';
     root.find('#ach-guard-preview,#ach-guard-recheck').prop('disabled',blocked);
-    var applyAllowed = !blocked && !!guardReady && guardReady.siteId === id;
+    root.find('#ach-guard-block-xmlrpc').prop('disabled',guardBusy || hostsBusy || siteBusy);
+    var applyAllowed = !blocked && !!guardReady && guardReady.siteId === id &&
+      guardReady.xmlrpc === (root.find('#ach-guard-block-xmlrpc').prop('checked') === true);
     var restoreAllowed = !blocked && !!guardRecovery && guardRecovery.siteId === id;
     root.find('#ach-guard-apply-reviewed').prop('disabled',!applyAllowed);
     root.find('#ach-guard-apply').prop('disabled',!applyAllowed ||
@@ -2648,7 +2831,9 @@
     var hash = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
     var token = v => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v);
     if (!native || !r || r.status !== true || r.schema !== 1 ||
-        r.mode !== 'native_site_sensitive_paths' || r.ruleset !== 'nested-sensitive-v2' ||
+        r.mode !== 'native_site_sensitive_paths' ||
+        !['site-sensitive-files-v1','site-sensitive-files-xmlrpc-v1'].includes(r.ruleset) ||
+        r.block_xmlrpc !== (r.ruleset==='site-sensitive-files-xmlrpc-v1') ||
         r.site_id !== Number(id) || r.site_key !== native.name ||
         typeof r.site_root !== 'string' ||
         r.site_root !== JSON.parse(native.snapshot)[2] ||
@@ -2697,7 +2882,11 @@
     root.find('#ach-guard-result').text(action === 'apply' || action === 'restore' ?
       'Guarded Nginx operation in progress. A timeout does not imply rollback; inspect recovery.' :
       'Inspecting native site source and managed protection state…');
-    var payload = Object.assign({guard_action:action},cacheNativeArgs(id));
+    var payload = Object.assign({
+      guard_action:action,
+      guard_block_xmlrpc:(isApply ? selected.xmlrpc :
+        root.find('#ach-guard-block-xmlrpc').prop('checked')===true) ? 'true' : 'false'
+    },cacheNativeArgs(id));
     if (isApply) {
       payload.approved = 'true';
       payload.expected_vhost_sha256 = selected.vhost;
@@ -2723,7 +2912,8 @@
       }
       if ((action === 'preview' && ['Unmanaged','Restored'].includes(r.state)) &&
           r.vhost_sha256 && r.proposal_sha256) {
-        guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256};
+        guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256,
+                      xmlrpc:r.block_xmlrpc};
       }
       if (action === 'recheck' && ['Applied','Recovery Required'].includes(r.state) &&
           /^[0-9a-f]{32}$/.test(r.recovery_id || '')) {
@@ -2737,6 +2927,7 @@
         '\nDocument root: ' + r.site_root + '\nProtection: ' + r.state +
         '\nVHost SHA-256: ' + (r.vhost_sha256 || 'Unverified') +
         '\nPolicy SHA-256: ' + r.proposal_sha256 +
+        '\nNginx pre-PHP XML-RPC block: ' + (r.block_xmlrpc?'Selected':'Not selected') +
         '\nRecovery ID: ' + (r.recovery_id || 'None') +
         '\nJournal phase: ' + (r.journal_phase || 'None') +
         '\nLive HTTP/80 guard nonce verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
@@ -2749,6 +2940,12 @@
   root.find('#ach-guard-apply').on('click',function () {guardRequest('apply');});
   root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
   root.find('#ach-guard-apply-reviewed,#ach-guard-restore-reviewed').on('change',guardLock);
+  root.find('#ach-guard-block-xmlrpc').on('change',function () {
+    guardReady=null;
+    root.find('#ach-guard-apply-reviewed').prop('checked',false);
+    root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
+    guardLock();
+  });
   var scanBusy = false, scanTicket = 0, scanReady = null, scanRecovery = null;
   function scanParameters() {
     return {
@@ -3889,7 +4086,7 @@
     root.find('#ach-status-site-preflight').prop('hidden', !manage);
     root.find('#ach-status-manage-section').prop('hidden', !manage);
     root.find('#ach-status-default-section').prop('hidden', !defaults);
-    root.find('#ach-status-unbound-section').prop('hidden', !unbound);
+    root.find('#ach-status-unbound-section, #ach-status-tls-section').prop('hidden', !unbound);
     root.find('#ach-status-stopped-section').prop('hidden', !stopped);
     root.find('#ach-status-workflow-note').prop('hidden',
       manage || defaults || unbound || stopped);
@@ -3972,6 +4169,16 @@
       !unboundMatches || !['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) ||
       !statusUnboundEvidence.recovery ||
       root.find('#ach-status-unbound-restore-approve').prop('checked') !== true);
+    var tlsReady = unboundReady;
+    var tlsMatches = tlsReady && sameDefaultSelection(statusTlsEvidence);
+    root.find('#ach-status-tls-recheck').prop('disabled', !tlsReady);
+    root.find('#ach-status-tls-apply').prop('disabled',
+      !tlsMatches || !['Source Ready','Restored'].includes(statusTlsEvidence.state) ||
+      root.find('#ach-status-tls-apply-approve').prop('checked') !== true);
+    root.find('#ach-status-tls-restore').prop('disabled',
+      !tlsMatches || !['Applied','Needs Review','Recovery Required'].includes(statusTlsEvidence.state) ||
+      !statusTlsEvidence.recovery ||
+      root.find('#ach-status-tls-restore-approve').prop('checked') !== true);
     // Do not invent readiness: the messages below derive from the very same
     // evidence conditions that already gate the corresponding action buttons.
     var pending = busy ? 'A check is running. The controls will be updated after it completes.' : null;
@@ -4030,6 +4237,21 @@
         root.find('#ach-status-unbound-restore-approve').prop('checked') ?
         'Restore approval selected for the verified HTTP/80 recovery. Restore previous HTTP default routing is enabled.' :
         'Saved HTTP/80 recovery confirmed. Review it, then tick to approve Restore and a shared Nginx reload.'));
+    var tlsApply = !!(tlsMatches && ['Source Ready','Restored'].includes(statusTlsEvidence.state));
+    var tlsRestore = !!(tlsMatches &&
+      ['Applied','Needs Review','Recovery Required'].includes(statusTlsEvidence.state) &&
+      !!statusTlsEvidence.recovery);
+    explainGate('ach-status-tls-apply-why', tlsApply && !busy ? 'ready' : 'blocked',
+      pending || (!tlsApply ?
+        'Recheck HTTPS on a site with an existing compatible wildcard TCP/443 listener; no new listener will be created.' :
+        root.find('#ach-status-tls-apply-approve').prop('checked') ?
+        'Approval selected; the exact HTTPS default source will be checked and Nginx reloaded.' :
+        'TLS source ready. Review the unknown-host effect and approve the shared reload.'));
+    explainGate('ach-status-tls-restore-why', tlsRestore && !busy ? 'ready' : 'blocked',
+      pending || (!tlsRestore ? 'Recheck saved TLS Recovery ID before Restore.' :
+        root.find('#ach-status-tls-restore-approve').prop('checked') ?
+        'Approval selected for TLS Restore and a shared Nginx reload.' :
+        'Saved TLS Recovery ID available. Review and approve Restore.'));
     var stoppedApply = !!(stoppedMatches && String(selected.panel_status) === '1' &&
       ['Source Ready','Restored'].includes(statusStoppedEvidence.state));
     var stoppedRestore = !!(stoppedMatches &&
@@ -4052,11 +4274,14 @@
     statusManageEvidence = null;
     statusDefaultEvidence = null;
     statusUnboundEvidence = null;
+    statusTlsEvidence = null;
     statusStoppedEvidence = null;
     root.find('#ach-status-stopped-apply-approve, #ach-status-stopped-restore-approve').prop('checked', false);
     root.find('#ach-status-stopped-result').text('Recheck selected native stopped-site recovery; no previous Apply evidence is current.');
     root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve').prop('checked', false);
     root.find('#ach-status-unbound-result').text('Recheck global HTTP/80 routing before Apply/Restore; HTTPS is unchanged.');
+    root.find('#ach-status-tls-apply-approve, #ach-status-tls-restore-approve').prop('checked', false);
+    root.find('#ach-status-tls-result').text('Recheck unknown-SNI HTTPS/443 routing before Apply/Restore.');
     root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
       .prop('checked', false);
     root.find('#ach-status-default-result').text(
@@ -5183,6 +5408,107 @@
     manageUnboundRequest('restore');
   });
   root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve')
+    .on('change', function () { statusLock(statusBusy); });
+  function validTlsResponse(r, action) {
+    var hash = function (v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v); };
+    var id = function (v) { return typeof v === 'string' && /^[0-9a-f]{32}$/.test(v); };
+    if (!r || r.status !== true || r.schema !== 1 ||
+        r.mode !== 'native_unknown_tls_reject' || r.tls_action !== action ||
+        r.scope !== 'global' || r.site_id !== null || r.template !== 'unbound' ||
+        !id(r.request_id) || r.operation_id !== r.request_id ||
+        !hash(r.source_sha256) ||
+        (r.recovery_id !== null && !id(r.recovery_id)) ||
+        !['Source Ready','Not Applicable','Applied','Restored','Conflict','Drift','Recovery Required','Needs Review'].includes(r.state) ||
+        typeof r.changed !== 'boolean' || typeof r.runtime_verified !== 'boolean' ||
+        r.read_only !== (action === 'recheck') ||
+        typeof r.reason !== 'string' || !Array.isArray(r.families) ||
+        !r.families.every(function (f) { return f === 'ipv4' || f === 'ipv6'; }) ||
+        new Set(r.families).size !== r.families.length ||
+        !r.witnesses || typeof r.witnesses !== 'object' ||
+        Object.keys(r.witnesses).some(function (key) { return !r.families.includes(key) ||
+          typeof r.witnesses[key] !== 'string'; }) ||
+        r.impact !== 'Reject unknown/no-SNI on existing HTTPS/443 TCP wildcard sockets; preserve named HTTPS and HTTP/80')
+      return false;
+    return action === 'recheck' ? !r.changed :
+      action === 'apply' ? (r.state === 'Applied' && r.changed && r.runtime_verified && id(r.recovery_id)) :
+      (r.state === 'Restored' && r.changed && r.runtime_verified && id(r.recovery_id));
+  }
+  function manageTlsRequest(action) {
+    var scope = statusScope(), template = root.find('#ach-status-template').val(),
+        locale = root.find('#ach-status-locale').val();
+    if (statusBusy || statusRevision === null || !scope || scope.scope !== 'global' ||
+        template !== 'unbound' || statusLoadedScope !== 'global:') return;
+    var previous = statusTlsEvidence;
+    if (action === 'apply' &&
+        (!sameDefaultSelection(previous) ||
+         !['Source Ready','Restored'].includes(previous.state) ||
+         root.find('#ach-status-tls-apply-approve').prop('checked') !== true)) return;
+    if (action === 'restore' &&
+        (!sameDefaultSelection(previous) ||
+         !['Applied','Needs Review','Recovery Required'].includes(previous.state) ||
+         !previous.recovery ||
+         root.find('#ach-status-tls-restore-approve').prop('checked') !== true)) return;
+    var ticket = statusTicket, revision = statusRevision, brand = statusFields();
+    statusTlsEvidence = null;
+    root.find('#ach-status-tls-apply-approve, #ach-status-tls-restore-approve').prop('checked', false);
+    root.find('#ach-status-tls-result').text(action === 'recheck' ?
+      'Inspecting existing Nginx HTTPS/443 wildcard listeners and saved TLS Recovery...' :
+      'Checking the exact TLS source and applying the approved Nginx operation...');
+    statusLock(true);
+    request('status_tls', Object.assign({}, scope, {
+      template:template, tls_action:action,
+      expected_source_sha256:previous ? previous.source : '',
+      expected_recovery_id:previous ? previous.recovery : '',
+      tls_approval:action === 'recheck' ? '' : action + '_global_tls_reject_reload'
+    }), function (r, failure) {
+      if (ticket !== statusTicket) return;
+      var same = statusLoadedScope === 'global:' && statusScope()?.scope === 'global' &&
+        JSON.stringify(statusFields()) === JSON.stringify(brand) &&
+        root.find('#ach-status-template').val() === 'unbound' &&
+        root.find('#ach-status-locale').val() === locale;
+      if (!same || !validTlsResponse(r, action) ||
+          action === 'apply' && r && (r.source_sha256 !== previous.source ||
+            r.recovery_id === previous.recovery && previous.state !== 'Restored') ||
+          action === 'restore' && r &&
+            (r.source_sha256 !== previous.source || r.recovery_id !== previous.recovery)) {
+        root.find('#ach-status-tls-result').text(statusBackendFailure(
+          action, same ? failure : null,
+          action === 'recheck' ?
+            'TLS read-only Recheck incomplete. Resolve the source/listener issue and recheck.' :
+            'TLS write outcome unknown. Recheck the exact Recovery ID before retrying.' +
+              (r && r.recovery_id ? '\nRecovery ID: ' + r.recovery_id : '')));
+      } else {
+        if (action === 'recheck') {
+          statusTlsEvidence = {
+            ticket:ticket, revision:revision, template:'unbound', locale:locale,
+            brand:JSON.stringify(brand), state:r.state, source:r.source_sha256,
+            recovery:r.recovery_id
+          };
+        }
+        root.find('#ach-status-tls-result').text(
+          r.state + (r.changed ? ' — TLS default source changed' : ' — no configuration change') +
+          '\nExisting TLS listeners: ' + (r.families.length ? r.families.join(', ') : 'None') +
+          '\nKnown HTTPS witnesses: ' + JSON.stringify(r.witnesses) +
+          '\nSource SHA-256: ' + r.source_sha256 +
+          '\nHandshake verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
+          '\nRecovery ID: ' + (r.recovery_id || 'None') +
+          '\nRequest ID: ' + r.operation_id +
+          (r.reason ? '\nReason: ' + r.reason : '') +
+          '\nHTTPS/443 only. HTTP/80 Status Pages and named website certificates remain independently configured.');
+      }
+      statusLock(false);
+    });
+  }
+  root.find('#ach-status-tls-recheck').on('click', function () {
+    manageTlsRequest('recheck');
+  });
+  root.find('#ach-status-tls-apply').on('click', function () {
+    manageTlsRequest('apply');
+  });
+  root.find('#ach-status-tls-restore').on('click', function () {
+    manageTlsRequest('restore');
+  });
+  root.find('#ach-status-tls-apply-approve, #ach-status-tls-restore-approve')
     .on('change', function () { statusLock(statusBusy); });
   root.find('#ach-status-save').on('click', function () {
     if (statusBusy || statusRevision === null) return;
@@ -6354,7 +6680,7 @@
         'Unsupported or unresolved: manual Apply unavailable.');
     }, fresh);
   });
-  var wpTerminalBusy = false, wpTerminalRecovery = null, wpTerminalKnown = false;
+  var wpTerminalBusy = false, wpTerminalKnown = false;
   var wpTerminalHelperStale = false;
   function wpTerminalControl() {
     root.find('#ach-wp-terminal-abandon').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
@@ -6362,18 +6688,15 @@
     root.find('#ach-wp-terminal-enable').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
       root.find('#ach-wp-terminal-reviewed').prop('checked') !== true);
     // Emergency disable is safe even when a verified resident helper mismatch
-    // prevents ordinary policy inspection. Never enable or restore in this state.
+    // prevents ordinary policy inspection. Never enable in this state.
     root.find('#ach-wp-terminal-disable').prop('disabled', wpTerminalBusy ||
       (!wpTerminalKnown && !wpTerminalHelperStale));
     root.find('#ach-wp-terminal-recheck').prop('disabled', wpTerminalBusy || !wpTerminalKnown);
     root.find('#ach-wp-terminal-refresh').prop('disabled', wpTerminalBusy);
-    root.find('#ach-wp-terminal-restore').prop('disabled', wpTerminalBusy ||
-      !wpTerminalKnown || !wpTerminalRecovery || root.find('#ach-wp-terminal-restore-reviewed').prop('checked') !== true);
   }
   function wpTerminalRender(r) {
     if (r && r.status === false && r.reason_code === 'resident_wp_helper_stale' &&
         typeof r.msg === 'string' && r.msg.length <= 300) {
-      wpTerminalRecovery = null;
       wpTerminalKnown = false;
       wpTerminalHelperStale = true;
       root.find('#ach-wp-terminal-status').text(
@@ -6384,7 +6707,6 @@
     wpTerminalHelperStale = false;
     if (!r || r.schema !== 1 || typeof r.enabled !== 'boolean' ||
         !Number.isSafeInteger(r.revision) || r.revision < 0 ||
-        !Number.isSafeInteger(r.recoveries) || r.recoveries < 0 ||
         r.auto_hosts !== false || r.auto_fpm !== false ||
         r.scope !== 'failed_native_single_site_wp_toolkit' ||
         typeof r.last_reason !== 'string' || r.last_reason.length > 240 ||
@@ -6416,18 +6738,14 @@
           !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(r.manual_review.domain) ||
           typeof r.manual_review.activity_delivered !== 'boolean')) ||
         (r.last_worker.operation_id !== null &&
-         !/^[0-9a-f]{32}$/.test(r.last_worker.operation_id || '')) ||
-        (r.last_recovery !== null && !/^[0-9a-f]{32}$/.test(r.last_recovery || ''))) {
-      wpTerminalRecovery = null;
+         !/^[0-9a-f]{32}$/.test(r.last_worker.operation_id || ''))) {
       wpTerminalKnown = false;
       root.find('#ach-wp-terminal-status').text('Unknown policy response. Inspect Activity before acting.');
       wpTerminalControl();
       return;
     }
     wpTerminalKnown = true;
-    wpTerminalRecovery = r.last_recovery_state === 'applied' ? r.last_recovery : null;
-    root.find('#ach-wp-terminal-restore-reviewed, #ach-wp-terminal-reviewed, #ach-wp-terminal-abandon-reviewed').prop('checked', false);
-    root.find('#ach-wp-terminal-restore-reviewed').prop('disabled', !wpTerminalRecovery);
+    root.find('#ach-wp-terminal-reviewed, #ach-wp-terminal-abandon-reviewed').prop('checked', false);
     root.find('#ach-wp-terminal-status').text('Native WP observer: ' + (r.enabled ? 'Enabled' : 'Disabled') +
       ' · Unattended Hosts edits: OFF (use Local Hosts one-click removal above)' +
       ' · Watcher: ' + (r.watcher_ready ? 'Active' : 'Not ready') +
@@ -6450,10 +6768,7 @@
         ' (first Operation: ' + r.manual_review_integrity.first_operation_id +
         '). Preserve for OS review; do not delete automatically.' : '') +
       ' · Manual-review reports: ' + r.manual_review_count +
-      ' · Historical auto repairs: ' + r.recoveries + '. PHP-FPM auto enforcement: Off.');
-    root.find('#ach-wp-terminal-recovery').text(r.last_recovery ?
-      'Recovery ID: ' + r.last_recovery + ' · ' + (r.last_recovery_state || 'Needs Review') +
-      '. Historical Restore requires an unchanged file.' : 'No saved legacy Hosts recovery.');
+      '. PHP-FPM auto enforcement: Off.');
     wpTerminalControl();
   }
   function loadWpTerminal() {
@@ -6468,25 +6783,21 @@
   function updateWpTerminal(action) {
     if (wpTerminalBusy) return;
     if ((action === 'enable' && !root.find('#ach-wp-terminal-reviewed').prop('checked')) ||
-        (action === 'abandon' && !root.find('#ach-wp-terminal-abandon-reviewed').prop('checked')) ||
-        (action === 'restore' && (!wpTerminalRecovery ||
-          !root.find('#ach-wp-terminal-restore-reviewed').prop('checked')))) return;
+        (action === 'abandon' && !root.find('#ach-wp-terminal-abandon-reviewed').prop('checked'))) return;
     var data = {terminal_action: action};
-    if (action === 'enable' || action === 'restore' || action === 'abandon') data.reviewed = 'true';
-    if (action === 'restore') data.recovery_id = wpTerminalRecovery;
+    if (action === 'enable' || action === 'abandon') data.reviewed = 'true';
     wpTerminalBusy = true; wpTerminalControl();
     root.find('#ach-wp-terminal-status').text('Operation requested; do not retry before inspecting saved state.');
     request('wp_terminal_manage', data, function (r) {
       wpTerminalBusy = false;
       if (!r) {
-        wpTerminalRecovery = null;
         wpTerminalKnown = false;
         root.find('#ach-wp-terminal-status').text('Outcome unconfirmed. Inspect saved policy and Activity before retrying.');
         wpTerminalControl();
         return;
       }
-      // Restore and Recheck return operation outcomes, not policy snapshots.
-      if (action === 'restore' || action === 'recheck' || action === 'abandon') {
+      // Recheck and witness abandonment return outcomes, not policy snapshots.
+      if (action === 'recheck' || action === 'abandon') {
         root.find('#ach-wp-terminal-recheck-result').text(
           action + ': ' + (typeof r.state === 'string' ? r.state : 'Unconfirmed') +
           (typeof r.reason === 'string' ? ' — ' + r.reason : ''));
@@ -6499,13 +6810,12 @@
       } else wpTerminalRender(r);
     });
   }
-  root.find('#ach-wp-terminal-reviewed, #ach-wp-terminal-restore-reviewed, #ach-wp-terminal-abandon-reviewed').on('change', wpTerminalControl);
+  root.find('#ach-wp-terminal-reviewed, #ach-wp-terminal-abandon-reviewed').on('change', wpTerminalControl);
   root.find('#ach-wp-terminal-refresh').on('click', loadWpTerminal);
   root.find('#ach-wp-terminal-recheck').on('click', function () { updateWpTerminal('recheck'); });
   root.find('#ach-wp-terminal-abandon').on('click', function () { updateWpTerminal('abandon'); });
   root.find('#ach-wp-terminal-enable').on('click', function () { updateWpTerminal('enable'); });
   root.find('#ach-wp-terminal-disable').on('click', function () { updateWpTerminal('disable'); });
-  root.find('#ach-wp-terminal-restore').on('click', function () { updateWpTerminal('restore'); });
 
   overview();
 })();

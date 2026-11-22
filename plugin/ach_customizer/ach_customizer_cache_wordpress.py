@@ -149,26 +149,24 @@ if ($input['action'] === 'restore') {
             deactivate_plugins($plugin);
         }
     }
-    // Old journals with only filtered admin_caps booleans cannot establish
-    // the original persistent role state: never replay those guesses.
-    if (array_key_exists('admin_caps_stored', $saved)) {
-        if (!$administrator || !is_array($saved['admin_caps_stored'])) exit(18);
-        foreach ($vendor_caps as $cap) {
-            if (!array_key_exists($cap, $saved['admin_caps_stored'])) exit(18);
-            $baseline = $saved['admin_caps_stored'][$cap];
-            if ($baseline !== null && !is_bool($baseline)) exit(18);
-        }
-        foreach ($vendor_caps as $cap) {
-            $baseline = $saved['admin_caps_stored'][$cap];
-            $current = array_key_exists($cap, $administrator->capabilities)
-                ? $administrator->capabilities[$cap] : null;
-            if ($current === $baseline) continue;
-            if ($baseline === null) $administrator->remove_cap($cap);
-            else $administrator->add_cap($cap, $baseline);
-        }
-        // Persisted role entries are verified by a fresh inspect process
-        // before the native recovery journal can advance.
+    // A current-generation journal must contain the exact persisted
+    // administrator role baseline; filtered booleans are not a replacement.
+    if (!$administrator || !is_array($saved['admin_caps_stored'] ?? null)) exit(18);
+    foreach ($vendor_caps as $cap) {
+        if (!array_key_exists($cap, $saved['admin_caps_stored'])) exit(18);
+        $baseline = $saved['admin_caps_stored'][$cap];
+        if ($baseline !== null && !is_bool($baseline)) exit(18);
     }
+    foreach ($vendor_caps as $cap) {
+        $baseline = $saved['admin_caps_stored'][$cap];
+        $current = array_key_exists($cap, $administrator->capabilities)
+            ? $administrator->capabilities[$cap] : null;
+        if ($current === $baseline) continue;
+        if ($baseline === null) $administrator->remove_cap($cap);
+        else $administrator->add_cap($cap, $baseline);
+    }
+    // A fresh PHP inspect process verifies the persisted role snapshot
+    // before the native recovery journal may advance.
 }
 $result = [
     'active_helper' => is_plugin_active($helper),
@@ -494,6 +492,14 @@ def _load(site, data_dir):
                 or record.get("site_key") != site["name"]
                 or record.get("wp_root") != site["path"]):
             raise WordpressCacheError("recovery", "WordPress Cache setup journal belongs to another site identity")
+        previous = record.get("previous")
+        baseline = previous.get("admin_caps_stored") if isinstance(previous, dict) else None
+        if (not isinstance(baseline, dict)
+                or set(baseline) != {"Nginx Helper | Config", "Nginx Helper | Purge cache"}
+                or any(value is not None and type(value) is not bool
+                       for value in baseline.values())):
+            raise WordpressCacheError(
+                "recovery", "WordPress Cache journal lacks the exact persisted administrator role baseline")
         return record
     finally:
         os.close(fd)
@@ -658,15 +664,6 @@ def _setup_locked(site, public, *, data_dir):
         version = _active_php(site, data_dir)
 
     original_options = _php(site, version, "inspect")
-    if (record is not None and "admin_caps_stored" not in record.get("previous", {})
-            and isinstance(original_options.get("previous", {}).get("admin_caps_stored"), dict)):
-        # An old filtered boolean cannot reconstruct a persisted baseline.
-        # For future writes, checkpoint the currently stored role entries.
-        # Never overwrite this snapshot on retry or retroactively replay old
-        # admin_caps values during Restore.
-        record["previous"]["admin_caps_stored"] = dict(
-            original_options["previous"]["admin_caps_stored"])
-        _save(site, record, data_dir)
     if record is None:
         patch = _edits(site)
         source_constant = _extract_constant(patch["wp_before"], allow_absent=True)
@@ -958,8 +955,7 @@ def _restore_locked(site, public, *, data_dir):
         raise WordpressCacheError("recovery", "Nginx Helper Purge All remains enabled")
     original_caps = record.get("previous", {}).get("admin_caps_stored")
     if original_caps is not None and status.get("previous", {}).get("admin_caps_stored") != original_caps:
-        # The previous checkpoint might have been written by an old binary.
-        # Replay only the exact stored snapshot on safe retry.
+        # Only replay the exact current saved snapshot on an interrupted retry.
         _php(site, record["php"], "restore", previous=record["previous"])
         status = _php(site, record["php"], "inspect")
         if status.get("previous", {}).get("admin_caps_stored") != original_caps:
@@ -976,14 +972,9 @@ def _restore_locked(site, public, *, data_dir):
     # Restored generation is only finalized, never signaled twice.
     record["phase"] = "restored"
     _save(site, record, data_dir)
-    legacy_role_baseline = "admin_caps_stored" not in record.get("previous", {})
     return {"schema": 1, "state": "Restored", "site_id": site["id"],
             "site_key": site["name"], "changed": True,
             "recovery_id": record["recovery_id"],
-            "note": (
-                "Legacy capability baseline is unknown: role entries were left unchanged; "
-                "inspect their persisted values manually."
-                if legacy_role_baseline else
-                "Existing operator-owned native Cache was retained."
-                if not record.get("cache_owned", True) else
-                "Site-specific WordPress, PHP access and native Cache settings restored.")}
+            "note": ("Existing operator-owned native Cache was retained."
+                     if not record.get("cache_owned", True) else
+                     "Site-specific WordPress, PHP access and native Cache settings restored.")}

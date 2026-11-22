@@ -203,29 +203,24 @@ class WordpressConnectionTests(unittest.TestCase):
                          "Restored")
         self.assertEqual(set(self.admin_caps_stored.values()), {None})
 
-    def test_existing_connected_journal_upgrades_only_before_managed_cap_changes(self):
+    def test_current_journal_missing_stored_role_baseline_is_rejected_without_edits(self):
         self.start()
         self.setup_once()
-        journal = self.root / "ach_customizer.nginx-helper.7.json"
-        saved = json.loads(journal.read_text())
-        del saved["previous"]["admin_caps_stored"]
-        saved["previous"]["admin_caps"] = {"Nginx Helper | Config": False,
-                                          "Nginx Helper | Purge cache": False}
-        journal.write_text(json.dumps(saved))
-        self.admin_caps_stored = {"Nginx Helper | Config": False,
-                                  "Nginx Helper | Purge cache": False}
-        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
-                         "Needs Review")
-        self.assertEqual(wp.setup(self.site, object(), data_dir=str(self.root))["state"],
-                         "Connected")
+        path = self.root / "ach_customizer.nginx-helper.7.json"
+        saved = json.loads(path.read_text())
+        saved["previous"].pop("admin_caps_stored")
+        saved["previous"]["admin_caps"] = {
+            "Nginx Helper | Config": False, "Nginx Helper | Purge cache": False}
+        path.write_text(json.dumps(saved))
+        before_events = list(self.events)
+        with self.assertRaisesRegex(
+                wp.WordpressCacheError, "persisted administrator role baseline"):
+            wp.restore(self.site, object(), data_dir=str(self.root))
+        with self.assertRaisesRegex(
+                wp.WordpressCacheError, "persisted administrator role baseline"):
+            wp.setup(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(self.events, before_events)
         self.assertEqual(set(self.admin_caps_stored.values()), {True})
-        saved = json.loads(journal.read_text())
-        self.assertEqual(set(saved["previous"]["admin_caps_stored"].values()), {False})
-        self.assertEqual(set(saved["previous"]["admin_caps"].values()), {False},
-                         "Legacy filtered baseline is retained but never applied")
-        self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
-                         "Restored")
-        self.assertEqual(set(self.admin_caps_stored.values()), {False})
 
     def test_filtered_true_without_stored_grant_restores_exact_absence(self):
         self.admin_caps_filter = {"Nginx Helper | Config": True,
@@ -320,22 +315,6 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["state"],
                          "Restored")
         self.assertEqual(set(self.admin_caps_stored.values()), {None})
-
-    def test_old_filtered_role_baseline_is_not_replayed_on_disconnect(self):
-        self.start()
-        self.setup_once()
-        journal_file = self.root / "ach_customizer.nginx-helper.7.json"
-        journal = json.loads(journal_file.read_text())
-        journal["previous"].pop("admin_caps_stored")
-        journal["previous"]["admin_caps"] = {"Nginx Helper | Config": False,
-                                             "Nginx Helper | Purge cache": False}
-        journal_file.write_text(json.dumps(journal))
-        # Older record cannot establish original stored state; preserve what
-        # is currently persisted instead of blindly deleting grants.
-        reply = wp.restore(self.site, object(), data_dir=str(self.root))
-        self.assertEqual(reply["state"], "Restored")
-        self.assertIn("Legacy capability baseline is unknown", reply["note"])
-        self.assertEqual(set(self.admin_caps_stored.values()), {True})
 
     def test_one_click_disconnect_restores_original_lines_without_extra_steps(self):
         self.start()

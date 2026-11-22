@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,14 +74,15 @@ class NativeSecurityTests(unittest.TestCase):
 
     def probe(self, site, op, kind):
         self.assertEqual(site["id"], 27)
-        self.assertIn(kind, guard.PROOF_KINDS)
+        self.assertIn(kind, guard.XMLRPC_PROOF_KINDS)
         if self.active and not self.force_bad_proof:
             return (403, op)
         return (404, None)
 
     def operate(self, action="preview", **kwargs):
         source = guard._sha(self.vhost.read_bytes())
-        proposal = guard._proposal_sha()
+        variant = (guard.RULESET_XMLRPC if kwargs.get("xmlrpc", False) else guard.RULESET)
+        proposal = guard._proposal_sha(variant)
         return guard.manage_guard(
             action, self.site, data_fd=self.fd,
             approved=kwargs.get("approved", True),
@@ -89,13 +91,14 @@ class NativeSecurityTests(unittest.TestCase):
             expected_recovery=kwargs.get("recovery"),
             vhost_root=str(self.vhost_root),
             nginx_conf=str(self.nginx_conf), nginx="/test/nginx",
-            runner=self.runner, probe=self.probe)
+            runner=self.runner, probe=self.probe,
+            block_xmlrpc=kwargs.get("xmlrpc", False))
 
     def test_rule_names_and_proof_paths_are_fixed_and_site_path_independent(self):
-        self.assertEqual(len(guard.PROOF_KINDS), 10)
+        self.assertEqual(len(guard.PROOF_KINDS), 14)
         sample = guard._include("a" * 32).decode()
-        self.assertEqual(sample.count("return 403 "), 3)
-        self.assertEqual(sample.count("ACh-Guard-Proof-"), 3)
+        self.assertEqual(sample.count("return 403 "), 4)
+        self.assertEqual(sample.count("ACh-Guard-Proof-"), 4)
         self.assertIn("wp-content/uploads", guard._probe_path("a" * 32, "wp_uploaded_php"))
         self.assertIn("[.]htaccess", sample)
         self.assertNotIn("wwwroot", sample)
@@ -105,6 +108,69 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertNotIn("location ~", sample)
         with self.assertRaises(guard.GuardError):
             guard._probe_path("a" * 32, "http://evil.invalid/")
+
+    def test_simple_file_protection_avoids_redundant_directory_listing_rules(self):
+        source = guard._include("f" * 32).decode()
+        patterns = re.findall(r'if \(\$uri ~\* "([^"]+)"\)', source)
+        self.assertEqual(len(patterns), 4)
+        self.assertNotIn("autoindex", source)
+        self.assertNotIn("location ", source)
+        # URL matching is against Nginx's normalized $uri, at any site root.
+        sensitive = (
+            "/debug.log", "/wp-content/debug.log", "/wp-content/uploads/debug.log",
+            "/logs/error_log", "/logs/error_log.1", "/error.log",
+            "/backup.sql", "/dir/data.sql.gz", "/dir/sqlite-store.sqlite3",
+            "/wp-config.php.bak", "/wp-config.php.old", "/wp-config.php~",
+            "/assets/tooling.bak", "/assets/tooling.backup",
+            "/path/backups/archive.zip", "/nested/.env.local",
+            "/wp-content/uploads/test.PHP",
+        )
+        ordinary = (
+            "/", "/wp-content/uploads/", "/wp-content/plugins/",
+            "/wp-content/uploads/photo.jpg", "/uploads/public-report.zip",
+            "/public.txt", "/index.html", "/assets/app.js",
+            "/assets/public.log", "/images/backup-banner.jpg",
+            "/.well-known/acme-challenge/random-token", "/oauth/callback",
+            "/wp-json/api", "/docs/README.pdf",
+        )
+        for path in sensitive:
+            with self.subTest(denied=path):
+                self.assertTrue(any(re.search(pattern, path, re.I) for pattern in patterns),
+                                path)
+        for path in ordinary:
+            with self.subTest(allowed=path):
+                self.assertFalse(any(re.search(pattern, path, re.I) for pattern in patterns),
+                                 path)
+
+    def test_opt_in_nginx_xmlrpc_stays_in_one_owned_guard_and_restores(self):
+        default = self.operate("preview")
+        opted = self.operate("preview", xmlrpc=True)
+        self.assertEqual(default["ruleset"], guard.RULESET)
+        self.assertEqual(opted["ruleset"], guard.RULESET_XMLRPC)
+        self.assertTrue(opted["block_xmlrpc"])
+        self.assertNotEqual(default["proposal_sha256"], opted["proposal_sha256"])
+        self.assertNotIn("xmlrpc", guard._include("f" * 32).decode())
+        self.assertIn("^/xmlrpc[.]php$", guard._include(
+            "f" * 32, guard.RULESET_XMLRPC).decode())
+        self.assertIn("return 403", guard._include("f" * 32, guard.RULESET_XMLRPC).decode())
+        self.assertNotIn(".well-known", guard._include("f" * 32, guard.RULESET_XMLRPC).decode())
+        with self.assertRaisesRegex(guard.GuardError, "changed"):
+            self.operate("apply", xmlrpc=True, proposal=default["proposal_sha256"])
+        result = self.operate("apply", xmlrpc=True)
+        self.assertEqual(result["state"], "Applied")
+        self.assertTrue(result["block_xmlrpc"])
+        self.assertEqual(self.operate("recheck")["ruleset"], guard.RULESET_XMLRPC)
+        self.assertEqual(self.operate("recheck")["state"], "Applied")
+        self.assertEqual(self.fragment.read_bytes(),
+                         guard._include(result["recovery_id"], guard.RULESET_XMLRPC))
+        self.assertEqual(self.operate("restore", recovery=result["recovery_id"])["state"],
+                         "Restored")
+        self.assertFalse(self.fragment.exists())
+        # Both current options use one selected-site journal and Restore.
+        old = self.operate("apply")
+        self.assertEqual(self.operate("recheck")["ruleset"], guard.RULESET)
+        self.assertEqual(self.operate("restore", recovery=old["recovery_id"])["state"],
+                         "Restored")
 
     def test_public_proof_never_exposes_durable_recovery_id(self):
         token = "b" * 32
@@ -146,6 +212,32 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertEqual(self.operate("restore", recovery=second["recovery_id"])["state"],
                          "Restored")
         self.assertEqual(len([c for c in self.commands if "reload" in c]), 4)
+
+    def test_native_new_site_missing_extension_reports_manual_prerequisite(self):
+        original = self.vhost.read_text()
+        self.vhost.write_text(original.replace(
+            "include " + str(self.ext) + "/*.conf;\n", ""))
+        with self.assertRaisesRegex(
+                guard.GuardError, "New native VHost has no selected-site extension include"):
+            guard._source_safe(self.site, vhost_root=str(self.vhost_root),
+                               nginx_conf=str(self.nginx_conf))
+        self.assertEqual(list(self.state.iterdir()), [])
+        self.assertFalse(self.fragment.exists())
+
+    def test_manual_reapply_after_restored_source_was_regenerated(self):
+        first = self.operate("apply")
+        self.operate("restore", recovery=first["recovery_id"])
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "include enable-php-85.conf;",
+            "add_header X-Owner-Setting yes;\ninclude enable-php-85.conf;"))
+        review = self.operate("preview")
+        self.assertEqual(review["state"], "Restored")
+        self.assertNotEqual(review["vhost_sha256"], first["vhost_sha256"])
+        applied = self.operate("apply", source=review["vhost_sha256"])
+        self.assertEqual(applied["state"], "Applied")
+        self.assertNotEqual(applied["recovery_id"], first["recovery_id"])
+        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])["state"],
+                         "Restored")
 
     def _large_native_inventory(self, *, extension_comment_bytes=0):
         """Complete native inventory, including >1 MiB of valid sources."""

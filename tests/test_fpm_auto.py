@@ -1473,23 +1473,20 @@ class AutoNativeFpmTests(unittest.TestCase):
         self.assertEqual(self.calls.count("reload"), 1)
         self.assertFalse(self._run()["changed"])
 
-    def test_legacy_profile_remains_wordpress_only_until_reenabled(self):
+    def test_current_profile_requires_lifecycle_ownership_without_fallback(self):
         self._enable()
-        fd=worker._open_state_dir(str(self.state))
+        fd = worker._open_state_dir(str(self.state))
         try:
-            store=worker._read(fd)
-            old={**store["profiles"]["85"]}
-            del old["lifecycle"]
-            worker._save(fd,{**store,"revision":store["revision"]+1,
-                             "profiles":{"85":old}})
+            store = worker._read(fd)
+            incomplete = dict(store["profiles"]["85"])
+            del incomplete["lifecycle"]
+            with self.assertRaisesRegex(worker.FpmAutoError, "Invalid versioned"):
+                worker._validate({**store, "profiles": {"85": incomplete}})
         finally:
             os.close(fd)
-        self._vendor_reset()
-        self.assertFalse(self._run()["changed"])
-        self.assertEqual(self.config.read_bytes(), VENDOR_BYTES)
-        self.assertEqual(self.calls.count("reload"), 0)
-        self.assertEqual(worker.inspect("85",data_dir=str(self.state))["watch_scope"],
-                         "verified_native_wp_terminal")
+        # A current source always has the exact verified lifecycle evidence.
+        self.assertEqual(worker.inspect("85", data_dir=str(self.state))["watch_scope"],
+                         "verified_native_wp_terminal_and_fpm_lifecycle")
 
     def test_recent_completed_wp_progress_does_not_delay_later_fpm_regeneration(self):
         self._enable()
