@@ -634,6 +634,8 @@ function loadUi() {
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
     startWithWebsite:() => { trigger(elements.get('#ach-overview-browse-sites'), 'click'); return requests.at(-1); },
+    browseFromContext:() => { trigger(elements.get('#ach-website-browse'), 'click'); return requests.at(-1); },
+    focusedTab:() => focusedTab?.attributes['data-tab'] || null,
     openTab:name => {
       const tab=tabs.find(item => item.attributes['data-tab'] === name);
       assert.ok(tab, 'Unknown section');
@@ -933,13 +935,27 @@ const monitorOverview = (overrides = {}) => ({
 // Read-only get_overview responses do not carry this mutation field.
 const monitorAck = (overrides = {}) => monitorOverview({changed:true, ...overrides});
 
-test('First-use website action navigates to existing inventory without any write', () => {
+test('First-use website action transfers focus to the selected tab without any write', () => {
   const ui=loadUi();
   ui.respondOverview(monitorOverview());
+  assert.equal(ui.focusedTab(),null);
   const request=ui.startWithWebsite();
   assert.equal(ui.selectedTab(),'websites');
+  assert.equal(ui.focusedTab(),'websites', 'Focus must leave the hidden Overview button');
   assert.match(request.options.url,/s=get_sites$/);
   assert.ok(ui.requests.every(r=>r.options.url.includes('s=get_')), 'Start action must only read state');
+  const next=ui.keyTab('websites','ArrowDown');
+  assert.equal(next.focused,'routing');
+  assert.equal(next.selected,'routing');
+});
+
+test('Shared Browse websites action also transfers focus to Website list', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview());
+  const request=ui.browseFromContext();
+  assert.equal(ui.selectedTab(),'websites');
+  assert.equal(ui.focusedTab(),'websites');
+  assert.match(request.options.url,/s=get_sites$/);
 });
 
 test('Native overview shows all three safe Monitor switches and revision', () => {

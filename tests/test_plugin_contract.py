@@ -138,12 +138,13 @@ class PackageContractTests(unittest.TestCase):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
         self.assertIn('aria-label="Start using Customizer"', html)
         self.assertIn('<strong>Start with a website</strong>', html)
-        self.assertIn('Choose a site in Website list', html)
-        self.assertIn('Routing &amp; Nginx for site protection and recovery', html)
+        self.assertIn('Open Website list, then use the Website dropdown in the Selected website bar above the table.', html)
+        self.assertIn('Routing &amp; Nginx for protection and recovery', html)
         self.assertIn('FastCGI Cache to inspect caching', html)
         self.assertIn('PHP-FPM covers shared PHP settings', html)
         self.assertIn('Start with read-only Inspect, Preview or Recheck before making changes.', html)
-        self.assertIn('<button id="ach-overview-browse-sites" type="button">Choose a website</button>', html)
+        self.assertIn('<button id="ach-overview-browse-sites" type="button">Browse websites</button>', html)
+        self.assertIn('tab.focus({preventScroll:true});', html)
 
     def test_fpm_auto_disclosure_rejects_retired_profile_upgrade_promise(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')

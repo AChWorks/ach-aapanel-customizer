@@ -446,8 +446,8 @@
       <h4 class="ach-sr-only">Overview</h4>
       <div class="ach-note" aria-label="Start using Customizer">
         <strong>Start with a website</strong>
-        <p>Choose a site in Website list, then open Routing &amp; Nginx for site protection and recovery, or FastCGI Cache to inspect caching. PHP-FPM covers shared PHP settings; Status Pages covers page design and delivery. Start with read-only Inspect, Preview or Recheck before making changes.</p>
-        <div class="ach-controls"><button id="ach-overview-browse-sites" type="button">Choose a website</button></div>
+        <p>Open Website list, then use the Website dropdown in the Selected website bar above the table. After choosing a site, open Routing &amp; Nginx for protection and recovery, or FastCGI Cache to inspect caching. PHP-FPM covers shared PHP settings; Status Pages covers page design and delivery. Start with read-only Inspect, Preview or Recheck before making changes.</p>
+        <div class="ach-controls"><button id="ach-overview-browse-sites" type="button">Browse websites</button></div>
       </div>
       <p class="ach-note">Monitor switches do not directly change server settings or restart services. Disabling Overall Monitor or a relevant module blocks related inspections and manual workflows; turning off Overall Monitor or PHP-FPM preview also stops opted-in PHP-FPM repair from running. Automatic repair still needs separate explicit Enable/Disable.</p>
       <div class="ach-toolbar">
@@ -6012,7 +6012,11 @@
     });
   });
   function browseWebsites() {
-    root.find('#ach-tab-websites')[0].click();
+    var tab = root.find('#ach-tab-websites')[0];
+    tab.click();
+    // The originating button may be hidden now; keep keyboard focus on the destination.
+    // The tab handler already scrolls the horizontal tablist on narrow screens.
+    tab.focus({preventScroll:true});
   }
   root.find('#ach-website-browse').on('click', browseWebsites);
   root.find('#ach-overview-browse-sites').on('click', browseWebsites);
