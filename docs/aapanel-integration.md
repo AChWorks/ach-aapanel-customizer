@@ -526,11 +526,16 @@ interrupted Restore), Recheck reports **Recovery Required**, including
 a claim that the new native source or all aliases have been verified as
 protected. After reviewing the site, the administrator may explicitly
 Restore that one Recovery ID without undoing the foreign domain/VHost
-change. Restore rechecks source ownership, Nginx syntax, live nonce absence,
-and source stability. Fresh **Preview -> Apply** is a separate one-time
-operator choice on the updated source. Duplicate, missing or altered
-managed/retained fragments must remain blocked. No background repair or
-automatic reapplication is added.
+change. Restore requires the **exact Nginx source SHA returned by the last
+successful Recheck**; another VHost or sibling-extension edit rejects stale
+approval before retiring the owned file or reloading shared Nginx. Even without
+VHost drift, an `applied` journal with only its single byte-exact retained
+file reports **Recovery Required** (`interrupted_restore`) and enables manual
+Restore. A simultaneous live/retained pair, altered or missing owned file
+must never be reported healthy Applied. Restore rechecks source ownership,
+Nginx syntax, live nonce absence and source stability. Fresh
+**Preview -> Apply** is a separate operator choice on the updated source.
+No background repair or automatic reapplication is added.
 
 Other files, users and site configurations are not modified.
 After uninstall, saved policy/recovery may still be active: reinstall and

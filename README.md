@@ -16,9 +16,11 @@ or a WordPress-only plugin.
 **Unmerged Native 0.1.98 source candidate (not yet installed):** the
 selected-site Nginx Guard now distinguishes an exact owned rule recoverable
 after live native VHost/domain drift from altered, ambiguous or cross-site
-source. It requires an operator-driven `Recheck -> Restore`, then a fresh
-`Preview -> Apply` on the changed source. The explicit action button itself
-is the administrator consent; there is no redundant second checkbox. No watcher, automatic
+source. It requires an operator-driven `Recheck -> Restore`, with Restore
+bound to the exact reviewed Nginx source SHA; an interrupted Restore with one
+exact retained fragment can also be completed without VHost drift. A fresh
+`Preview -> Apply` is needed on the changed source. The action button itself
+is administrator consent; there is no redundant second checkbox. No watcher, automatic
 repair, foreign-source overwrite or new production qualification. Refer to
 the native integration guide and current PR checks for exact acceptance.
 

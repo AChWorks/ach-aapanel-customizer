@@ -628,7 +628,7 @@
         <p id="ach-guard-apply-why" class="ach-availability" data-state="blocked" role="status">Select a website and check readiness before enabling protection.</p>
         <div class="ach-controls"><button id="ach-guard-apply" type="button" class="btn btn-warning" disabled>Enable protection (reload Nginx)</button></div>
         <p id="ach-guard-restore-why" class="ach-availability" data-state="blocked" role="status">Select a website and Recheck to see whether Restore is available.</p>
-        <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Restore previous protection</button></div>
+        <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Remove managed Guard (reload Nginx)</button></div>
       </div>
       <div class="ach-note" aria-label="Fail2ban abusive scan protection">
         <strong>Abusive-scan protection — Fail2ban (opt-in)</strong>
@@ -2950,16 +2950,17 @@
     if (r.state === 'Restored' &&
         (!r.runtime_verified || !token(r.recovery_id) ||
          r.journal_phase !== 'restored' || !hash(r.vhost_sha256))) return false;
-    // A live native VHost change can expose an exact owned guard that must
-    // be manually retired before another Apply. Only the explicit backend
-    // source-drift recovery scope allows an applied journal in this state.
+    // Only the backend's explicit native-drift or interrupted-Restore scope
+    // permits an applied journal to report recoverable instead of Applied.
+    // Neither state proves the active Nginx workers still enforce Guard.
     if (r.recovery_scope !== undefined &&
-        !(r.recovery_scope === 'native_source_drift' &&
+        !(['native_source_drift','interrupted_restore'].includes(r.recovery_scope) &&
           r.state === 'Recovery Required' && r.journal_phase === 'applied')) return false;
     if (r.state === 'Recovery Required' &&
         (!token(r.recovery_id) ||
          !(r.journal_phase === 'prepared' ||
-           (r.journal_phase === 'applied' && r.recovery_scope === 'native_source_drift')) ||
+           (r.journal_phase === 'applied' &&
+            ['native_source_drift','interrupted_restore'].includes(r.recovery_scope))) ||
          !hash(r.vhost_sha256))) return false;
     if (r.state === 'Unmanaged' &&
         (r.recovery_id !== null || r.journal_phase !== null ||
@@ -2996,6 +2997,7 @@
     if (isRestore) {
       payload.approved = 'true';
       payload.recovery_id = selected.recovery;
+      payload.expected_vhost_sha256 = selected.vhost;
     }
     request('manage_nginx_protection',payload,function (r,failure) {
       if (ticket !== guardTicket) return;
@@ -3004,7 +3006,8 @@
       guardRecovery = null;
       guardLock();
       if (id !== hostsSiteId()) return;
-      if (!r || !validGuardReport(r,id,action)) {
+      if (!r || !validGuardReport(r,id,action) ||
+          ((isApply || isRestore) && r.vhost_sha256 !== selected.vhost)) {
         inspectionSummary('guard','Protection result was refused or could not be verified; Recheck before another action.','review');
         root.find('#ach-guard-result').text(cacheBackendFailure(failure,'nginx_guard_manage') ||
           'Unconfirmed native Nginx protection result; inspect saved recovery and Activity before retry.');
@@ -3017,7 +3020,7 @@
       }
       if (action === 'recheck' && ['Applied','Recovery Required'].includes(r.state) &&
           /^[0-9a-f]{32}$/.test(r.recovery_id || '')) {
-        guardRecovery = {siteId:id,recovery:r.recovery_id};
+        guardRecovery = {siteId:id,recovery:r.recovery_id,vhost:r.vhost_sha256};
       }
       guardLock();
       inspectionSummary('guard',r.state + ': ' + r.reason,

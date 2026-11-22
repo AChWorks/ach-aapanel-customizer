@@ -9268,6 +9268,7 @@ test('Sensitive-file Nginx guard requires fresh source and explicit Apply/Restor
   const restoring=ui.statusClick('#ach-guard-restore');
   assert.equal(restoring.options.data.guard_action,'restore');
   assert.equal(restoring.options.data.recovery_id,'c'.repeat(32));
+  assert.equal(restoring.options.data.expected_vhost_sha256,'a'.repeat(64));
   assert.equal(restoring.options.data.approved,'true');
   restoring.respond(sensitiveGuardResponse('Restored',{
     read_only:false,changed:true,journal_phase:'restored'
@@ -9312,6 +9313,7 @@ test('Optional pre-PHP XML-RPC uses the existing guard, invalidates stale Previe
     'changing a future selected option must not prevent exact recovery of the active variant');
   const restore=ui.statusClick('#ach-guard-restore');
   assert.equal(restore.options.data.recovery_id,'c'.repeat(32));
+  assert.equal(restore.options.data.expected_vhost_sha256,'a'.repeat(64));
   restore.respond(sensitiveGuardResponse('Restored',{
     read_only:false,changed:true,journal_phase:'restored'
   }));
@@ -9328,6 +9330,8 @@ test('Sensitive-file Nginx guard rejects read-only state and recovery inconsiste
       recovery_scope:'invalid'}],
     ['Recovery Required',{recovery_id:'c'.repeat(32),journal_phase:'prepared',
       recovery_scope:'native_source_drift'}],
+    ['Recovery Required',{recovery_id:'c'.repeat(32),journal_phase:'prepared',
+      recovery_scope:'interrupted_restore'}],
     ['Unmanaged',{recovery_id:'c'.repeat(32),journal_phase:'applied'}],
     ['Unmanaged',{journal_phase:'applied'}],
     ['Applied',{vhost_sha256:null}],
@@ -9363,7 +9367,7 @@ test('Sensitive-file Nginx guard accepts exact native-source-drift Recovery Requ
   const ui=loadUi();selectHostsSite(ui);
   ui.statusClick('#ach-guard-recheck').respond(sensitiveGuardResponse('Recovery Required',{
     recovery_id:'c'.repeat(32),journal_phase:'applied',runtime_verified:false,
-    recovery_scope:'native_source_drift',
+    recovery_scope:'native_source_drift',vhost_sha256:'d'.repeat(64),
     reason:'Native VHost changed while exact owned rule remains'
   }));
   assert.match(ui.state().guardResult,/Protection: Recovery Required/);
@@ -9375,10 +9379,49 @@ test('Sensitive-file Nginx guard accepts exact native-source-drift Recovery Requ
   const restore=ui.statusClick('#ach-guard-restore');
   assert.equal(restore.options.data.guard_action,'restore');
   assert.equal(restore.options.data.recovery_id,'c'.repeat(32));
+  assert.equal(restore.options.data.expected_vhost_sha256,'d'.repeat(64));
   assert.equal(restore.options.data.approved,'true');
-  restore.respond(sensitiveGuardResponse('Restored',{read_only:false,changed:true}));
+  restore.respond(sensitiveGuardResponse('Restored',{
+    read_only:false,changed:true,vhost_sha256:'d'.repeat(64)
+  }));
   assert.match(ui.state().guardResult,/Protection: Restored/);
   assert.equal(ui.state().guardApplyDisabled,true,'New source needs fresh Preview');
+});
+
+test('Sensitive-file Guard exposes interrupted retained-file Restore without source drift',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-guard-recheck').respond(sensitiveGuardResponse('Recovery Required',{
+    recovery_id:'c'.repeat(32),journal_phase:'applied',runtime_verified:false,
+    recovery_scope:'interrupted_restore',vhost_sha256:'e'.repeat(64),
+    reason:'Interrupted Restore retained exactly one owned Guard fragment'
+  }));
+  assert.match(ui.state().guardResult,/Protection: Recovery Required/);
+  assert.equal(ui.state().guardRestoreDisabled,false);
+  assert.equal(ui.state().guardApplyDisabled,true);
+  const restore=ui.statusClick('#ach-guard-restore');
+  assert.equal(restore.options.data.recovery_id,'c'.repeat(32));
+  assert.equal(restore.options.data.expected_vhost_sha256,'e'.repeat(64));
+  assert.equal(restore.options.data.approved,'true');
+  restore.respond(sensitiveGuardResponse('Restored',{
+    read_only:false,changed:true,vhost_sha256:'e'.repeat(64)
+  }));
+  assert.match(ui.state().guardResult,/Protection: Restored/);
+  assert.equal(ui.state().guardRestoreDisabled,true);
+});
+
+test('Sensitive-file Guard rejects Restore receipt for unreviewed source',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-guard-recheck').respond(sensitiveGuardResponse('Applied'));
+  assert.equal(ui.state().guardRestoreDisabled,false);
+  const restoring=ui.statusClick('#ach-guard-restore');
+  assert.equal(restoring.options.data.expected_vhost_sha256,'a'.repeat(64));
+  restoring.respond(sensitiveGuardResponse('Restored',{
+    read_only:false,changed:true,journal_phase:'restored',
+    vhost_sha256:'f'.repeat(64)
+  }));
+  assert.match(ui.state().guardResult,/unconfirmed|inspect saved recovery/i);
+  assert.doesNotMatch(ui.state().guardResult,/Protection: Restored/);
+  assert.equal(ui.state().guardRestoreDisabled,true);
 });
 
 test('Sensitive-file Nginx guard rejects malformed optimistic success and stale selection',()=>{

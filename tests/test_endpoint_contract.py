@@ -474,9 +474,21 @@ class EntrypointTests(unittest.TestCase):
                     {"guard_action": "recheck"})
                 self.assertTrue(observed["status"], observed)
                 self.assertEqual(observed["state"], "Recovery Required")
+                # Direct endpoint callers cannot bypass the reviewed
+                # source precondition with only a valid Recovery ID.
+                for stale_sha in (None, "f" * 64):
+                    rejected = self.plugin.manage_nginx_protection({
+                        "guard_action": "restore", "approved": "true",
+                        "recovery_id": recovery,
+                        **({"expected_vhost_sha256": stale_sha}
+                           if stale_sha is not None else {}),
+                    })
+                    self.assertFalse(rejected["status"], rejected)
+                    self.assertTrue(fragment.exists())
                 restored = self.plugin.manage_nginx_protection({
                     "guard_action": "restore", "approved": "true",
                     "recovery_id": recovery,
+                    "expected_vhost_sha256": observed["vhost_sha256"],
                 })
                 self.assertTrue(restored["status"], restored)
                 self.assertEqual(restored["state"], "Restored")

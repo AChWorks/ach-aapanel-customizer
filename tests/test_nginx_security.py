@@ -274,9 +274,10 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertNotEqual(latest["vhost_sha256"], preview["vhost_sha256"])
         applied = self.operate("apply", source=latest["vhost_sha256"])
         self.assertEqual(applied["state"], "Applied")
-        self.assertEqual(self.operate("recheck")["state"], "Applied")
-        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])["state"],
-                         "Restored")
+        reviewed = self.operate("recheck")
+        self.assertEqual(reviewed["state"], "Applied")
+        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"],
+                                      source=reviewed["vhost_sha256"])["state"], "Restored")
         self.assertEqual(peer.read_bytes(), peer_bytes)
         self.assertEqual(foreign.read_text(), "add_header X-Peer-39 changed;\n")
         self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
@@ -327,8 +328,10 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertFalse(list(self.state.iterdir()))
         applied = self.operate("apply", source=updated["vhost_sha256"])
         self.assertEqual(applied["state"], "Applied")
-        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])["state"],
-                         "Restored")
+        reviewed = self.operate("recheck")
+        self.assertEqual(reviewed["state"], "Applied")
+        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"],
+                                      source=reviewed["vhost_sha256"])["state"], "Restored")
         self.assertEqual(foreign.read_text(), "add_header X-Foreign-Module present;\n")
 
     def test_untrusted_root_symlink_refuses_security_write(self):
@@ -391,6 +394,189 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertEqual(self.operate("restore", recovery=reinstalled["recovery_id"])[
             "state"], "Restored")
         self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+
+    def test_stale_drift_restore_fails_before_mutation_or_reload(self):
+        applied = self.operate("apply")
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "server_name secure.invalid;",
+            "server_name secure.invalid;\n# aaPanel edit B"))
+        review_b = self.operate("recheck")
+        self.assertEqual(review_b["state"], "Recovery Required")
+        self.assertEqual(review_b["recovery_scope"], "native_source_drift")
+
+        # A second valid native VHost change must invalidate B's approval,
+        # even though site identity, root and the owned Guard remain exact.
+        self.vhost.write_text(self.vhost.read_text() + "# aaPanel edit C\n")
+        source_c = self.vhost.read_bytes()
+        before = list(self.commands)
+        with self.assertRaises(guard.GuardError) as stale:
+            self.operate("restore", recovery=applied["recovery_id"],
+                         source=review_b["vhost_sha256"])
+        self.assertEqual(stale.exception.stage, "concurrency")
+        self.assertIn("Recheck", str(stale.exception))
+        self.assertEqual(self.commands, before)
+        self.assertTrue(self.fragment.exists())
+        self.assertEqual(self.vhost.read_bytes(), source_c)
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+
+        review_c = self.operate("recheck")
+        self.assertNotEqual(review_c["vhost_sha256"], review_b["vhost_sha256"])
+        sibling = self.ext / "unrelated_module.conf"
+        sibling.write_text("add_header X-Unrelated yes;\n")
+        sibling.chmod(0o600)
+        prior_commands = list(self.commands)
+        with self.assertRaises(guard.GuardError) as stale_sibling:
+            self.operate("restore", recovery=applied["recovery_id"],
+                         source=review_c["vhost_sha256"])
+        self.assertEqual(stale_sibling.exception.stage, "concurrency")
+        self.assertEqual(self.commands, prior_commands)
+        self.assertTrue(self.fragment.exists())
+        self.assertEqual(sibling.read_text(), "add_header X-Unrelated yes;\n")
+
+        # Even direct callers must supply reviewed source evidence, not
+        # merely the durable Recovery ID and a current site snapshot.
+        with self.assertRaises(guard.GuardError) as missing:
+            self.operate("restore", recovery=applied["recovery_id"],
+                         source=None)
+        self.assertEqual(missing.exception.stage, "concurrency")
+        self.assertEqual(self.commands, prior_commands)
+
+        review_d = self.operate("recheck")
+        self.assertEqual(review_d["state"], "Recovery Required")
+        self.assertNotEqual(review_d["vhost_sha256"], review_c["vhost_sha256"])
+        restored = self.operate("restore", recovery=applied["recovery_id"],
+                                source=review_d["vhost_sha256"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertTrue(restored["runtime_verified"])
+        self.assertFalse(self.fragment.exists())
+        self.assertFalse(self.active)
+        self.assertEqual(self.vhost.read_bytes(), source_c)
+        self.assertEqual(sibling.read_text(), "add_header X-Unrelated yes;\n")
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+        self.assertEqual(len([c for c in self.commands if "reload" in c]), 2)
+
+    def test_restore_rechecks_source_after_syntax_check_before_retirement(self):
+        applied = self.operate("apply")
+        reviewed = self.operate("recheck")
+        self.assertEqual(reviewed["state"], "Applied")
+        sibling = self.ext / "new_native_extension.conf"
+        original_runner = self.runner
+        changed = False
+
+        def native_writer_during_syntax(argv, **kw):
+            nonlocal changed
+            if "-t" in argv and not changed:
+                changed = True
+                sibling.write_text("add_header X-New-Site-State observed;\n")
+                sibling.chmod(0o600)
+            return original_runner(argv, **kw)
+
+        self.runner = native_writer_during_syntax
+        try:
+            with self.assertRaises(guard.GuardError) as interrupted:
+                self.operate("restore", recovery=applied["recovery_id"],
+                             source=reviewed["vhost_sha256"])
+        finally:
+            self.runner = original_runner
+        self.assertTrue(changed)
+        self.assertEqual(interrupted.exception.stage, "concurrency")
+        self.assertTrue(self.fragment.exists(), "No owned-file rename on late drift")
+        self.assertEqual(len([c for c in self.commands if "reload" in c]), 1)
+        self.assertEqual(sibling.read_text(),
+                         "add_header X-New-Site-State observed;\n")
+
+        fresh = self.operate("recheck")
+        self.assertEqual(fresh["state"], "Recovery Required")
+        self.assertEqual(fresh["recovery_scope"], "native_source_drift")
+        self.assertNotEqual(fresh["vhost_sha256"], reviewed["vhost_sha256"])
+        self.assertEqual(self.operate(
+            "restore", recovery=fresh["recovery_id"],
+            source=fresh["vhost_sha256"])["state"], "Restored")
+        self.assertEqual(sibling.read_text(),
+                         "add_header X-New-Site-State observed;\n")
+        self.assertEqual(self.foreign.read_bytes(),
+                         b"Never change any unrelated site")
+
+    def test_interrupted_restore_exact_retained_with_unchanged_vhost(self):
+        applied = self.operate("apply")
+        retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+        original_source = self.vhost.read_bytes()
+        self.fragment.rename(retained)
+        checked = self.operate("recheck")
+        self.assertEqual(checked["state"], "Recovery Required")
+        self.assertEqual(checked["journal_phase"], "applied")
+        self.assertEqual(checked["recovery_scope"], "interrupted_restore")
+        self.assertFalse(checked["runtime_verified"])
+        self.assertEqual(checked["recovery_id"], applied["recovery_id"])
+        restored = self.operate("restore", recovery=checked["recovery_id"],
+                                source=checked["vhost_sha256"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertTrue(restored["runtime_verified"])
+        self.assertFalse(self.fragment.exists())
+        self.assertFalse(retained.exists())
+        self.assertFalse(self.active)
+        self.assertEqual(self.vhost.read_bytes(), original_source)
+        saved = json.loads((self.state / guard._journal(self.site["id"])).read_text())
+        self.assertEqual(saved["phase"], "restored")
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+
+    def test_applied_guard_live_retained_ownership_matrix_with_and_without_drift(self):
+        applied = self.operate("apply")
+        owned = self.fragment.read_bytes()
+        original = self.vhost.read_text()
+        retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+        cases = {
+            "live_exact": ("Applied", "Recovery Required"),
+            "retained_exact": ("Recovery Required", "Recovery Required"),
+            "duplicated_exact": ("Needs Review", "Needs Review"),
+            "live_altered": ("Needs Review", "Needs Review"),
+            "retained_altered": ("Needs Review", "Needs Review"),
+            "both_altered": ("Needs Review", "Needs Review"),
+            "missing": ("Needs Review", "Needs Review"),
+        }
+        for drift in (False, True):
+            self.vhost.write_text(original + ("# aaPanel changed VHost\n" if drift else ""))
+            for kind, states in cases.items():
+                with self.subTest(source_drift=drift, ownership=kind):
+                    for path in (self.fragment, retained):
+                        if path.exists():
+                            path.unlink()
+                    if kind in ("live_exact", "duplicated_exact"):
+                        self.fragment.write_bytes(owned)
+                        self.fragment.chmod(0o600)
+                    elif kind in ("live_altered", "both_altered"):
+                        self.fragment.write_bytes(b"foreign live\n")
+                        self.fragment.chmod(0o600)
+                    if kind in ("retained_exact", "duplicated_exact"):
+                        retained.write_bytes(owned)
+                        retained.chmod(0o600)
+                    elif kind in ("retained_altered", "both_altered"):
+                        retained.write_bytes(b"foreign retained\n")
+                        retained.chmod(0o600)
+                    checked = self.operate("recheck")
+                    expected = states[int(drift)]
+                    self.assertEqual(checked["state"], expected)
+                    self.assertEqual(checked["runtime_verified"], expected == "Applied")
+                    if expected == "Recovery Required":
+                        scope = ("native_source_drift" if drift
+                                 else "interrupted_restore")
+                        self.assertEqual(checked["recovery_scope"], scope)
+                    if expected == "Needs Review":
+                        before = list(self.commands)
+                        before_files = {
+                            path: path.read_bytes() if path.exists() else None
+                            for path in (self.fragment, retained)}
+                        with self.assertRaises(guard.GuardError):
+                            self.operate("restore", recovery=applied["recovery_id"],
+                                         source=checked["vhost_sha256"])
+                        self.assertEqual(
+                            len([c for c in self.commands if "reload" in c]),
+                            len([c for c in before if "reload" in c]))
+                        for path, content in before_files.items():
+                            self.assertEqual(
+                                path.read_bytes() if path.exists() else None, content)
+                    self.assertEqual(self.foreign.read_bytes(),
+                                     b"Never change any unrelated site")
 
     def test_drift_during_interrupted_restore_recovers_retired_exact_rule(self):
         applied = self.operate("apply")
