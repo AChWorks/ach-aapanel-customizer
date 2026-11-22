@@ -40,8 +40,8 @@ shared Cache roots, automatic site-wide purging, or Nginx Helper's vendor
 Purge All. The separately guarded native site-owned full-tree Clear is a
 different operation and does not make vendor Purge All safe.
 
-This GitHub-distributed package is a development pre-release, not a
-Production deployment or general compatibility certification. Actual
+This GitHub-distributed package is not a Production deployment or a
+general compatibility certification. Actual
 nonproduction acceptance includes WordPress 7.1.4 and Nginx Helper 2.4.1
 in an isolated aaPanel 8.0.7 environment; untested combinations require
 separate verification. For evidence and scope, see the
@@ -110,9 +110,9 @@ verified, manually installed ZIPs from the project Releases page.
 
 = Is this a WordPress.org Plugin Directory release? =
 
-No. This is a GitHub-distributed development pre-release. Plugin Directory
-submission, licensing and other Directory requirements are separate
-decisions and are not implied by the presence of this standard readme.txt.
+No. This package is distributed through GitHub Releases. A future
+WordPress.org Directory submission and its requirements are separate
+decisions; the MPL-2.0 license and this readme.txt do not imply a listing.
 
 == Changelog ==
 

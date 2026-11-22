@@ -11,7 +11,7 @@ A native aaPanel plugin for **inspect → preview → explicit apply → recheck
 3. Open **Website list**, refresh the inventory and choose a site using the **Selected website → Website** dropdown. Start with a read-only inspection; use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation.
 4. **Optional:** install the separately versioned `ach-aapanel-bridge-vX.Y.Z.zip` through **WordPress → Plugins → Add New → Upload Plugin** only for supported WordPress Cache integration. The Bridge is not embedded in or required by the native ZIP.
 
-The first Stable baseline uses **Native 0.1.98** and the independently versioned **WordPress Bridge 0.1.9**; earlier development previews are historical, not mandatory compatibility/migration targets. Always obtain the **actually published** assets rather than assuming the source tree is a Release.
+The first Stable release was **Native 0.1.98** with optional **WordPress Bridge 0.1.9**. Later native and Bridge package versions advance independently. Earlier development previews are historical, not mandatory compatibility/migration targets. Always obtain the **latest published** assets and SHA256 checksums from Releases rather than assuming the source tree is a Release.
 
 A successful import does **not** prove that aaPanel's resident Python helpers were refreshed. If the installed files and observed behavior disagree, consult the [native ZIP upgrade and resident-worker recovery runbook](docs/aapanel-upgrade-recovery.md); preserve the saved Recovery ID and recheck before retrying. Neither ZIP performs a Production deployment or enables optional enforcement on its own.
 
