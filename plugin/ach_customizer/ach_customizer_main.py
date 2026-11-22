@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.91'
+WORKER_SOURCE_VERSION = '0.1.92'
 
 _STATE_DIR = DATA_DIR
 
@@ -276,7 +276,7 @@ class ach_customizer_main:
             },
             "overall_enable_control": "Plugin-owned Monitor switch only",
             "notice": (
-                "Monitor controls are read-only; PHP 8.1/8.5 Manual Apply requires separate admin approval. No background enforcement."
+                "Monitor observes without changing services or enabling automatic repair. Manual Apply requires administrator approval; optional PHP-FPM repair is enabled separately."
                 if active else
                 "Monitor disabled; existing services stay running. Previously applied manual FPM changes require explicit recovery."
             ),

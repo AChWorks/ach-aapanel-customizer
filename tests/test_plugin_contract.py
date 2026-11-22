@@ -119,6 +119,16 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn('data-i18n', html)
         self.assertNotIn('navigator.language', html)
 
+    def test_overview_distinguishes_monitor_from_opt_in_auto_repair(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        main = (PACKAGE / 'ach_customizer_main.py').read_text(encoding='utf-8')
+        self.assertNotIn('Unreleased preview.', html)
+        self.assertNotIn('No automatic enforcement.', html)
+        self.assertIn('Monitor changes only observation preferences', html)
+        self.assertIn('Optional PHP-FPM automatic repair has separate opt-in controls.', html)
+        self.assertIn('Monitor observes without changing services or enabling automatic repair.', main)
+        self.assertIn('optional PHP-FPM repair is enabled separately.', main)
+
     def test_installer_guards_cleanup_and_does_not_mutate_services(self):
         shell = (PACKAGE / 'install.sh').read_text(encoding='utf-8')
         helper = (PACKAGE / 'ach_customizer_cleanup.py').read_text(encoding='utf-8')

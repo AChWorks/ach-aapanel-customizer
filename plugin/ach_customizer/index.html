@@ -415,7 +415,7 @@
         </div>
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
       <h4 class="ach-sr-only">Overview</h4>
-      <p class="ach-note">Unreleased preview. Monitoring observes only; PHP-FPM changes require separate review and approval. No automatic enforcement.</p>
+      <p class="ach-note">Monitor changes only observation preferences; manual site and service changes require explicit administrator approval. Optional PHP-FPM automatic repair has separate opt-in controls.</p>
       <div class="ach-toolbar">
         <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
         <button type="button" id="ach-overview-refresh">Refresh state</button>
@@ -969,7 +969,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.91'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.92'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
