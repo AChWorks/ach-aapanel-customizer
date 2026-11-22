@@ -915,7 +915,25 @@ new 0.1.80 source has been installed.
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,
 check the native combined access log, configure the desired retry/window/ban
-values, inspect the plan, then enable. The managed Fail2ban jail is selected
+values, inspect the plan, then enable.
+
+**Native log-integrity preflight (Native 0.1.87 source):** a matching
+`access_log` path is not trusted merely because a root-owned file exists.
+The log's parent directory and the log file must be root-controlled,
+without group/other write: a PHP `www` process can rename/replace even
+a `root:root 0644` log inside a `www`-writable directory. On the retained
+aaPanel 8.0.7 guest, `/www/wwwlogs` is `www:www 0700` and does
+**not** meet this origin-wide firewall trust prerequisite. A specific
+`Needs Review` reason identifies the problem; new Scanner Apply is refused.
+The plugin does **not** automatically chown/chmod this shared aaPanel
+log directory, overwrite foreign logs or disable unrelated jails. Inspect
+native writer, rotation and log owner before any explicitly approved
+system-wide adjustment. Existing scanner Restore/orphan recovery is
+independent of new Apply. Customizer Activity/Recovery journals remain
+root-owned `0600` and do not consume native access logs. This safety
+check is not proof of trusted CDN/proxy client-IP attribution.
+
+The managed Fail2ban jail is selected
 site-log-scoped, but an nftables ban affects EVERY web service on the origin
 using TCP/UDP 80/443, IPv4 and IPv6. Real-client log addresses from a trusted
 proxy may not be packet sources visible to the origin kernel firewall; never

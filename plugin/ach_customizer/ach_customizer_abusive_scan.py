@@ -20,7 +20,7 @@ import stat
 import subprocess
 from uuid import uuid4
 
-from ach_customizer_nginx_security import _site_identity, _source_safe
+from ach_customizer_nginx_security import GuardError, _site_identity, _source_safe
 from ach_customizer_status_inspect import VHOST_ROOT
 from ach_customizer_state import _open_state_dir
 
@@ -262,9 +262,20 @@ def _site_log(site, *, vhost_root=SOURCE_DIR, log_dir=LOG_DIR):
             or Path(desired).resolve() != Path(desired)):
         raise AbuseError("source", "Selected site log path is missing or untrusted")
     log_stat, dir_stat = Path(desired).stat(), log_dir.stat()
+    # Fail2ban turns these log lines into ROOT firewall decisions. A PHP/www
+    # process can forge them not only by writing the file itself but by
+    # *renaming/replacing a root-owned log inside a www-writable directory*.
+    # Nginx's root master can still append to a root-controlled native log.
+    # Never silently chown/chmod aaPanel's shared log directory here.
+    trusted_uid = os.geteuid()
     if (not stat.S_ISREG(log_stat.st_mode) or log_stat.st_nlink != 1
-            or log_stat.st_mode & 0o002 or dir_stat.st_mode & 0o002):
-        raise AbuseError("source", "Selected site log is not safely owned")
+            or not stat.S_ISDIR(dir_stat.st_mode)
+            or log_stat.st_uid != trusted_uid or dir_stat.st_uid != trusted_uid
+            or log_stat.st_mode & 0o022 or dir_stat.st_mode & 0o022):
+        raise AbuseError(
+            "source", "Native access log or its parent directory is writable or "
+            "replaceable by non-root processes; cannot trust it for origin-wide "
+            "Fail2ban firewall bans. Review native ownership/permissions and Recheck")
     return source_sha, desired
 
 
@@ -376,6 +387,7 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             state = "Needs Review"
         else:
             state = "Unmanaged"
+        source_problem = None
         try:
             vhost_sha, log = _site_log(site, vhost_root=vhost_root, log_dir=log_dir)
             if state == "Unmanaged" and site.get("status") not in ("1", 1):
@@ -386,7 +398,12 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             report.update(vhost_sha256=vhost_sha, log_path=log,
                           plan_sha256=_hash(_jail(site_id, log, policy) +
                                             filter_bytes + vhost_sha.encode()))
-        except Exception as exc:
+        except (AbuseError, GuardError) as exc:
+            source_problem = str(exc)[:300]
+            report.update(vhost_sha256=None, log_path=None)
+            if state in ("Unmanaged", "Applied"):
+                state = "Needs Review"
+        except Exception:
             report.update(vhost_sha256=None, log_path=None)
             if state in ("Unmanaged", "Applied"):
                 state = "Needs Review"
@@ -397,6 +414,8 @@ def manage(action, site, *, data_fd, params=None, expected_plan=None,
             "Recovery Required": "Interrupted setup/restore; inspect recovery and retry removal",
             "Needs Review": "Native source, log or live Fail2ban jail needs attention",
         }.get(state, "Inspect Fail2ban")
+        if state == "Needs Review" and source_problem:
+            reason = source_problem
         return {**report, "state": state, "reason": reason,
                 "runtime_verified": (state == "Applied"
                                  or (state == "Restored"

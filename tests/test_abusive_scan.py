@@ -104,6 +104,36 @@ class ScannerTests(unittest.TestCase):
             with self.assertRaisesRegex(scan.AbuseError, "uniquely owned"):
                 scan._site_log(self.site, vhost_root=self.vhosts, log_dir=self.log_dir)
 
+    def test_writable_log_directory_cannot_authorize_root_firewall(self):
+        # A www-owned parent can replace even a root-owned, 0644 log.
+        self.log_dir.chmod(0o777)
+        try:
+            preview = self.execute("preview")
+            self.assertEqual(preview["state"], "Needs Review")
+            self.assertIn("replaceable", preview["reason"])
+            self.assertIsNone(preview["log_path"])
+            with self.assertRaisesRegex(scan.AbuseError, "replaceable"):
+                self.execute("apply", approved=True, expected_plan="0" * 64)
+            self.assertFalse((self.jail / "ach-customizer-scan-23.local").exists())
+        finally:
+            self.log_dir.chmod(0o755)
+
+    def test_writable_log_file_cannot_authorize_root_firewall(self):
+        self.log.chmod(0o666)
+        try:
+            with patch.object(scan, "_source_safe", return_value=(self.log_sha, "")):
+                with self.assertRaisesRegex(scan.AbuseError, "replaceable"):
+                    scan._site_log(self.site, vhost_root=self.vhosts, log_dir=self.log_dir)
+        finally:
+            self.log.chmod(0o644)
+
+    def test_foreign_log_owner_refused_even_if_mode_readonly(self):
+        # Simulate a root-run app inspecting a foreign-owned native log.
+        with patch.object(scan, "_source_safe", return_value=(self.log_sha, "")):
+            with patch.object(scan.os, "geteuid", return_value=os.geteuid() + 1):
+                with self.assertRaisesRegex(scan.AbuseError, "replaceable"):
+                    scan._site_log(self.site, vhost_root=self.vhosts, log_dir=self.log_dir)
+
     def test_plan_apply_recheck_restore_exact_owned_jail(self):
         preview = self.execute("preview")
         self.assertEqual(preview["state"], "Unmanaged")

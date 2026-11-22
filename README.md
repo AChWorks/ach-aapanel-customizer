@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-21; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.86`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.87`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.86 development source (not yet installed or publicly released)
+## Native 0.1.87 development candidate (not yet installed or publicly released)
 
 This candidate adds one selected-site, manual, recoverable HTTPS
 `home`/`siteurl` WordPress database correction, using the site's native
@@ -84,11 +84,18 @@ interrupted two-option update retains its exact Recovery ID. Separate
 WP_DEBUG/PHP changes no longer obstruct a valid URL Restore. The existing
 site-owned sensitive-path Nginx Guard also has an **optional pre-PHP
 XML-RPC rule** using the exact same include/journal; the old default
-and pre-existing Recovery records continue to work. Native installed QA
-for these **0.1.86** changes is pending, not inherited from the prior
-[0.1.85 QA](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+and pre-existing Recovery records continue to work. These **0.1.86**
+features passed exact-source and real installed native QA on the one retained
+VM ([receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7071383274)).
+**0.1.87** additionally refuses new origin-wide Fail2ban scanner bans when
+the native Nginx access-log file or its parent directory is replaceable by
+a non-root process; the source report identifies the unsafe path. The plugin
+does not silently change shared aaPanel log ownership or grant PHP access to
+root-only recovery records. A native VHost created without its site-owned
+Nginx extension include now reports the exact one-time manual prerequisite.
+These changes do not assert 0.1.87 installed QA or public Release.
 [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
-now defines the manual-first reconciliation contract.
+defines the manual-first reconciliation contract.
 
 The same optional site-local WordPress controls also provide a **manual
 XML-RPC request block**. It uses one exact, plugin-owned WordPress must-use
@@ -125,8 +132,9 @@ It does not open a new listener, install a certificate, change HTTP/80
 Status Pages, publish a public Release or authorize Production deployment.
 The retained QA VM has no configured HTTPS/443 listener at its
 original baseline. Previous exact-source 0.1.85 QA verified a temporary
-two-family HTTPS fixture and its cleanup; this does not certify the new
-0.1.86 source or the optional pre-PHP XML-RPC variant. See [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
+two-family HTTPS fixture and its cleanup; this evidence remains source-specific; the
+0.1.86 pre-PHP XML-RPC HTTP/POST+Restore path was independently exercised on
+the retained guest and does not certify 0.1.87's new scanner log trust check. See [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 
 ## P0 native 0.1.80 source workflow (not yet publicly released)

@@ -301,9 +301,15 @@ def _source_safe(site, *, vhost_root, nginx_conf):
     roots = values("root")
     server_names = values("server_name")
     expected_glob = vhost_root + "/extension/" + name + "/*.conf"
-    if (roots != [root] or includes.count(expected_glob) != 1
-            or len(server_names) != 1):
-        raise GuardError("source", "Native root, server or exclusive include is unproven")
+    if roots != [root] or len(server_names) != 1:
+        raise GuardError("source", "Native root or server identity is unproven")
+    if includes.count(expected_glob) != 1:
+        if expected_glob not in includes:
+            raise GuardError(
+                "source", "New native VHost has no selected-site extension include. "
+                "Add exactly one server-level include for " + expected_glob +
+                " and its root-owned directory using the site's aaPanel Config, then Recheck")
+        raise GuardError("source", "Native site extension include is duplicated or unproven")
     observed_names = server_names[0].split()
     native_domains = {binding["name"] for binding in site["bound_domains"]}
     if (not observed_names or name not in observed_names

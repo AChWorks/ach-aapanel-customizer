@@ -180,6 +180,17 @@ class NativeSecurityTests(unittest.TestCase):
                          "Restored")
         self.assertEqual(len([c for c in self.commands if "reload" in c]), 4)
 
+    def test_native_new_site_missing_extension_reports_manual_prerequisite(self):
+        original = self.vhost.read_text()
+        self.vhost.write_text(original.replace(
+            "include " + str(self.ext) + "/*.conf;\n", ""))
+        with self.assertRaisesRegex(
+                guard.GuardError, "New native VHost has no selected-site extension include"):
+            guard._source_safe(self.site, vhost_root=str(self.vhost_root),
+                               nginx_conf=str(self.nginx_conf))
+        self.assertEqual(list(self.state.iterdir()), [])
+        self.assertFalse(self.fragment.exists())
+
     def test_manual_reapply_after_restored_source_was_regenerated(self):
         first = self.operate("apply")
         self.operate("restore", recovery=first["recovery_id"])

@@ -184,7 +184,20 @@ or broad file types by default. Every active security policy needs fresh
 source ownership, guarded apply/reload, live response proof, durable recovery,
 separate approval for Restore and drift awareness. Exact URL probes are
 not universal proof of full HTTP/2/3, CDN/HTTPS or all custom site aliases.
-Security policy starts disabled until primary-admin opt-in. After native
+Security policy starts disabled until primary-admin opt-in. A site
+freshly created by aaPanel can lack its Nginx `extension/<site>/*.conf`
+include; do not silently edit such a VHost during ordinary inspection.
+Show the exact missing-include prerequisite for a one-time operator-owned
+correction. The optional Fail2ban scanner consumes native access logs to
+make **origin-wide** root firewall decisions: the log file AND its parent
+directory must be protected against non-root writing, replacement and
+forgery. A `root`-owned file alone inside a `www`-writable directory is
+insufficient. Refuse new Scanner Apply with an actionable diagnostic when
+the source is untrusted; do not change aaPanel's shared log directory
+ownership automatically or remove existing recoverable jails. This boundary
+does not pretend that aaPanel's ordinary `www`-writable access logs are
+tamper-proof or that a trusted CDN client-IP ban can be enforced at the
+origin. After native
 aaPanel regenerates a selected-site source, **manual Recheck followed by
 one-time guarded Apply/Restore** is the accepted reconciliation route;
 a separate automatic Nginx-regeneration watcher is not required. Existing
