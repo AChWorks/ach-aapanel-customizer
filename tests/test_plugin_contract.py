@@ -134,6 +134,14 @@ class PackageContractTests(unittest.TestCase):
         self.assertIn('disabling Overall Monitor or PHP-FPM preview also blocks opted-in PHP-FPM repair.', main)
         self.assertIn('Monitor disabled: existing services keep running, but related inspections/manual workflows and already opted-in PHP-FPM automatic repair cannot run.', main)
 
+    def test_dense_tables_preserve_readable_activity_and_website_columns(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('.ach-scroll > table { min-width:640px; }', html)
+        self.assertIn('class="ach-website-table"', html)
+        self.assertIn('.ach-activity-table { table-layout:fixed; }', html)
+        self.assertIn('.ach-activity-table td:nth-child(2) { white-space:nowrap; }', html)
+        self.assertIn("$('<time>').addClass('ach-activity-time').attr('datetime', entry.time_utc)", html)
+
     def test_overview_starts_with_clear_website_task_and_no_unconditional_writes(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
         self.assertIn('aria-label="Start using Customizer"', html)

@@ -313,6 +313,11 @@
   #ach-customizer th { background:#f7f9fa; color:#586775; font-weight:600; white-space:nowrap; }
   #ach-customizer tbody tr:hover { background:#fafcfd; }
   #ach-customizer .ach-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--ach-line); border-radius:8px; }
+  /* Dense data tables must scroll inside their own frame on narrow screens,
+     rather than squeezing domain names and identifiers into vertical text. */
+  #ach-customizer .ach-scroll > table { min-width:640px; }
+  #ach-customizer .ach-scroll > table.ach-website-table,
+  #ach-customizer .ach-scroll > table.ach-activity-table { min-width:760px; }
   #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:var(--ach-space-sm); margin:var(--ach-space-md) 0 0; }
   /* Keep each control paired with its label when a row wraps. Separating
      label and input as independent flex items orphaned several fields. */
@@ -375,7 +380,15 @@
   #ach-customizer .ach-activity-error { color:#ac3431; font-weight:600; }
   #ach-customizer .ach-activity-warning { color:#8c601c; font-weight:600; }
   #ach-customizer .ach-activity-info { color:#3b6474; }
+  #ach-customizer .ach-activity-table { table-layout:fixed; }
+  #ach-customizer .ach-activity-table th:nth-child(1) { width:145px; }
+  #ach-customizer .ach-activity-table th:nth-child(2) { width:83px; }
+  #ach-customizer .ach-activity-table th:nth-child(3) { width:170px; }
+  #ach-customizer .ach-activity-table th:nth-child(4) { width:175px; }
+  #ach-customizer .ach-activity-table th:nth-child(5) { width:187px; }
   #ach-customizer .ach-activity-table td { overflow-wrap:anywhere; }
+  #ach-customizer .ach-activity-table td:nth-child(2) { white-space:nowrap; }
+  #ach-customizer .ach-activity-time span { display:block; }
   #ach-customizer .ach-main hr { border:0; border-top:1px solid var(--ach-line); margin:var(--ach-space-lg) 0; }
   #ach-customizer .ach-main small { display:block; margin-top:6px; color:var(--ach-muted); line-height:1.55; }
   @media (max-width:880px) {
@@ -474,7 +487,7 @@
         <p id="ach-sites-status" role="status" aria-live="polite">Open this section to load native website inventory.</p>
         <button id="ach-sites-refresh" type="button">Refresh websites</button>
       </div>
-      <div class="ach-scroll"><table><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"><tr><td colspan="5">Website inventory not loaded.</td></tr></tbody></table><div id="ach-sites-loading" class="ach-table-skeleton" aria-hidden="true" hidden><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div></div></div>
+      <div class="ach-scroll"><table class="ach-website-table"><thead><tr><th>ID</th><th>Site key</th><th>Bound domains</th><th>Document root</th><th>Classification</th></tr></thead><tbody id="ach-sites-rows"><tr><td colspan="5">Website inventory not loaded.</td></tr></tbody></table><div id="ach-sites-loading" class="ach-table-skeleton" aria-hidden="true" hidden><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div><div class="ach-skeleton-row"><span></span><span></span><span></span></div></div></div>
       <div class="ach-controls"><button type="button" id="ach-prev">Previous</button><span id="ach-page">1</span><button type="button" id="ach-next">Next</button></div>
       <div class="ach-note" aria-label="Native website lifecycle Monitor">
         <strong>Website lifecycle changes (read-only)</strong>
@@ -1054,7 +1067,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.96'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.97'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -5715,7 +5728,15 @@
       sectionsLoaded.activity = true;
       r.entries.forEach(function (entry) {
         var tr = $('<tr>');
-        $('<td>').text(entry.time_utc).appendTo(tr);
+        // Display date and time on deliberate lines while retaining the exact
+        // UTC value in the semantic datetime attribute for diagnostics.
+        var when = $('<time>').addClass('ach-activity-time').attr('datetime', entry.time_utc);
+        var timeParts = /^(\d{4}-\d{2}-\d{2})T(.+)$/.exec(entry.time_utc);
+        if (timeParts) {
+          $('<span>').text(timeParts[1]).appendTo(when);
+          $('<span>').text(timeParts[2]).appendTo(when);
+        } else when.text(entry.time_utc);
+        $('<td>').append(when).appendTo(tr);
         $('<td>').text(entry.level).addClass('ach-activity-' + entry.level.toLowerCase()).appendTo(tr);
         $('<td>').text(entry.module + ' / ' + entry.action + (entry.target ? ' · ' + entry.target : '')).appendTo(tr);
         $('<td>').text(entry.outcome + ' · ' + entry.stage + (entry.error_class ? ' (' + entry.error_class + ')' : '') + (entry.detail ? ': ' + entry.detail : '')).appendTo(tr);
