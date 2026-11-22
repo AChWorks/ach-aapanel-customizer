@@ -8476,8 +8476,8 @@ test('Navigation splits real site, routing and cache controls without duplicatin
   assert.match(cache,/id="ach-cache-plan-button"/);
   assert.match(cache,/id="ach-cache-activation-apply"/);
   assert.match(cache,/id="ach-cache-activation-restore"/);
-  assert.match(cache,/Native full-site Cache file clear/);
-  assert.match(cache,/older generations and cached aliases in that same directory/);
+  assert.match(cache,/Clear this website's Cache files/);
+  assert.match(cache,/verified site-owned physical directory may contain earlier Cache generations and aliases/);
   assert.match(cache,/Clear all selected-site Cache files/);
   assert.match(cache,/neither changes Nginx Helper settings or enables Purge All/);
   assert.match(cache,/public GET\/HEAD URL objects/);

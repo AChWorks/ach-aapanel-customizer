@@ -119,6 +119,87 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn('data-i18n', html)
         self.assertNotIn('navigator.language', html)
 
+    def test_overview_distinguishes_monitor_from_opt_in_auto_repair(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        main = (PACKAGE / 'ach_customizer_main.py').read_text(encoding='utf-8')
+        self.assertNotIn('Unreleased preview.', html)
+        self.assertNotIn('No automatic enforcement.', html)
+        self.assertNotIn('Monitor changes only observation preferences', html)
+        self.assertIn('Monitor switches do not directly change server settings or restart services.', html)
+        self.assertIn('Disabling Overall Monitor or a relevant module blocks related inspections and manual workflows', html)
+        self.assertIn('turning off Overall Monitor or PHP-FPM preview also stops opted-in PHP-FPM repair from running', html)
+        self.assertIn('Automatic repair still needs separate explicit Enable/Disable.', html)
+        self.assertIn('even if its profile stays enabled.', html)
+        self.assertIn('Monitor switches do not directly change services or enable automatic repair.', main)
+        self.assertIn('disabling Overall Monitor or PHP-FPM preview also blocks opted-in PHP-FPM repair.', main)
+        self.assertIn('Monitor disabled: existing services keep running, but related inspections/manual workflows and already opted-in PHP-FPM automatic repair cannot run.', main)
+
+    def test_fpm_auto_disclosure_rejects_retired_profile_upgrade_promise(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        validator = (PACKAGE / 'ach_customizer_fpm_auto.py').read_text(encoding='utf-8')
+        self.assertIn('Only current lifecycle-bearing automatic profiles are supported.', html)
+        self.assertIn('A separate explicit Enable requires fresh source and policy verification', html)
+        self.assertIn('retired pre-Stable WordPress-only formats have no automatic migration or fallback.', html)
+        self.assertNotIn('Previously enabled WordPress-only profiles need to be disabled and enabled again', html)
+        self.assertIn('or not isinstance(profile["lifecycle"], dict)', validator)
+
+    def test_checkbox_text_flow_and_guard_option_remain_readable(self):
+        import re
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        # A label with text + code + emphasis must not make each fragment
+        # a separate flex item that collapses into vertical letter columns.
+        generic = re.search(
+            r'#ach-customizer \.ach-main label:has\(> input\[type="checkbox"\]\)\s*\{([^}]+)\}',
+            html)
+        self.assertIsNotNone(generic)
+        self.assertIn('display:block', generic.group(1))
+        self.assertNotIn('inline-flex', generic.group(1))
+        note = re.search(
+            r'#ach-customizer \.ach-main \.ach-note > label:has\(> input\[type="checkbox"\]\)\s*\{([^}]+)\}',
+            html)
+        self.assertIsNotNone(note)
+        self.assertIn('display:block', note.group(1))
+        self.assertIn('class="ach-guard-option"', html)
+        self.assertIn('id="ach-guard-block-xmlrpc" /><span>', html)
+        self.assertIn('grid-template-columns:16px minmax(0,1fr)', html)
+        self.assertIn('#ach-customizer .ach-view code { white-space:nowrap; }', html)
+        self.assertIn('<summary>What changes when I enable this?</summary>', html)
+        self.assertIn('Check protection readiness', html)
+        self.assertIn('Recheck current protection', html)
+        # Each formerly detached flex label/select pair is one wrapping
+        # field, across Routing, PHP-FPM, and Activity.
+        for control_id in (
+            'ach-hosts-alias-select', 'ach-scan-maxretry',
+            'ach-scan-findtime', 'ach-scan-bantime',
+            'ach-scan-orphan-choice', 'ach-wp-settings-kind',
+            'ach-wp-settings-debug', 'ach-wp-settings-interval',
+            'ach-php-version', 'ach-activity-level', 'ach-activity-module',
+        ):
+            field = re.search(
+                r'<div class="ach-inline-field">\s*'
+                r'<label for="' + re.escape(control_id) +
+                r'">.*?</label>\s*<(?:input|select)\s+id="' +
+                re.escape(control_id) + r'"', html, re.S)
+            self.assertIsNotNone(field, control_id)
+
+    def test_complex_operator_notes_offer_scannable_guidance(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        for heading in (
+            'What does each WordPress operation change?',
+            'How to complete orphan-jail recovery',
+            'Which sources are compared?',
+            'Supported source and exact Nginx changes',
+            'What does the Cache audit check?',
+            'When does PHP-FPM automatic repair run?',
+            'Delivery requirements and recovery',
+            'Which HTTPS connections are affected?',
+        ):
+            self.assertIn('<summary>' + heading + '</summary>', html)
+        self.assertIn('Before changing WordPress HTTPS URLs:', html)
+        self.assertIn('Firewall impact:', html)
+        self.assertIn('Existing bans are <strong>not yet verified removed</strong>', html)
+        self.assertIn('This is <strong>not</strong> Nginx Helper Purge All.', html)
+
     def test_installer_guards_cleanup_and_does_not_mutate_services(self):
         shell = (PACKAGE / 'install.sh').read_text(encoding='utf-8')
         helper = (PACKAGE / 'ach_customizer_cleanup.py').read_text(encoding='utf-8')

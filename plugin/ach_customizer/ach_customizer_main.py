@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.91'
+WORKER_SOURCE_VERSION = '0.1.95'
 
 _STATE_DIR = DATA_DIR
 
@@ -276,9 +276,9 @@ class ach_customizer_main:
             },
             "overall_enable_control": "Plugin-owned Monitor switch only",
             "notice": (
-                "Monitor controls are read-only; PHP 8.1/8.5 Manual Apply requires separate admin approval. No background enforcement."
+                "Monitor switches do not directly change services or enable automatic repair. Disabling Overall Monitor or a relevant module blocks related workflows; disabling Overall Monitor or PHP-FPM preview also blocks opted-in PHP-FPM repair. Manual Apply and auto-repair Enable remain separate explicit actions."
                 if active else
-                "Monitor disabled; existing services stay running. Previously applied manual FPM changes require explicit recovery."
+                "Monitor disabled: existing services keep running, but related inspections/manual workflows and already opted-in PHP-FPM automatic repair cannot run. Previously applied manual FPM changes require explicit recovery."
             ),
         }
 
