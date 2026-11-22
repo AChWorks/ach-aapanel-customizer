@@ -72,8 +72,11 @@ be changed or inserted before WordPress bootstrap. It is syntax-checked
 with the actual native PHP CLI before atomic replacement. The backup
 records only the original matched line (if any) in root-owned state; Restore
 removes or replaces the exact managed line and preserves unrelated changes
-elsewhere in the WordPress file. Dynamic/multiple PHP definitions, stale
-site identity, and foreign managed markers are refused. No live PHP setting
+elsewhere in the WordPress file. Dynamic/multiple PHP definitions, including comma-separated global `const`
+declarations of the managed key, and additional pre-bootstrap `include` or
+`require` sources are refused with an actionable compatibility error.
+Unrelated constants, inert comments/strings, stale site identity and foreign
+managed markers are handled without silently asserting effective runtime state. No live PHP setting
 is claimed until the application is separately inspected.
 
 **XML-RPC request gate:** An independent opt-in site policy creates one
@@ -458,7 +461,7 @@ Full authenticated PHP-FPM automatic-repair UI acceptance and Production
 qualification remain
 separate.
 
-## Selected-site Nginx sensitive-path guard (Draft 0.1.90; pre-stable current contract)
+## Selected-site Nginx sensitive-path guard (Draft 0.1.91; pre-stable current contract)
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
@@ -860,8 +863,10 @@ Monitor status, exact source identity, recovery journal and fresh runtime
 verification must agree; failure preserves diagnostic evidence and baseline
 bytes. A completed host transaction is reconciled after a worker crash without
 reloading PHP again. Emergency Disable prevents new lifecycle repairs.
-Existing enabled profiles do not silently acquire new authority; disable
-and re-enable deliberately to activate the expanded scope.
+Only current lifecycle-bearing profiles are supported for automatic repair;
+each new Enable requires fresh explicit operator intent and the current source
+identity. Former pre-Stable profiles and their WordPress-only fallback are
+not supported or silently upgraded.
 
 A fresh, already-completed WP progress record does not suppress later
 independent PHP-FPM regeneration. The two branches are reconciled in the

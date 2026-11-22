@@ -224,9 +224,21 @@ def _setting(raw, kind):
     boot = bootstrap[0]
     _top_level_php(code, boot.start())
 
-    # A global PHP const is effective, but not an editable define() line.
-    # Comments/quoted examples are masked, so only executable const remains.
-    if re.search(rb"\bconst\s+" + name + rb"\b", code, re.I):
+    # A pre-bootstrap PHP include can define either setting from another file.
+    # Do not infer absence from wp-config.php alone or execute foreign PHP
+    # during a read-only preview. The verified WordPress bootstrap follows
+    # this prefix and is deliberately not an additional include.
+    if re.search(rb"(?<![\w$])(?:require_once|require|include_once|include)\b",
+                 code[:boot.start()], re.I):
+        raise WPSettingsError(
+            "compatibility", "WordPress config loads another PHP source before WordPress bootstrap; "
+            "review the setting manually")
+
+    # A PHP const statement may declare several constants separated by commas.
+    # Check its active statement up to the semicolon, not only the first name;
+    # comment and string contents have already been masked at fixed offsets.
+    if re.search(rb"(?<![\w$])const\b[^;{}]*\b" + name + rb"\s*=(?!=|>)",
+                 code, re.I):
         raise WPSettingsError(
             "compatibility", "WordPress " + KEYS[kind] +
             " uses a PHP const declaration; review manually")

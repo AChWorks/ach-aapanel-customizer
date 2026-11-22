@@ -188,6 +188,83 @@ class WPSettingsTests(unittest.TestCase):
                     self.assertFalse(list(self.data.iterdir()))
                     self.assertFalse(list(self.cron.iterdir()))
 
+    def test_multi_const_declarations_never_masquerade_as_absent(self):
+        for kind, constant in (("debug", b"WP_DEBUG"),
+                               ("cron", b"DISABLE_WP_CRON")):
+            declarations = [
+                b"const " + constant + b" = false;",
+                b"const OTHER_SETTING = 1, " + constant + b" = false;",
+                b"const OTHER_SETTING = 1,\n" + constant + b" = false;",
+                b"const OTHER_SETTING = [1, 2], /* explanation */ " +
+                constant + b" = false;",
+                b"const OTHER_SETTING = 'a;b',\r\n /* active */\r\n" +
+                constant + b" = false;",
+                b"const /* comment */ OTHER_SETTING = 1, /* c */ " +
+                constant + b" = false, NEXT_SETTING = 2;",
+            ]
+            for declaration in declarations:
+                source = (b"<?php\r\n" + declaration + b"\r\n"
+                          b"require_once ABSPATH . 'wp-settings.php';\r\n")
+                interval = 9 if kind == "cron" else None
+                with self.subTest(kind=kind, declaration=declaration):
+                    self.config.write_bytes(source)
+                    for action in ("recheck", "apply"):
+                        with self.assertRaises(settings.WPSettingsError) as error:
+                            self.call(action, kind, desired="true", interval=interval,
+                                      **({"expected_source": settings._sha(source)}
+                                         if action == "apply" else {}))
+                        self.assertEqual(error.exception.stage, "compatibility")
+                    self.assertEqual(self.config.read_bytes(), source)
+                    self.assertFalse(list(self.data.iterdir()))
+                    self.assertFalse(list(self.cron.iterdir()))
+
+    def test_prebootstrap_included_php_is_not_an_absent_setting(self):
+        for kind, constant in (("debug", b"WP_DEBUG"),
+                               ("cron", b"DISABLE_WP_CRON")):
+            # A real local PHP source exists; this is NOT merely a comment.
+            included = (b"<?php\n"
+                        b"define('" + constant + b"', false);\n")
+            (self.root / "local-settings.php").write_bytes(included)
+            for statement in (
+                    b"require __DIR__ . '/local-settings.php';",
+                    b"include __DIR__ . '/local-settings.php';",
+                    b"require_once(__DIR__ . '/local-settings.php');",
+                    b"include_once (__DIR__ . '/local-settings.php');"):
+                for declared in (b"", b"define( '" + constant + b"', true );\n"):
+                    source = (b"<?php\n" + declared + statement +
+                              b"\nrequire_once ABSPATH . 'wp-settings.php';\n")
+                    interval = 11 if kind == "cron" else None
+                    with self.subTest(kind=kind, statement=statement, direct=bool(declared)):
+                        self.config.write_bytes(source)
+                        for action in ("recheck", "apply"):
+                            with self.assertRaises(settings.WPSettingsError) as error:
+                                self.call(action, kind, desired="true", interval=interval,
+                                          **({"expected_source": settings._sha(source)}
+                                             if action == "apply" else {}))
+                            self.assertEqual(error.exception.stage, "compatibility")
+                            self.assertIn("before WordPress bootstrap", str(error.exception))
+                        self.assertEqual(self.config.read_bytes(), source)
+                        self.assertFalse(list(self.data.iterdir()))
+                        self.assertFalse(list(self.cron.iterdir()))
+
+    def test_unrelated_const_and_inert_includes_do_not_block_normal_flow(self):
+        for kind in ("debug", "cron"):
+            source = (b"<?php\n"
+                      b"const OTHER_SETTING = 'include require WP_DEBUG';\n"
+                      b"$note = \"require_once __DIR__ . '/local-settings.php';\";\n"
+                      b"/* include __DIR__ . '/other.php'; */\n"
+                      b"// require __DIR__ . '/else.php';\n"
+                      b"require_once ABSPATH . 'wp-settings.php';\n")
+            with self.subTest(kind=kind):
+                self.config.write_bytes(source)
+                interval = 5 if kind == "cron" else None
+                self.assertEqual(self.recheck(kind, interval=interval)["state"], "Source Ready")
+                self.assertEqual(self.apply(kind, interval=interval)["state"], "Applied")
+                self.assertEqual(self.recheck(kind, interval=interval)["state"], "Applied")
+                self.assertEqual(self.restore(kind, interval=interval)["state"], "Restored")
+                self.assertEqual(self.config.read_bytes(), source)
+                self.assertFalse(list(self.cron.iterdir()))
+
     def test_conditionals_and_post_bootstrap_definitions_are_not_managed(self):
         cases = [
             b"<?php\nif (false) {\n  define( 'WP_DEBUG', false );\n}\n"
