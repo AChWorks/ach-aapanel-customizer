@@ -113,8 +113,10 @@ cleanup, a second review checkbox or a version-pinned WP writer. It does not
 edit DNS, unrelated names or network/peer hosts. Retain primary-admin access,
 exact hostname targeting and basic file integrity, but do not invent extra
 prerequisite/recovery layers or prevent an informed Remove because no native
-site exists. Keep only genuine historical recovery paths for older applied
-state; never silently delete their retained records. An OS-level edit is not
+site exists. Preserve current-generation manual Hosts Recovery and its owned records.
+Retired pre-Stable automatic WordPress Hosts cleanup Restore is not a
+supported operator action. Retained old QA records are forensic evidence,
+not a mandate to keep obsolete compatibility code. An OS-level edit is not
 the required workflow.
 
 ### Optional WordPress companion

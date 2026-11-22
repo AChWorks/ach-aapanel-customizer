@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-22; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native `0.1.89` remediation candidate on Draft [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118); Bridge `0.1.9` unchanged | Not yet independently reviewed/merged/released. Installed Native `0.1.88` QA remains exact-older-version evidence in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21); it is not proof for `0.1.89`. |
+| **Source checkout** | Native `0.1.90` exact-source remediation candidate on Draft [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118); Bridge `0.1.9` unchanged | Still pending exact-HEAD independent review, Merge and Release. Officially installed Native `0.1.89` acceptance is historical exact-source evidence in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), not proof for the revised `0.1.90` parser. |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.89 candidate: basic website file protection, no duplicate directory-index rule
+## Native 0.1.90 candidate: basic website file protection, no duplicate directory-index rule
 
 On the retained native aaPanel VM, a synthetic directory without an index
 already returned HTTP 403 (Nginx autoindex disabled). No duplicate listing
@@ -88,11 +88,12 @@ This pre-stable Guard has just one current default ruleset
 (`site-sensitive-files-xmlrpc-v1`); it does **not** carry earlier QA
 ruleset adapters.
 
-The Native `0.1.89` remediation also restricts selected-site manual
+The Native `0.1.90` remediation restricts selected-site manual
 WP_DEBUG/system WP-Cron edits to one direct, live literal PHP definition
-before WordPress bootstrap. Commented, conditional, post-bootstrap or
-otherwise ambiguous source requires manual review; no inert Cron policy
-may be reported Applied. Current PHP-FPM automatic recovery requires the
+before WordPress bootstrap. Active conditional, post-bootstrap, `const`,
+duplicate or computed definitions require manual review, while comments and
+quoted explanations are not active settings. No inert Cron policy may be
+reported Applied. Current PHP-FPM automatic recovery requires the
 exact witnessed event token, not a previous pre-Stable tokenless record.
 These are source changes, not a claim of new installed-native acceptance.
 

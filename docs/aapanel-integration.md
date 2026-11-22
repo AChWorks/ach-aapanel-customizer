@@ -458,7 +458,7 @@ Full authenticated PHP-FPM automatic-repair UI acceptance and Production
 qualification remain
 separate.
 
-## Selected-site Nginx sensitive-path guard (Draft 0.1.89; pre-stable current contract)
+## Selected-site Nginx sensitive-path guard (Draft 0.1.90; pre-stable current contract)
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
@@ -718,10 +718,11 @@ descriptor-relative source/identity check immediately before atomic replace
 detects most external edits; a simultaneously writing uncoordinated OS
 process is **not** covered by a universal transaction. If the alias is
 already absent, the action reports that state and the UI refreshes. Source
-writes remain full-primary-admin-only. Existing advanced selected-site
-Recovery and historical, explicitly approved WP Restore remain separately
-accessible only for their earlier saved state; no new automatic cleanup
-journal, daemon, watcher, or backup subsystem is created by this feature.
+writes remain full-primary-admin-only. The currently supported advanced selected-site Hosts Recovery remains
+available for exact operations created through that active manual workflow.
+The retired pre-Stable automatic WordPress Hosts cleanup Restore is **not**
+available or supported. No new cleanup journal, daemon, watcher or backup
+subsystem is created by one-click removal.
 
 Source-level regressions cover successful and failed/deleted-site names,
 multiple mappings, preservation of peer aliases, invalid/non-UTF-8

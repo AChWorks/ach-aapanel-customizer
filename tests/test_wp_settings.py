@@ -143,23 +143,50 @@ class WPSettingsTests(unittest.TestCase):
                 self.assertEqual(self.config.read_bytes(), value)
                 self.assertFalse(list(self.data.iterdir()))
 
-    def test_inert_comment_definitions_never_publish_debug_or_cron(self):
+    def test_inert_comment_and_quoted_explanation_are_not_active_settings(self):
         for kind, constant in (("debug", b"WP_DEBUG"),
                                ("cron", b"DISABLE_WP_CRON")):
             source = (b"<?php\n/*\n" + b"define( '" + constant +
-                      b"', false );\n*/\nrequire_once ABSPATH . 'wp-settings.php';\n")
+                      b"', false );\n*/\n"
+                      b"$example = \"define( '" + constant + b"', false );\";\n"
+                      b"require_once ABSPATH . 'wp-settings.php';\n")
             with self.subTest(kind=kind):
                 self.config.write_bytes(source)
-                with self.assertRaises(settings.WPSettingsError) as error:
-                    self.recheck(kind, interval=5 if kind == "cron" else None)
-                self.assertEqual(error.exception.stage, "compatibility")
-                with self.assertRaises(settings.WPSettingsError):
-                    self.call("apply", kind, desired="true",
-                              interval=5 if kind == "cron" else None,
-                              expected_source=settings._sha(source))
+                interval = 5 if kind == "cron" else None
+                self.assertEqual(self.recheck(kind, interval=interval)["state"], "Source Ready")
+                self.assertEqual(self.apply(kind, interval=interval)["state"], "Applied")
+                self.assertEqual(self.restore(kind, interval=interval)["state"], "Restored")
                 self.assertEqual(self.config.read_bytes(), source)
-                self.assertFalse(list(self.data.iterdir()))
                 self.assertFalse(list(self.cron.iterdir()))
+
+    def test_active_unrecognized_definitions_never_become_absent(self):
+        for kind, constant in (("debug", b"WP_DEBUG"),
+                               ("cron", b"DISABLE_WP_CRON")):
+            forms = [
+                b"const " + constant + b" = false;",
+                b"const /* active */ " + constant + b" = false;",
+                b"define( /* existing setting */ '" + constant + b"', false );",
+                b"define( '" + constant + b"' /* inline */, false );",
+                b"define( $constant_name, false );",  # key could be the requested setting
+                b"define( 'WP_' . 'DEBUG', false );",  # dynamic target cannot be verified
+                b'define( "WP_{$suffix}", false );',  # interpolated key is dynamic
+            ]
+            for definition in forms:
+                source = (b"<?php\n" + definition +
+                          b"\nrequire_once ABSPATH . 'wp-settings.php';\n")
+                interval = 7 if kind == "cron" else None
+                with self.subTest(kind=kind, definition=definition):
+                    self.config.write_bytes(source)
+                    with self.assertRaises(settings.WPSettingsError) as review:
+                        self.recheck(kind, interval=interval)
+                    self.assertEqual(review.exception.stage, "compatibility")
+                    with self.assertRaises(settings.WPSettingsError) as attempted:
+                        self.call("apply", kind, desired="true", interval=interval,
+                                  expected_source=settings._sha(source))
+                    self.assertEqual(attempted.exception.stage, "compatibility")
+                    self.assertEqual(self.config.read_bytes(), source)
+                    self.assertFalse(list(self.data.iterdir()))
+                    self.assertFalse(list(self.cron.iterdir()))
 
     def test_conditionals_and_post_bootstrap_definitions_are_not_managed(self):
         cases = [

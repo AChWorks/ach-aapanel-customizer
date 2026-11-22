@@ -137,6 +137,7 @@ def _live_php_code(raw):
     PHP parser. Unfamiliar heredoc/nowdoc syntax needs manual review.
     """
     code = bytearray(raw)
+    quoted = {}
     i = 0
     while i < len(raw):
         if raw.startswith(b"<<<", i):
@@ -152,6 +153,7 @@ def _live_php_code(raw):
             if end < 0:
                 end = len(raw)
         elif raw[i] in (39, 34, 96):  # PHP quotes and backticks
+            begin = i
             quote = raw[i]
             end = i + 1
             while end < len(raw) and raw[end] != quote:
@@ -159,12 +161,13 @@ def _live_php_code(raw):
             if end >= len(raw):
                 raise WPSettingsError("compatibility", "WordPress PHP quoted text is incomplete")
             end += 1
+            quoted[begin] = (end, raw[begin + 1:end - 1], quote)
         else:
             i += 1
             continue
         code[i:end] = b" " * (end - i)
         i = end
-    return bytes(code)
+    return bytes(code), quoted
 
 
 def _top_level_php(code, at):
@@ -179,11 +182,38 @@ def _top_level_php(code, at):
             "compatibility", "WordPress setting/bootstrap is conditional or not a direct PHP statement")
 
 
+def _active_define_names(raw, code, quoted):
+    """Inspect just the first argument of live PHP define() calls.
+
+    A variable/computed first argument could define either managed constant;
+    refuse the source rather than claim the setting is absent. Other define()
+    values may be dynamic; their constant names must be literal.
+    """
+    names = []
+    for call in re.finditer(rb"\bdefine\s*\(", code, re.I):
+        at = call.end()
+        while at < len(code) and code[at] in b" \t\r\n" and at not in quoted:
+            at += 1
+        literal = quoted.get(at)
+        if (literal is None or literal[2] not in (39, 34)
+                or b"\\" in literal[1] or literal[2] == 34 and b"$" in literal[1]):
+            raise WPSettingsError(
+                "compatibility", "WordPress config contains a dynamic define() name; review manually")
+        end, name, _ = literal
+        while end < len(code) and code[end] in b" \t\r\n":
+            end += 1
+        if end >= len(code) or code[end] != 44:  # comma after literal first argument
+            raise WPSettingsError(
+                "compatibility", "WordPress config contains an unsupported define() name; review manually")
+        names.append((call.start(), name))
+    return names
+
+
 def _setting(raw, kind):
     name = KEYS[kind].encode("ascii")
     if not raw.lstrip().startswith(b"<?php"):
         raise WPSettingsError("compatibility", "WordPress config must start with PHP source")
-    code = _live_php_code(raw)
+    code, quoted = _live_php_code(raw)
     bootstrap = [
         match for match in WP_BOOTSTRAP.finditer(raw)
         if code[match.start() + len(match.group(0)) -
@@ -193,26 +223,37 @@ def _setting(raw, kind):
         raise WPSettingsError("compatibility", "Unique active WordPress bootstrap not found")
     boot = bootstrap[0]
     _top_level_php(code, boot.start())
-    definitions = [match for match in REGEX.finditer(raw)
-                   if match.group(2).upper() == name]
-    # A second mention, including a comment or dynamic definition, is
-    # ambiguous: never turn it into an "absent" setting.
-    candidates = re.findall(rb"\bdefine\s*\(\s*['\"]" + name +
-                            rb"['\"]", raw, flags=re.I)
-    if len(definitions) > 1 or len(candidates) != len(definitions):
+
+    # A global PHP const is effective, but not an editable define() line.
+    # Comments/quoted examples are masked, so only executable const remains.
+    if re.search(rb"\bconst\s+" + name + rb"\b", code, re.I):
+        raise WPSettingsError(
+            "compatibility", "WordPress " + KEYS[kind] +
+            " uses a PHP const declaration; review manually")
+
+    live = [at for at, value in _active_define_names(raw, code, quoted)
+            if value.upper() == name]
+    definitions = []
+    for match in REGEX.finditer(raw):
+        if match.group(2).upper() != name:
+            continue
+        at = match.start() + len(match.group(0)) - len(match.group(0).lstrip(b" \t"))
+        if code[at:at + 6].lower() == b"define":
+            definitions.append((at, match))
+    # No reported absence if any active write uses an unsupported syntax.
+    if len(live) != len(definitions) or len(live) > 1:
         raise WPSettingsError(
             "compatibility", "WordPress " + KEYS[kind] +
             " is duplicated, dynamic or not a single live literal definition")
     if not definitions:
         return None, None, boot.start()
-    match = definitions[0]
-    keyword_at = match.start() + len(match.group(0)) - len(match.group(0).lstrip(b" \t"))
+    keyword_at, match = definitions[0]
     if (match.group(2) != name or
-            code[keyword_at:keyword_at + len(b"define")].lower() != b"define" or
+            live[0] != keyword_at or
             match.start() >= boot.start()):
         raise WPSettingsError(
             "compatibility", "WordPress " + KEYS[kind] +
-            " definition is commented, incorrectly cased or follows WordPress bootstrap")
+            " definition is ambiguous, incorrectly cased or follows WordPress bootstrap")
     _top_level_php(code, keyword_at)
     return match, match.group(3).decode("ascii").lower(), boot.start()
 
