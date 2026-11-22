@@ -444,6 +444,11 @@
         </div>
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
       <h4 class="ach-sr-only">Overview</h4>
+      <div class="ach-note" aria-label="Start using Customizer">
+        <strong>Start with a website</strong>
+        <p>Choose a site in Website list, then open Routing &amp; Nginx for site protection and recovery, or FastCGI Cache to inspect caching. PHP-FPM covers shared PHP settings; Status Pages covers page design and delivery. Start with read-only Inspect, Preview or Recheck before making changes.</p>
+        <div class="ach-controls"><button id="ach-overview-browse-sites" type="button">Choose a website</button></div>
+      </div>
       <p class="ach-note">Monitor switches do not directly change server settings or restart services. Disabling Overall Monitor or a relevant module blocks related inspections and manual workflows; turning off Overall Monitor or PHP-FPM preview also stops opted-in PHP-FPM repair from running. Automatic repair still needs separate explicit Enable/Disable.</p>
       <div class="ach-toolbar">
         <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
@@ -1049,7 +1054,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.95'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.96'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -6006,9 +6011,11 @@
         String(root.find('#ach-php-version').val() || '') === selected;
     });
   });
-  root.find('#ach-website-browse').on('click', function () {
+  function browseWebsites() {
     root.find('#ach-tab-websites')[0].click();
-  });
+  }
+  root.find('#ach-website-browse').on('click', browseWebsites);
+  root.find('#ach-overview-browse-sites').on('click', browseWebsites);
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     if (['overview','websites','routing','cache','php','status','activity'].indexOf(tab) < 0) return;
