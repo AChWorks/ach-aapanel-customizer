@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-22; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native `0.1.91` source-remediation candidate on Draft [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118); Bridge `0.1.9` unchanged | Pending fresh exact-HEAD CI, installed QA and independent review. Native `0.1.90` installed acceptance in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7072677985) remains version-scoped evidence; it does not prove the revised `0.1.91` parser. |
+| **Merged development source** | Native `0.1.91` integrated into `main` by [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118) (merge `8c1aca8e2e8b7f78ea419043a9d0e1021c7abf70`); Bridge `0.1.9` unchanged | [Exact candidate CI](https://github.com/AChWorks/ach-aapanel-customizer/actions/runs/44975680996) passed (1,207 Python, 380 UI); [installed 0.1.91 QA on the retained VM](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7072889806) passed for its tested paths. **No public 0.1.91 Release or Production deployment is claimed.** |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.91 candidate: basic website file protection, no duplicate directory-index rule
+## Native 0.1.91 merged source: basic website file protection, no duplicate directory-index rule
 
 On the retained native aaPanel VM, a synthetic directory without an index
 already returned HTTP 403 (Nginx autoindex disabled). No duplicate listing
@@ -96,13 +96,13 @@ pre-bootstrap PHP includes/requires require manual review; inert comments and
 quoted explanations do not count as active settings. No inert Cron policy may be
 reported Applied. Current PHP-FPM automatic recovery requires the
 exact witnessed event token, not a previous pre-Stable tokenless record.
-These are source changes, not a claim of new installed-native acceptance.
+The exact candidate passed CI and scope-bound installed WordPress Debug/Cron and parser acceptance ([Issue #21 receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7072889806)); unchanged Guard and other previously tested modules retain their own version-scoped evidence.
 
 This is a limited additional layer, not a promise to catch every renamed
 backup or an explicit per-location `autoindex on` override. Unsupported
 site layouts require manual review. Native QA evidence and installed identity
 are kept in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
-Merge, public Release and Production still require separate authorization.
+Source integration has completed; public Release and Production deployment remain separately gated.
 
 ## Native 0.1.87 earlier QA milestone (historical; not publicly released)
 

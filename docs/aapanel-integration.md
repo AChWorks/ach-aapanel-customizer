@@ -461,7 +461,7 @@ Full authenticated PHP-FPM automatic-repair UI acceptance and Production
 qualification remain
 separate.
 
-## Selected-site Nginx sensitive-path guard (Draft 0.1.91; pre-stable current contract)
+## Selected-site Nginx sensitive-path guard (Merged Native 0.1.91; pre-stable current contract)
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
