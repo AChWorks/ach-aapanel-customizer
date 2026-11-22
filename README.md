@@ -7,10 +7,10 @@ or a WordPress-only plugin.
 
 ## Distribution, source and tested state
 
-| Layer | Verified reference (2026-11-21; check live systems) | What it proves |
+| Layer | Verified reference (2026-11-22; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native version from the [manifest](plugin/ach_customizer/info.json) (this candidate: `0.1.87`); Bridge `0.1.9`. [PR #116](https://github.com/AChWorks/ach-aapanel-customizer/pull/116) merged the prior Native `0.1.75` source | Development source, **not** a published package or installed QA proof. Verify the [native manifest](plugin/ach_customizer/info.json) and [Bridge](wordpress/ach-aapanel-bridge/ach-aapanel-bridge.php) |
+| **Source checkout** | Native `0.1.87` on Draft [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118); optional Bridge `0.1.9` unchanged | The ZIP was officially imported into the one retained **QA VM**, but has not passed independent review, Merge or public Release; exact installed-proof and test scope are in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7071682775) |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -73,7 +73,7 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.87 development candidate (not yet installed or publicly released)
+## Native 0.1.87 QA-installed candidate (not independently reviewed or publicly released)
 
 This candidate adds one selected-site, manual, recoverable HTTPS
 `home`/`siteurl` WordPress database correction, using the site's native
@@ -93,7 +93,7 @@ a non-root process; the source report identifies the unsafe path. The plugin
 does not silently change shared aaPanel log ownership or grant PHP access to
 root-only recovery records. A native VHost created without its site-owned
 Nginx extension include now reports the exact one-time manual prerequisite.
-These changes do not assert 0.1.87 installed QA or public Release.
+The 0.1.87 source was officially imported into the **same persistent nonproduction aaPanel VM**, with all 69 source files byte-verified, native Python/UI version `0.1.87` and the unsafe log-path refusal proved via the authenticated UI. [Detailed QA evidence](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7071682775). This does **not** authorize public Release or Production.
 [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2)
 defines the manual-first reconciliation contract.
 
