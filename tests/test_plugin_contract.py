@@ -168,6 +168,24 @@ class PackageContractTests(unittest.TestCase):
                 re.escape(control_id) + r'"', html, re.S)
             self.assertIsNotNone(field, control_id)
 
+    def test_complex_operator_notes_offer_scannable_guidance(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        for heading in (
+            'What does each WordPress operation change?',
+            'How to complete orphan-jail recovery',
+            'Which sources are compared?',
+            'Supported source and exact Nginx changes',
+            'What does the Cache audit check?',
+            'When does PHP-FPM automatic repair run?',
+            'Delivery requirements and recovery',
+            'Which HTTPS connections are affected?',
+        ):
+            self.assertIn('<summary>' + heading + '</summary>', html)
+        self.assertIn('Before changing WordPress HTTPS URLs:', html)
+        self.assertIn('Firewall impact:', html)
+        self.assertIn('Existing bans are <strong>not yet verified removed</strong>', html)
+        self.assertIn('This is <strong>not</strong> Nginx Helper Purge All.', html)
+
     def test_installer_guards_cleanup_and_does_not_mutate_services(self):
         shell = (PACKAGE / 'install.sh').read_text(encoding='utf-8')
         helper = (PACKAGE / 'ach_customizer_cleanup.py').read_text(encoding='utf-8')

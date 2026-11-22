@@ -527,7 +527,10 @@
       </details>
       <div class="ach-note" aria-label="Native WordPress failed-install read-only witness">
         <strong>Native WordPress failed-install witness — opt-in, observation only</strong>
-        <p>This optional aaPanel 8.0.7 Nginx witness records detailed evidence of failed single-site WP Toolkit operations. It never edits Hosts automatically. Use <strong>Local Hosts — one-click removal</strong> above to remove a detected alias after either successful or failed installation, regardless of site inventory status. The witness is not required to inspect or remove a current alias. No automatic PHP-FPM changes from this witness.</p>
+        <p>Optional diagnostics for failed WordPress installations. You can remove an unwanted local Hosts alias above without enabling this feature. It never edits Hosts or PHP automatically.</p>
+        <details class="ach-help"><summary>What does this diagnostic record?</summary>
+          <p>On supported aaPanel 8.0.7 Nginx sources, the witness records failure evidence for individual WP Toolkit operations. It is not required for inspecting or removing a local alias, even if that website has already been removed from aaPanel.</p>
+        </details>
         <p id="ach-wp-terminal-status" role="status" aria-live="polite">Inspect the optional read-only witness policy before enabling.</p>
         <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> Enable optional detailed failed-install diagnostics. Alias removal above works even without this watcher; it never edits /etc/hosts automatically.</label>
         <div class="ach-controls">
@@ -546,11 +549,10 @@
       <hr />
       <div class="ach-note" aria-label="Selected website onboarding and recovery">
         <strong>Site onboarding, drift &amp; guided recovery (read-only)</strong>
-        <p>Select a discovered native website. This combines its last reviewed site baseline,
-        current generated VHost, saved shared PHP policy and site-owned Cache recovery.
-        A change in aaPanel can invalidate earlier evidence: this report never approves
-        or performs Apply/Restore and cannot certify live Nginx/PHP workers or Status Pages recovery.
-        Run it again after aaPanel adds/edits a site or regenerates a VHost.</p>
+        <p>Check what changed on the selected website since your last review. This report only compares information; it does not change the website.</p>
+        <details class="ach-help"><summary>Which sources are compared?</summary>
+          <p>Compares the saved native website baseline with the current generated Nginx VHost, shared PHP policy and site-owned Cache recovery. It cannot prove which Nginx/PHP workers are currently running or authorize Status Pages recovery. Run the check again after changes in aaPanel.</p>
+        </details>
         <div class="ach-controls">
           <button id="ach-reconcile-button" type="button" disabled>Review selected site &amp; recovery</button>
         </div>
@@ -578,7 +580,10 @@
         <p id="ach-vhost-result" class="ach-status-metadata" role="status">Select a website to compare native records with generated VHost source.</p>
       </details>
       <hr />
-      <p class="ach-note"><strong>Nginx next-load candidate and origin HTTP/80 (read-only):</strong> Run a bounded native <code>nginx -T</code> syntax/include check to see whether the selected website VHost belongs to the configuration a future reload would use, then observe a localhost HTTP/80 HEAD with its registered Host. This is NOT proof of the configuration in already-running Nginx workers, which site served the response, effective cache safety or DNS/TLS behavior. No reload or configuration/cache changes.</p>
+      <p class="ach-note"><strong>Check Nginx configuration (read-only):</strong> See whether this site's Nginx file is included in the next-load configuration and whether its local HTTP/80 address responds. Nothing is changed or reloaded.</p>
+      <details class="ach-help"><summary>What does this Nginx check verify?</summary>
+        <p>Runs a bounded <code>nginx -T</code> syntax/include check and a local HTTP/80 HEAD request using the selected Host. This does not prove the active Nginx worker configuration, which website served the response, Cache safety or external DNS/TLS behavior.</p>
+      </details>
       <div class="ach-controls"><button id="ach-nginx-candidate-button" type="button" disabled>Check Nginx candidate and local HTTP</button></div>
       <p id="ach-nginx-candidate-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Check Nginx next-load source and local HTTP/80.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
@@ -612,7 +617,10 @@
       <div class="ach-note" aria-label="Fail2ban abusive scan protection">
         <strong>Abusive-scan protection — Fail2ban (opt-in)</strong>
         <p>Enable the site's <strong>sensitive-path Nginx guard</strong> first. This separate Fail2ban jail watches only this site's native combined access log for repeated malicious file and executable-upload probes returning 403/404. Requires installed/running system Fail2ban and nftables. It does not ban ordinary 404s, OAuth, ACME or .well-known. It never installs packages or enables itself.</p>
-        <p><strong>Firewall impact:</strong> A triggered source-IP ban applies to TCP/UDP web ports <code>80,443</code> for the <em>entire origin</em>, including other websites, not just this selected log. If traffic arrives through a CDN/proxy, verify original-client logging and ban effectiveness before enabling; blocking a shared proxy IP can affect legitimate users. A Ban never substitutes for the pre-PHP Nginx guard.</p>
+        <p><strong>Firewall impact:</strong> A ban affects web traffic for the entire server, not just this website. If you use a CDN or proxy, verify real-client IP logging first to avoid blocking legitimate visitors.</p>
+        <details class="ach-help"><summary>Exact ban scope and prerequisites</summary>
+          <p>Triggered source-IP bans affect TCP/UDP ports <code>80,443</code> across the origin. Blocking a shared proxy IP may affect unrelated websites. Confirm both original-client logging and ban effectiveness. Fail2ban does not replace the separate pre-PHP Nginx guard.</p>
+        </details>
         <div class="ach-controls">
           <div class="ach-inline-field"><label for="ach-scan-maxretry">Attempts</label>
             <input id="ach-scan-maxretry" type="number" min="1" step="1" value="6" /></div>
@@ -633,15 +641,11 @@
         </details>
         <div class="ach-note">
           <strong>Recover scanner bans after deleting a website</strong>
-          <p>If aaPanel removed the original site while its scanner jail still exists,
-             find orphaned jails in the plugin recovery journal. This does not
-             require a selected website or enabled Monitor. If a deleted
-             site's missing log prevents Fail2ban from starting, Restore first
-             retires only its exact owned jail source offline; the Recovery ID
-             remains pending and existing bans are <strong>not verified removed</strong>.
-             Start Fail2ban, refresh the orphan list and use the same Recovery ID
-             again to verify jail and nftables action removal before it is
-             marked Restored. Foreign jails and actions are preserved.</p>
+          <p>If a deleted website still has a Customizer Fail2ban jail, find its saved recovery and Restore that jail. No website selection is needed.</p>
+          <p><strong>Important:</strong> If the missing log prevents Fail2ban from starting, the first Restore removes only the owned jail source. Existing bans are <strong>not yet verified removed</strong>.</p>
+          <details class="ach-help"><summary>How to complete orphan-jail recovery</summary>
+            <p>After the first offline Restore, start Fail2ban, refresh the orphan list and Restore the same Recovery ID again. Only after verifying that the jail and owned nftables action are absent is recovery marked Restored. Foreign jails and actions are preserved. This does not require Monitor to be enabled.</p>
+          </details>
           <div class="ach-controls">
             <button id="ach-scan-orphan-list" type="button">Find orphaned scanner jails</button>
             <div class="ach-inline-field"><label for="ach-scan-orphan-choice">Orphan journal</label>
@@ -653,7 +657,15 @@
       </div>
       <div class="ach-note" aria-label="Selected WordPress operational settings">
         <strong>Selected WordPress — HTTPS URLs, Debug, Cron and XML-RPC (manual)</strong>
-        <p>Select a native website above. Recheck reads its actual WordPress source. <strong>Debug</strong> changes only one verified <code>wp-config.php</code> constant. <strong>System WP-Cron</strong> creates an owned Cron task running as the site's <code>www</code> PHP user before disabling the page-load trigger. <strong>Block XML-RPC</strong> uses an exact site-owned WordPress must-use plugin: live <code>/xmlrpc.php</code> POST requests return HTTP 403. <strong>WordPress HTTPS URLs</strong> is an explicit one-time update of the existing <code>home</code>/<code>siteurl</code> database options from HTTP to HTTPS, preserving recognized hostname and path; it does not install SSL, change DNS/Nginx or run a background sync. <strong>Enable and verify HTTPS/certificates for this site before Apply</strong> or WordPress administrative pages may become unreachable. The URL preview and Recovery ID appear below. Restore reverses only the exact owned setting, Cron task, MU-plugin file, or URL options. Foreign, overridden or changed source requires manual Recheck; no policy is automatically enabled.</p>
+        <p>Choose an operation, select a website and run Recheck. Review the result before you Apply or Restore that setting. Changes are never automatic.</p>
+        <p><strong>Before changing WordPress HTTPS URLs:</strong> Make sure this website's HTTPS connection and certificate already work, or its admin pages may become unreachable.</p>
+        <details class="ach-help"><summary>What does each WordPress operation change?</summary>
+          <p><strong>Debug:</strong> changes one verified <code>wp-config.php</code> constant.</p>
+          <p><strong>System WP-Cron:</strong> creates a site-owned Cron task running PHP as <code>www</code>, then disables the WordPress page-load trigger.</p>
+          <p><strong>Block XML-RPC:</strong> creates an exact site-owned WordPress must-use plugin, returning HTTP 403 for <code>/xmlrpc.php</code> POST requests.</p>
+          <p><strong>HTTPS URLs:</strong> updates the existing <code>home</code> and <code>siteurl</code> database values from HTTP to HTTPS, preserving the verified hostname and path. It does not install SSL or change DNS, Nginx or other URLs automatically.</p>
+          <p>Restore reverses only the matching owned change. If another tool changed the source, run Recheck; never overwrite a foreign setting blindly. Exact recovery details appear after Recheck.</p>
+        </details>
         <div class="ach-controls">
           <div class="ach-inline-field"><label for="ach-wp-settings-kind">Operation</label>
             <select id="ach-wp-settings-kind">
@@ -682,13 +694,19 @@
       <h4>FastCGI Cache</h4>
       <p class="ach-note">Inspect FastCGI Cache sources and ownership before changing them. Native selected-site file clear is available only after a verified Applied Recheck and separate approval. Nginx Helper Purge All is a separate vendor operation; this plugin neither intercepts it nor certifies it as site-safe.</p>
       <details class="ach-help"><summary>Cache workflow and recovery</summary><p>Select a website, inspect its sources, preview a site-owned policy, then Recheck. Apply requires a separate approval; keep the recovery ID and use Restore when needed.</p></details>
-      <p class="ach-note"><strong>FastCGI cache source audit (read-only):</strong> uses the same selected native website. Examines native VHost/PHP snippets and aaPanel's known top-level 0.fastcgi_cache.conf include for cache-zone paths, shared-directory Purge All risk, bypass/write guards, host-key tokens and ignored response headers. Does not prove effective Nginx routing, private-data exposure, safe purge or live cache hits.</p>
+      <p class="ach-note"><strong>Inspect this website's Cache (read-only):</strong> See where its Nginx Cache files may be stored and whether its configuration shares a directory with other sites. This does not prove a Cache is safe to clear.</p>
+      <details class="ach-help"><summary>What does the Cache audit check?</summary>
+        <p>Reads the site's VHost/PHP snippets and aaPanel's top-level <code>0.fastcgi_cache.conf</code> source for zone paths, shared-directory Purge All risk, bypass/write rules, Host keys and ignored headers. Source inspection cannot prove effective routing, private-data safety, live Cache hits or safe vendor Purge All.</p>
+      </details>
       <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect Nginx cache sources and Nginx Helper presence.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-cache-result" class="ach-status-metadata" role="status">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
       </details>
-      <p class="ach-note"><strong>Local WordPress cache header probe (synthetic, no login):</strong> four fixed HTTP/80 HEAD requests to localhost with invalid Authorization or test Cookie headers. Understands the native wpfastcgi X-Cache header and verified applied site-owned Cache X-ACh-Cache / X-ACh-Cache-Site headers (including stock PHP). Tests homepage and WordPress REST bypass, not real users, anonymous WooCommerce routes, HTTPS edge or safe Purge All. A defective cache policy might warm a public cache entry.</p>
+      <p class="ach-note"><strong>Check private-request Cache headers:</strong> Use local test requests to see whether WordPress appears to bypass caching for fake cookies and Authorization headers. This is not a real logged-in user test. A faulty policy may cache a test response.</p>
+      <details class="ach-help"><summary>What does this probe send and exclude?</summary>
+        <p>Sends four synthetic HTTP/80 HEAD requests from localhost, observes native or site-owned Cache headers and checks homepage/WordPress REST bypass. It does not test real users, WooCommerce carts, HTTPS edges, vendor Purge All or private-data safety.</p>
+      </details>
       <div class="ach-controls"><button type="button" id="ach-cache-private-probe-button" disabled>Probe local private-request Cache headers</button></div>
       <p id="ach-cache-private-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to test synthetic request bypass without changing configuration.</p>
       <p class="ach-note"><strong>Default WooCommerce guest-route probe (no login):</strong> five extra fixed anonymous HTTP/80 HEAD checks for <code>/cart/</code>, <code>/checkout/</code>, <code>/my-account/</code> and Store API cart/checkout, after four synthetic WordPress checks. Customized page slugs, GET behavior, identity/session cookies and the responding VHost are not verified. A faulty policy could warm a guest response.</p>
@@ -699,7 +717,10 @@
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
       <div class="ach-note" aria-label="One-time WordPress Nginx Helper connection">
         <strong>WordPress + Nginx Helper — one-time connection</strong>
-        <p>Install the official Nginx Helper and ACh aaPanel Bridge plugins in this WordPress site, then choose Connect once. Customizer configures site-owned Nginx Cache, WordPress Cache path, PHP access, Nginx Helper unlink_files settings and Bridge URL mapping. No repeated path edits or per-post setup. Nginx and the selected PHP service may reload; peer Cache directories are preserved.</p>
+        <p>After installing Nginx Helper and ACh aaPanel Bridge in this WordPress site, check the connection and choose Connect once. Nginx and PHP may reload.</p>
+        <details class="ach-help"><summary>What does one-time Connect configure?</summary>
+          <p>Configures a site-owned Nginx Cache, the WordPress Cache path, PHP access, Nginx Helper <code>unlink_files</code> and Bridge URL mapping. Other sites' Cache directories are preserved; ordinary post updates should not need manual path changes.</p>
+        </details>
         <div class="ach-controls">
           <button type="button" id="ach-wp-cache-inspect" disabled>Check WordPress connection</button>
           <button type="button" id="ach-wp-cache-setup" class="btn btn-warning" disabled>Connect WordPress Cache (once)</button>
@@ -709,7 +730,11 @@
       </div>
       <div class="ach-note" aria-label="Guarded site-specific FastCGI Cache activation">
         <strong>Site-owned FastCGI Cache — manual Apply / Restore</strong>
-        <p>For a verified aaPanel 8.0.7 Nginx HTTP/80 site using stock PHP 8.1/8.5 or an exactly source-matched native WordPress wpfastcgi handler. A site-owned extension takes precedence over the matching native PHP location, retaining its routing and response headers; no aaPanel vendor configuration is edited. Applies an isolated zone, validates Nginx, reloads with consent and verifies the PHP route. Existing shared WORDPRESS Cache and native /purge remain untouched. Nginx Helper automatic invalidation, authenticated WooCommerce privacy and Purge All are NOT certified or enabled.</p>
+        <p>Create an isolated FastCGI Cache for one verified website, with a separate approval and shared Nginx reload.</p>
+        <p><strong>Not included:</strong> This does not enable Nginx Helper Purge All or certify the privacy of logged-in WooCommerce customers.</p>
+        <details class="ach-help"><summary>Supported source and exact Nginx changes</summary>
+          <p>Requires a verified aaPanel 8.0.7 Nginx HTTP/80 site with stock PHP 8.1/8.5 or an exact native WordPress wpfastcgi source match. A site-owned extension takes precedence over the matching PHP location while retaining its routing and headers; no aaPanel vendor source is edited. Nginx syntax, reload and the PHP route are verified. Shared WORDPRESS Cache and native <code>/purge</code> remain untouched, as do Nginx Helper automatic invalidation settings.</p>
+        </details>
         <div class="ach-controls">
           <button type="button" id="ach-cache-activation-preview" disabled>Check site-specific Cache Apply readiness</button>
           <button type="button" id="ach-cache-activation-recheck" disabled>Recheck Cache / recovery</button>
@@ -721,11 +746,17 @@
         <p id="ach-cache-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore is unavailable until Recheck Cache / recovery confirms a saved, site-owned recovery. No verified recovery means no Restore.</p>
         <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" disabled /> I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
-        <p class="ach-note"><strong>Native full-site Cache file clear (manual):</strong> removes all verified Cache files in the selected site's owned physical directory, including older generations and cached aliases in that same directory. Requires a fresh <em>Applied</em> Recheck, separate approval, and renewed physical peer-isolation checks. It leaves other sites, shared WORDPRESS cache, the Nginx configuration, and Nginx Helper unchanged. New requests may immediately refill the cache. This is <strong>not</strong> Nginx Helper Purge All.</p>
+        <p class="ach-note"><strong>Clear this website's Cache files:</strong> After a fresh Applied Recheck and your approval, remove verified files only from this site's isolated Cache directory. Other sites remain untouched; new requests may refill the Cache. This is <strong>not</strong> Nginx Helper Purge All.</p>
+      <details class="ach-help"><summary>Exactly which files can be cleared?</summary>
+        <p>The verified site-owned physical directory may contain earlier Cache generations and aliases. Physical isolation from peer sites is checked again before clearing. The operation does not modify Nginx, shared WORDPRESS Cache, Nginx Helper or saved recovery journals.</p>
+      </details>
         <p id="ach-cache-clear-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm the selected site's Cache is Applied before file clear.</p>
         <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" disabled /> I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" disabled>Clear all selected-site Cache files</button></div>
-        <p class="ach-note"><strong>Clear one cached URL (manual):</strong> restrict removal to this site's primary Host and exact current-generation GET/HEAD Cache files for one canonical URL path. Only paths with no query, encoding, or fragment are supported by this Cache policy. Covers HTTP and HTTPS keys; other site aliases are separate. Requires a fresh Applied Recheck and independent approval. This is not an Nginx Helper hook.</p>
+        <p class="ach-note"><strong>Clear one cached URL:</strong> Remove verified Cache entries for one path on this site's primary hostname after a fresh Applied Recheck and approval. Other URLs and websites stay untouched.</p>
+      <details class="ach-help"><summary>URL matching limits</summary>
+        <p>Only current-generation GET/HEAD Cache files for a canonical URL path without query, encoding or fragment are eligible. HTTP and HTTPS keys are checked; other host aliases are separate. This is not an automatic Nginx Helper hook.</p>
+      </details>
         <label for="ach-cache-url-path">Cached URL path (for example, /news/ or /)</label>
         <input id="ach-cache-url-path" type="text" maxlength="1024" value="/" spellcheck="false" autocomplete="off" aria-describedby="ach-cache-url-why" />
         <p id="ach-cache-url-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm this site's Cache is Applied; enter a canonical URL path.</p>
@@ -784,7 +815,10 @@
       </form>
       <div class="ach-note" aria-label="Saved shared PHP-FPM Monitor policy">
         <strong>Saved shared PHP-FPM policy</strong>
-        <p>Save five reviewed desired [www] values first, then explicitly opt in. Saving alone never changes PHP. The existing timer repairs witnessed WP Toolkit changes and later PHP-FPM regeneration matching the installed aaPanel writer after rechecking site ownership. It reloads the shared PHP service; unknown/manual drift is reported as Needs Review and never silently overwritten. Previously enabled profiles stay WP-only until the operator disables and re-enables them.</p>
+        <p>Save your desired PHP settings for monitoring; Save alone does not change PHP. Optional automatic repair must be enabled separately and may reload the shared PHP service.</p>
+        <details class="ach-help"><summary>When does PHP-FPM automatic repair run?</summary>
+          <p>The existing watcher handles verified WordPress Toolkit changes and later PHP-FPM regeneration matching the installed aaPanel writer, after rechecking site ownership. Unexpected manual changes become Needs Review and are never silently overwritten. Previously enabled WordPress-only profiles need to be disabled and enabled again to adopt the newer scope.</p>
+        </details>
         <div class="ach-controls">
           <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>
           <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
@@ -915,7 +949,11 @@
             <option value="extension">Native Nginx extension (reload required)</option>
             <option value="file">Existing native 404.html / 502.html (no reload)</option>
           </select></div>
-        <p>aaPanel 8.0.7 + Nginx only. <strong>Nginx extension</strong> preserves native website HTML and uses a plugin-owned route with checked shared-service reload. <strong>Native site file</strong> replaces only the selected website's existing 404.html/502.html after a durable backup; requires proven native file routing with no extension include, does not edit the VHost or reload Nginx. For 50x, select the <strong>Nginx extension</strong> delivery mode (existing-file mode is unsupported); it covers only Nginx-generated 500/502/503/504. 404 is verified by local HTTP 404 and body hash; 502 remains source-only (no synthetic HTTP 502). Each mode requires explicit approval and a recovery ID. Stopped or incompatible source allows saved-only Recheck, never Apply/Restore.</p>
+        <p>Choose how to show this error page for the selected website. <strong>Nginx extension</strong> reloads Nginx; <strong>site file</strong> backs up and replaces only this site's error-page HTML without a reload. Recheck and approve before Apply.</p>
+        <p><strong>Important:</strong> 50x pages require the Nginx extension. The 502 check reads source files; it does not trigger a real server error.</p>
+        <details class="ach-help"><summary>Delivery requirements and recovery</summary>
+          <p>On supported aaPanel 8.0.7 Nginx sites, extension mode preserves native HTML and installs an owned route with a checked shared-service reload. Site-file mode requires proven native 404.html/502.html routing, no competing extension, and a durable byte-exact backup; it does not edit the VHost. Extension-only 50x covers Nginx-generated 500/502/503/504. HTTP 404 and body hash are verified for 404; 502 remains source-only. Each mode requires a matching Recovery ID. Stopped or incompatible sites allow saved-state Recheck only, not Apply or Restore.</p>
+        </details>
         <div class="ach-controls">
           <button id="ach-status-manage-recheck" type="button" disabled>Recheck selected site status</button>
         </div>
@@ -941,7 +979,10 @@
       </div>
       <div class="ach-note" id="ach-status-unbound-section" aria-label="HTTP unbound default-server management" hidden>
         <strong>Unknown domains · global HTTP/80 catch-all (native IPv4 / IPv6)</strong>
-        <p>aaPanel 8.0.7 Nginx only. Select <code>unbound</code> and global branding above. A guarded plugin-owned <code>default_server</code> serves the chosen static HTML with real HTTP 404 for unmatched Host headers on currently configured native IPv4/IPv6 wildcard listeners. It does not enable a new IP family. This requires an explicitly approved <strong>global Nginx reload</strong>. It does not change named websites, HTTPS/443, stopped sites, or aaPanel's new-site sources. Recheck first; conflicting default servers are unsupported.</p>
+        <p>Show a 404 page for unknown HTTP hostnames on this server's existing Nginx listeners. This is a <strong>global change</strong> and requires a shared Nginx reload and your approval. Named websites and HTTPS are left unchanged.</p>
+        <details class="ach-help"><summary>Supported listeners and conflicts</summary>
+          <p>On supported aaPanel 8.0.7 Nginx sources, choose the <code>unbound</code> template and global branding. An owned <code>default_server</code> serves static HTTP 404 on currently configured IPv4/IPv6 wildcard listeners, without adding an IP family. It does not change HTTPS/443, stopped-site pages or new-site templates. Recheck first; conflicting default servers are not overwritten.</p>
+        </details>
         <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" disabled>Recheck HTTP unbound routing</button></div>
         <p id="ach-status-unbound-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a fresh valid global HTTP/80 Recheck and explicit approval.</p>
         <label><input id="ach-status-unbound-apply-approve" type="checkbox" aria-describedby="ach-status-unbound-apply-why" /> I approve the exact global HTTP/80 default-server and shared Nginx reload.</label>
@@ -953,7 +994,10 @@
       </div>
       <div class="ach-note" id="ach-status-tls-section" aria-label="Unknown SNI HTTPS rejection" hidden>
         <strong>Unknown TLS hostname — reject handshake (HTTPS/443)</strong>
-        <p>Option A: reject the TLS handshake for unknown or missing SNI <em>before</em> a certificate is served. Only existing native Nginx TCP/443 wildcard listeners can be protected; no HTTPS port, IP family, certificate or website is created. Existing named HTTPS websites must continue to negotiate TLS. HTTP/80 Status Pages are independent. An existing foreign HTTPS default, address-specific listener, or unsupported QUIC/stream setup is reported as incompatible instead of overwritten.</p>
+        <p>Reject unknown or missing HTTPS hostnames <strong>before sending a certificate</strong>. This optional shared-Nginx change requires approval and works only on supported existing HTTPS listeners; it does not add a port or certificate.</p>
+        <details class="ach-help"><summary>Which HTTPS connections are affected?</summary>
+          <p>Option A rejects TLS handshakes with unknown or absent SNI on compatible native TCP/443 wildcard listeners. Named HTTPS websites must still work, and HTTP/80 Status Pages are separate. Existing foreign defaults, address-specific listeners, or unsupported QUIC/stream setups are reported as incompatible; no website, certificate, listener or IP family is created or overwritten.</p>
+        </details>
         <p>This is a separately opted-in <strong>shared Nginx reload</strong>. Preview the current TLS listeners and Recovery state first. After Apply or Restore, compare the actual TLS handshake of unknown SNI with a known configured HTTPS hostname. A failed or interrupted operation retains a Recovery ID for Recheck.</p>
         <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" disabled>Recheck HTTPS unknown-SNI policy</button></div>
         <p id="ach-status-tls-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a compatible configured HTTPS/443 listener and a fresh Recheck.</p>
@@ -966,7 +1010,10 @@
       </div>
       <div class="ach-note" id="ach-status-stopped-section" aria-label="Stopped-site 503 management" hidden>
         <strong>Stopped website · real HTTP 503 (native SiteStop/Start)</strong>
-        <p>aaPanel 8.0.7 Nginx only. Select a running website and the <code>stopped</code> template. An explicitly approved, recoverable rule is added to that native website VHost; it remains dormant while running and returns real HTTP 503 with the selected self-contained HTML after aaPanel SiteStop. The native site must be refreshed after Stop/Start before Recheck or Restore. Nginx reload is shared; unknown-domain HTTPS is unchanged. Restore removes only the verified owned rule, preserving unrelated native changes.</p>
+        <p>Show a 503 page when this website is stopped in aaPanel. The rule stays inactive while the site runs. Enabling or restoring it requires approval and reloads shared Nginx.</p>
+        <details class="ach-help"><summary>How stopped-site pages work</summary>
+          <p>On supported aaPanel 8.0.7 Nginx sources, select the running website and <code>stopped</code> template first. The recoverable site-owned rule returns HTTP 503 with the selected HTML after aaPanel SiteStop. Refresh the native site after Stop/Start before Recheck or Restore. Unknown-domain HTTPS is unchanged, and Restore removes only the verified owned rule.</p>
+        </details>
         <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" disabled>Recheck native stopped-site route</button></div>
         <p id="ach-status-stopped-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Arm requires a running native site and a successful saved-rule Recheck.</p>
         <label><input id="ach-status-stopped-apply-approve" type="checkbox" aria-describedby="ach-status-stopped-apply-why" /> I approve adding this website's exact native 503 rule and reloading shared Nginx.</label>
@@ -1002,7 +1049,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.94'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.95'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
