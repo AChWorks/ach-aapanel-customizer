@@ -89,25 +89,19 @@ def _validate(value):
     for version, profile in value["profiles"].items():
         if (version not in recovery.SUPPORTED_VERSIONS
                 or not isinstance(profile, dict)
-                # Existing pre-lifecycle profiles retain WP-only behavior
-                # until an operator expressly disables and re-enables them.
-                or not {"enabled", "policy_sha256", "enabled_ns",
-                        "last_token", "last_state", "last_operation", "active"} <= set(profile)
-                or set(profile) - {"enabled", "policy_sha256", "enabled_ns",
+                or set(profile) != {"enabled", "policy_sha256", "enabled_ns",
                                     "last_token", "last_state", "last_operation",
                                     "active", "lifecycle"}
-                or ("lifecycle" in profile and (
-                    not isinstance(profile["lifecycle"], dict)
-                    or set(profile["lifecycle"]) != {"baseline_sha256",
-                                                      "baseline_max_requests",
-                                                      "memory_mib"}
-                    or not isinstance(profile["lifecycle"]["baseline_sha256"], str)
-                    or not DIGEST.fullmatch(profile["lifecycle"]["baseline_sha256"])
-                    or type(profile["lifecycle"]["memory_mib"]) is not int
-                    or profile["lifecycle"]["memory_mib"] < 1
-                    or (profile["lifecycle"]["baseline_max_requests"] is not None
-                        and (type(profile["lifecycle"]["baseline_max_requests"]) is not int
-                             or profile["lifecycle"]["baseline_max_requests"] < 0))))
+                or not isinstance(profile["lifecycle"], dict)
+                or set(profile["lifecycle"]) != {"baseline_sha256",
+                                                  "baseline_max_requests", "memory_mib"}
+                or not isinstance(profile["lifecycle"]["baseline_sha256"], str)
+                or not DIGEST.fullmatch(profile["lifecycle"]["baseline_sha256"])
+                or type(profile["lifecycle"]["memory_mib"]) is not int
+                or profile["lifecycle"]["memory_mib"] < 1
+                or (profile["lifecycle"]["baseline_max_requests"] is not None
+                    and (type(profile["lifecycle"]["baseline_max_requests"]) is not int
+                         or profile["lifecycle"]["baseline_max_requests"] < 0))
                 or type(profile["enabled"]) is not bool
                 or not isinstance(profile["policy_sha256"], str)
                 or not DIGEST.fullmatch(profile["policy_sha256"])
@@ -369,9 +363,7 @@ def inspect(version, *, data_dir=DATA_DIR):
                 "last_state": ("Pending Disable" if pending else
                                profile["last_state"] if profile else "Disabled"),
                 "last_operation": profile["last_operation"] if profile else None,
-                "watch_scope": ("verified_native_wp_terminal_and_fpm_lifecycle"
-                                if profile and profile.get("lifecycle")
-                                else "verified_native_wp_terminal"),
+                "watch_scope": "verified_native_wp_terminal_and_fpm_lifecycle",
                 "auto_hosts": False}
     finally:
         os.close(fd)
@@ -490,9 +482,7 @@ def set_enabled(version, enabled, *, data_dir=DATA_DIR,
                     "state_revision": updated["revision"],
                     "last_state": profile["last_state"],
                     "saved_policy_sha256": profile["policy_sha256"],
-                    "watch_scope": ("verified_native_wp_terminal_and_fpm_lifecycle"
-                                    if enabled and profile.get("lifecycle")
-                                    else "verified_native_wp_terminal"),
+                    "watch_scope": "verified_native_wp_terminal_and_fpm_lifecycle",
                     "scope": "shared_service", "auto_hosts": False}
         finally:
             os.close(lock)

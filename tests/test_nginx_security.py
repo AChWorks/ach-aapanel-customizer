@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,10 +95,10 @@ class NativeSecurityTests(unittest.TestCase):
             block_xmlrpc=kwargs.get("xmlrpc", False))
 
     def test_rule_names_and_proof_paths_are_fixed_and_site_path_independent(self):
-        self.assertEqual(len(guard.PROOF_KINDS), 10)
+        self.assertEqual(len(guard.PROOF_KINDS), 14)
         sample = guard._include("a" * 32).decode()
-        self.assertEqual(sample.count("return 403 "), 3)
-        self.assertEqual(sample.count("ACh-Guard-Proof-"), 3)
+        self.assertEqual(sample.count("return 403 "), 4)
+        self.assertEqual(sample.count("ACh-Guard-Proof-"), 4)
         self.assertIn("wp-content/uploads", guard._probe_path("a" * 32, "wp_uploaded_php"))
         self.assertIn("[.]htaccess", sample)
         self.assertNotIn("wwwroot", sample)
@@ -108,7 +109,40 @@ class NativeSecurityTests(unittest.TestCase):
         with self.assertRaises(guard.GuardError):
             guard._probe_path("a" * 32, "http://evil.invalid/")
 
-    def test_opt_in_nginx_xmlrpc_stays_in_one_owned_guard_and_legacy_restores(self):
+    def test_simple_file_protection_avoids_redundant_directory_listing_rules(self):
+        source = guard._include("f" * 32).decode()
+        patterns = re.findall(r'if \(\$uri ~\* "([^"]+)"\)', source)
+        self.assertEqual(len(patterns), 4)
+        self.assertNotIn("autoindex", source)
+        self.assertNotIn("location ", source)
+        # URL matching is against Nginx's normalized $uri, at any site root.
+        sensitive = (
+            "/debug.log", "/wp-content/debug.log", "/wp-content/uploads/debug.log",
+            "/logs/error_log", "/logs/error_log.1", "/error.log",
+            "/backup.sql", "/dir/data.sql.gz", "/dir/sqlite-store.sqlite3",
+            "/wp-config.php.bak", "/wp-config.php.old", "/wp-config.php~",
+            "/assets/tooling.bak", "/assets/tooling.backup",
+            "/path/backups/archive.zip", "/nested/.env.local",
+            "/wp-content/uploads/test.PHP",
+        )
+        ordinary = (
+            "/", "/wp-content/uploads/", "/wp-content/plugins/",
+            "/wp-content/uploads/photo.jpg", "/uploads/public-report.zip",
+            "/public.txt", "/index.html", "/assets/app.js",
+            "/assets/public.log", "/images/backup-banner.jpg",
+            "/.well-known/acme-challenge/random-token", "/oauth/callback",
+            "/wp-json/api", "/docs/README.pdf",
+        )
+        for path in sensitive:
+            with self.subTest(denied=path):
+                self.assertTrue(any(re.search(pattern, path, re.I) for pattern in patterns),
+                                path)
+        for path in ordinary:
+            with self.subTest(allowed=path):
+                self.assertFalse(any(re.search(pattern, path, re.I) for pattern in patterns),
+                                 path)
+
+    def test_opt_in_nginx_xmlrpc_stays_in_one_owned_guard_and_restores(self):
         default = self.operate("preview")
         opted = self.operate("preview", xmlrpc=True)
         self.assertEqual(default["ruleset"], guard.RULESET)
@@ -132,8 +166,7 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertEqual(self.operate("restore", recovery=result["recovery_id"])["state"],
                          "Restored")
         self.assertFalse(self.fragment.exists())
-        # Existing v2 journals (deployed before this optional variant) remain
-        # verifiable/restorable without adopting a new ruleset.
+        # Both current options use one selected-site journal and Restore.
         old = self.operate("apply")
         self.assertEqual(self.operate("recheck")["ruleset"], guard.RULESET)
         self.assertEqual(self.operate("restore", recovery=old["recovery_id"])["state"],

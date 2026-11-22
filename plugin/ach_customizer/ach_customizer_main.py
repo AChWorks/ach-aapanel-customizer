@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.87'
+WORKER_SOURCE_VERSION = '0.1.88'
 
 _STATE_DIR = DATA_DIR
 
@@ -740,8 +740,8 @@ class ach_customizer_main:
     def wp_terminal_manage(self, args):
         """Primary-admin control of read-only WP failure observation.
 
-        New events never edit Hosts or PHP-FPM; historical journal Recheck
-        and separately approved legacy Restore remain distinct paths.
+        The witness only observes native setup and records a diagnostic;
+        it never repairs Hosts or PHP-FPM.
         """
         request_id = uuid4().hex
         try:
@@ -756,8 +756,8 @@ class ach_customizer_main:
                         "a controlled aaPanel reload requires operator approval."), request_id)
                 response["reason_code"] = "resident_wp_helper_stale"
                 return response
-            inspect, restore = terminal.inspect, terminal.restore
-            recheck_recovery, abandon_witness = terminal.recheck_recovery, terminal.abandon_witness
+            inspect = terminal.inspect
+            recheck_witness, abandon_witness = terminal.recheck_witness, terminal.abandon_witness
             if action == "inspect":
                 result = inspect(data_dir=_STATE_DIR)
                 level = "DEBUG"
@@ -775,17 +775,12 @@ class ach_customizer_main:
                 result = disable(data_dir=_STATE_DIR)
                 level = "WARNING"
             elif action == "recheck":
-                result = recheck_recovery(data_dir=_STATE_DIR)
+                result = recheck_witness(data_dir=_STATE_DIR)
                 level = "INFO" if result["state"] not in ("Needs Review", "Active or Unknown") else "WARNING"
             elif action == "abandon":
                 if self._argument(args, "reviewed") != "true":
                     raise MonitorInputError("Explicit stale WP witness abandonment approval is required")
                 result = abandon_witness(data_dir=_STATE_DIR)
-                level = "WARNING"
-            elif action == "restore":
-                if self._argument(args, "reviewed") != "true":
-                    raise MonitorInputError("Explicit recovery approval is required")
-                result = restore(self._argument(args, "recovery_id"), data_dir=_STATE_DIR)
                 level = "WARNING"
             else:
                 raise MonitorInputError("Unsupported native WordPress terminal operation")

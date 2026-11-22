@@ -78,22 +78,21 @@ def _record_decode(raw, site_id):
               'cache_generation', 'probe_status'}
     if not isinstance(record, dict):
         raise CacheManageError('recovery', 'Untrusted Cache journal')
-    schema = record.get('schema')
-    expected = needed | ({'cache_identity'} if schema == 2 else set())
-    if schema == 2 and 'inherited_hsts' in record:
+    expected = needed | {'cache_identity'}
+    if 'inherited_hsts' in record:
         expected.add('inherited_hsts')
-    if schema == 2 and 'native_handler' in record:
+    if 'native_handler' in record:
         expected.add('native_handler')
     identity = record.get('cache_identity')
     valid_identity = (identity is None and record.get('phase') in ('prepared', 'restored') or
                       isinstance(identity, list) and len(identity) == 2 and
                       all(type(value) is int and value > 0 for value in identity))
-    if (schema not in (1, 2) or set(record) != expected
+    if (record.get('schema') != 2 or set(record) != expected
             or ('native_handler' in record and record['native_handler'] != 'wpfastcgi')
             or ('inherited_hsts' in record and (
                 type(record['inherited_hsts']) is not str or
                 not HSTS_DIRECTIVE.fullmatch(record['inherited_hsts'])))
-            or (schema == 2 and not valid_identity)
+            or not valid_identity
             or record['site_id'] != site_id
             or not isinstance(record['site_key'], str)
             or not SITE_KEY.fullmatch(record['site_key'])
@@ -1082,7 +1081,7 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
     """Allow another explicit Apply only with an exact, restored prior policy.
 
     Reuse the pinned site directory with a fresh generation. A fully restored
-    schema-2 journal may precede an aaPanel site-key change or a supported
+    journal may precede an aaPanel site-key change or a supported
     stock/wpfastcgi handler change in either direction: its exact old fragments
     and physical identity must still match. No active/prepared recovery may be adopted.
     Prior journals are archived, not discarded.
@@ -1097,14 +1096,14 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
     changed_identity = old['site_key'] != site['name'] or prior_handler != current_handler
     if (old['phase'] != 'restored' or
             old['php_version'] != reference['php_version'] or
-            (changed_identity and (old['schema'] != 2 or old['cache_identity'] is None)) or
+            (changed_identity and old['cache_identity'] is None) or
             old['cache_generation'] == reference['cache_generation'] or
             old['proposal_sha'] != prior_reference['proposal_sha256']):
         raise CacheManageError('recovery',
             'Existing Cache generation cannot be reused without policy-specific recovery')
     global_name, ext_name, _ = _names(site['id'])
     expected_global, expected_ext = _expected_files(old)
-    incomplete_setup = old['schema'] == 2 and old['cache_identity'] is None
+    incomplete_setup = old['cache_identity'] is None
     gfd, efd, g, e = _cache_files(None, site, vhost_root=vhost_root)
     try:
         previous_global = _bounded_file(gfd, global_name+'.'+old['op']+'.retained',
@@ -1123,13 +1122,8 @@ def _restored_generation_can_reapply(site, old, reference, *, vhost_root=VHOST_R
         if _path_owned(site['id'], allow_missing=True) is not None:
             raise CacheManageError('ownership',
                 'Incomplete Cache setup has an unexpected physical directory')
-    elif old['schema'] == 2:
+    else:
         _same_cache_identity(site['id'], old)
-    elif _path_owned(site['id'], allow_missing=True) is None:
-        # Historical unreleased journals did not store physical identities;
-        # validate path ownership rather than silently adopting a missing tree.
-        raise CacheManageError('ownership',
-            'Prior managed Cache directory is missing, not safe to reuse')
     return changed_identity
 
 
@@ -1314,7 +1308,7 @@ def _same_native_source_inventory(site, record, public, *,
     except (OSError, ValueError) as exc:
         raise CacheManageError('concurrency',
             'Native Cache extension inventory changed or has unverified routing') from exc
-    if record['schema'] == 2 and record['cache_identity'] is None:
+    if record['cache_identity'] is None:
         if public is None:
             raise CacheManageError('recovery',
                 'Registered native website inventory is unavailable for empty Cache recovery')
@@ -1333,7 +1327,7 @@ def _same_cache_identity(site_id, record):
     """The path is not enough: a valid-looking replacement inode is drift."""
     identity = _path_owned(site_id)
     if (not isinstance(identity, tuple) or len(identity) != 2 or
-            record['schema'] != 2 or record['cache_identity'] != list(identity)):
+            record['cache_identity'] != list(identity)):
         raise CacheManageError('ownership',
             'Saved Cache directory physical identity is missing or has changed')
 
@@ -1369,10 +1363,10 @@ def _expected_files(record):
 def _empty_prepublication(site, record, *, vhost_root=VHOST_ROOT):
     """Read-only proof that a prepared operation never published Cache state.
 
-    Only a schema-2 null identity can represent this crash window. Reuse the
+    Only a prepared null identity represents this crash window. Reuse the
     same exact-file/physical checks in Recheck and explicit no-op Restore.
     """
-    if (record['schema'] != 2 or record['cache_identity'] is not None or
+    if (record['cache_identity'] is not None or
             record['phase'] not in ('prepared', 'restored')):
         raise CacheManageError('recovery', 'Not an empty prepublication Cache recovery')
     _expected_files(record)
@@ -1404,7 +1398,7 @@ def _cache_observation(site, record, public, *, vhost_root=VHOST_ROOT,
         _same_native_source_inventory(
             site, record, public, vhost_root=vhost_root,
             nginx_root=nginx_root, data_dir=data_dir)
-        if record['schema'] == 2 and record['cache_identity'] is None:
+        if record['cache_identity'] is None:
             # Before directory creation, there is no inode to compare. Prove
             # absence of BOTH managed files and the physical cache directory.
             _empty_prepublication(site, record, vhost_root=vhost_root)
@@ -1531,7 +1525,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                             'note':'Native site manifest removed; Nginx Helper options '
                                    'and any shared Purge All settings are unchanged.'}
                 if (record is None or record['site_key'] != site['name']
-                        or record['schema'] != 2 or record['phase'] != 'applied'
+                        or record['phase'] != 'applied'
                         or record.get('native_handler', 'stock') not in ('stock', 'wpfastcgi')
                         or recovery_id != record['op']):
                     raise CacheManageError('recovery',
@@ -1599,7 +1593,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 if action == 'clear_url':
                     cache_url_path = _cache_url_path(cache_url_path)
                 if (record is None or record['site_key'] != site['name']
-                        or record['schema'] != 2 or record['phase'] != 'applied' or
+                        or record['phase'] != 'applied' or
                         recovery_id != record['op']):
                     raise CacheManageError('recovery',
                         'Fresh Applied Cache Recheck and matching recovery ID required')
@@ -1763,7 +1757,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     _archive_restored_record(statefd, previous)
                 _record_save(statefd, record)
                 try:
-                    if previous is None or previous.get('cache_identity', 'legacy') is None:
+                    if previous is None or previous['cache_identity'] is None:
                         _create_site_cache(site['id'])
                     identity = _path_owned(site['id'])
                     record['cache_identity'] = list(identity)
@@ -1848,7 +1842,7 @@ def manage_cache(action, site, public=None, *, expected_source=None,
             _same_native_source_inventory(
                 site, record, public, vhost_root=vhost_root,
                 nginx_root=nginx_root, data_dir=data_dir)
-            if record['schema'] == 2 and record['cache_identity'] is None:
+            if record['cache_identity'] is None:
                 # The same read-only physical proof used by Recheck permits
                 # journal-only recovery; no Cache source or reload is touched.
                 _empty_prepublication(site, record, vhost_root=vhost_root)

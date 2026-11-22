@@ -30,13 +30,15 @@ SCHEMA = 1
 MAX_JOURNAL = 4096
 MAX_INCLUDE = 8192
 PROOF_BODY = "ACh-Guard-Proof-"
-RULESET = "nested-sensitive-v2"
-RULESET_XMLRPC = "nested-sensitive-xmlrpc-v3"
+# Pre-stable current policy only; QA installations are reset between builds.
+RULESET = "site-sensitive-files-v1"
+RULESET_XMLRPC = "site-sensitive-files-xmlrpc-v1"
 RULESETS = (RULESET, RULESET_XMLRPC)
 PROOF_KINDS = (
     "root_env", "nested_env", "wp_env", "nested_htaccess",
     "backup_dir", "wp_backup_dir", "uploaded_php", "wp_uploaded_php",
-    "media_php", "tmp_php",
+    "media_php", "tmp_php", "debug_log", "error_log",
+    "db_dump", "config_backup",
 )
 XMLRPC_PROOF_KINDS = PROOF_KINDS + ("xmlrpc",)
 # Path syntax is verified against the current aaPanel native record, never
@@ -102,7 +104,7 @@ def _public_proof(op):
     """
     if not isinstance(op, str) or not TOKEN.fullmatch(op):
         raise GuardError("identity", "Invalid security proof generation")
-    return PROOF_BODY + hashlib.sha256(("site-guard-v2:" + op).encode("ascii")).hexdigest()[:32]
+    return PROOF_BODY + hashlib.sha256(("site-guard-v1:" + op).encode("ascii")).hexdigest()[:32]
 
 
 def _include(op, ruleset=RULESET):
@@ -120,6 +122,15 @@ def _include(op, ruleset=RULESET):
         "(^|/)(?:[.]env(?:[.][^/]+)?|[.]htaccess|[.]user[.]ini|[.]git|[.]svn)(?:/|$)",
         "(^|/)(?:backups?|db-backup|db_dumps?)(?:/|$)",
         "(^|/)(?:uploads|media|tmp)/[^?#]*[.](?:php[0-9]?|phtml|phar)(?:/|$)",
+    )
+    # High-confidence sensitive *files*, not all archives or logs.
+    # Existing Nginx autoindex-off already prevents ordinary directory listing.
+    patterns += (
+        "(^|/)(?:(?:debug|error|access|php_errors)[.]log(?:[.][0-9]+|[.]gz)?"
+        "|error_log(?:[.][0-9]+|[.]gz)?"
+        "|wp-config[.]php(?:[.](?:bak|backup|old|orig|save)|~)"
+        "|[^/]+[.](?:sql|sqlite|sqlite3|db)(?:[.]gz)?"
+        "|[^/]+[.](?:bak|backup))(?:/|$)",
     )
     if ruleset == RULESET_XMLRPC:
         # Server rewrite phase executes before php's ^~ or regex location
@@ -212,6 +223,10 @@ def _probe_path(op, kind):
         "wp_uploaded_php": "/wp-content/uploads/" + suffix + "/proof.php",
         "media_php": "/media/" + suffix + "/proof.phtml",
         "tmp_php": "/tmp/" + suffix + "/proof.php",
+        "debug_log": "/wp-content/uploads/debug.log",
+        "error_log": "/site/logs/error_log",
+        "db_dump": "/site/db-backup-copy.sql.gz",
+        "config_backup": "/wp-config.php.bak",
         "xmlrpc": "/xmlrpc.php",
     }[kind]
 

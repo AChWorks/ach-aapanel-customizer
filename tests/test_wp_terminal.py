@@ -124,24 +124,6 @@ class TestNativeWpWitness(unittest.TestCase):
         os.utime(self.progress,ns=(completed_ns,completed_ns))
         return self.tick()
 
-    def legacy_applied(self):
-        """A previous release's recovery, not a fresh unattended edit."""
-        self.arm()
-        operation = self.prepared_record()
-        with worker._locked_state(str(self.data)) as fd:
-            rec = worker._read_recovery(fd, operation)
-            rec["phase"] = "applied"
-            worker._save_recovery(fd, rec)
-            policy = worker._load(fd)
-            policy["active"] = None
-            policy["last_recovery"] = operation
-            policy["recoveries"] = 1
-            policy["last_reason"] = "Historical native WP cleanup applied"
-            worker._save(fd, policy)
-        self.lock.unlink()
-        self.hosts.write_bytes(self.before)
-        return operation
-
     def test_failed_terminal_exact_vendor_append_is_observed_but_never_removed(self):
         self.arm()
         marker = b"\n127.0.0.1 failed.test"
@@ -151,15 +133,13 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(result["state"], "Manual Review Required")
         self.assertFalse(result["changed"])
         self.assertIn("remove manually", result["reason"])
-        self.assertIsNone(result["recovery_id"])
+        self.assertNotIn("recovery_id", result)
         self.assertEqual(self.hosts.read_bytes(), self.before + marker)
         self.assertEqual(self.tick()["state"], "Already Observed")
         inspection = worker.inspect(data_dir=str(self.data))
         self.assertTrue(inspection["enabled"])
         self.assertFalse(inspection["auto_hosts"])
         self.assertEqual(inspection["last_worker"]["state"], "Manual Review Required")
-        self.assertIsNone(inspection["last_recovery"])
-        self.assertEqual(inspection["recoveries"], 0)
         from ach_customizer_activity import LOG_NAME
         entries = [json.loads(x) for x in (self.data / LOG_NAME).read_text().splitlines()]
         matches = [x for x in entries if x["action"] == "wp_terminal_manual_review"]
@@ -169,12 +149,6 @@ class TestNativeWpWitness(unittest.TestCase):
             self.assertEqual(self.tick()["state"], "Already Observed")
         self.assertEqual((self.data / LOG_NAME).read_text().count('"wp_terminal_manual_review"'),1)
         self.assertEqual(self.hosts.read_bytes(), self.before + marker)
-
-    def test_recovery_counter_is_not_limited_to_64_events(self):
-        from ach_customizer_wp_terminal import _default, _validate
-        record = _default()
-        record["recoveries"] = 135
-        self.assertEqual(_validate(record)["recoveries"], 135)
 
     def test_exact_long_domain_survives_private_outbox_activity_and_crash(self):
         from ach_customizer_activity import read_activity
@@ -197,14 +171,11 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(first["active_domain"],domain)
         self.assertEqual(first["manual_review"]["domain"],domain)
         self.assertEqual(len(first["manual_review"]["domain"]),160)
-        self.assertEqual(first["recoveries"],0)
         self.assertEqual(self.tick()["state"],"Manual Review Required")
         current=worker.inspect(data_dir=str(self.data))
         self.assertEqual(current["manual_review"]["operation_id"],op)
         self.assertEqual(current["manual_review"]["domain"],domain)
         self.assertEqual(current["manual_review_count"],1)
-        self.assertEqual(current["recoveries"],0)
-        self.assertIsNone(current["last_recovery"])
         with worker._locked_state(str(self.data)) as fd:
             private=worker._read_manual_review(fd,op)
         self.assertEqual(private["event"]["target"],domain)
@@ -283,7 +254,6 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_count"],0)
         self.assertEqual(self.tick()["state"],"Manual Review Required")
         self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review"]["operation_id"],op)
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],0)
         self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
 
     def test_incomplete_canonical_is_preserved_reported_and_operator_recoverable(self):
@@ -315,7 +285,6 @@ class TestNativeWpWitness(unittest.TestCase):
             self.finish(domain="second.test")
         self.assertEqual(broken.read_bytes(),b"\x00partial canonical bytes")
         self.assertEqual(worker.inspect(data_dir=str(self.data))["active_domain"],"second.test")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],0)
         # Simulate a separately reviewed *OS operator* quarantine of this exact
         # malformed file: the worker itself never deletes or overwrites it.
         quarantined=self.data/(broken.name+".quarantined")
@@ -327,7 +296,6 @@ class TestNativeWpWitness(unittest.TestCase):
                               if e["action"]=="wp_terminal_manual_review"]),2)
         self.assertTrue(quarantined.exists())
         self.assertEqual(worker.inspect(data_dir=str(self.data))["manual_review_integrity"]["state"],"Complete")
-        self.assertIsNone(worker.inspect(data_dir=str(self.data))["last_recovery"])
         self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 first.test"+
                          b"\n127.0.0.1 second.test")
 
@@ -475,8 +443,6 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(current["manual_review_count"],1)
         self.assertEqual(current["manual_review"]["operation_id"],manual["operation_id"])
         self.assertIs(current["manual_review"]["activity_delivered"],True)
-        self.assertEqual(current["recoveries"],0)
-        self.assertIsNone(current["last_recovery"])
         logs=read_activity(str(self.data),module="lifecycle")
         self.assertEqual(len([e for e in logs if e["action"]=="wp_terminal_manual_review"]),1)
         self.assertEqual(self.hosts.read_bytes(),exact)
@@ -644,7 +610,6 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(len([e for e in read_activity(str(self.data))
                               if e["action"]=="wp_terminal_manual_review"]),2)
         self.assertEqual(self.hosts.read_bytes(),second)
-        self.assertEqual(status["recoveries"],0)
 
     def test_activity_log_corruption_retains_privileged_manual_view(self):
         import ach_customizer_main as api
@@ -684,7 +649,6 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(result["state"], "Manual Review Required")
         self.assertFalse(result["changed"])
         self.assertEqual(self.hosts.read_bytes(), self.before + marker + foreign)
-        self.assertIsNone(worker.inspect(data_dir=str(self.data))["last_recovery"])
         self.assertEqual(self.tick()["state"], "Already Observed")
 
     def test_observed_manual_review_is_not_a_systemd_worker_failure(self):
@@ -726,7 +690,6 @@ class TestNativeWpWitness(unittest.TestCase):
         result=self.finish()
         self.assertEqual(result["state"],"Needs Review")
         self.assertEqual(self.hosts.read_bytes(),self.before+external+b"\n127.0.0.1 failed.test")
-        self.assertIsNone(worker.inspect(data_dir=str(self.data))["last_recovery"])
 
     def test_active_lock_prevents_completion_and_disable_is_immediate(self):
         self.arm()
@@ -761,47 +724,6 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(self.tick()["state"],"Needs Review")
         self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
 
-    def prepared_record(self):
-        """Model a worker crash after durable pre-write journal creation."""
-        with worker._locked_state(str(self.data)) as fd:
-            policy=worker._load(fd)
-            active=policy["active"]
-            record={"schema":1,"operation":active["operation"],"domain":active["domain"],
-                    "phase":"prepared", "before_sha":hashlib.sha256(
-                        self.before+b"\n127.0.0.1 failed.test").hexdigest(),
-                    "after_sha":hashlib.sha256(self.before).hexdigest(),
-                    "backup":worker._baseline_name(active["operation"])}
-            worker._save_recovery(fd,record)
-            return active["operation"]
-
-    def test_prepared_journal_blocks_automatic_retry_and_recheck_marks_not_applied(self):
-        self.arm()
-        operation=self.prepared_record()
-        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
-        self.lock.unlink()
-        self.progress_write(status=1,stages=(1,1,1,-1))
-        self.assertEqual(self.tick()["state"],"Recovery Required")
-        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
-        checked=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts),
-                                       progress_path=str(self.progress))
-        self.assertEqual(checked["state"],"not_applied")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery"],None)
-        with self.assertRaises(worker.TerminalError):
-            worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-
-    def test_prepared_journal_can_be_reconciled_as_applied_then_restored(self):
-        self.arm()
-        operation=self.prepared_record()
-        self.lock.unlink()
-        self.progress_write(status=1,stages=(1,1,1,-1))
-        checked=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts),
-                                       progress_path=str(self.progress))
-        self.assertEqual(checked["state"],"applied")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery"],operation)
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery_state"],"applied")
-        worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
-
     def test_emergency_disable_retains_active_witness_until_terminal_recheck(self):
         self.arm()
         worker.set_enabled(False,data_dir=str(self.data))
@@ -809,23 +731,9 @@ class TestNativeWpWitness(unittest.TestCase):
             worker.set_enabled(True,data_dir=str(self.data))
         self.lock.unlink()
         self.progress_write(status=1,stages=(1,1,1,1))
-        result=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts),
-                                       progress_path=str(self.progress))
+        result=worker.recheck_witness(data_dir=str(self.data),progress_path=str(self.progress))
         self.assertEqual(result["state"],"No Repair Pending")
         self.assertTrue(worker.set_enabled(True,data_dir=str(self.data))["enabled"])
-
-    def test_uncertain_recovery_with_foreign_hosts_diff_refuses_recheck(self):
-        self.arm()
-        operation=self.prepared_record()
-        self.lock.unlink()
-        self.progress_write(status=1,stages=(1,1,1,-1))
-        edited=self.before+b"\n127.0.0.1 failed.test\n192.0.2.8 changed.test"
-        self.hosts.write_bytes(edited)
-        result=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts),
-                                       progress_path=str(self.progress))
-        self.assertEqual(result["state"],"Needs Review")
-        self.assertEqual(self.hosts.read_bytes(),edited)
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery"],operation)
 
     def test_stale_witness_abandonment_requires_disable_and_no_locks_or_journal(self):
         self.arm()
@@ -851,60 +759,6 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(result["state"],"Active or Unknown")
         self.assertIsNone(worker.inspect(data_dir=str(self.data))["active_domain"])
 
-    def test_restore_rejects_new_native_wp_operation_even_after_previous_successful_cleanup(self):
-        operation=self.legacy_applied()
-        self.lock.write_text("new native WP operation")
-        with self.assertRaisesRegex(worker.TerminalError,"still be active"):
-            worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(self.hosts.read_bytes(),self.before)
-
-    def test_prepared_recovery_cannot_be_abandoned_without_recheck(self):
-        self.arm()
-        worker.set_enabled(False,data_dir=str(self.data))
-        self.prepared_record()
-        self.lock.unlink()
-        with self.assertRaisesRegex(worker.TerminalError,"Prepared"):
-            worker.abandon_witness(data_dir=str(self.data))
-        self.assertIsNotNone(worker.inspect(data_dir=str(self.data))["last_recovery"])
-
-    def test_crash_after_applied_journal_before_policy_save_rechecks_idempotently(self):
-        self.arm()
-        op=self.prepared_record()
-        with worker._locked_state(str(self.data)) as fd:
-            record=worker._read_recovery(fd,op)
-            record["phase"]="applied"
-            worker._save_recovery(fd,record)
-        self.lock.unlink()
-        self.progress_write(status=1,stages=(1,1,1,-1))
-        self.assertEqual(self.tick()["state"],"Recovery Required")
-        first=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(first["state"],"applied")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],1)
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery"],op)
-        second=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(second["state"],"applied")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],1)
-        restored=worker.restore(op,data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(restored["state"],"Restored")
-        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
-
-    def test_crash_after_restore_write_before_journal_persist_rechecks_idempotently(self):
-        operation=self.legacy_applied()
-        with worker._locked_state(str(self.data)) as fd:
-            record=worker._read_recovery(fd,operation)
-            record["phase"]="restore_prepared"
-            worker._save_recovery(fd,record)
-        self.hosts.write_bytes(self.before+b"\n127.0.0.1 failed.test")
-        outcome=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(outcome["state"],"restored")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery_state"],"restored")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["last_recovery"],operation)
-        self.assertEqual(worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))["state"],"restored")
-        self.assertEqual(worker.inspect(data_dir=str(self.data))["recoveries"],1)
-        self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test")
-        with self.assertRaises(worker.TerminalError):
-            worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-
     def test_unattended_worker_never_attempts_any_kernel_write_lease_or_mutation(self):
         self.arm()
         marker=b"\n127.0.0.1 failed.test"
@@ -916,75 +770,13 @@ class TestNativeWpWitness(unittest.TestCase):
                 raise AssertionError("Unattended writer attempted an unsafe lease")
             return actual_fcntl(fd,command,arg)
         try:
-            with patch.object(worker.fcntl,"fcntl",side_effect=probe):
+            with patch.object(fcntl,"fcntl",side_effect=probe):
                 result=self.finish()
         finally:
             os.close(held)
         self.assertEqual(result["state"],"Manual Review Required")
         self.assertFalse(result["changed"])
         self.assertEqual(self.hosts.read_bytes(),self.before+marker)
-
-    def test_unsupported_kernel_lease_fails_closed_for_reviewed_legacy_restore(self):
-        operation=self.legacy_applied()
-        original=fcntl.fcntl
-        def unsupported(fd,command,arg=0):
-            if command==fcntl.F_SETLEASE and arg==fcntl.F_WRLCK:
-                raise OSError(errno.EINVAL,"unsupported")
-            return original(fd,command,arg)
-        with patch.object(worker.fcntl,'fcntl',side_effect=unsupported):
-            with self.assertRaisesRegex(worker.TerminalError,"lease unavailable"):
-                worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(self.hosts.read_bytes(),self.before)
-        with worker._locked_state(str(self.data)) as fd:
-            self.assertEqual(worker._read_recovery(fd,operation)["phase"],"applied")
-
-    def test_final_window_rename_preserves_foreign_path_in_reviewed_restore(self):
-        operation=self.legacy_applied()
-        outsider=self.orig/"external"
-        foreign=self.before+b"192.0.2.55 added-by-other-writer.test\n"
-        outsider.write_bytes(foreign);outsider.chmod(0o644)
-        actual=os.write
-        actions=[]
-        def race(fd,data):
-            if data==b"\n127.0.0.1 failed.test":
-                os.replace(outsider,self.hosts)
-                actions.append("renamed")
-            return actual(fd,data)
-        with patch.object(worker.os,"write",side_effect=race):
-            with self.assertRaisesRegex(worker.TerminalError,"changed during guarded legacy Restore"):
-                worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(actions,["renamed"])
-        self.assertEqual(self.hosts.read_bytes(),foreign)
-        self.assertEqual(worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))["state"],"Needs Review")
-        with worker._locked_state(str(self.data)) as fd:
-            self.assertEqual(worker._read_recovery(fd,operation)["phase"],"restore_prepared")
-
-    def test_forced_lease_expiration_interleaving_preserves_foreign_append(self):
-        """Simulate kernel-forced lease removal *after* the last guard."""
-        operation=self.legacy_applied()
-        foreign=b"\n192.0.2.55 foreign-after-lease.test\n"
-        actual=os.write
-        attempted=[]
-        def expired_lease(fd,data):
-            if data==b"\n127.0.0.1 failed.test":
-                # This is the same late interleaving as a forced kernel break;
-                # the independent writer can now acquire a new write FD.
-                fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_UNLCK)
-                code=("import os,sys; f=os.open(sys.argv[1],os.O_WRONLY|os.O_APPEND);"
-                      "os.write(f,bytes.fromhex(sys.argv[2]));os.close(f)")
-                result=subprocess.run([sys.executable,'-c',code,str(self.hosts),foreign.hex()],
-                                      capture_output=True,text=True,timeout=3)
-                attempted.append(result.returncode)
-                self.assertEqual(result.returncode,0,result.stderr)
-            return actual(fd,data)
-        with patch.object(worker.os,"write",side_effect=expired_lease):
-            with self.assertRaisesRegex(worker.TerminalError,"source diverged"):
-                worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(attempted,[0])
-        self.assertEqual(self.hosts.read_bytes(),self.before+foreign+b"\n127.0.0.1 failed.test")
-        self.assertEqual(worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))["state"],"Needs Review")
-        with worker._locked_state(str(self.data)) as fd:
-            self.assertEqual(worker._read_recovery(fd,operation)["phase"],"restore_prepared")
 
     def test_vendor_source_refusal_is_persisted_and_activity_deduplicated(self):
         self.arm()
@@ -1038,36 +830,6 @@ class TestNativeWpWitness(unittest.TestCase):
         self.assertEqual(result["state"],"Manual Review Required")
         self.assertEqual(self.hosts.read_bytes(),self.before+b"\n127.0.0.1 failed.test"+foreign)
 
-    def test_applied_journal_external_exact_marker_reappend_is_not_restore(self):
-        operation=self.legacy_applied()
-        # Verify the ordinary already-applied state before external activity.
-        self.assertEqual(worker.recheck_recovery(
-            data_dir=str(self.data),hosts_path=str(self.hosts))["state"],"applied")
-        original_policy=worker.inspect(data_dir=str(self.data))
-        self.assertEqual(original_policy["last_recovery_state"],"applied")
-        # A separate writer recreates precisely the former vendor marker.
-        externally_reappended=self.before+b"\n127.0.0.1 failed.test"
-        with open(self.hosts,"ab") as writer:
-            writer.write(externally_reappended[len(self.before):])
-        first=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(first["state"],"Needs Review")
-        self.assertIn("without a prepared Restore",first["reason"])
-        second=worker.recheck_recovery(data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(second["state"],"Needs Review")
-        self.assertEqual(self.hosts.read_bytes(),externally_reappended)
-        state=worker.inspect(data_dir=str(self.data))
-        self.assertEqual(state["last_recovery"],operation)
-        self.assertEqual(state["last_recovery_state"],"applied")
-        self.assertEqual(state["recoveries"],original_policy["recoveries"])
-        with worker._locked_state(str(self.data)) as fd:
-            self.assertEqual(worker._read_recovery(fd,operation)["phase"],"applied")
-
-    def test_stale_foreign_change_rejects_restore(self):
-        operation=self.legacy_applied()
-        self.hosts.write_bytes(self.before+b"# administrator edit\n")
-        with self.assertRaisesRegex(worker.TerminalError,"changed since"):
-            worker.restore(operation,data_dir=str(self.data),hosts_path=str(self.hosts))
-        self.assertEqual(self.hosts.read_bytes(),self.before+b"# administrator edit\n")
 
 
 if __name__ == '__main__':

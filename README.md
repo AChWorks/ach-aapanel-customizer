@@ -10,7 +10,7 @@ or a WordPress-only plugin.
 | Layer | Verified reference (2026-11-22; check live systems) | What it proves |
 | --- | --- | --- |
 | **Published package** | [v0.1.51 pre-release](https://github.com/AChWorks/ach-aapanel-customizer/releases/tag/v0.1.51), native `0.1.51` and optional Bridge `0.1.8` | The previously verified public package; always recheck [Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases) before claiming latest |
-| **Source checkout** | Native `0.1.87` on Draft [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118); optional Bridge `0.1.9` unchanged | The ZIP was officially imported into the one retained **QA VM**, but has not passed independent review, Merge or public Release; exact installed-proof and test scope are in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7071682775) |
+| **Source checkout** | Native `0.1.88` candidate on Draft [PR #118](https://github.com/AChWorks/ach-aapanel-customizer/pull/118); Bridge `0.1.9` unchanged | Not yet merged or publicly released. The installed version and exact QA proof belong to [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21); prior 0.1.87 QA remains version-scoped |
 | **Retained native QA VM** | `ach-aapanel-qa/aac-native-qa-20261118`, aaPanel `8.0.7`; [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) owns current installed ZIP and resident-worker verification | **One persistent Running VM**, not a fresh guest. See [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for binding, test scope and actual current runtime |
 
 Always check [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases),
@@ -73,7 +73,28 @@ install Nginx Helper, intercept its vendor **Purge All**, or provide a
 cross-site-safe recursive purge. The installed WordPress package ships its
 own [WordPress `readme.txt`](wordpress/ach-aapanel-bridge/readme.txt).
 
-## Native 0.1.87 QA-installed candidate (not independently reviewed or publicly released)
+## Native 0.1.88: basic website file protection, no duplicate directory-index rule
+
+On the retained native aaPanel VM, a synthetic directory without an index
+already returned HTTP 403 (Nginx autoindex disabled). No duplicate listing
+restriction is added. But synthetic website-root `debug.log`, `error_log`,
+`backup.sql` and `wp-config.php.bak` each returned HTTP 200. The **same
+opt-in selected-site Nginx Guard** now denies these common debug/error logs,
+database dumps and configuration/backup filenames before file download.
+It neither scans/moves/deletes files nor changes permissions, aaPanel logs,
+global Nginx, public images or normal ZIP downloads; no extra UI option.
+This pre-stable Guard has just one current default ruleset
+(`site-sensitive-files-v1`) and one optional XML-RPC variant
+(`site-sensitive-files-xmlrpc-v1`); it does **not** carry earlier QA
+ruleset adapters.
+
+This is a limited additional layer, not a promise to catch every renamed
+backup or an explicit per-location `autoindex on` override. Unsupported
+site layouts require manual review. Native QA evidence and installed identity
+are kept in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+Merge, public Release and Production still require separate authorization.
+
+## Native 0.1.87 earlier QA milestone (historical; not publicly released)
 
 This candidate adds one selected-site, manual, recoverable HTTPS
 `home`/`siteurl` WordPress database correction, using the site's native

@@ -218,7 +218,7 @@ def require_native_runtime_paths(config_root, version, source=None):
 
     A source-derived site file map alone can admit a different socket. Check
     the actual root-owned FPM config before Prepare and under the Apply lock.
-    PHP85 is deliberately unchanged for existing recovery compatibility.
+    PHP8.5 retains its independently verified native runtime adapter.
     """
     if version != "81":
         return

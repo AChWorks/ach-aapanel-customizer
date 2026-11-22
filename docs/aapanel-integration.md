@@ -458,7 +458,7 @@ Full authenticated PHP-FPM automatic-repair UI acceptance and Production
 qualification remain
 separate.
 
-## Selected-site Nginx sensitive-path guard (merged source 0.1.53; not released)
+## Selected-site Nginx sensitive-path guard (Draft 0.1.88; pre-stable current contract)
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
@@ -471,24 +471,36 @@ aaPanel 8.0.7 Nginx/HTTP-80 layout; no blanket Nginx-version claim.
 **Protection semantics:** After a fresh Preview and explicit one-site approval,
 an immutable policy fragment is atomically installed into that site's existing
 Nginx extension directory, validated with `nginx -t` and applied with a
-shared-service reload. Three fixed, server-rewrite `if ($uri ~* ...)` +
+shared-service reload. Four fixed, server-rewrite `if ($uri ~* ...)` +
 `return 403` conditions block nested sensitive dotfiles (including
 `.env`, `.htaccess`, `.user.ini`), accesses below common backup directory
-names and PHP/PHTML/PHAR requests below common uploads/media/tmp directories.
-These **server rewrite-phase** returns run before Nginx Location selection:
+names, PHP/PHTML/PHAR requests below common uploads/media/tmp directories,
+and common **website-local files** such as `wp-content/debug.log`,
+`error_log`, `backup.sql`, `*.sql.gz` and `wp-config.php.bak`.
+Optional Nginx XML-RPC adds one fixed rule in the same policy. The
+pre-stable candidate uses only `site-sensitive-files-v1` or
+`site-sensitive-files-xmlrpc-v1`; obsolete QA rulesets have no runtime
+adapters. These **server rewrite-phase** returns run before Nginx Location selection:
 native `location ^~ /wp-content/uploads/` cannot silently bypass the filter.
 Safe `if` usage is limited to static server-scope **return-only** directives;
 no rewrite or application PHP is executed. The response includes a
 per-generation proof in a short body on matched requests (not in benign
-response headers); exact HTTP/80 403+proof is observed on ten bounded paths
-over three consecutive fresh request batches. This verifies *those* paths,
+response headers); exact HTTP/80 403+proof is observed on fourteen bounded
+paths (fifteen with XML-RPC) over three consecutive fresh request batches.
+This verifies *those* paths,
 not arbitrary path aliases or origin HTTPS/cached edge behavior.
 
 **Exceptions and scope:** No restriction is added to legitimate `.well-known`
 ACME/OAuth paths, the site homepage, ordinary public static downloads, or other
-sites. The policy is intentionally **not** a global block on all .zip/.sql,
-a replacement for Fail2ban, or complete protection for every custom upload/
-backup directory. A site with unsupported VHost/include, symlinked Document Root,
+sites. Default Nginx already prevents directory listing where `autoindex`
+is off: a directory without an index returned HTTP 403 on the retained
+aaPanel VM. Customizer does **not** add another autoindex rule or override
+foreign `location` declarations that explicitly enable it. This new Guard
+does reject raw SQL database dumps, but deliberately does **not** block all
+ZIP archives, ordinary downloads or public static files. It is not a
+replacement for Fail2ban or complete protection for every renamed backup,
+custom upload directory or alternative web server.
+A site with unsupported VHost/include, symlinked Document Root,
 missing native identity, unrecognized owner, changed foreign include or
 incompatible active Nginx workers must fail closed with `Needs Review` rather
 than claim protection. Custom shared Nginx/global security rules need
@@ -587,28 +599,20 @@ enable this observer.
 **Recoverability:** Private root-owned `*.manual-review.json` records,
 atomic no-clobber publication, fsync and delivery receipts keep the
 manual-review event visible through Activity failure, restart or log
-rotation without replaying a Hosts write. Older applied/prepared
-**automatic-cleanup** journals are historical operator state, not
-permissions to repeat automatic removal. Their Recheck is read-only for
-Hosts, and a legacy Restore needs separate primary-admin authorization,
-an unchanged source and its original Recovery ID. Do not discard foreign,
-malformed or uncertain records merely to clear an alert.
+rotation without replaying a Hosts write. The current read-only witness
+can Recheck a genuinely active native setup and clear its temporary baseline
+after a verified terminal event. There is **no old automatic-cleanup journal
+adapter or legacy Hosts Restore**. Actual one-click Local Hosts removal
+is a separate current capability with its own current Recovery ID.
 
 **If a canonical evidence record is malformed:** Stop/disable the witness
 through its supported controls, inspect the exact Operation ID and original
 native task/locks, and under separately authorized root maintenance preserve
 a byte-identical protected copy before moving **only that record** to a
 private non-overwriting quarantine path. Reinspect first; never delete
-another operation's report, the original forensic copy or a recovery
-journal. The UI distinguishes policy Enabled from watcher Ready and
+another operation's report, the original forensic copy or another
+current-operation report. The UI distinguishes policy Enabled from watcher Ready and
 provides Emergency Disable independently from stale non-emergency helpers.
-
-Detailed historical implementation concerns (formerly ~120 lines,
-including `F_SETLEASE` no-loss reasoning, exact Outbox mechanics and
-source-version tests) remain inspectable in the
-[pre-consolidation technical guide at the merged source commit](https://github.com/AChWorks/ach-aapanel-customizer/blob/bea6e772e1a1b6cd92bbd931ab760bacd13b6374/docs/aapanel-integration.md).
-That history is **not** a current request for new VMs, auto-cleanup,
-privileged password recovery or Production changes.
 
 ## Simplification and operator choice (merged source v0.1.63; unpublished)
 
@@ -633,7 +637,7 @@ A second cross-layer limit audit additionally removes stale frontend
 ceilings on large Hosts/VHost/Cache peer results, the 32-installation/128-root
 PHP inventory limits, artificial Linux process/FD count stops, the 32-profile
 Monitor-only PHP intent cap, the 32-fragment Nginx/PHP source reader caps,
-and the 64-event historical WordPress recovery count stop. Inspection
+and obsolete WordPress historical repair counters. Inspection
 of installed older PHP versions and newer aaPanel Nginx sources uses
 observed readable files rather than version-text bans. The explicitly
 implemented 8.1/8.5 PHP-FPM and Cache write adapters, native WP watcher
@@ -1136,11 +1140,10 @@ absent/false/true states before changes (distinct from WordPress's
 checks both stored grants and effective permissions before reporting Connected,
 and independently verifies exact persisted baseline restoration before
 completing Disconnect. Interrupted writes remain retryable from the saved
-journal, without overwriting the original snapshot. Older journals holding
-only filtered capability booleans cannot reconstruct an earlier stored
-baseline; the first new Connect records the then-current persisted entries,
-and a legacy-only Disconnect leaves those entries unchanged rather than
-blindly granting or deleting role privileges.
+journal, without overwriting the original snapshot. Only current journals with a complete persisted `admin_caps_stored`
+baseline are accepted. Missing, filtered-only or otherwise incomplete
+journals fail before another WordPress/PHP/Cache mutation; no migration
+or guessed-role fallback is implemented.
 Bridge 0.1.9 maps a valid authenticated, nonce-checked frontend
 `Purge Current Page` through the same generation-bound per-URL
 GET/HEAD selector for HTTP/HTTPS cache keys, including an HTTPS public

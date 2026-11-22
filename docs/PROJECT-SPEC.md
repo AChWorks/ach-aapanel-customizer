@@ -175,12 +175,30 @@ stale previews, cache manifests and recoveries; never silently replace it
 with a default path. Certify each module with representative real custom-root
 behavior rather than inferring compatibility from inventory alone.
 
+**Pre-stable internal compatibility policy:** No official production
+installation of ACh aaPanel Customizer exists. Remove previous Customizer
+version/schema/ruleset recovery shims, historic automatic Hosts Restore
+paths, and old role/profiles baseline guesses. Only preserve current
+capabilities and the durability/Restore guarantees for operations created
+by the current candidate. Real aaPanel vendor sources, supported PHP/WordPress
+versions, third-party plugin contracts and user-created site files are
+external compatibility requirements and must not be removed under this
+policy. The persistent QA VM is for testing, not a compatibility customer.
+
 An opt-in site-specific Nginx sensitive-path policy should deny known
 sensitive dotfile, backup-directory and upload-PHP requests *before* PHP-FPM
 work. Prefer source-verified server-rewrite `if` + `return 403` rather than
 a regex-only `location` policy which `^~` Nginx prefixes could bypass.
-Do not break legitimate `.well-known` ACME/OAuth, public assets, peer sites,
-or broad file types by default. Every active security policy needs fresh
+Do not break legitimate `.well-known` ACME/OAuth, public assets, peer sites
+or ordinary downloads. When native Nginx already disables directory listing,
+do **not** duplicate that policy. A small fixed pre-PHP rule may block common
+website-local `debug.log`/`error_log`, WordPress config backups, raw SQL
+dumps and `.bak` artifacts. Do not globally block ZIP files or add a site
+crawler, watcher, ownership rewrite or another plugin. Before the first
+Stable release, prefer one current source/journal contract; the retained QA
+VM must explicitly retire its old test-only state before exercising a
+new incompatible policy.
+Every active security policy needs fresh
 source ownership, guarded apply/reload, live response proof, durable recovery,
 separate approval for Restore and drift awareness. Exact URL probes are
 not universal proof of full HTTP/2/3, CDN/HTTPS or all custom site aliases.
@@ -246,12 +264,11 @@ non-emergency watcher controls must verify the **loaded helper** contract
 and fail closed if stale, while keeping Emergency disable accessible.
 A panel reload is separately authorized, never triggered by import.
 
-**Historical requirement superseded 2026-11-20:** the earlier P0
-automatic post-terminal Hosts cleanup is explicitly **cancelled**; current
-Hosts acceptance requires one-click in-plugin removal from the actual file.
-Legacy witness/journal text below is implementation history, not a new
-automatic-cleanup requirement. **Merged source 0.1.62** added an independently
-opt-in, service-scoped PHP 8.1/8.5 auto-repair worker. It records a trusted
+**Current Hosts/FPM behavior:** Failed WordPress provisioning is
+observation-only; the user explicitly selects any unwanted alias for
+one-click Hosts removal. The legacy automatic Hosts-cleanup path and its
+journals have no runtime adapter. An independent opt-in PHP 8.1/8.5
+automatic-repair worker watches verified native PHP-FPM regeneration. It records a trusted
 pre-terminal native WP progress identity and FPM file fingerprint, requires a
 matching later successful/failed terminal and changed FPM source, then
 rechecks saved admin intent and shared-site mapping before guarded
@@ -269,31 +286,17 @@ revocation even when a guarded operation holds the shared lock longer than
 the request timeout, then completes autonomously at the next safe worker
 boundary; it never silently leaves future authority active after a
 successfully acknowledged final Disable.
-Live native aaPanel 8.0.7 systemd-only QA on two isolated guests now
-proves a successful WordPress PHP 8.1 first-time optimizer reset and a
-failed-installation/removed-site PHP 8.5 reset both repaired to saved
-shared policy, with service and peer-site checks. Independent exact-candidate
-review, native authenticated **PHP-FPM policy/automatic-repair UI** QA,
-broader compatibility proof and Production approval remain separate OPEN
-gates. This does not re-open the independently proven primary-admin Login,
-Local Hosts one-click action or CSRF/no-session denial acceptance on the
-installed 0.1.69 QA guest (see Issue #21). The read-only Hosts
-witness is not an automatic recurrence-prevention deliverable. An exact
-no-loss removal cannot rely on Linux F_SETLEASE alone: a lease can be forcibly
-revoked after the timeout while the holder is suspended, and an intervening
-uncoordinated writer can append data before ftruncate. Extra userland
-hash/stat/lease checks do not make that truncation atomic. Only an independently
-verified transactional writer-coordination design and subsequent Owner
-approval could reauthorize automatic deletion.
+Exact previous FPM runtime acceptance is recorded in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+The current witness and Hosts action do not attempt automatic Hosts cleanup;
+no old kernel-lease append-Restore code or compatibility tests remain. Native
+auto PHP-FPM repair retains its own scoped source/recovery verification.
 
-Historical applied/prepared recovery journals remain supported: read-only,
-idempotent Recheck differentiates a true prepared Restore from an exact alias
-reappend by an unrelated actor; the latter must say Needs Review without
-claiming a successful Restore. Separately approved legacy Restore uses
-O_APPEND write semantics, so forced lease expiry cannot cause an offset-based
-overwrite of competing appended lines; uncertain results retain the recovery
-journal and require Recheck. Distinguish Enabled observation policy, actual
-watcher readiness and typed last worker result in UI and Activity.
+The current WordPress witness is observation-only, with no automatic
+Hosts edit and no historical append-only Restore. A matching terminal
+progress record may close a current active witness, while an unproven task
+remains Needs Review until explicitly discarded. Distinguish Enabled
+observation policy, actual watcher readiness and typed last worker result
+in UI and Activity.
 The Hosts witness alone does **not** authorize generic alias cleanup,
 batch WP install mutation, or shared PHP-FPM auto-enforcement. The separate
 0.1.62 FPM worker is opt-in and has its own narrower native-writer boundary.
