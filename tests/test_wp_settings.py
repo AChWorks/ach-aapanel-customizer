@@ -143,6 +143,103 @@ class WPSettingsTests(unittest.TestCase):
                 self.assertEqual(self.config.read_bytes(), value)
                 self.assertFalse(list(self.data.iterdir()))
 
+    def test_inert_comment_definitions_never_publish_debug_or_cron(self):
+        for kind, constant in (("debug", b"WP_DEBUG"),
+                               ("cron", b"DISABLE_WP_CRON")):
+            source = (b"<?php\n/*\n" + b"define( '" + constant +
+                      b"', false );\n*/\nrequire_once ABSPATH . 'wp-settings.php';\n")
+            with self.subTest(kind=kind):
+                self.config.write_bytes(source)
+                with self.assertRaises(settings.WPSettingsError) as error:
+                    self.recheck(kind, interval=5 if kind == "cron" else None)
+                self.assertEqual(error.exception.stage, "compatibility")
+                with self.assertRaises(settings.WPSettingsError):
+                    self.call("apply", kind, desired="true",
+                              interval=5 if kind == "cron" else None,
+                              expected_source=settings._sha(source))
+                self.assertEqual(self.config.read_bytes(), source)
+                self.assertFalse(list(self.data.iterdir()))
+                self.assertFalse(list(self.cron.iterdir()))
+
+    def test_conditionals_and_post_bootstrap_definitions_are_not_managed(self):
+        cases = [
+            b"<?php\nif (false) {\n  define( 'WP_DEBUG', false );\n}\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n",
+            b"<?php\nif (false)\ndefine( 'WP_DEBUG', false );\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n",
+            b"<?php\nif (false):\ndefine( 'WP_DEBUG', false );\nendif;\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n",
+            b"<?php\nrequire_once ABSPATH . 'wp-settings.php';\n"
+            b"define( 'WP_DEBUG', false );\n",
+            b"<?php\ndefine( 'wp_debug', false );\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n",
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                self.config.write_bytes(source)
+                with self.assertRaises(settings.WPSettingsError):
+                    self.recheck("debug")
+                self.assertEqual(self.config.read_bytes(), source)
+                self.assertFalse(list(self.data.iterdir()))
+
+    def test_only_live_bootstrap_and_literal_definition_are_edited(self):
+        initial = (
+            b"<?php\n/*\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n"
+            b"*/\n"
+            b"$comment_like = 'http://example.test/a/*b';\n"
+            b"  define( 'WP_DEBUG', false );\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n"
+        )
+        self.config.write_bytes(initial)
+        self.assertEqual(self.apply("debug")["state"], "Applied")
+        changed = self.config.read_bytes()
+        self.assertIn(b"$comment_like = 'http://example.test/a/*b';", changed)
+        self.assertEqual(changed.count(b"require_once ABSPATH"), 2)
+        self.assertIn(b"WP_DEBUG', true", changed)
+        self.assertEqual(self.restore("debug")["state"], "Restored")
+        self.assertEqual(self.config.read_bytes(), initial)
+
+    def test_commented_bootstrap_does_not_count_as_a_live_anchor(self):
+        original = (
+            b"<?php\n/*\nrequire_once ABSPATH . 'wp-settings.php';\n*/\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n"
+        )
+        self.config.write_bytes(original)
+        self.apply("debug")
+        self.restore("debug")
+        self.assertEqual(self.config.read_bytes(), original)
+
+    def test_crlf_literal_and_absent_setting_keep_exact_recovery(self):
+        original = self.baseline.replace(b"\n", b"\r\n")
+        self.config.write_bytes(original)
+        self.apply("debug")
+        self.assertIn(b"WP_DEBUG', true", self.config.read_bytes())
+        self.restore("debug")
+        self.assertEqual(self.config.read_bytes(), original)
+        without = original.replace(b"define( 'WP_DEBUG', false );\r\n", b"")
+        self.config.write_bytes(without)
+        review = self.recheck("debug", "false")
+        self.assertEqual(review["state"], "Restored")
+        self.assertEqual(self.call("apply", "debug", desired="false",
+                                   expected_source=review["source_sha256"])["state"],
+                         "Applied")
+        self.assertIn(b"WP_DEBUG', false", self.config.read_bytes())
+        self.restore("debug", "false")
+        self.assertEqual(self.config.read_bytes(), without)
+
+    def test_complex_heredoc_requires_manual_review(self):
+        source = (
+            b"<?php\n$example = <<<MARKER\n"
+            b"define( 'WP_DEBUG', false );\nMARKER;\n"
+            b"require_once ABSPATH . 'wp-settings.php';\n"
+        )
+        self.config.write_bytes(source)
+        with self.assertRaises(settings.WPSettingsError):
+            self.recheck("debug")
+        self.assertEqual(self.config.read_bytes(), source)
+        self.assertFalse(list(self.data.iterdir()))
+
     def test_concurrent_source_change_rejects_stale_apply(self):
         info = self.recheck("debug")
         self.config.write_bytes(self.baseline + b"// other admin\n")

@@ -309,6 +309,29 @@ class TestFpmManualApply(unittest.TestCase):
         self.assertEqual(caught.exception.stage, "recovery")
         self.assertEqual(self.config.read_bytes(), BASELINE)
 
+    def test_current_auto_journal_requires_exact_event_token(self):
+        record = {
+            "schema": 2, "operation_id": "a" * 32, "version": "85",
+            "phase": "prepared", "before_sha256": "b" * 64,
+            "after_sha256": "c" * 64, "timestamp": 1,
+            "owner": "auto", "policy_sha256": "d" * 64,
+            "event_token": "e" * 64,
+        }
+        fd = manual._dir(self.data)
+        try:
+            manual._persist_journal(fd, record)
+            self.assertEqual(manual._read_journal(fd, "85"), record)
+            # Old QA schema-2 without a witnessed event is not a current
+            # automatic operation and cannot authorize recovery.
+            previous = dict(record)
+            previous.pop("event_token")
+            manual._persist_journal(fd, previous)
+            with self.assertRaises(manual.FpmApplyError) as err:
+                manual._read_journal(fd, "85")
+            self.assertEqual(err.exception.stage, "recovery")
+        finally:
+            os.close(fd)
+
     def test_extended_attributes_are_refused_before_modifying_config(self):
         if not hasattr(os, "setxattr"):
             self.skipTest("extended attributes unsupported")

@@ -176,12 +176,17 @@ with a default path. Certify each module with representative real custom-root
 behavior rather than inferring compatibility from inventory alone.
 
 **Pre-stable internal compatibility policy:** No official production
-installation of ACh aaPanel Customizer exists. Remove previous Customizer
-version/schema/ruleset recovery shims, historic automatic Hosts Restore
-paths, and old role/profiles baseline guesses. Only preserve current
+installation of ACh aaPanel Customizer exists. **Apply this decision across
+all Customizer subsystems** (Status Pages, Nginx Guard, PHP-FPM, Cache,
+WordPress operations, website management, UI and recovery): remove previous
+Customizer version/schema/ruleset recovery shims, historic automatic Hosts
+Restore paths, and old role/profiles baseline guesses. Only preserve current
 capabilities and the durability/Restore guarantees for operations created
-by the current candidate. Real aaPanel vendor sources, supported PHP/WordPress
-versions, third-party plugin contracts and user-created site files are
+by the current candidate. Names such as aaPanel's `class_v2` and native
+Nginx Helper's older cache paths are **external vendor/source contracts**,
+not old Customizer adapters; assess them by real active use.
+Real aaPanel vendor sources, supported PHP/WordPress versions,
+third-party plugin contracts and user-created site files are
 external compatibility requirements and must not be removed under this
 policy. The persistent QA VM is for testing, not a compatibility customer.
 

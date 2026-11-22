@@ -119,20 +119,20 @@ These operations do not change WordPress URL/SSL, XML-RPC or Nginx rules.
 Exact native installed-runtime checks, Cron execution and the full
 site-identity/peer matrix belong to [QA Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 
-**Optional pre-PHP Nginx XML-RPC block:** The same existing Nginx
-sensitive-path Guard has an optional **Also block `/xmlrpc.php` before PHP-FPM**
-checkbox. The default remains the existing `nested-sensitive-v2` policy.
-When explicitly chosen, the complete site guard uses one
-`nested-sensitive-xmlrpc-v3` rule set, **the same site-owned Nginx include,
-source-checked Preview/Apply/Recheck/Restore and original Recovery journal**.
-The additional server-rewrite condition blocks `/xmlrpc.php` before any PHP
-location dispatch; the live local proof covers eleven guarded paths instead
-of ten. Existing v2 journals/Restore remain valid, even if a new option is
-selected later. No watcher or global rule. The independently available
-WordPress MU-plugin XML-RPC gate is application-level and its live proof
-must not be treated as confirmation of the Nginx variant; avoid stacking the
-two managed gates on the same site. Native installed HTTP POST/GET and peer
-tests belong to Issue #21; passing source tests alone is not installed proof.
+**Optional pre-PHP Nginx XML-RPC block:** The existing selected-site Nginx
+sensitive-file Guard has an optional **Also block `/xmlrpc.php` before PHP-FPM**
+checkbox. Its current default ruleset is `site-sensitive-files-v1`; when
+selected, the full site guard uses `site-sensitive-files-xmlrpc-v1`.
+Both options use the **same site-owned Nginx include and current-generation
+Recovery journal**, with source-checked Preview/Apply/Recheck/Restore.
+The extra server-rewrite condition blocks `/xmlrpc.php` before PHP
+location dispatch. Live local proof checks 14 Guard paths by default and
+15 with XML-RPC. No previous pre-Stable ruleset adapters or migration path
+are supported. No watcher or global rule. The separately available WordPress
+MU-plugin XML-RPC gate runs at the application layer; its proof is not proof
+of the Nginx variant, and both gates need not be stacked on the same site.
+Native installed HTTP POST/GET and peer tests belong to Issue #21; source
+tests alone are not installed proof.
 
 ## Unknown-SNI HTTPS/443 rejection (Owner Option A)
 
@@ -458,7 +458,7 @@ Full authenticated PHP-FPM automatic-repair UI acceptance and Production
 qualification remain
 separate.
 
-## Selected-site Nginx sensitive-path guard (Draft 0.1.88; pre-stable current contract)
+## Selected-site Nginx sensitive-path guard (Draft 0.1.89; pre-stable current contract)
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads

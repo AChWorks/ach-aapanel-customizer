@@ -130,37 +130,106 @@ def _managed_value(raw):
     return match.group(1) if match else None
 
 
+def _live_php_code(raw):
+    """Mask PHP comments and quoted text while keeping original byte offsets.
+
+    A conservative source check for one line-scoped setting, not a general
+    PHP parser. Unfamiliar heredoc/nowdoc syntax needs manual review.
+    """
+    code = bytearray(raw)
+    i = 0
+    while i < len(raw):
+        if raw.startswith(b"<<<", i):
+            raise WPSettingsError(
+                "compatibility", "WordPress config has complex PHP text; review the setting manually")
+        if raw.startswith(b"/*", i):
+            end = raw.find(b"*/", i + 2)
+            if end < 0:
+                raise WPSettingsError("compatibility", "WordPress PHP block comment is incomplete")
+            end += 2
+        elif raw.startswith(b"//", i) or raw[i] == 35:  # PHP # comment
+            end = raw.find(b"\n", i)
+            if end < 0:
+                end = len(raw)
+        elif raw[i] in (39, 34, 96):  # PHP quotes and backticks
+            quote = raw[i]
+            end = i + 1
+            while end < len(raw) and raw[end] != quote:
+                end += 2 if raw[end] == 92 else 1
+            if end >= len(raw):
+                raise WPSettingsError("compatibility", "WordPress PHP quoted text is incomplete")
+            end += 1
+        else:
+            i += 1
+            continue
+        code[i:end] = b" " * (end - i)
+        i = end
+    return bytes(code)
+
+
+def _top_level_php(code, at):
+    """Only use a direct PHP statement, never an inactive/conditional one."""
+    prefix = code[:at]
+    if (b"?>" in prefix
+            or prefix.count(b"{") != prefix.count(b"}")
+            or not prefix.rstrip().endswith((b"<?php", b";", b"}"))
+            or re.search(rb"\b(?:if|elseif|while|for|foreach|switch)\s*\([^{}]*\)\s*:",
+                         prefix, re.I)):
+        raise WPSettingsError(
+            "compatibility", "WordPress setting/bootstrap is conditional or not a direct PHP statement")
+
+
 def _setting(raw, kind):
     name = KEYS[kind].encode("ascii")
-    definitions = [match for match in REGEX.finditer(raw) if match.group(2).upper() == name]
-    # A multiline or conditional definition is not a literal site-level
-    # source we can safely rewrite. Do not mask it as "absent".
+    if not raw.lstrip().startswith(b"<?php"):
+        raise WPSettingsError("compatibility", "WordPress config must start with PHP source")
+    code = _live_php_code(raw)
+    bootstrap = [
+        match for match in WP_BOOTSTRAP.finditer(raw)
+        if code[match.start() + len(match.group(0)) -
+                len(match.group(0).lstrip(b" \t")):][:12] == b"require_once"
+    ]
+    if len(bootstrap) != 1:
+        raise WPSettingsError("compatibility", "Unique active WordPress bootstrap not found")
+    boot = bootstrap[0]
+    _top_level_php(code, boot.start())
+    definitions = [match for match in REGEX.finditer(raw)
+                   if match.group(2).upper() == name]
+    # A second mention, including a comment or dynamic definition, is
+    # ambiguous: never turn it into an "absent" setting.
     candidates = re.findall(rb"\bdefine\s*\(\s*['\"]" + name +
                             rb"['\"]", raw, flags=re.I)
     if len(definitions) > 1 or len(candidates) != len(definitions):
-        raise WPSettingsError("compatibility", "WordPress " + KEYS[kind] +
-                              " is duplicate, dynamic, or not a simple literal define")
+        raise WPSettingsError(
+            "compatibility", "WordPress " + KEYS[kind] +
+            " is duplicated, dynamic or not a single live literal definition")
     if not definitions:
-        return None, None
+        return None, None, boot.start()
     match = definitions[0]
-    return match.group(0), match.group(3).decode("ascii").lower()
+    keyword_at = match.start() + len(match.group(0)) - len(match.group(0).lstrip(b" \t"))
+    if (match.group(2) != name or
+            code[keyword_at:keyword_at + len(b"define")].lower() != b"define" or
+            match.start() >= boot.start()):
+        raise WPSettingsError(
+            "compatibility", "WordPress " + KEYS[kind] +
+            " definition is commented, incorrectly cased or follows WordPress bootstrap")
+    _top_level_php(code, keyword_at)
+    return match, match.group(3).decode("ascii").lower(), boot.start()
 
 
 def _propose(raw, kind, op, value):
-    before, old_value = _setting(raw, kind)
+    match, old_value, bootstrap_at = _setting(raw, kind)
     new_line = _canonical_managed_line(kind, op, value)
-    if before is None:
-        boot = list(WP_BOOTSTRAP.finditer(raw))
-        if len(boot) != 1 or not raw.lstrip().startswith(b"<?php"):
-            raise WPSettingsError("compatibility", "Unique WordPress bootstrap not found")
+    if match is None:
         newline = b"\r\n" if b"\r\n" in raw else b"\n"
         inserted = new_line.replace(b"\n", newline)
-        return raw[:boot[0].start()] + inserted + raw[boot[0].start():], None, inserted
+        return raw[:bootstrap_at] + inserted + raw[bootstrap_at:], None, inserted
+    before = match.group(0)
     if b"// ACh Customizer " in before:
         raise WPSettingsError("recovery", "A previous managed WordPress setting needs Recheck")
-    # Preserve line endings and restore the original exact source on request.
+    # Edit the verified live span, not some identical inert text elsewhere.
     new_line = new_line.replace(b"\n", b"\r\n" if before.endswith(b"\r\n") else b"\n")
-    return raw.replace(before, new_line, 1), before, new_line
+    return raw[:match.start()] + new_line + raw[match.end():], before, new_line
 
 
 def _site_source(site, public, *, vhost_root):
@@ -274,7 +343,7 @@ def manage(action, kind, site, public, *, desired=None, interval=None,
             scheduled = _bounded_file(cfd, _task(site["id"]), limit=4096, permissions=0o644)
         if action == "recheck":
             if not record:
-                line, current_value = _setting(raw, kind)
+                _, current_value, _ = _setting(raw, kind)
                 if kind == "cron" and scheduled is not None:
                     state, reason = "Conflict", "Existing site Cron task is not owned by Customizer"
                 elif current_value == desired:
@@ -284,7 +353,8 @@ def manage(action, kind, site, public, *, desired=None, interval=None,
                 return _reply(site, kind, state, before_hash, record,
                               reason=reason, interval=interval)
             managed = record["managed_line"].encode("ascii")
-            line, actual_value = _setting(raw, kind)
+            matched, actual_value, _ = _setting(raw, kind)
+            line = matched.group(0) if matched else None
             expected_task = (_cron_text(site, php, record["interval"])
                              if kind == "cron" else None)
             if record["phase"] == "restored":
@@ -304,7 +374,7 @@ def manage(action, kind, site, public, *, desired=None, interval=None,
                 raise WPSettingsError("recovery", "Existing WordPress setting or cron task needs recovery")
             if expected_source != before_hash:
                 raise WPSettingsError("concurrency", "wp-config.php changed after Preview; Recheck")
-            _, current = _setting(raw, kind)
+            _, current, _ = _setting(raw, kind)
             if current == desired:
                 raise WPSettingsError("input", "Setting already has the selected value; no Apply needed")
             operation_id = uuid4().hex
@@ -356,7 +426,8 @@ def manage(action, kind, site, public, *, desired=None, interval=None,
                 # A prior Restore may have committed wp-config.php and crashed
                 # before retiring the cron task or advancing the journal. Do
                 # not demand the removed managed line to exist again.
-                observed, _ = _setting(raw, kind)
+                observed_match, _, _ = _setting(raw, kind)
+                observed = observed_match.group(0) if observed_match else None
                 if old is None and observed is not None or (
                         old is not None and observed != old):
                     raise WPSettingsError(

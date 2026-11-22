@@ -23,13 +23,12 @@ from ach_customizer_monitor import (
 )
 
 MAX_BYTES = 256 * 1024
-VERSION = "85"  # Existing PHP 8.5 default, retained for recovery compatibility.
+VERSION = "85"  # Default for manual PHP 8.5 callers; each service owns its journal.
 SUPPORTED_VERSIONS = ("81", "85")  # Independently bounded native aaPanel adapters.
 LOCK_TIMEOUT = 3.0
 JOURNAL = "ach_customizer.fpm85.recovery.json"
 SNAPSHOT = "ach_customizer.fpm85.recovery.before"
-# Keep the original lock name as a shared lock for both versioned writers,
-# including older resident PHP 8.5 workers during a panel-plugin ZIP upgrade.
+# One current shared lock coordinates both manual service-version writers.
 LOCK = "ach_customizer.fpm85.recovery.lock"
 
 
@@ -332,17 +331,14 @@ def _read_journal(fd_dir, version=VERSION):
     if not isinstance(record, dict):
         raise FpmApplyError("recovery", "Unsupported PHP-FPM recovery journal")
     if record.get("schema") == 2:
-        # Older schema-2 source candidates did not bind an event token.
-        # Their recovery evidence remains readable, but can never be
-        # mistaken for a particular newly witnessed automatic task.
-        auto_keys = required | {"owner", "policy_sha256"}
-        if (set(record) not in (auto_keys, auto_keys | {"event_token"})
+        # Current automatic transactions always identify the witnessed event.
+        auto_keys = required | {"owner", "policy_sha256", "event_token"}
+        if (set(record) != auto_keys
                 or record["owner"] != "auto"
                 or not isinstance(record["policy_sha256"], str)
                 or not re.fullmatch(r"[0-9a-f]{64}", record["policy_sha256"])
-                or ("event_token" in record and
-                    (not isinstance(record["event_token"], str)
-                     or not re.fullmatch(r"[0-9a-f]{64}", record["event_token"])))):
+                or not isinstance(record["event_token"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", record["event_token"])):
             raise FpmApplyError("recovery", "Unsupported automatic PHP-FPM recovery journal")
     elif record.get("schema") != 1 or set(record) != required:
         raise FpmApplyError("recovery", "Unsupported PHP-FPM recovery journal")
