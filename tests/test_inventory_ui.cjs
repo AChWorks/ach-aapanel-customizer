@@ -5213,9 +5213,27 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /\.ach-workspace \{[^}]*border-radius:0 0 10px 10px/);
   assert.match(html, /\.layui-layer:has\(#ach-customizer\) \{[^}]*border-radius:10px/);
   assert.match(html, /class="ach-sidebar-label"/);
-  assert.match(html, /\.ach-main button \{[^}]*min-height:32px/);
+  assert.match(html, /\.ach-main button \{[^}]*min-height:var\(--ach-control-height\)/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
   assert.match(html, /<h4 class="ach-sr-only">Overview<\/h4>/);
+});
+
+test('Shared native form-row primitive aligns actual labeled controls, not label boxes', () => {
+  // All current and future mixed field/button rows inherit these rules;
+  // avoid per-ID margin patches that silently break the next form.
+  assert.match(html, /--ach-control-height:32px/);
+  assert.match(html, /\.ach-main button \{[^}]*min-height:var\(--ach-control-height\)/);
+  assert.match(html, /\.ach-main input:not\(\[type="checkbox"\]\),[\s\S]*?min-height:var\(--ach-control-height\)/);
+  assert.match(html, /\.ach-controls:has\(> \.ach-inline-field\) \{ align-items:flex-end; \}/);
+  assert.match(html, /\.ach-controls > \.ach-inline-field \{[^}]*align-self:stretch/);
+  assert.match(html, /\.ach-controls > \.ach-inline-field > :is\([^}]*margin-top:auto/);
+  for (const [fieldId, buttonId] of [
+    ['ach-hosts-alias-select','ach-hosts-alias-refresh'],
+    ['ach-scan-orphan-choice','ach-scan-orphan-list']
+  ]) {
+    assert.match(html, new RegExp('class="ach-controls"[\\s\\S]*?id="' + buttonId +
+      '"[\\s\\S]*?class="ach-inline-field"[\\s\\S]*?id="' + fieldId + '"'));
+  }
 });
 
 test('Dense Activity and Website tables preserve readable column widths', () => {
