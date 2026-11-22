@@ -3033,7 +3033,11 @@
         '\nNginx pre-PHP XML-RPC block: ' + (r.block_xmlrpc?'Selected':'Not selected') +
         '\nRecovery ID: ' + (r.recovery_id || 'None') +
         '\nJournal phase: ' + (r.journal_phase || 'None') +
-        '\nLive HTTP/80 guard nonce verified: ' + (r.runtime_verified ? 'Yes' : 'No') +
+        '\n' + (r.runtime_verified && r.state === 'Applied' ?
+          'Managed Guard nonce present: Verified' :
+          r.runtime_verified && r.state === 'Restored' ?
+          'Former Guard nonce absent: Verified' :
+          'Runtime verification: Not confirmed') +
         '\nAutomatic enforcement: No\n' + r.reason +
         '\nAfter changes, run Recheck. HTTPS, WAF and custom application exceptions require independent QA.');
     });

@@ -532,10 +532,19 @@ approval before retiring the owned file or reloading shared Nginx. Even without
 VHost drift, an `applied` journal with only its single byte-exact retained
 file reports **Recovery Required** (`interrupted_restore`) and enables manual
 Restore. A simultaneous live/retained pair, altered or missing owned file
-must never be reported healthy Applied. Restore rechecks source ownership,
-Nginx syntax, live nonce absence and source stability. Fresh
-**Preview -> Apply** is a separate operator choice on the updated source.
-No background repair or automatic reapplication is added.
+must never be reported healthy Applied. Restore rechecks both managed
+filenames immediately before retirement, verifies exact moved bytes and
+file identity after no-clobber rename, and revalidates both the retained rule
+and complete native source **after the final Nginx syntax check and before
+shared reload**. An altered retired entry is moved back without overwriting
+another file when possible; otherwise its original Recovery ID remains for
+explicit inspection. Late source drift leaves the exact retained rule
+recoverable without a reload. After reload, nonce absence, source stability
+and retained ownership are verified before acknowledging Restored. External
+aaPanel writers do not share this plugin lock: the checks narrow, but cannot
+atomically eliminate, the last check-to-reload race. Fresh **Preview -> Apply**
+is a separate operator choice. No watcher, background repair or automatic
+reapplication is added.
 
 Other files, users and site configurations are not modified.
 After uninstall, saved policy/recovery may still be active: reinstall and

@@ -9259,7 +9259,7 @@ test('Sensitive-file Nginx guard requires fresh source and explicit Apply/Restor
   assert.equal(applying.options.data.expected_proposal_sha256,'b'.repeat(64));
   assert.equal(ui.state().guardApplyDisabled,true);
   applying.respond(sensitiveGuardResponse('Applied',{read_only:false,changed:true}));
-  assert.match(ui.state().guardResult,/Live HTTP\/80 guard nonce verified: Yes/);
+  assert.match(ui.state().guardResult,/Managed Guard nonce present: Verified/);
   assert.equal(ui.state().guardRestoreDisabled,true,'Apply receipt does not authorize Restore');
   const recheck=ui.statusClick('#ach-guard-recheck');
   recheck.respond(sensitiveGuardResponse('Applied'));
@@ -9276,6 +9276,7 @@ test('Sensitive-file Nginx guard requires fresh source and explicit Apply/Restor
   assert.equal(ui.state().guardRestoreDisabled,true);
   assert.equal(ui.state().guardApplyDisabled,true);
   assert.match(ui.state().guardResult,/Protection: Restored/);
+  assert.match(ui.state().guardResult,/Former Guard nonce absent: Verified/);
 });
 
 test('Optional pre-PHP XML-RPC uses the existing guard, invalidates stale Preview and preserves Recovery',()=>{
@@ -9371,6 +9372,7 @@ test('Sensitive-file Nginx guard accepts exact native-source-drift Recovery Requ
     reason:'Native VHost changed while exact owned rule remains'
   }));
   assert.match(ui.state().guardResult,/Protection: Recovery Required/);
+  assert.match(ui.state().guardResult,/Runtime verification: Not confirmed/);
   assert.equal(ui.state().guardApplyDisabled,true);
   const requestsBeforeRestore=ui.requests.length;
   assert.equal(ui.state().guardRestoreDisabled,false);
