@@ -15,7 +15,7 @@ PAGE_VARIANTS = ('403', '404', '429', '500', '502', '503', '504', '50x', 'new-si
 FILES = CORE_FILES + ('status_pages/manifest.json',) + tuple(
     f'status_pages/{locale}/{page}.html'
     for locale in ('en', 'fa') for page in PAGE_VARIANTS
-)
+) + ('LICENSE',)
 
 # aaPanel extracts ZIP member mtimes onto installed Python source files.
 # A constant date can cause Python's size+mtime bytecode cache to execute an
@@ -50,11 +50,14 @@ def build(output):
         source = PLUGIN / 'status_pages' / rel
         if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != digest:
             raise ValueError('Bundled Status Page hash mismatch: ' + rel)
+    license_source = ROOT / 'LICENSE'
+    if license_source.is_symlink() or not license_source.is_file():
+        raise ValueError('Missing or unsafe package license: LICENSE')
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(output, 'w', compression=ZIP_DEFLATED, compresslevel=9) as archive:
         for name in FILES:
-            source = PLUGIN / name
+            source = ROOT / name if name == 'LICENSE' else PLUGIN / name
             if source.is_symlink() or not source.is_file():
                 raise ValueError('Missing or unsafe package file: ' + name)
             payload = source.read_bytes()

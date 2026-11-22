@@ -51,6 +51,11 @@ class PackageContractTests(unittest.TestCase):
                 self.assertTrue(all(n.startswith('ach_customizer/') and '..' not in n for n in names))
                 self.assertIn('ach_customizer/info.json', names)
                 self.assertIn('ach_customizer/install.sh', names)
+                self.assertIn('ach_customizer/LICENSE', names)
+                self.assertEqual(archive.read('ach_customizer/LICENSE'),
+                                 (ROOT / 'LICENSE').read_bytes())
+                self.assertIn(b'Mozilla Public License Version 2.0',
+                              archive.read('ach_customizer/LICENSE'))
                 self.assertIn('ach_customizer/ach_customizer_cleanup.py', names)
                 self.assertIn('ach_customizer/ach_customizer_state.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_helper.py', names)
@@ -110,6 +115,17 @@ class PackageContractTests(unittest.TestCase):
                 for info in archive.infolist():
                     self.assertEqual(info.date_time, _content_timestamp(archive.read(info)),
                                      'Member mtimes must be deterministic content fingerprints')
+
+    def test_native_zip_refuses_missing_license_without_partial_archive(self):
+        from unittest.mock import patch
+        from scripts import build_plugin
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'candidate.zip'
+            with patch.object(build_plugin, 'ROOT', Path(tmp)):
+                with self.assertRaisesRegex(ValueError, 'package license'):
+                    build_plugin.build(path)
+            self.assertFalse(path.exists())
 
     def test_native_ui_is_english_only_without_translation_dependency(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')

@@ -1275,6 +1275,9 @@ class WordPressBridgePackagingTests(unittest.TestCase):
         self.assertIn("Purge All", readme)
         self.assertIn("Not connected", readme)
         self.assertIn("Cache Restore", readme)
+        self.assertIn("License: MPL-2.0", readme)
+        self.assertIn("License URI: https://www.mozilla.org/en-US/MPL/2.0/", readme)
+        self.assertIn(" * License: MPL-2.0", entry)
 
     def test_invalid_or_duplicate_readme_tag_rejected_before_packaging(self):
         import re
@@ -1329,6 +1332,17 @@ class WordPressBridgePackagingTests(unittest.TestCase):
                     builder.build(output)
             self.assertFalse(output.exists())
 
+    def test_missing_repo_license_refuses_unlicensed_bridge_zip(self):
+        from unittest.mock import patch
+        from scripts import build_wordpress_bridge as builder
+
+        with tempfile.TemporaryDirectory(prefix="ach-bridge-license-") as work:
+            destination = Path(work) / "candidate.zip"
+            with patch.object(builder, "ROOT", Path(work)):
+                with self.assertRaisesRegex(ValueError, "Missing or unsafe"):
+                    builder.build(destination)
+            self.assertFalse(destination.exists())
+
     def test_deterministic_standalone_zip(self):
         from scripts.build_wordpress_bridge import build
 
@@ -1343,10 +1357,13 @@ class WordPressBridgePackagingTests(unittest.TestCase):
             self.assertEqual(first["version"], source_version.group(1))
             with ZipFile(a) as package:
                 names = package.namelist()
-                self.assertEqual(len(names), 5)
+                self.assertEqual(len(names), 6)
                 self.assertTrue(all(p.startswith("ach-aapanel-bridge/") for p in names))
                 self.assertIn("ach-aapanel-bridge/ach-aapanel-bridge.php", names)
                 self.assertIn("ach-aapanel-bridge/readme.txt", names)
+                self.assertIn("ach-aapanel-bridge/LICENSE", names)
+                self.assertEqual(package.read("ach-aapanel-bridge/LICENSE"),
+                                 (ROOT / "LICENSE").read_bytes())
                 self.assertNotIn("ach-aapanel-bridge/README.md", names)
                 self.assertEqual(
                     package.read("ach-aapanel-bridge/readme.txt"),
