@@ -124,10 +124,24 @@ class PackageContractTests(unittest.TestCase):
         main = (PACKAGE / 'ach_customizer_main.py').read_text(encoding='utf-8')
         self.assertNotIn('Unreleased preview.', html)
         self.assertNotIn('No automatic enforcement.', html)
-        self.assertIn('Monitor changes only observation preferences', html)
-        self.assertIn('Optional PHP-FPM automatic repair has separate opt-in controls.', html)
-        self.assertIn('Monitor observes without changing services or enabling automatic repair.', main)
-        self.assertIn('optional PHP-FPM repair is enabled separately.', main)
+        self.assertNotIn('Monitor changes only observation preferences', html)
+        self.assertIn('Monitor switches do not directly change server settings or restart services.', html)
+        self.assertIn('Disabling Overall Monitor or a relevant module blocks related inspections and manual workflows', html)
+        self.assertIn('turning off Overall Monitor or PHP-FPM preview also stops opted-in PHP-FPM repair from running', html)
+        self.assertIn('Automatic repair still needs separate explicit Enable/Disable.', html)
+        self.assertIn('even if its profile stays enabled.', html)
+        self.assertIn('Monitor switches do not directly change services or enable automatic repair.', main)
+        self.assertIn('disabling Overall Monitor or PHP-FPM preview also blocks opted-in PHP-FPM repair.', main)
+        self.assertIn('Monitor disabled: existing services keep running, but related inspections/manual workflows and already opted-in PHP-FPM automatic repair cannot run.', main)
+
+    def test_fpm_auto_disclosure_rejects_retired_profile_upgrade_promise(self):
+        html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
+        validator = (PACKAGE / 'ach_customizer_fpm_auto.py').read_text(encoding='utf-8')
+        self.assertIn('Only current lifecycle-bearing automatic profiles are supported.', html)
+        self.assertIn('A separate explicit Enable requires fresh source and policy verification', html)
+        self.assertIn('retired pre-Stable WordPress-only formats have no automatic migration or fallback.', html)
+        self.assertNotIn('Previously enabled WordPress-only profiles need to be disabled and enabled again', html)
+        self.assertIn('or not isinstance(profile["lifecycle"], dict)', validator)
 
     def test_checkbox_text_flow_and_guard_option_remain_readable(self):
         import re

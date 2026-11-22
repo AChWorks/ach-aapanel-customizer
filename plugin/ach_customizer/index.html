@@ -444,20 +444,20 @@
         </div>
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
       <h4 class="ach-sr-only">Overview</h4>
-      <p class="ach-note">Monitor changes only observation preferences; manual site and service changes require explicit administrator approval. Optional PHP-FPM automatic repair has separate opt-in controls.</p>
+      <p class="ach-note">Monitor switches do not directly change server settings or restart services. Disabling Overall Monitor or a relevant module blocks related inspections and manual workflows; turning off Overall Monitor or PHP-FPM preview also stops opted-in PHP-FPM repair from running. Automatic repair still needs separate explicit Enable/Disable.</p>
       <div class="ach-toolbar">
         <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
         <button type="button" id="ach-overview-refresh">Refresh state</button>
       </div>
       <div class="ach-note">
         <strong>Monitor controls</strong>
-        <p>Choose which read-only observations to keep enabled. Preferences survive reinstall; no services are stopped or restarted.</p>
+        <p>Choose which website and PHP-FPM inspections remain available. These switches also gate related manual workflows and opted-in PHP-FPM repair; turning them off does not stop running services.</p>
         <div class="ach-switches">
           <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /> Overall Monitor</label>
           <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /> Website inventory</label>
           <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" disabled /> PHP-FPM preview</label>
         </div>
-        <details class="ach-help"><summary>What do Monitor settings control?</summary><p>Overall Monitor enables observation, Website inventory checks site records, and PHP-FPM preview compares saved source settings. These switches never restart websites or approve PHP changes. If a control is unavailable, Refresh state and read the status above.</p></details>
+        <details class="ach-help"><summary>What do Monitor settings control?</summary><p>Overall Monitor gates the related workflows. Website inventory gates native site discovery and selected WordPress actions. PHP-FPM preview gates PHP file checks.</p><p>Disabling Overall Monitor or PHP-FPM preview blocks existing opted-in PHP-FPM repair runs, even if its profile stays enabled. Monitor toggles never Apply configuration or Enable automatic repair; use its separate Enable/Disable controls. If a control is unavailable, Refresh state and read the status above.</p></details>
         <p id="ach-overview-control-result" role="status" aria-live="polite" data-state="info">Change a Monitor control to update its saved state.</p>
         <p id="ach-state-revision" role="status">Monitor state unavailable</p>
       </div>
@@ -817,7 +817,7 @@
         <strong>Saved shared PHP-FPM policy</strong>
         <p>Save your desired PHP settings for monitoring; Save alone does not change PHP. Optional automatic repair must be enabled separately and may reload the shared PHP service.</p>
         <details class="ach-help"><summary>When does PHP-FPM automatic repair run?</summary>
-          <p>The existing watcher handles verified WordPress Toolkit changes and later PHP-FPM regeneration matching the installed aaPanel writer, after rechecking site ownership. Unexpected manual changes become Needs Review and are never silently overwritten. Previously enabled WordPress-only profiles need to be disabled and enabled again to adopt the newer scope.</p>
+          <p>The existing watcher handles verified WordPress Toolkit changes and later PHP-FPM regeneration matching the installed aaPanel writer, after rechecking site ownership. Unexpected manual changes become Needs Review and are never silently overwritten.</p><p>Only current lifecycle-bearing automatic profiles are supported. A separate explicit Enable requires fresh source and policy verification; retired pre-Stable WordPress-only formats have no automatic migration or fallback.</p>
         </details>
         <div class="ach-controls">
           <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>

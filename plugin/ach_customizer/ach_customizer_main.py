@@ -276,9 +276,9 @@ class ach_customizer_main:
             },
             "overall_enable_control": "Plugin-owned Monitor switch only",
             "notice": (
-                "Monitor observes without changing services or enabling automatic repair. Manual Apply requires administrator approval; optional PHP-FPM repair is enabled separately."
+                "Monitor switches do not directly change services or enable automatic repair. Disabling Overall Monitor or a relevant module blocks related workflows; disabling Overall Monitor or PHP-FPM preview also blocks opted-in PHP-FPM repair. Manual Apply and auto-repair Enable remain separate explicit actions."
                 if active else
-                "Monitor disabled; existing services stay running. Previously applied manual FPM changes require explicit recovery."
+                "Monitor disabled: existing services keep running, but related inspections/manual workflows and already opted-in PHP-FPM automatic repair cannot run. Previously applied manual FPM changes require explicit recovery."
             ),
         }
 
