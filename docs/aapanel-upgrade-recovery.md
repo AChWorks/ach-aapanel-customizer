@@ -31,6 +31,17 @@ Original evidence:
 This is a confirmed **one-environment observation**, not a guarantee about
 all aaPanel versions or a blanket reason to restart after every install.
 
+**Latest relevant installed regression (Native 0.1.98, aaPanel 8.0.7):**
+the official import displayed the new version and installed all 69 ZIP
+members byte-identically, but the resident panel continued using an older
+Guard helper when checking native VHost/domain drift. After a **verified
+panel-only reload** (without VM reboot or Nginx/PHP restart), the same
+Recheck returned the correct `Recovery Required` and the scoped Restore
+completed with its original Recovery ID. See the [exact installed-native
+receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7083011262).
+Treat ZIP identity, resident entrypoint, imported helpers and Nginx workers
+as separate observations.
+
 ## Observe before intervening
 
 1. Verify the native plugin inventory shows the intended installed version.
@@ -63,7 +74,7 @@ all aaPanel versions or a blanket reason to restart after every install.
    returned the old response without the mandatory manual-review fields.
    The UI correctly refused that incompatible response. Candidate v0.1.57
    adds a **loaded-helper contract check** to the authenticated WP observer
-   endpoint. The unpublished v0.1.60 candidate increments that contract
+   endpoint. A later source generation strengthened that contract
    to v3: long-domain, incomplete-evidence and single-link crash-safe
    atomic rename semantics must be present before
    the installed entrypoint may trust the resident helper. When the helper

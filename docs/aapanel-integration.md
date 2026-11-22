@@ -11,30 +11,15 @@ unfinished compatibility and acceptance live in
 
 ## Active QA environment — read before native testing
 
-**Owner decision (2026-11-21):** Keep **one persistent Running QA VM** for this project on AI Test Server: `ach-aapanel-qa/aac-native-qa-20261118` (guest UUID and protected credential binding are recorded in [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)). **Do not create, clone, replace, stop or delete it** while development continues, and do not recreate disposable snapshots. The five obsolete QA VMs and all seven surplus snapshots were removed; see the [verified inventory and service checks](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7063214175).
+**Owner decision:** Keep the single existing Running aaPanel QA VM at `ach-aapanel-qa/aac-native-qa-20261118` on AI Test Server. Its identity, authorized credential workflow, scope and verified state are maintained in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21). Do not provision, clone, replace, stop or delete that VM, reset its existing credential or create disposable snapshots. Use only reversible task-owned fixtures on that VM and preserve unrelated websites and Recovery records. Prior guests and snapshots are historical evidence, not reusable targets.
 
-The retained VM has working aaPanel, WordPress, WooCommerce and other test sites. Its native Customizer was originally `0.1.69` and was subsequently upgraded to a byte-verified `0.1.72` QA ZIP; check [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) for the latest installed candidate and **separate** resident-worker/browser evidence. Source, installed bytes and loaded runtime must not be conflated. Make reversible, task-owned fixtures on this VM and protect peer sites. Use the existing `service_access` credential with the verified Browser adapter; avoid resetting passwords, relying on vanished guests, or interpreting an older VM-specific test as new installed acceptance. A disruptive shared-VM fault test without a safe scoped recovery path is **not yet an authorized test**. Production/Release remain separately gated.
+The [Native 0.1.98 installed acceptance receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7083011262) proves official aaPanel 8.0.7 import, **69/69 source file identity**, authenticated UI and bounded Guard Apply/Restore/source-drift recovery. A resident Python helper initially remained stale despite the official import and matching entrypoint/manifest version; a verified panel-only reload resolved that specific mismatch. This is not a license to restart every aaPanel installation or to claim untested modules were retested. Consult the [upgrade runbook](aapanel-upgrade-recovery.md).
 
 ## Evidence versus support
 
-The verified installed nonproduction reference is **aaPanel 8.0.7 / Nginx /
-PHP-FPM 8.1 and 8.5**, with specific site, native ZIP and recovery
-tests recorded under #21. An earlier retained-guest check reported **Nginx 1.30.6**
-(2026-11-19); other QA receipts used Nginx 1.28.3. Re-inspect
-the running VM for its **current** Nginx version. These are observations,
-not a general Nginx-version support guarantee. A reported source-file match, permitted read-only
-inventory, synthetic HTTP probe or matching entrypoint version proves only
-its named observation. It does **not** certify every runtime worker, another
-PHP layout, real customer/private-data safety, DNS/TLS, aaPanel version or
-Production installation.
+The reference non-production environment uses **aaPanel 8.0.7**, Nginx and PHP-FPM **8.1/8.5**. Actual eligible writers depend on current native site/service ownership, Nginx include graph, PHP pool topology and available CLI/runtime behavior, not an arbitrary string-version allowlist. Historical installed QA is bound to its source, package, guest, site and real exercised behavior. Exact installed source bytes and a matching version label alone do not establish fresh imported helpers, TLS, customer Cache isolation, vendor Purge All safety, other host layouts or Production qualification.
 
-The latest [public native 0.1.51 ZIP installed QA receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6937217273)
-records 57/57 exact installed bytes and bounded native lifecycle checks. A
-[separate real WooCommerce A/B test](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-6938476216)
-passed two independent customer sessions on HTTP/80 and strict-TLS HTTPS/443
-with site-specific, manually Applied Cache, then Restored that site to its
-original VHost. This **does not** exercise live payments/gateway callbacks,
-every extension, general vendor Purge All or other host topologies.
+Use [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21) and [the archived QA evidence](evidence/) for version-bound results, [Issue #2](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) for open compatibility work and [Issue #10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10) for unknown-SNI HTTPS policy. Real customer/site or shared-service mutations remain separately scoped and require actual inspected ownership and explicit administrator action.
 
 ## WordPress per-site HTTPS URLs, Debug, system Cron and XML-RPC (manual)
 
@@ -169,7 +154,7 @@ real TLS check are **distinct** evidence. On errors or uncertain reloads,
 keep the Recovery ID; Recheck before attempting Restore or any retry.
 This module does not affect HTTP/80 Status Pages, issue certificates,
 automate ACME, or change Production until separately authorized.
-Owner acceptance and unresolved installed-native testing: [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
+Owner policy and version-bound installed-native testing: [#10](https://github.com/AChWorks/ach-aapanel-customizer/issues/10)
 and [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 
 ## Native packaging, identity and lifecycle
@@ -455,13 +440,11 @@ by the Owner's 2026-11-20 decision: offer administrator-click removal of a
 selected hostname found in the current local Hosts file after successful or
 failed WP setup, including when aaPanel has no site record. No unattended
 Hosts deletion is required; the existing failed-install witness remains
-observation-only. Native PHP-FPM auto-repair is merged in unpublished v0.1.62
-source after recorded systemd success/failure acceptance on aaPanel 8.0.7.
-Full authenticated PHP-FPM automatic-repair UI acceptance and Production
-qualification remain
-separate.
+observation-only. Native PHP-FPM repair is available only by separate opt-in after a saved
+reviewed policy. Installed, authenticated and Production acceptance remain
+separate; inspect the current scope in Issue #21.
 
-## Selected-site Nginx sensitive-path guard (Merged Native 0.1.91; pre-stable current contract)
+## Selected-site Nginx sensitive-path guard
 
 The full primary administrator may choose a **native website** in Routing &
 Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
@@ -647,7 +630,7 @@ another operation's report, the original forensic copy or another
 current-operation report. The UI distinguishes policy Enabled from watcher Ready and
 provides Emergency Disable independently from stale non-emergency helpers.
 
-## Simplification and operator choice (merged source v0.1.63; unpublished)
+## Operator choice and capability-driven inventories
 
 Merged PR #103 removed arbitrary maximum totals on observed
 native site records, PHP-FPM site attribution, Cache audit website lists,
@@ -661,10 +644,9 @@ checkboxes. Displayed scope/impact explanations remain. Existing
 authentication, fresh selection identity and revision checks remain in
 the backend. Low-contrast Status Pages colors are allowed: preview and Save
 show accessibility advice instead of rejecting the user's chosen palette.
-At the v0.1.63 source checkpoint, native installed UI acceptance had
-not yet been completed and the package was unpublished. Later bounded
-installed 0.1.69 acceptance is recorded in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21);
-it does not certify every adapter or authorize Production deployment.
+The version-bound installed UI acceptance and remaining runtime coverage
+are documented in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21);
+these operator choices do not certify every adapter or authorize Production.
 
 A second cross-layer limit audit additionally removes stale frontend
 ceilings on large Hosts/VHost/Cache peer results, the 32-installation/128-root
@@ -694,12 +676,11 @@ authoritative. The read-only Nginx candidate observer evaluates the actual
 Nginx source and retains a stable panel-version/webserver observation rather
 than rejecting recognizable sources solely by aaPanel version string.
 These changes did **not** extend Nginx/PHP-FPM/Cache writer eligibility.
-The exact v0.1.63 candidate passed CI and independent review before its
-Owner-authorized Merge. At that checkpoint, native installed QA was pending;
-later bounded 0.1.69 QA is tracked in [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
-Public Release and Production delivery remain separately gated.
+Exact review and historical installed acceptance are recoverable through
+PR #103 and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+Release publication and Production rollout are different effects.
 
-## Native Nginx writer source completeness (merged v0.1.64; unpublished)
+## Native Nginx writer source completeness
 
 Before v0.1.64, two existing *write* workflows — selected-site
 sensitive-path protection and Status Pages extension Apply/Restore — rejected
@@ -731,7 +712,7 @@ requirement; exact-HEAD independent review and Owner-authorized Merge
 were completed in PR #104. Installed native 0.1.69 and real Cache/Hosts QA
 do not by themselves certify this module on every Nginx source graph.
 
-## One-click local Hosts alias removal (merged source; verified on native 0.1.69 QA)
+## One-click local Hosts alias removal
 
 The origin's current `/etc/hosts` is the source of truth, including after
 successful WordPress setup and when a failed setup left no aaPanel site record.
@@ -803,46 +784,12 @@ fault-injection/crash recovery or universal source compatibility. Inspect
 and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
 for exact identities, checksums, reproduction and remaining gates.
 
-**Important evidence boundary:** All separate-guest examples in the next historical QA section are source- and date-bound. Future QA must run on the persistent VM described above, without recreating or stopping a guest.
-
-**Native QA (2026-11-19):** The exact 0.1.62 ZIP SHA256
-0b18ff8eb0a8c3ca1dd2029de10085ff06087ef47968e4407013d021b3dd8d1d
-was installed with 63/63 byte-identical payload members using the real
-aaPanel importer. Two independent isolated aaPanel 8.0.7 guests exercised
-the unchanged native optimizer with the standard systemd path/timer/service
-already active, and no external high-frequency observer or manual repair:
-
-- **PHP 8.1 successful installation:** native AddWPSite completed
-  [1,1,1,1], created a real WordPress 7.1.4 OneKey site (ID 12), and
-  reset shared pm.max_spare_servers from 20 to 30. The watcher had
-  witnessed its start, then returned the value to the saved 20
-  (pm.max_requests=300). Recovery ID:
-  418d944918894f7c8698823a4279e19c.
-  The installed site and three existing peer origins returned HTTP 200.
-- **PHP 8.5 failed initialization:** on a separate new VM, a test-only
-  restricted CLI staging permission caused a native WP initialization
-  failure after the optimizer completed. Native progress finished
-  [1,1,1,-1]; site/domain/binding rows were all removed. The same
-  ordinary watcher returned Applied and recovered the shared pool from
-  native 30 to saved 20, with the PHP 8.1 source byte-identical.
-  Recovery ID: 25493fc8377d4cc5bb521050dc5df8f9.
-  Three peer sites retained HTTP 200.
-- Native Recovery Journal SHA, PHP/Nginx syntax, live services,
-  idempotent repeat worker run, and actual Emergency Disable were
-  verified; turning off both watcher policies preserved corrected FPM
-  files and stopped the owned path/timer units.
-
-**Historical QA only (2026-11-19):** Those disposable guests were stopped
-at the time and have since been removed. This is **not** an instruction to
-create another VM, stop the retained VM or restore snapshots. Production was
-untouched; the retained primary guest was not the target of those tests.
-The two source-verified lifecycles do not prove general compatibility
-with other aaPanel versions or arbitrary writers. PR #102 passed review
-and merged. The later bounded retained-guest PHP policy/UI acceptance and
-separate native R3 crash proof are recorded in [#21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
-Public Release/Production remain separate gates.
-The detailed reproducible source identity and native QA results are in
-[the 0.1.62 native systemd QA evidence](evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json).
+**Historical native QA provenance:** The first PHP-FPM watcher/optimizer
+experiments ran on older, subsequently removed test guests. Their scoped
+success/failure, worker ownership and recovery proofs remain in
+[the original recorded QA](evidence/aaPanel-8.0.7-2026-11-19-fpm-auto-v062-native-systemd-qa.json)
+and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
+They do not require new VMs and do not certify untested writer shapes.
 
 This addresses automatic correction, not additional detection-only reporting.
 In native PHP-FPM, save the desired PHP 8.1 or PHP 8.5 shared `[www]` settings,
@@ -880,7 +827,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### P0 native PHP regeneration and scanner workflow (0.1.80 candidate)
+### Opt-in native PHP regeneration and scanner workflow
 
 An explicit new FPM auto Enable records the selected service's original
 canonical source SHA, native RAM tier, and saved pm.max_requests before any
@@ -908,49 +855,21 @@ before reading the source and again at the guarded Apply verification
 boundary. This avoids a premature reload during early or batched install;
 the next timer wakeup retains the source and policy for reconciliation.
 
-The Native 0.1.76 installed QA uncovered an activation-order race:
-after Emergency Disable and a new Enable, the freshly started systemd
-worker could observe the old disabled profile and disable its own
-timer/path before the new operator intent was saved. The 0.1.77
-source committed policy before activating either unit, but a later
-official installed 0.1.77 package still reproduced the race because
-aaPanel retained an **older imported watcher helper in memory**, even
-while the UI and Python entrypoint both reported 0.1.77.
+**Activation and repeated-writer reliability:** The saved, reviewed PHP
+policy is committed *before* arming its systemd path/timer; both units must
+actually become active or the newly armed authority is revoked. An imported,
+resident helper that lacks the policy-first contract refuses non-emergency
+Enable with a concrete stale-helper reason; Emergency Disable remains
+available. The next genuine native regeneration is identified by its
+opt-in epoch and last acknowledged event, not just a before/after file hash.
+A completed repair is reconciled after a worker crash without another PHP
+reload; systemd errors retain bounded stage and reason.
 
-Native 0.1.78 both (a) commits the reviewed profile before starting
-the units, verifying both are active, compensating only a newly armed
-version on activation failure, and (b) requires the resident watcher
-helper to advertise the policy-first arming protocol. If aaPanel still
-uses an older helper, non-emergency Enable is refused with an explicit
-stale-helper diagnosis, and read-only Inspect cannot claim readiness.
-Emergency Disable remains available. Do not automatically restart
-the panel: only an explicitly authorized panel-only reload under the
-upgrade/recovery runbook can refresh known stale imports.
-
-The official installed Native 0.1.78 QA on the retained VM, after a
-scoped panel reload, proved policy-before-systemd Enable, both managed
-units active, native aaPanel PHP Optimization regeneration and one
-automatic guarded Apply. **A second identical regeneration then failed**:
-the event token used only old/new content hashes, which were identical
-between cycles when the source at opt-in already matched desired
-values. The worker mistook the new writer event for the previous
-committed auto journal and refused Apply; the CLI recorded only its
-exception type. Auto repair was disabled, the old journal retired
-through exact UI Recovery, and the PHP85 source restored to the
-original hash, with all peer sites healthy. Native 0.1.79 binds each
-independent event token to the explicit opt-in epoch and previously
-acknowledged event, so repeated identical vendor bytes cannot alias.
-Journal acknowledgment after a post-commit crash is checked before
-the source-baseline early exit; no second reload is authorized.
-The systemd error record now includes bounded stage and reason. The
-exact installed 0.1.79 QA subsequently verified **both** separate,
-byte-identical native regenerations (Recovery IDs
-`5019b1188c5f4896a00cddf36546ad1c` and
-`53e495525b6748b992cafc9cbe58679c`), prior-journal
-archival, Emergency Disable and exact-byte baseline Restore; see
-[Issue #21 accepted runtime receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/21#issuecomment-7069608396).
-This evidence is historical to installed 0.1.79, not proof that the
-new 0.1.80 source has been installed.
+These behaviors were introduced after observed historical failure/recovery
+cycles. Exact version-bound native evidence (including repeated byte-identical
+writer events and post-disable re-Enable) belongs to
+[Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21),
+not to a rotating status narrative in this guide.
 
 The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
 sensitive-path protection. Choose a native site with its Nginx Guard Applied,
@@ -1021,7 +940,7 @@ other references. No vendor Nginx source or foreign Fail2ban jail is edited.
 Only an actual installed-native HTTP/UI check can prove a particular host
 layout, not unit tests or synthetic Fail2ban traffic.
 
-### Source-integrated R1–R4 control-flow remediation (verify installed behavior)
+### Automatic PHP-FPM repair — guarded control-flow invariants
 
 - **Reviewed-site consent (R1):** Enable carries the exact versioned
   `impact_sha256` from saved-policy Recheck plus the saved policy and
@@ -1081,15 +1000,11 @@ Emergency Disable clears future authority before stopping the owned watcher,
 potentially waiting on an existing guarded operation. Uninstall preserves
 host PHP settings, snapshots, archived recovery and desired policy.
 
-At the original R1–R4 source-integration checkpoint, those controls were
-development work, not blanket operational acceptance. The earlier bounded
-systemd PHP 8.1/8.5 start/terminal and peer-site results above remain valid
-for their tested source and guest; they do not automatically certify every
-later control-flow remediation or the authenticated policy/auto-repair UI.
-Broader resident-watcher and UI acceptance remains open in
-[Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
-This feature is not automated Hosts cleanup and does not cover unrelated
-aaPanel PHP operations.
+Source/CI and installed-native acceptance have different identities.
+Consult [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
+for which source and mounted aaPanel workflow were actually verified.
+This feature is not unattended Hosts cleanup or a universal repair path
+for unrelated aaPanel/PHP writers.
 
 ## PHP-FPM scope and guarded change
 
