@@ -471,7 +471,7 @@ native `extension/<site>/*.conf` include graph**; `/www/wwwroot` is never a
 site-root assumption. The supported implementation targets the source-matched
 aaPanel 8.0.7 Nginx/HTTP-80 layout; no blanket Nginx-version claim.
 
-**Protection semantics:** After a fresh Preview and explicit one-site approval,
+**Protection semantics:** After a fresh Preview and explicit one-site **Enable** action,
 an immutable policy fragment is atomically installed into that site's existing
 Nginx extension directory, validated with `nginx -t` and applied with a
 shared-service reload. Four fixed, server-rewrite `if ($uri ~* ...)` +
@@ -515,11 +515,26 @@ distinguish `Unmanaged`, `Applied`, `Recovery Required`, `Needs Review`
 and `Restored`. An uncertain Apply must NOT be automatically retried;
 an explicit saved Recovery ID permits narrowly retiring the owned include,
 revalidating and reloading Nginx, and checking that its proof disappeared.
-Changed site ID/root/domain, native VHost or another extension invalidates
-stale approvals. Other files, users and site configurations are not modified.
+A native site ID/key or Document Root change, foreign/tampered guard,
+invalid extension ownership/include, or an unresolved source conflict still
+blocks writes with `Needs Review`. A native domain/VHost/extension change
+always invalidates old **Apply** approval: the operator must Recheck. If the
+*same native site and root* still have an exclusively imported, byte-exact
+Customizer guard fragment (or its single exact retained file from an
+interrupted Restore), Recheck reports **Recovery Required**, including
+`native_source_drift` for a previously `applied` journal. This is **not**
+a claim that the new native source or all aliases have been verified as
+protected. After reviewing the site, the administrator may explicitly
+Restore that one Recovery ID without undoing the foreign domain/VHost
+change. Restore rechecks source ownership, Nginx syntax, live nonce absence,
+and source stability. Fresh **Preview -> Apply** is a separate one-time
+operator choice on the updated source. Duplicate, missing or altered
+managed/retained fragments must remain blocked. No background repair or
+automatic reapplication is added.
+
+Other files, users and site configurations are not modified.
 After uninstall, saved policy/recovery may still be active: reinstall and
-use guarded Restore rather than delete Nginx files manually. No background
-enforcement/automatic regeneration repair is yet implemented.
+use guarded Restore rather than delete Nginx files manually.
 
 **Evidence boundary:** QA source-only and real manager transaction tests were
 run on the **new** isolated aaPanel 8.0.7 machine, including

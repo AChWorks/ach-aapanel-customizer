@@ -365,6 +365,74 @@ class NativeSecurityTests(unittest.TestCase):
         with self.assertRaises(guard.ExtensionError):
             self.operate("apply")
 
+    def test_live_native_domain_change_can_restore_exact_owned_guard_without_undo(self):
+        applied = self.operate("apply")
+        original = self.vhost.read_text()
+        self.site["bound_domains"].append({"name": "alias.invalid", "port": 80})
+        changed = original.replace(
+            "server_name secure.invalid;", "server_name secure.invalid alias.invalid;")
+        self.vhost.write_text(changed)
+        self.assertNotEqual(guard._sha(changed.encode()), applied["vhost_sha256"])
+        review = self.operate("recheck")
+        self.assertEqual(review["state"], "Recovery Required")
+        self.assertEqual(review["journal_phase"], "applied")
+        self.assertFalse(review["runtime_verified"])
+        self.assertEqual(review["recovery_id"], applied["recovery_id"])
+        self.assertTrue(self.fragment.exists())
+        with self.assertRaises(guard.GuardError):
+            self.operate("apply")
+        restored = self.operate("restore", recovery=review["recovery_id"])
+        self.assertEqual(restored["state"], "Restored")
+        self.assertFalse(self.fragment.exists())
+        self.assertEqual(self.vhost.read_text(), changed)
+        self.assertEqual(self.operate("preview")["state"], "Restored")
+        reinstalled = self.operate("apply")
+        self.assertEqual(reinstalled["state"], "Applied")
+        self.assertEqual(self.operate("restore", recovery=reinstalled["recovery_id"])[
+            "state"], "Restored")
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+
+    def test_drift_during_interrupted_restore_recovers_retired_exact_rule(self):
+        applied = self.operate("apply")
+        retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+        self.fragment.rename(retained)
+        self.site["bound_domains"].append({"name": "alias.invalid", "port": 80})
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "server_name secure.invalid;", "server_name secure.invalid alias.invalid;"))
+        review = self.operate("recheck")
+        self.assertEqual(review["state"], "Recovery Required")
+        self.assertEqual(review["recovery_scope"], "native_source_drift")
+        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])[
+            "state"], "Restored")
+        self.assertFalse(self.fragment.exists())
+        self.assertFalse(retained.exists())
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+
+    def test_drift_with_ambiguous_live_and_retired_copies_refuses_restore(self):
+        applied = self.operate("apply")
+        retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+        retained.write_bytes(self.fragment.read_bytes())
+        retained.chmod(0o600)
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "server_name secure.invalid;", "server_name secure.invalid;\n# native edit"))
+        self.assertEqual(self.operate("recheck")["state"], "Needs Review")
+        with self.assertRaises(guard.GuardError):
+            self.operate("restore", recovery=applied["recovery_id"])
+        self.assertTrue(self.fragment.exists())
+        self.assertTrue(retained.exists())
+
+    def test_live_native_source_drift_refuses_tampered_guard_recovery(self):
+        applied = self.operate("apply")
+        self.site["bound_domains"].append({"name": "alias.invalid", "port": 80})
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "server_name secure.invalid;", "server_name secure.invalid alias.invalid;"))
+        self.fragment.write_bytes(b"foreign changed rule\n")
+        self.assertEqual(self.operate("recheck")["state"], "Needs Review")
+        with self.assertRaises(guard.GuardError):
+            self.operate("restore", recovery=applied["recovery_id"])
+        self.assertEqual(self.fragment.read_bytes(), b"foreign changed rule\n")
+        self.assertEqual(self.foreign.read_bytes(), b"Never change any unrelated site")
+
     def test_foreign_and_symlink_fragment_never_overwritten(self):
         self.fragment.write_bytes(b"foreign Nginx rule")
         self.fragment.chmod(0o600)

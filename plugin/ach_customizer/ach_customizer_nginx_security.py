@@ -432,19 +432,52 @@ def manage_guard(action, site, *, data_fd, approved=False,
             record["site_root"] != site["path"] or
             record["bindings_sha"] != bindings_sha or
             record["vhost_sha"] != source_sha))
-        # A *fully restored* record no longer owns a live source. Once the
-        # selected native VHost/include graph is freshly inspected and no
-        # managed file exists, a later aaPanel regeneration must not prevent
-        # an administrator's one-time manual re-Apply. Never relax this for
-        # prepared/applied journals or an unexpected existing include.
-        if changed_source and not (
-                record["phase"] == "restored" and current is None):
+        # A fully restored record no longer owns a live source; permit a
+        # fresh operator-reviewed Apply after native regeneration.
+        restored_no_include = bool(
+            record and record["phase"] == "restored" and current is None)
+        # For an *active* exact owned include, a regenerated native VHost is
+        # different from a reused site ID, root move, or foreign/tampered
+        # fragment. An administrator must be able to retire our exact rule
+        # without undoing an otherwise valid aaPanel domain/source change.
+        # This never automatically re-applies, repairs, or accepts the new
+        # source; a separate fresh Preview is required before a new Apply.
+        drift_restore_ready = False
+        if (changed_source and record["phase"] in ("prepared", "applied")
+                and record["site_key"] == site["name"]
+                and record["site_root"] == site["path"]
+                and record["vhost_sha"] != source_sha):
+            retained = _bounded_file(
+                extension_fd, _retained(site["id"], record["op"]),
+                limit=MAX_INCLUDE, permissions=0o600)
+            # An interrupted Restore may already have retired the exact
+            # owned file but not yet persisted the journal. Either state
+            # is recoverable; simultaneous live and retired copies, foreign
+            # bytes and missing ownership remain blocked.
+            drift_restore_ready = (
+                (current is not None and _sha(current) == record["include_sha"]
+                 and retained is None) or
+                (current is None and retained is not None
+                 and _sha(retained) == record["include_sha"]))
+        if changed_source and not (restored_no_include or drift_restore_ready):
             if action in ("apply", "restore"):
                 raise GuardError(
                     "identity", "Native site/VHost changed; preserved security recovery requires review")
             return _report(site, state="Needs Review", source_sha=source_sha,
                            journal=record, reason="Site identity, root, bindings or native source drifted",
                            ruleset=selected_ruleset)
+
+        if action in ("preview", "recheck") and drift_restore_ready:
+            report = _report(
+                site, state="Recovery Required", source_sha=source_sha,
+                journal=record, ruleset=selected_ruleset,
+                reason="Native VHost source changed while this exact owned guard remains; "
+                       "explicitly Restore its Recovery ID before a fresh Preview/Apply")
+            if record["phase"] == "applied":
+                # Frontend validates the exact scope before exposing Restore;
+                # unverified drift must never be displayed as healthy Applied.
+                report["recovery_scope"] = "native_source_drift"
+            return report
 
         if action in ("preview", "recheck"):
             if record is None:
