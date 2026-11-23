@@ -541,8 +541,8 @@
           <button type="button" data-server-task="monitor" aria-current="false">Monitoring controls</button>
         </nav>
         <div id="ach-site-required" class="ach-task-empty" hidden>
-          <strong>Choose a website to continue</strong>
-          <p>This task needs an exact native aaPanel website. Select it below, or browse the website list to find the right ID and name.</p>
+          <strong id="ach-site-required-title">Choose a website to continue</strong>
+          <p id="ach-site-required-detail">This task needs an exact native aaPanel website. Select it below, or browse the website list to find the right ID and name.</p>
           <button type="button" id="ach-choose-website">Browse websites</button>
         </div>
         <div id="ach-website-context" class="ach-site-context" hidden>
@@ -776,9 +776,12 @@
         <details class="ach-technical-report"><summary>Source, policy and recovery evidence</summary>
           <p id="ach-scan-result" class="ach-status-metadata" role="status">No Fail2ban protection inspected yet.</p>
         </details>
-        <div class="ach-note">
+      </div>
+      </div>
+      <div class="ach-workflow" data-routing-group="attack-orphan">
+        <div class="ach-note" aria-label="Orphan-jail recovery without website selection">
           <strong>Recover scanner bans after deleting a website</strong>
-          <p>If a deleted website still has a Customizer Fail2ban jail, find its saved recovery and Restore that jail. No website selection is needed.</p>
+          <p><strong>No website selection needed.</strong> If a deleted website still has a Customizer Fail2ban jail, find its saved Recovery ID and Restore that exact owned jail. This action is separate from configuring a scanner for a current website.</p>
           <p><strong>Important:</strong> If the missing log prevents Fail2ban from starting, the first Restore removes only the owned jail source. Existing bans are <strong>not yet verified removed</strong>.</p>
           <details class="ach-help"><summary>How to complete orphan-jail recovery</summary>
             <p>After the first offline Restore, start Fail2ban, refresh the orphan list and Restore the same Recovery ID again. Only after verifying that the jail and owned nftables action are absent is recovery marked Restored. Foreign jails and actions are preserved. This does not require Monitor to be enabled.</p>
@@ -791,7 +794,6 @@
           </div>
           <p id="ach-scan-orphan-result" class="ach-status-metadata" role="status" aria-live="polite">Check for recovery journals after a website is removed.</p>
         </div>
-      </div>
       </div>
       <div class="ach-workflow" data-routing-group="wordpress">
       <div class="ach-note" aria-label="Selected WordPress operational settings">
@@ -6265,8 +6267,14 @@
     var siteSelected = !!hostsSiteId();
     var selectedSiteTask = activeDestination === 'websites' &&
       ['protection','cache','wordpress','routing'].includes(activeTask);
-    var needsSiteBanner = selectedSiteTask || activeDestination === 'server' && activeTask === 'attack';
-    var needChooser = activeDestination === 'websites' || activeDestination === 'server' && activeTask === 'attack';
+    var attackTask = activeDestination === 'server' && activeTask === 'attack';
+    var needsSiteBanner = selectedSiteTask || attackTask;
+    var needChooser = activeDestination === 'websites' || attackTask;
+    root.find('#ach-site-required-title').text(attackTask ?
+      'Choose a source website to configure scanner bans' : 'Choose a website to continue');
+    root.find('#ach-site-required-detail').text(attackTask ?
+      'Scanner settings need a native website access log. Orphan-jail recovery below works without selecting a website.' :
+      'This task needs an exact native aaPanel website. Select it below, or browse the website list to find the right ID and name.');
     root.find('#ach-website-context').prop('hidden', !needChooser);
     root.find('#ach-site-required').prop('hidden', !needsSiteBanner || siteSelected);
     root.find('[data-routing-group]').prop('hidden', true);
@@ -6278,7 +6286,8 @@
     }
     if (activeDestination === 'server') {
       if (activeTask === 'hosts') groups = ['aliases','witness'];
-      if (activeTask === 'attack') groups = ['attack'];
+      if (activeTask === 'attack') groups = siteSelected ?
+        ['attack','attack-orphan'] : ['attack-orphan'];
     }
     groups.forEach(function (key) {
       root.find('[data-routing-group="' + key + '"]').prop('hidden', false);
