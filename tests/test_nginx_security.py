@@ -713,16 +713,25 @@ class NativeSecurityTests(unittest.TestCase):
         retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
         original_rename = guard._rename_noreplace
         replaced = False
+        identities = None
 
         def replace_inode_after_rename(fd, before, after):
-            nonlocal replaced
+            nonlocal replaced, identities
             original_rename(fd, before, after)
             if before == guard._file(self.site["id"]) and not replaced:
                 replaced = True
-                original = retained.read_bytes()
-                retained.unlink()
-                retained.write_bytes(original)
-                retained.chmod(0o600)
+                # Keep the displaced inode open while creating its replacement.
+                # Otherwise some CI filesystems may immediately recycle its
+                # inode number, so the fixture never actually changes identity.
+                with retained.open("rb") as displaced:
+                    original = displaced.read()
+                    prior = os.fstat(displaced.fileno())
+                    retained.unlink()
+                    retained.write_bytes(original)
+                    retained.chmod(0o600)
+                    replacement = retained.stat()
+                    identities = ((prior.st_dev, prior.st_ino),
+                                  (replacement.st_dev, replacement.st_ino))
 
         reloads = len([x for x in self.commands if "reload" in x])
         with patch.object(guard, "_rename_noreplace", side_effect=replace_inode_after_rename):
@@ -730,6 +739,8 @@ class NativeSecurityTests(unittest.TestCase):
                 self.operate("restore", recovery=applied["recovery_id"],
                              source=checked["vhost_sha256"])
         self.assertTrue(replaced)
+        self.assertIsNotNone(identities)
+        self.assertNotEqual(*identities, "Fixture must create a distinct inode")
         self.assertEqual(error.exception.stage, "uncertain")
         self.assertEqual(error.exception.recovery_id, applied["recovery_id"])
         self.assertFalse(self.fragment.exists())
