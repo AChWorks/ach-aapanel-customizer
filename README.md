@@ -44,7 +44,28 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 
 The Owner approved a comprehensive native UI redesign focused on plain-language
 tasks, selected-site context, explicit server-wide effects, transparent errors,
-and simple recovery. [The redesign contract](docs/UX-REDESIGN.md) and
+and simple recovery.
+
+**Source implementation S1b (not an installed or published feature):** The
+work-in-progress interface replaces the old technical tab strip with five
+destinations: **Home**, **Websites**, **Server**, **Error pages**, and
+**Activity & recovery**. Websites adds contextual **Summary & changes**,
+**Protection**, **Cache & performance**, **WordPress**, and **Routing &
+diagnostics** tasks with one visible native site ID/name; Server separates
+**PHP services**, **Local hostnames**, **Attack protection**, **Default
+HTTP/TLS**, and **Monitoring controls**. Site selection never converts a
+server-wide Fail2ban ban into a site-only effect. Existing backend writers,
+authorization, source checks, evidence and Recovery remain module-owned.
+The 320px navigation uses an explicit menu, and a site-dependent task
+without a valid selected site offers a Browse websites action instead of
+enabled-looking stale controls.
+
+The **Install** and **What you can do** sections above describe the
+currently **published Native** ZIP, not permission to install an unreviewed
+S1b source candidate. S2-S5 remain required for complete task-level redesign,
+native installed acceptance, usability verification and public Release.
+
+[The redesign contract](docs/UX-REDESIGN.md) and
 [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
 track the design and implementation slices. The **published Release** still
 uses the current seven-tab interface until a separately reviewed and

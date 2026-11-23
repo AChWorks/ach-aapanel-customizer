@@ -24,28 +24,39 @@ assert.match(shippedPackageVersion, /^[0-9]+\.[0-9]+\.[0-9]+$/);
 function fakeNode(tag, attributes = {}) {
   return {
     tag, attributes: { ...attributes }, props: {}, children: [],
-    textContent: '', classes: new Set(), handlers: {}
+    textContent: '', classes: new Set(), handlers: {},
+    hasAttribute(name) { return Object.hasOwn(this.attributes,name); }
   };
 }
 
 function loadUi() {
   const root = fakeNode('div');
   const content = {scrollTop:0};
-  let focusedTab = null, tabScrollCalls = 0;
+  let focusedTab = null, focusedHeading = false;
   const elements = new Map();
-  const tabs = ['overview', 'websites', 'routing', 'cache', 'php', 'status', 'activity'].map(name => fakeNode('button', {
-    'data-tab': name, 'aria-selected': name === 'overview' ? 'true' : 'false'
+  const tabs = ['overview', 'websites', 'server', 'status', 'activity'].map(name => fakeNode('button', {
+    'data-destination': name, 'aria-current': name === 'overview' ? 'page' : 'false'
   }));
-  const views = ['overview', 'websites', 'routing', 'cache', 'php', 'status', 'activity'].map(name => fakeNode('section', {
+  const siteTasks = ['summary','protection','cache','wordpress','routing'].map(name => fakeNode('button', {
+    'data-task': name, 'aria-current': name === 'summary' ? 'page' : 'false'
+  }));
+  const serverTasks = ['php','hosts','attack','http','monitor'].map(name => fakeNode('button', {
+    'data-server-task': name, 'aria-current': name === 'php' ? 'page' : 'false'
+  }));
+  const groups = ['intro','aliases','hosts','witness','reconcile','diagnostics','protection','attack','wordpress'].map(name => fakeNode('div', {'data-routing-group':name}));
+  const homeOnly = ['h4','p','div'].map(tag => fakeNode(tag, {'data-home-only':''}));
+  const views = ['overview','websites','routing','cache','php','status','activity'].map(name => fakeNode('section', {
     'data-view': name
   }));
+  elements.set('#ach-panel-cache',views.find(view => view.attributes['data-view'] === 'cache'));
   root.querySelector = query => query === '#ach-content' ? content : null;
-  root.querySelectorAll = query => query === '[data-tab]' ? tabs : [];
-  for (const tab of tabs) {
-    elements.set('#ach-tab-' + tab.attributes['data-tab'], tab);
-    tab.focus = () => { focusedTab = tab; };
-    tab.click = () => trigger(tab, 'click');
-    tab.scrollIntoView = () => { tabScrollCalls++; };
+  root.querySelectorAll = query => query === '[data-destination]' ? tabs :
+    query === '[data-task]' ? siteTasks : query === '[data-server-task]' ? serverTasks : [];
+  for (const tab of [...tabs, ...siteTasks, ...serverTasks]) {
+    if (tab.attributes['data-destination'])
+      elements.set('#ach-tab-' + tab.attributes['data-destination'], tab);
+    tab.focus = () => { focusedTab = tab; focusedHeading = false; };
+    tab.click = () => trigger(tab,'click');
   }
   for (const name of [
     '#ach-message', '#ach-worker-version-status', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh', '#ach-overview-browse-sites',
@@ -67,7 +78,11 @@ function loadUi() {
     '#ach-wp-terminal-disable', '#ach-wp-terminal-recheck',
     '#ach-wp-terminal-recheck-result',
     '#ach-wp-terminal-abandon', '#ach-wp-terminal-abandon-reviewed',
-    '#ach-website-context', '#ach-website-context-status', '#ach-website-browse', '#ach-hosts-summary',
+    '#ach-website-context', '#ach-website-context-status', '#ach-website-browse',
+    '#ach-website-error-pages',
+    '#ach-task-title', '#ach-task-intro', '#ach-breadcrumb',
+    '#ach-site-required', '#ach-choose-website', '#ach-website-tasks', '#ach-server-tasks',
+    '#ach-menu-toggle', '#ach-primary-nav', '#ach-hosts-summary',
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-reconcile-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-cache-private-probe-button', '#ach-cache-private-probe-result',
@@ -183,6 +198,9 @@ function loadUi() {
     elements.get(id).props.disabled = true;
   for (const key of ['#ach-wp-settings-recheck','#ach-wp-settings-apply','#ach-wp-settings-restore'])
     elements.get(key).props.disabled = true;
+  elements.get('#ach-task-title').focus = () => { focusedHeading = true; focusedTab = null; };
+  const homeAdvanced = fakeNode('details');
+  elements.set('.ach-home-advanced',homeAdvanced);
   elements.get('#ach-cache-url-path').props.value = '/';
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
@@ -209,7 +227,12 @@ function loadUi() {
       length: nodes.length,
       find(query) {
         assert.equal(nodes[0], root, 'Only plugin-scoped selectors are allowed');
-        if (query === '[data-tab]') return selection(tabs);
+        if (query === '[data-destination]') return selection(tabs);
+        if (query === '[data-task]') return selection(siteTasks);
+        if (query === '[data-server-task]') return selection(serverTasks);
+        if (query === '[data-task], [data-server-task]') return selection([...siteTasks,...serverTasks]);
+        if (query === '[data-routing-group]') return selection(groups);
+        if (query === '[data-home-only]') return selection(homeOnly);
         if (query === '[data-view]') return selection(views);
         if (query === '[data-monitor-control]') return selection(controls);
         if (query === '#ach-prev, #ach-next') {
@@ -222,6 +245,10 @@ function loadUi() {
         }
         const view = /^\[data-view="([^"]+)"\]$/.exec(query);
         if (view) return selection(views.filter(node => node.attributes['data-view'] === view[1]));
+        const route = /^\[data-(destination|task|server-task|routing-group)="([^"]+)"\]$/.exec(query);
+        if (route) return selection(({destination:tabs,task:siteTasks,
+          'server-task':serverTasks,'routing-group':groups})[route[1]].filter(node =>
+          node.attributes['data-' + route[1]] === route[2]));
         assert.ok(elements.has(query), 'Unexpected plugin selector: ' + query);
         return selection([elements.get(query)]);
       },
@@ -328,20 +355,31 @@ function loadUi() {
     node.handlers[event].call(node, payload);
     return payload;
   }
-  function openSites() {
-    trigger(tabs.find(node => node.attributes['data-tab'] === 'websites'), 'click');
+  // Legacy helper names are test-only shorthands for current user task routes.
+  function openTab(name) {
+    const mapping = {
+      overview:['overview'],websites:['websites'],routing:['websites','routing'],
+      cache:['websites','cache'],php:['server','php'],
+      status:['status'],activity:['activity']
+    };
+    const destination = mapping[name];
+    assert.ok(destination,'Unknown task');
+    trigger(tabs.find(node => node.attributes['data-destination'] === destination[0]),'click');
+    if (destination[1]) {
+      const buttons = destination[0] === 'websites' ? siteTasks : serverTasks;
+      const prop = destination[0] === 'websites' ? 'data-task' : 'data-server-task';
+      trigger(buttons.find(button => button.attributes[prop] === destination[1]),'click');
+    }
     return requests.at(-1);
   }
+  function openSites() { return openTab('websites'); }
   function respond(response) {
     const request = requests.at(-1);
     assert.match(request.options.url, /s=get_sites$/);
     request.respond(response);
     return request;
   }
-  function openOverview() {
-    trigger(tabs.find(node => node.attributes['data-tab'] === 'overview'), 'click');
-    return requests.at(-1);
-  }
+  function openOverview() { return openTab('overview'); }
   function refreshSites() {
     trigger(elements.get('#ach-sites-refresh'), 'click');
     return requests.at(-1);
@@ -577,10 +615,7 @@ function loadUi() {
     return {status:true,schema:1,state:'Observed',read_only:true,
       runtime_verified:false,versions,reason:'',note:'File presence, not process verification'};
   }
-  function openPhp() {
-    trigger(tabs.find(node => node.attributes['data-tab'] === 'php'), 'click');
-    return requests.at(-1);
-  }
+  function openPhp() { return openTab('php'); }
   function submitPhp(version = '85', autoDiscover = true) {
     if (autoDiscover && elements.get('#ach-php-version').props.disabled !== false) {
       const discovered = openPhp();
@@ -617,14 +652,8 @@ function loadUi() {
     trigger(elements.get(selector), event);
     return requests.at(-1);
   }
-  function openStatus() {
-    trigger(tabs.find(node => node.attributes['data-tab'] === 'status'), 'click');
-    return requests.at(-1);
-  }
-  function openActivity() {
-    trigger(tabs.find(node => node.attributes['data-tab'] === 'activity'), 'click');
-    return requests.at(-1);
-  }
+  function openStatus() { return openTab('status'); }
+  function openActivity() { return openTab('activity'); }
   function statusSetValue(selector, value, event = null) {
     assert.ok(elements.has(selector));
     elements.get(selector).props.value = value;
@@ -638,24 +667,33 @@ function loadUi() {
     startWithWebsite:() => { trigger(elements.get('#ach-overview-browse-sites'), 'click'); return requests.at(-1); },
     homeTask:id => { trigger(elements.get('#ach-home-' + id), 'click'); return requests.at(-1); },
     browseFromContext:() => { trigger(elements.get('#ach-website-browse'), 'click'); return requests.at(-1); },
-    focusedTab:() => focusedTab?.attributes['data-tab'] || null,
-    openTab:name => {
-      const tab=tabs.find(item => item.attributes['data-tab'] === name);
-      assert.ok(tab, 'Unknown section');
-      trigger(tab, 'click');
-      return requests.at(-1);
-    },
+    focusedTab:() => focusedHeading ? 'task-title' : focusedTab?.attributes['data-destination'] || null,
+    openTab,
     setViewportWidth:width => { browserWindow.innerWidth = width; },
     setMainScroll:value => { content.scrollTop = value; },
     mainScroll:() => content.scrollTop,
-    selectedTab:() => tabs.find(tab => tab.attributes['aria-selected'] === 'true')?.attributes['data-tab'],
-    keyTab:(name, key) => {
-      const tab=tabs.find(item => item.attributes['data-tab'] === name);
-      const event=trigger(tab, 'keydown', {key});
-      return {prevented:event.prevented, focused:focusedTab?.attributes['data-tab'],
-        selected:tabs.find(item => item.attributes['aria-selected'] === 'true')?.attributes['data-tab']};
+    selectedTab:() => views.find(view => view.props.hidden === false)?.attributes['data-view'],
+    selectedDestination:() => tabs.find(tab => tab.attributes['aria-current'] === 'page')?.attributes['data-destination'],
+    selectedTask:() => siteTasks.find(tab => tab.attributes['aria-current'] === 'page')?.attributes['data-task'],
+    selectedServerTask:() => serverTasks.find(tab => tab.attributes['aria-current'] === 'page')?.attributes['data-server-task'],
+    siteGateHidden:() => elements.get('#ach-site-required').props.hidden,
+    workflowVisible:group => groups.find(item => item.attributes['data-routing-group'] === group)?.props.hidden === false,
+    menuExpanded:() => elements.get('#ach-menu-toggle').attributes['aria-expanded'],
+    clickMenu:() => trigger(elements.get('#ach-menu-toggle'),'click'),
+    clickDestination:name => trigger(tabs.find(tab => tab.attributes['data-destination'] === name),'click'),
+    clickSiteTask:name => trigger(siteTasks.find(tab => tab.attributes['data-task'] === name),'click'),
+    clickServerTask:name => trigger(serverTasks.find(tab => tab.attributes['data-server-task'] === name),'click'),
+    keyTab:(name,key) => {
+      const tab=tabs.find(item => item.attributes['data-destination'] === name);
+      const event=trigger(tab,'keydown',{key});
+      return {prevented:event.prevented, focused:focusedTab?.attributes['data-destination'],
+        selected:tabs.find(item => item.attributes['aria-current'] === 'page')?.attributes['data-destination']};
     },
-    tabScrollCalls:() => tabScrollCalls,
+    keySiteTask:(name,key) => {
+      const tab=siteTasks.find(item => item.attributes['data-task'] === name);
+      const event=trigger(tab,'keydown',{key});
+      return {prevented:event.prevented, selected:siteTasks.find(item => item.attributes['aria-current'] === 'page')?.attributes['data-task']};
+    },
     statusPermitDiscard: value => { allowStatusDiscard = value; },
     statusConfirmations: () => statusConfirmations.slice(),
     statusSelection: () => ({
@@ -945,18 +983,18 @@ const monitorOverview = (overrides = {}) => ({
 // Read-only get_overview responses do not carry this mutation field.
 const monitorAck = (overrides = {}) => monitorOverview({changed:true, ...overrides});
 
-test('First-use website action transfers focus to the selected tab without any write', () => {
+test('First-use website task focuses the visible heading without any write', () => {
   const ui=loadUi();
   ui.respondOverview(monitorOverview());
   assert.equal(ui.focusedTab(),null);
   const request=ui.startWithWebsite();
   assert.equal(ui.selectedTab(),'websites');
-  assert.equal(ui.focusedTab(),'websites', 'Focus must leave the hidden Overview button');
+  assert.equal(ui.focusedTab(),'task-title', 'Focus must enter the visible task heading');
   assert.match(request.options.url,/s=get_sites$/);
   assert.ok(ui.requests.every(r=>r.options.url.includes('s=get_')), 'Start action must only read state');
   const next=ui.keyTab('websites','ArrowDown');
-  assert.equal(next.focused,'routing');
-  assert.equal(next.selected,'routing');
+  assert.equal(next.focused,'server');
+  assert.equal(next.selected,'server');
 });
 
 test('Task-first Home routes common jobs with keyboard focus and without writes', () => {
@@ -968,7 +1006,7 @@ test('Task-first Home routes common jobs with keyboard focus and without writes'
     ui.respondOverview(monitorOverview());
     ui.homeTask(task);
     assert.equal(ui.selectedTab(),target);
-    assert.equal(ui.focusedTab(),target,'Hidden Home link must not retain focus');
+    assert.equal(ui.focusedTab(),'task-title','Hidden Home link must hand focus to visible heading');
     assert.ok(ui.requests.every(r => !/s=(set_|apply_|restore_|remove_)/.test(r.options.url)),
       'Home navigation must not mutate configuration');
   }
@@ -982,7 +1020,7 @@ test('Shared Browse websites action also transfers focus to Website list', () =>
   ui.respondOverview(monitorOverview());
   const request=ui.browseFromContext();
   assert.equal(ui.selectedTab(),'websites');
-  assert.equal(ui.focusedTab(),'websites');
+  assert.equal(ui.focusedTab(),'task-title');
   assert.match(request.options.url,/s=get_sites$/);
 });
 
@@ -1846,9 +1884,9 @@ const hostsAliasResponse = (entries = []) => ({
   entries
 });
 
-test('Routing automatically lists loopback aliases without any website selection or WP watcher', () => {
+test('Server local hostnames lists loopback aliases without website selection or WP watcher', () => {
   const ui = loadUi();
-  ui.openTab('routing');
+  ui.clickDestination('server'); ui.clickServerTask('hosts');
   const listing = ui.requests.find(x => /s=inspect_hosts_aliases$/.test(x.options.url));
   assert.ok(listing, 'Actual local Hosts inventory loads when Routing opens');
   assert.equal(ui.state().hostsAliasesRemoveDisabled, true);
@@ -1882,7 +1920,7 @@ test('Routing automatically lists loopback aliases without any website selection
 
 test('Invalid alias inventory never offers Remove and already-absent action can be refreshed', () => {
   const ui=loadUi();
-  ui.openTab('routing');
+  ui.clickDestination('server'); ui.clickServerTask('hosts');
   const listing=ui.requests.find(x=>/s=inspect_hosts_aliases$/.test(x.options.url));
   listing.respond(hostsAliasResponse([
     {domain:'localhost',address:'127.0.0.1',line:1}
@@ -5217,11 +5255,15 @@ test('A valid Persian diff still renders, then stale content disappears on inval
 });
 
 
-test('Native sidebar sections are linked to panels and scrollable content', () => {
-  for (const name of ['overview','websites','routing','cache','php','status','activity']) {
-    assert.match(html, new RegExp('id="ach-tab-' + name + '"[^>]*aria-controls="ach-panel-' + name + '"'));
-    assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*aria-labelledby="ach-tab-' + name + '"'));
-  }
+test('Native task-first sidebar and site/server journeys retain accessible view regions', () => {
+  for (const name of ['overview','websites','server','status','activity'])
+    assert.match(html, new RegExp('data-destination="' + name + '"[^>]*id="ach-tab-' + name + '"'));
+  for (const name of ['overview','websites','routing','cache','php','status','activity'])
+    assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*role="region"'));
+  for (const name of ['summary','protection','cache','wordpress','routing'])
+    assert.match(html, new RegExp('data-task="' + name + '"'));
+  for (const name of ['php','hosts','attack','http','monitor'])
+    assert.match(html, new RegExp('data-server-task="' + name + '"'));
   assert.match(html, /\.ach-main \{[^}]*overflow-y:auto/);
   assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:170px/);
   assert.match(html, /@media \(max-width:720px\)/);
@@ -5236,14 +5278,161 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:var\(--ach-control-height\)/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
-  assert.match(html, /<h4>Home<\/h4>/);
-  assert.match(html, /class="ach-task-launch-grid"/);
+  assert.match(html, /<h4 data-home-only>Home<\/h4>/);
+  assert.match(html, /class="ach-task-launch-grid" data-home-only/);
+});
+
+test('S1b: website task context requires an exact native site before actions appear', () => {
+  const ui=loadUi();
+  const read=ui.openSites();
+  assert.match(read.options.url,/s=get_sites$/);
+  ui.respond(hostsInventory());
+  ui.clickSiteTask('protection');
+  assert.equal(ui.selectedDestination(),'websites');
+  assert.equal(ui.selectedTask(),'protection');
+  assert.equal(ui.siteGateHidden(),false,'First-use site actions give the operator a next step');
+  assert.equal(ui.workflowVisible('protection'),false,'Do not present an inactive Guard action forest');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  assert.equal(ui.siteGateHidden(),true);
+  assert.equal(ui.workflowVisible('protection'),true);
+  assert.equal(ui.workflowVisible('attack'),false,'Origin-wide Fail2ban belongs to Server');
+  assert.equal(ui.state().hostsInspectDisabled,false);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true,'Navigation never authorizes Apply');
+  assert.equal(ui.requests.filter(r=>/s=(manage_|apply_|restore_|remove_)/.test(r.options.url)).length,0);
+});
+
+test('S1b: website Error pages shortcut uses the one canonical editor without changing scope', () => {
+  const ui=loadUi();
+  ui.openSites();ui.respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  const before=ui.requests.length;
+  ui.statusClick('#ach-website-error-pages');
+  assert.equal(ui.selectedDestination(),'status');
+  assert.equal(ui.selectedTab(),'status');
+  assert.equal(ui.state().websiteContextHidden,true,'Error pages keeps its own explicit scope');
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''},
+    'Selected website does not silently authorize global-to-site publication');
+  assert.equal(ui.requests.length,before+1,'Only the canonical read-only editor loads');
+  assert.match(ui.requests.at(-1).options.url,/s=status_preferences$/);
+});
+
+test('S1b: selected website stays explicit across WordPress, routing and Cache', () => {
+  const ui=loadUi();
+  ui.openSites();ui.respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  const before=ui.requests.filter(r=>/s=get_sites$/.test(r.options.url)).length;
+  ui.clickSiteTask('wordpress');
+  assert.equal(ui.workflowVisible('wordpress'),true);
+  assert.equal(ui.workflowVisible('hosts'),false);
+  ui.clickSiteTask('routing');
+  assert.equal(ui.workflowVisible('hosts'),true);
+  assert.equal(ui.workflowVisible('diagnostics'),true);
+  assert.equal(ui.workflowVisible('aliases'),false);
+  assert.equal(ui.workflowVisible('witness'),false);
+  ui.clickSiteTask('cache');
+  assert.equal(ui.selectedTab(),'cache');
+  assert.equal(ui.siteGateHidden(),true);
+  assert.equal(ui.state().hostsSelectorDisabled,false);
+  assert.equal(ui.requests.filter(r=>/s=get_sites$/.test(r.options.url)).length,before);
+  ui.clickSiteTask('summary');
+  assert.equal(ui.selectedTab(),'websites');
+  assert.equal(ui.state().hostsSelectorDisabled,false);
+});
+
+test('S1b: refreshing inventory revokes stale site context without losing task choice', () => {
+  const ui=loadUi();
+  ui.openSites();ui.respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.clickSiteTask('protection');
+  assert.equal(ui.siteGateHidden(),true);
+  const refresh=ui.refreshSites();
+  assert.match(refresh.options.url,/s=get_sites$/);
+  assert.equal(ui.siteGateHidden(),false,'An invalidated inventory cannot authorize stale context');
+  assert.equal(ui.workflowVisible('protection'),false);
+  refresh.respond(hostsInventory());
+  assert.equal(ui.selectedTask(),'protection');
+  assert.equal(ui.siteGateHidden(),false,'Refresh must not silently reselect a former site');
+  assert.equal(ui.state().hostsInspectDisabled,true);
+});
+
+test('S1b: Server local aliases do not impersonate selected-site actions', () => {
+  const ui=loadUi();
+  ui.clickDestination('server');
+  ui.clickServerTask('hosts');
+  assert.equal(ui.selectedDestination(),'server');
+  assert.equal(ui.selectedServerTask(),'hosts');
+  assert.equal(ui.state().websiteContextHidden,true);
+  assert.equal(ui.workflowVisible('aliases'),true);
+  assert.equal(ui.workflowVisible('witness'),true);
+  for (const group of ['hosts','diagnostics','protection','wordpress','attack'])
+    assert.equal(ui.workflowVisible(group),false,group+' must not be shown in local hostnames');
+  assert.equal(ui.siteGateHidden(),true);
+  assert.ok(ui.requests.some(req=>/s=inspect_hosts_aliases$/.test(req.options.url)));
+});
+
+test('S1b: server-wide Fail2ban impact remains clear before selecting a source site', () => {
+  const ui=loadUi();
+  ui.clickDestination('server');ui.clickServerTask('attack');
+  assert.equal(ui.workflowVisible('attack'),true,
+    'Orphan recovery is reachable even without current selected website');
+  assert.equal(ui.siteGateHidden(),false,'Source-site selection has a useful prompt');
+  assert.equal(ui.state().websiteContextHidden,false);
+  assert.match(html,/A ban affects web traffic for the entire server/);
+  assert.match(html,/id="ach-scan-orphan-list"/);
+  assert.equal(ui.state().scanApplyDisabled,true);
+});
+
+test('S1b: Server monitor reuses the original control owner, not a cloned writer', () => {
+  const ui=loadUi();
+  ui.clickDestination('server');ui.clickServerTask('monitor');
+  assert.equal(ui.selectedTab(),'overview');
+  assert.equal(ui.selectedDestination(),'server');
+  assert.equal(ui.state().websiteContextHidden,true);
+  assert.match(html,/data-server-task="monitor"/);
+  assert.equal(html.split('id="ach-monitor-enabled"').length,2);
+  assert.equal(html.split('id="ach-site-enabled"').length,2);
+  assert.equal(html.split('id="ach-fpm-enabled"').length,2);
+});
+
+test('S1b: narrow navigation is an explicit expandable menu and closes on route', () => {
+  const ui=loadUi();
+  ui.setViewportWidth(320);
+  ui.clickMenu();
+  assert.equal(ui.menuExpanded(),'true');
+  ui.clickDestination('activity');
+  assert.equal(ui.menuExpanded(),'false');
+  assert.equal(ui.selectedDestination(),'activity');
+  assert.equal(ui.selectedTab(),'activity');
+  ui.clickMenu();
+  ui.clickMenu();
+  assert.equal(ui.menuExpanded(),'false');
+  assert.match(html, /aria-controls="ach-primary-nav" aria-expanded="false"/);
+  assert.match(html, /\.ach-sidebar\[data-open="true"\]/);
+});
+
+test('S1b: each privileged UI control stays unique under contextual grouping', () => {
+  const routed=html.slice(html.indexOf('id="ach-panel-routing"'),
+    html.indexOf('id="ach-panel-cache"'));
+  for (const [group,method] of [
+    ['aliases','ach-hosts-alias-remove'],
+    ['hosts','ach-hosts-restore-button'],
+    ['protection','ach-guard-apply'],
+    ['attack','ach-scan-apply'],
+    ['wordpress','ach-wp-settings-apply']
+  ]) {
+    const chunk=routed.split('data-routing-group="'+group+'"')[1]?.split('data-routing-group="')[0];
+    assert.ok(chunk,'Missing canonical '+group+' group');
+    assert.match(chunk,new RegExp('id="'+method+'"'));
+    assert.equal(html.split('id="'+method+'"').length,2,'Duplicate writer '+method);
+  }
+  assert.match(html,/role="region"/);
+  assert.doesNotMatch(html,/role="tablist"|role="tabpanel"/);
 });
 
 test('Shared native form-row primitive aligns actual labeled controls, not label boxes', () => {
   // All current and future mixed field/button rows inherit these rules;
   // avoid per-ID margin patches that silently break the next form.
-  assert.match(html, /--ach-control-height:32px/);
+  assert.match(html, /--ach-control-height:36px/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:var\(--ach-control-height\)/);
   assert.match(html, /\.ach-main input:not\(\[type="checkbox"\]\),[\s\S]*?min-height:var\(--ach-control-height\)/);
   assert.match(html, /\.ach-controls:has\(> \.ach-inline-field\) \{ align-items:flex-end; \}/);
@@ -6340,34 +6529,45 @@ test('Native tabs retain per-section scroll, including a repeated tab click', ()
   assert.equal(ui.mainScroll(),412,'Clicking the selected sidebar tab must not jump to top');
   ui.openActivity();
   assert.equal(ui.mainScroll(),133,'Activity keeps its independent scroll position');
-  assert.equal(ui.tabScrollCalls(),0,'Desktop sidebar does not scroll the host dialog');
+  ui.openSites();
+  ui.respond(page());
+  ui.setMainScroll(212);
+  ui.clickSiteTask('protection');
+  assert.equal(ui.mainScroll(),0,'First visit to new task begins at top');
+  ui.setMainScroll(78);
+  ui.clickSiteTask('summary');
+  assert.equal(ui.mainScroll(),212,'Site summary restores its own reading position');
+  ui.clickSiteTask('protection');
+  assert.equal(ui.mainScroll(),78,'Each site task preserves independent scroll');
   ui.setViewportWidth(375);
   ui.openStatus();
-  assert.equal(ui.tabScrollCalls(),1,'Narrow tab strip scrolls the selected item into view');
+  assert.equal(ui.mainScroll(),412,'Narrow viewport keeps the saved Error pages position');
 });
 
-test('Native tab arrow keys follow actual desktop/mobile orientation', () => {
+test('Five native destinations have consistent desktop/mobile keyboard routes', () => {
   const ui=loadUi();
   ui.setViewportWidth(1280);
   assert.equal(ui.keyTab('overview','ArrowRight').prevented,false);
-  assert.equal(ui.selectedTab(),'overview','Horizontal arrows must remain available on desktop');
+  assert.equal(ui.selectedDestination(),'overview');
   const desktop=ui.keyTab('overview','ArrowDown');
   assert.equal(desktop.prevented,true);
   assert.equal(desktop.focused,'websites');
   assert.equal(desktop.selected,'websites');
   assert.equal(ui.keyTab('websites','ArrowLeft').prevented,false);
   ui.setViewportWidth(375);
-  assert.equal(ui.keyTab('websites','ArrowDown').prevented,false);
-  const mobile=ui.keyTab('websites','ArrowRight');
+  const mobile=ui.keyTab('websites','ArrowDown');
   assert.equal(mobile.prevented,true);
-  assert.equal(mobile.focused,'routing');
-  assert.equal(mobile.selected,'routing');
-  assert.equal(ui.keyTab('routing','ArrowRight').selected,'cache');
-  assert.equal(ui.keyTab('cache','ArrowRight').selected,'php');
-  assert.equal(ui.keyTab('php','Home').selected,'overview');
+  assert.equal(mobile.selected,'server');
+  assert.equal(ui.selectedDestination(),'server');
+  assert.equal(ui.keyTab('server','ArrowDown').selected,'status');
+  assert.equal(ui.keyTab('status','ArrowDown').selected,'activity');
+  assert.equal(ui.keyTab('activity','Home').selected,'overview');
   assert.equal(ui.keyTab('overview','End').selected,'activity');
-  assert.equal(ui.keyTab('activity','ArrowRight').selected,'overview',
-    'Horizontal keyboard navigation wraps around');
+  assert.equal(ui.keyTab('activity','ArrowDown').selected,'overview',
+    'Keyboard navigation wraps around with five destinations');
+  ui.clickDestination('websites');
+  assert.equal(ui.keySiteTask('summary','ArrowRight').selected,'protection');
+  assert.equal(ui.keySiteTask('protection','End').selected,'routing');
 });
 
 test('Status Pages unsaved brand values survive native tab switching', () => {
@@ -8752,9 +8952,11 @@ test('Routing and Cache open with the same selected website and no duplicate inv
   ui.statusClick('#ach-cache-inspect-button').respond(cacheInspection());
   const count=ui.requests.filter(x=>/s=get_sites$/.test(x.options.url)).length;
   ui.openTab('routing');
-  assert.match(ui.requests.at(-1).options.url,/s=inspect_hosts_aliases$/,
-    'Routing inspects actual Hosts independently, not the website inventory');
-  ui.requests.at(-1).respond(hostsAliasResponse());
+  assert.equal(ui.selectedDestination(),'websites');
+  assert.equal(ui.selectedTask(),'routing');
+  assert.equal(ui.workflowVisible('diagnostics'),true);
+  assert.equal(ui.workflowVisible('aliases'),false,
+    'Origin-wide alias management belongs only to Server / Local hostnames');
   assert.equal(ui.requests.filter(x=>/s=get_sites$/.test(x.options.url)).length,
     count, 'Shared verified website list must not refetch on tab switch');
   assert.equal(ui.state().websiteContextHidden,false);

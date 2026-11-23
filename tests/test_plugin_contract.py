@@ -158,7 +158,7 @@ class PackageContractTests(unittest.TestCase):
 
     def test_home_starts_with_four_task_launchers_and_no_unconditional_writes(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('<h4>Home</h4>', html)
+        self.assertIn('<h4 data-home-only>Home</h4>', html)
         self.assertIn('aria-label="Common tasks"', html)
         for control, task in (
                 ('ach-overview-browse-sites', 'Manage a website'),
@@ -168,7 +168,9 @@ class PackageContractTests(unittest.TestCase):
             self.assertIn('id="' + control + '" type="button" class="ach-task-link"', html)
             self.assertIn('<strong>' + task + '</strong>', html)
         self.assertIn("root.find('#ach-home-php').on('click'", html)
-        self.assertIn('tab.focus({preventScroll:true});', html)
+        self.assertIn("if (title && title.focus) title.focus({preventScroll:true});", html)
+        self.assertIn("root.find('[data-destination]').on('click'", html)
+        self.assertIn("root.find('[data-task]').on('click'", html)
 
     def test_fpm_auto_disclosure_rejects_retired_profile_upgrade_promise(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
