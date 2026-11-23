@@ -96,6 +96,7 @@
   #ach-customizer .ach-inspection-summary[data-tone="error"] {
     background:#fff3f2; border-color:#efc8c4; color:#9b342e;
   }
+  #ach-customizer #ach-site-changes-summary { white-space:pre-line; }
   #ach-customizer .ach-technical-report {
     margin:8px 0 16px; border:1px solid #e0e6eb; border-radius:8px;
     background:#fff; overflow:hidden;
@@ -1243,6 +1244,26 @@
     explainGate('ach-site-changes-why', 'blocked',
       'Locked: select Compare website records above. Review added, removed and changed site records before accepting a new observation baseline.');
   }
+  function showBaselineSaveUnconfirmed(scope, response, failure) {
+    // A write can commit even if its acknowledgement is lost. The next safe
+    // action is a fresh Compare, never a retry against a stale review token.
+    var rejected = !!(failure && failure.status === false);
+    var transport = failure && typeof failure.transport_status === 'string' &&
+      /^[a-z_-]{1,32}$/.test(failure.transport_status) ?
+      failure.transport_status : null;
+    var detail = rejected ? statusBackendFailure('save', failure, '') :
+      transport ? 'Network/transport status: ' + transport + '.' :
+      'The returned Save receipt was missing or incompatible.';
+    if (!rejected && response && typeof response.operation_id === 'string' &&
+        /^[0-9a-f]{32}$/.test(response.operation_id))
+      detail += ' Operation ID: ' + response.operation_id + '.';
+    var summary = scope + ' baseline Save ' + (rejected ?
+      'was rejected by the server. The stored baseline has not been verified.' :
+      'outcome unconfirmed. The change may already have committed.') +
+      ' Compare website records to verify what was stored before any new Save.';
+    resetSiteChanges(summary + '\n' + detail);
+    inspectionSummary('site-changes', summary + '\n' + detail, 'error');
+  }
   function invalidateWebsitesSnapshot() {
     // Reject an inventory request started under an earlier Monitor policy.
     resetSiteChanges('Monitor policy changed; compare again after Refresh.');
@@ -1417,7 +1438,10 @@
                 '. Automatic repair outcome unknown: inspect current enabled state before retrying.' :
                 '. Outcome unknown: inspect saved recovery before any retry.') : ''), true);
         }
-        done(null);
+        // Preserve the transport category for the two Baseline writes so the
+        // owning task can explain an unknown completion beyond the global toast.
+        done(null, ['save_site_baseline', 'save_selected_site_baseline'].includes(method) ?
+          {transport_status:status} : null);
         if (hasPotentialActivity(method)) invalidateActivitySnapshot();
       });
   }
@@ -1927,6 +1951,8 @@
     siteChangesSnapshot = null; // An ambiguous write must be reconciled before retry.
     root.find('#ach-site-changes-status').text(
       'Saving reviewed selected website record; other saved baselines are preserved...');
+    inspectionSummary('site-changes',
+      'Saving the selected website baseline. The result has not been verified yet.');
     siteChangesLock(true);
     request('save_selected_site_baseline', Object.assign(
       {}, cacheNativeArgs(id), {
@@ -1945,9 +1971,7 @@
           r.source_sha256 !== snapshot.source_sha256 ||
           !/^[0-9a-f]{64}$/.test(String(r.baseline_sha256 || '')) ||
           r.baseline_revision !== snapshot.baseline_revision + (r.changed ? 1 : 0)) {
-        resetSiteChanges(
-          'Selected-site save unconfirmed. Do not retry blindly; Compare again to verify the baseline. ' +
-          statusBackendFailure('save', failure, ''));
+        showBaselineSaveUnconfirmed('Selected website', r, failure);
         return;
       }
       resetSiteChanges(r.state + ' — selected #' + id +
@@ -1967,20 +1991,22 @@
     var snapshot = siteChangesSnapshot, ticket = ++siteChangesTicket;
     siteChangesSnapshot = null; // An uncertain request must not be retried blindly.
     root.find('#ach-site-changes-status').text('Saving reviewed plugin-owned baseline...');
+    inspectionSummary('site-changes',
+      'Saving the all-websites baseline. The result has not been verified yet.');
     siteChangesLock(true);
     request('save_site_baseline', {
       expected_revision:snapshot.baseline_revision,
       expected_monitor_revision:snapshot.monitor_revision,
       expected_source_sha256:snapshot.source_sha256, reviewed:'true'
-    }, function (r) {
+    }, function (r, failure) {
       if (ticket !== siteChangesTicket) return;
-      if (!r || r.schema !== 1 ||
+      if (!r || r.status !== true || r.schema !== 1 ||
           !['Baseline Saved', 'Baseline Unchanged'].includes(r.state) ||
           typeof r.changed !== 'boolean' ||
           r.changed !== (r.state === 'Baseline Saved') ||
           r.source_sha256 !== snapshot.source_sha256 ||
           r.baseline_revision !== snapshot.baseline_revision + (r.changed ? 1 : 0)) {
-        resetSiteChanges('Baseline outcome unconfirmed; Compare again to reconcile before another save.');
+        showBaselineSaveUnconfirmed('All websites', r, failure);
         return;
       }
       resetSiteChanges(r.state + ' — revision ' + r.baseline_revision +

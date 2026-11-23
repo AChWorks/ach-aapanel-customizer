@@ -7535,6 +7535,106 @@ test('Confirmed baseline Save keeps a dominant Saved state until a new compariso
   assert.equal(ui.requests.length,count,'No Changes cannot send a redundant write');
 });
 
+// The prominent result is outside the collapsed technical evidence disclosure.
+// Verify every selected/all-Save outcome, not merely the disabled retry button.
+function pendingBaselineSave(scope) {
+  const ui=loadUi();
+  if (scope==='selected') {
+    selectHostsSite(ui);
+    const target={id:7,name:'site.test',document_root:'/www/site.test',
+      panel_status:'1',bound_domains:[['site.test',80]]};
+    const comparison=siteChangesPayload({
+      state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+      changes:[{id:7,kind:'Added',fields:[],before:null,after:target}]
+    });
+    ui.siteChangesCompare().respond(comparison);
+    return {ui,comparison,save:ui.siteChangesSelectedSave(),
+      ack:{status:true,schema:1,scope:'selected_site_only',
+        state:'Selected Site Baseline Saved',site_id:7,site_key:'site.test',
+        changed:true,baseline_revision:2,source_sha256:'a'.repeat(64),
+        baseline_sha256:'c'.repeat(64),runtime_verified:false}};
+  }
+  ui.openSites().respond(page());
+  const comparison=siteChangesPayload();
+  ui.siteChangesCompare().respond(comparison);
+  return {ui,comparison,save:ui.siteChangesSave(),
+    ack:{status:true,schema:1,state:'Baseline Saved',
+      changed:true,baseline_revision:1,source_sha256:'a'.repeat(64)}};
+}
+
+for (const scope of ['selected','all']) {
+  const summaryTarget=scope==='selected'?'Selected website':'All websites';
+  const disabled=ui=>scope==='selected'?ui.state().selectedBaselineSaveDisabled:
+    ui.state().siteChangesSaveDisabled;
+  const trySave=ui=>scope==='selected'?ui.siteChangesSelectedSave():ui.siteChangesSave();
+  test(scope+' Baseline Save persists verified Saved and Unchanged outcomes', () => {
+    for (const isChanged of [true,false]) {
+      const {ui,save,ack}=pendingBaselineSave(scope);
+      assert.match(ui.state().siteChangesSummary,/Saving .* baseline.*not been verified/);
+      save.respond({...ack,changed:isChanged,
+        state:scope==='selected'?
+          (isChanged?'Selected Site Baseline Saved':'Selected Site Baseline Unchanged'):
+          (isChanged?'Baseline Saved':'Baseline Unchanged'),
+        baseline_revision:isChanged?ack.baseline_revision:ack.baseline_revision-1});
+      assert.match(ui.state().siteChangesSummary,
+        isChanged?/baseline saved|website records saved/i:/unchanged|up to date/i);
+      assert.equal(disabled(ui),true,'Response invalidates old Save evidence');
+      assert.doesNotMatch(ui.state().siteChangesSummary,/Comparison not current/);
+    }
+  });
+
+  test(scope+' Baseline malformed success does not imply saved and locks stale retry', () => {
+    const {ui,save,ack,comparison}=pendingBaselineSave(scope);
+    save.respond({...ack,baseline_revision:400,operation_id:'e'.repeat(32)});
+    assert.match(ui.state().siteChangesSummary,/Save outcome unconfirmed/);
+    assert.match(ui.state().siteChangesSummary,/may already have committed/);
+    assert.match(ui.state().siteChangesSummary,/Operation ID: e{32}/);
+    assert.equal(disabled(ui),true);
+    const count=ui.requests.length;
+    trySave(ui);
+    assert.equal(ui.requests.length,count);
+    ui.siteChangesCompare().respond(comparison);
+    assert.doesNotMatch(ui.state().siteChangesSummary,/outcome unconfirmed/);
+    assert.equal(disabled(ui),false,'Fresh Compare restores exact review gate');
+  });
+
+  test(scope+' Baseline backend CAS rejection displays stage, cause and ID', () => {
+    const {ui,save,comparison}=pendingBaselineSave(scope);
+    save.respond({status:false,stage:'baseline_revision_check',
+      msg:'Saved baseline revision changed; Compare again',
+      operation_id:'d'.repeat(32)});
+    const summary=ui.state().siteChangesSummary;
+    assert.match(summary,/Save was rejected by the server/);
+    assert.match(summary,/baseline_revision_check/);
+    assert.match(summary,/Saved baseline revision changed/);
+    assert.match(summary,/d{32}/);
+    assert.doesNotMatch(summary,/may already have committed/);
+    assert.equal(disabled(ui),true);
+    const count=ui.requests.length;
+    trySave(ui);
+    assert.equal(ui.requests.length,count);
+    ui.siteChangesCompare().respond(comparison);
+    assert.equal(disabled(ui),false);
+    assert.doesNotMatch(ui.state().siteChangesSummary,/was rejected/);
+  });
+
+  test(scope+' Baseline timeout preserves unknown outcome until fresh Compare', () => {
+    const {ui,save,comparison}=pendingBaselineSave(scope);
+    save.reject(null,'timeout');
+    const summary=ui.state().siteChangesSummary;
+    assert.match(summary,/Save outcome unconfirmed/);
+    assert.match(summary,/may already have committed/);
+    assert.match(summary,/Network\/transport status: timeout/);
+    assert.match(summary,/Compare website records/);
+    assert.equal(disabled(ui),true);
+    const count=ui.requests.length;
+    trySave(ui);
+    assert.equal(ui.requests.length,count);
+    ui.siteChangesCompare().respond(comparison);
+    assert.equal(disabled(ui),false);
+  });
+}
+
 test('Website lifecycle Monitor renders HTML as text and invalidates the old comparison on Refresh', () => {
   const ui=loadUi();
   ui.openSites().respond(page());

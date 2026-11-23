@@ -348,14 +348,17 @@ def _replace_source(parent, payload, baseline, *, expected_sha, recovery_id):
 _RESERVED = frozenset(("localhost", "ip6-localhost", "ip6-loopback"))
 
 
-def _protected_hostnames():
-    """Identify this machine's names at the point of inspection or removal.
+def _protected_hostnames(payload=None):
+    """Protect actual machine names, including a locally proven FQDN.
 
-    /etc/hostname and the live kernel nodename can differ during a hostname
-    transition. Neither is a removable WordPress/site alias. Reading them is
-    independent of the current /etc/hosts file or native site inventory.
+    A short nodename often has its canonical FQDN as the first alias on the
+    very same loopback /etc/hosts record (e.g. node.example.test node). The
+    exact nodename binding, local address and matching first DNS label together
+    identify that FQDN; a similar-looking domain on another line does not.
+    Use the pinned hosts snapshot instead of a separate, racy resolver query.
     """
     protected = set(_RESERVED)
+    declared = set()
     candidates = [os.uname().nodename]
     try:
         with open("/etc/hostname", encoding="utf-8") as source:
@@ -367,21 +370,47 @@ def _protected_hostnames():
             name = _hostname(candidate.strip())
         except HostsInspectionError:
             continue
+        declared.add(name)
         protected.add(name)
-        # A kernel or configured FQDN also identifies the same short host.
-        if "." in name:
-            protected.add(name.split(".", 1)[0])
+        protected.add(name.split(".", 1)[0])
+
+    if payload is not None and declared:
+        short_names = {name.split(".", 1)[0] for name in declared}
+        for line in payload.splitlines():
+            parts = line.partition(b"#")[0].split()
+            if len(parts) < 3:
+                continue
+            try:
+                address = ipaddress.ip_address(parts[0].decode("ascii"))
+            except (ValueError, UnicodeError):
+                continue
+            if not _loopback(address):
+                continue
+            aliases = []
+            for part in parts[1:]:
+                try:
+                    aliases.append(_hostname(part.decode("utf-8")))
+                except (HostsInspectionError, UnicodeError):
+                    continue
+            # A full domain with the same first label is NOT enough. The
+            # source record must explicitly bind an exact current nodename.
+            if not declared.intersection(aliases):
+                continue
+            canonical = next((name for name in aliases if "." in name and
+                              name.split(".", 1)[0] in short_names), None)
+            if canonical:
+                protected.add(canonical)
     return protected
 
 
-def _require_removable_name(domain):
-    if domain in _protected_hostnames():
+def _require_removable_name(domain, payload=None):
+    if domain in _protected_hostnames(payload):
         raise HostsManageError("The server's own hostname cannot be removed here")
 
 
 def _available_aliases(payload):
     entries = []
-    protected = _protected_hostnames()
+    protected = _protected_hostnames(payload)
     for line_number, line in enumerate(payload.splitlines(), 1):
         parts = line.partition(b"#")[0].split()
         if len(parts) < 2:
@@ -438,12 +467,13 @@ def remove_available_alias(*, domain, source_path=HOSTS_PATH, data_dir=DATA_DIR)
         parent = _open_parent(source_path)
         try:
             before, meta = _read_source(parent)
+            _require_removable_name(domain, before)
             after, removed = _remove_domain_aliases(before, domain)
             if not removed:
                 return {"state": "Already Absent", "changed": False,
                         "domain": domain, "removed_aliases": 0,
                         "hosts_sha256": _sha(before)}
-            _require_removable_name(domain)
+            _require_removable_name(domain, before)
             op = uuid4().hex
             try:
                 _replace_source(parent, after, meta, expected_sha=_sha(before),
@@ -515,6 +545,7 @@ def remove_loopback_alias(*, site, domains, domain, expected_sha,
         parent = _open_parent(source_path)
         try:
             before, meta = _read_source(parent)
+            _require_removable_name(domain, before)
             if _sha(before) != expected_sha:
                 raise HostsManageError("Hosts file changed after inspection; refresh")
             if existing is not None and existing["phase"] != "restored":
@@ -539,7 +570,7 @@ def remove_loopback_alias(*, site, domains, domain, expected_sha,
             after, removed = _remove_domain_aliases(before, domain)
             if removed == 0 or after == before or not after:
                 raise HostsManageError("No eligible alias could be removed safely")
-            _require_removable_name(domain)
+            _require_removable_name(domain, before)
             op = uuid4().hex
             row = {
                 "schema": 1, "site_id": site["id"], "site_key": site["name"],
