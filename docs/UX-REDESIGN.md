@@ -101,6 +101,39 @@ The image concept previously generated is **not runtime proof** and its compulso
 | Error/partial | Could not prove completion → `Recheck` + exact outcome | rollback only when verified, no blind repeat |
 | Recovery | Exact owned journal and changed-source guard → `Restore` | recheck stale data; no universal undo |
 
+## Current source implementation and acceptance boundary
+
+The S1 navigation/identity foundation is merged into `main` through PRs #129
+and #130, but the published and retained installed Native v0.1.100 still uses
+the earlier UI. The S2–S4 task-level candidate is isolated from `main` and
+has not been released. The browser projection adds only one selected workflow
+at a time; privileged actions continue through the original native backend.
+
+- **Selected website:** Protection remains site-owned; WordPress exposes four
+  independent setting choices; Routing exposes VHost, local Hosts, and drift;
+  Cache separates passive inspection, WordPress Connect, live site Cache
+  configuration, exact Cache Clear and Bridge mapping.
+- **Shared server:** PHP exposes inspection, desired policy, explicit live
+  shared-service change and independently discoverable saved Recovery; scanner
+  source-site selection is separate from origin-wide bans and orphan-jail
+  Restore; local aliases remain site-selection-independent.
+- **Error pages:** Template/language/scope selectors remain explicit. Design,
+  website publication, future-site defaults, stopped-site 503 and default
+  HTTP/TLS routes are separate pages within the same canonical state owner.
+  Unsupported scope/template combinations display guidance rather than an
+  empty or wrongly actionable screen. Activity links to a known owning task
+  without inferring a site or silently executing a recovery.
+- **Navigation dependency:** Clear and Bridge expose a direct route to the
+  single original Cache Recheck; PHP Apply exposes a route to the original
+  read-only preview. There is no duplicate backend action or automatic writer.
+
+**This is source/interaction structure, not installed acceptance.** Unit tests,
+real Chromium with mocked native reads, and automation can demonstrate specific
+behaviors, but not primary-admin native sessions, live backend authorization,
+active Nginx effects, human novice completion or the health of the retained
+13-site QA fixture. S5 is a separate required acceptance boundary. Record exact
+HEAD/CI/QA evidence in the PR and Issue #128, not as a mirrored status log here.
+
 ## Validation and delivery slices
 
 - **S0** (design baseline): this agreed contract, Issue mapping, source/API review and operator journey benchmark; **accepted in principle**. Improve when real usability evidence changes an assumption.

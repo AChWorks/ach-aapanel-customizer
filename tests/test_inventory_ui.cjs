@@ -44,6 +44,20 @@ function loadUi() {
     'data-server-task': name, 'aria-current': name === 'php' ? 'page' : 'false'
   }));
   const groups = ['intro','aliases','hosts','witness','reconcile','diagnostics','protection','attack','attack-orphan','wordpress'].map(name => fakeNode('div', {'data-routing-group':name}));
+  const taskSpecs = {
+    'routing-detail':['diagnostics','hosts','reconcile'],
+    'wp-task':['debug','cron','xmlrpc','https'],
+    'wp-field':['debug','cron'],
+    'cache-task':['inspect','connect','configure','clear','bridge'],
+    'cache-stage':['inspect','connect','configure','clear','bridge'],
+    'php-task':['inspect','policy','apply','restore'],
+    'php-stage':['inspect','policy','apply','restore'],
+    'status-mode':['design','site','defaults','stopped','fallback'],
+    'status-stage':['design','site','defaults','fallback','stopped']
+  };
+  const taskNodes = Object.fromEntries(Object.entries(taskSpecs).map(([attr,names]) =>
+    [attr,names.map(name => fakeNode(attr.endsWith('stage') || attr === 'wp-field' ? 'div' : 'button',
+      {['data-'+attr]:name,'aria-current':name === names[0] ? 'page' : 'false'}))]));
   const homeOnly = ['h4','p','div'].map(tag => fakeNode(tag, {'data-home-only':''}));
   const views = ['overview','websites','routing','cache','php','status','activity'].map(name => fakeNode('section', {
     'data-view': name
@@ -51,8 +65,12 @@ function loadUi() {
   elements.set('#ach-panel-cache',views.find(view => view.attributes['data-view'] === 'cache'));
   root.querySelector = query => query === '#ach-content' ? content : null;
   root.querySelectorAll = query => query === '[data-destination]' ? tabs :
-    query === '[data-task]' ? siteTasks : query === '[data-server-task]' ? serverTasks : [];
-  for (const tab of [...tabs, ...siteTasks, ...serverTasks]) {
+    query === '[data-task]' ? siteTasks : query === '[data-server-task]' ? serverTasks :
+    /^\[data-(routing-detail|wp-task|cache-task|php-task|status-mode)\]$/.test(query) ?
+      taskNodes[query.slice(6,-1)] : [];
+  for (const tab of [...tabs, ...siteTasks, ...serverTasks, ...taskNodes['routing-detail'],
+    ...taskNodes['wp-task'], ...taskNodes['cache-task'], ...taskNodes['php-task'],
+    ...taskNodes['status-mode']]) {
     if (tab.attributes['data-destination'])
       elements.set('#ach-tab-' + tab.attributes['data-destination'], tab);
     tab.focus = () => { focusedTab = tab; focusedHeading = false; };
@@ -84,6 +102,13 @@ function loadUi() {
     '#ach-site-required', '#ach-site-required-title', '#ach-site-required-detail',
     '#ach-choose-website', '#ach-website-tasks', '#ach-server-tasks',
     '#ach-menu-toggle', '#ach-primary-nav', '#ach-hosts-summary',
+    '#ach-routing-workflows', '#ach-routing-task-effect',
+    '#ach-wordpress-workflows', '#ach-wp-task-effect', '#ach-wordpress-installer-route',
+    '#ach-cache-tasks', '#ach-cache-task-effect',
+    '#ach-php-tasks', '#ach-php-task-effect',
+    '#ach-status-modes', '#ach-status-server-return', '#ach-status-design-shortcut',
+    '#ach-status-task-effect', '#ach-status-task-setup',
+    '#ach-cache-clear-recheck-route', '#ach-bridge-recheck-route', '#ach-php-preview-route',
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-reconcile-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
     '#ach-cache-private-probe-button', '#ach-cache-private-probe-result',
@@ -232,6 +257,18 @@ function loadUi() {
         if (query === '[data-task]') return selection(siteTasks);
         if (query === '[data-server-task]') return selection(serverTasks);
         if (query === '[data-task], [data-server-task]') return selection([...siteTasks,...serverTasks]);
+        const allTaskNav = '[data-task], [data-server-task], [data-routing-detail], [data-wp-task], [data-cache-task], [data-php-task], [data-status-mode]';
+        if (query === allTaskNav) return selection([
+          ...siteTasks,...serverTasks,...taskNodes['routing-detail'],
+          ...taskNodes['wp-task'],...taskNodes['cache-task'],
+          ...taskNodes['php-task'],...taskNodes['status-mode']]);
+        if (query.startsWith('[data-') && query.includes(', ')) {
+          const parts = query.split(', ');
+          const nodes = parts.map(part => /^\[data-(routing-detail|wp-task|wp-field|cache-task|cache-stage|php-task|php-stage|status-mode|status-stage)\]$/.exec(part));
+          if (nodes.every(Boolean)) return selection(nodes.flatMap(match => taskNodes[match[1]]));
+        }
+        const dataTask = /^\[data-(routing-detail|wp-task|wp-field|cache-task|cache-stage|php-task|php-stage|status-mode|status-stage)\]$/.exec(query);
+        if (dataTask) return selection(taskNodes[dataTask[1]]);
         if (query === '[data-routing-group]') return selection(groups);
         if (query === '[data-home-only]') return selection(homeOnly);
         if (query === '[data-view]') return selection(views);
@@ -246,9 +283,9 @@ function loadUi() {
         }
         const view = /^\[data-view="([^"]+)"\]$/.exec(query);
         if (view) return selection(views.filter(node => node.attributes['data-view'] === view[1]));
-        const route = /^\[data-(destination|task|server-task|routing-group)="([^"]+)"\]$/.exec(query);
+        const route = /^\[data-(destination|task|server-task|routing-group|routing-detail|wp-task|wp-field|cache-task|cache-stage|php-task|php-stage|status-mode|status-stage)="([^"]+)"\]$/.exec(query);
         if (route) return selection(({destination:tabs,task:siteTasks,
-          'server-task':serverTasks,'routing-group':groups})[route[1]].filter(node =>
+          'server-task':serverTasks,'routing-group':groups,...taskNodes})[route[1]].filter(node =>
           node.attributes['data-' + route[1]] === route[2]));
         assert.ok(elements.has(query), 'Unexpected plugin selector: ' + query);
         return selection([elements.get(query)]);
@@ -330,7 +367,7 @@ function loadUi() {
   function $(value) {
     if (value === '#ach-customizer') return selection([root]);
     if (value && typeof value === 'object' && value.handlers) return selection([value]);
-    if (typeof value === 'string' && /^<(tr|td|option|time|span)\b/.test(value)) {
+    if (typeof value === 'string' && /^<(tr|td|option|time|span|button)\b/.test(value)) {
       return selection([fakeNode(value.slice(1).split(/\W/)[0])]);
     }
     throw new Error('Unexpected unscoped jQuery target: ' + String(value));
@@ -688,6 +725,19 @@ function loadUi() {
     clickDestination:name => trigger(tabs.find(tab => tab.attributes['data-destination'] === name),'click'),
     clickSiteTask:name => trigger(siteTasks.find(tab => tab.attributes['data-task'] === name),'click'),
     clickServerTask:name => trigger(serverTasks.find(tab => tab.attributes['data-server-task'] === name),'click'),
+    clickSubTask:(attr,name) => trigger(taskNodes[attr].find(node => node.attributes['data-'+attr] === name),'click'),
+    currentSubTask:attr => taskNodes[attr].find(node => node.attributes['aria-current'] === 'page')?.attributes['data-'+attr],
+    subStageVisible:(attr,name) => taskNodes[attr].find(node => node.attributes['data-'+attr] === name)?.props.hidden === false,
+    navElementHidden:selector => elements.get(selector).props.hidden,
+    elementText:selector => elements.get(selector)?.textContent,
+    elementValue:selector => elements.get(selector)?.props.value,
+    followActivity:index => {
+      const tr=elements.get('#ach-activity-rows').children[index];
+      const last=tr?.children.at(-1);
+      const button=last?.children.find(node=>node.tag==='button');
+      assert.ok(button,'Expected activity owner task button');
+      trigger(button,'click');
+    },
     keyTab:(name,key) => {
       const tab=tabs.find(item => item.attributes['data-destination'] === name);
       const event=trigger(tab,'keydown',{key});
@@ -5330,7 +5380,8 @@ test('S1b: selected website stays explicit across WordPress, routing and Cache',
   assert.equal(ui.workflowVisible('wordpress'),true);
   assert.equal(ui.workflowVisible('hosts'),false);
   ui.clickSiteTask('routing');
-  assert.equal(ui.workflowVisible('hosts'),true);
+  assert.equal(ui.workflowVisible('intro'),true);
+  assert.equal(ui.workflowVisible('hosts'),false,'Routing shows one clear task at a time');
   assert.equal(ui.workflowVisible('diagnostics'),true);
   assert.equal(ui.workflowVisible('aliases'),false);
   assert.equal(ui.workflowVisible('witness'),false);
@@ -5579,7 +5630,7 @@ test('Activity records show a complete WARNING label and a semantic two-line UTC
     datetime:'2026-11-22T04:57:40+00:00',lines:['2026-11-22','04:57:40+00:00']
   }]);
   assert.equal(ui.activityRows()[0][1],'WARNING');
-  assert.equal(ui.activityRows()[0][4],'a'.repeat(32));
+  assert.match(ui.activityRows()[0][4], /^a{32}Open task \(Recheck first\)$/);
 });
 
 test('Activity panel filters read-only structured events and uses text rendering', () => {
@@ -10141,4 +10192,150 @@ test('Native WP malformed policy may never silently re-enable unattended Hosts e
   assert.match(ui.state().wpTerminalStatus,/Unknown policy response/);
   assert.equal(ui.state().wpTerminalEnableDisabled,true);
   assert.equal(ui.state().wpTerminalDisableDisabled,true);
+});
+
+test('S2: Routing tasks expose exactly one selected-site diagnostic and navigate without creating a writer', () => {
+  const ui=loadUi();
+  ui.openSites().respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.clickSiteTask('routing');
+  assert.equal(ui.workflowVisible('intro'),true);
+  assert.equal(ui.workflowVisible('diagnostics'),true);
+  assert.equal(ui.workflowVisible('hosts'),false);
+  assert.equal(ui.workflowVisible('reconcile'),false);
+  const count=ui.requests.length;
+  ui.clickSubTask('routing-detail','hosts');
+  assert.equal(ui.currentSubTask('routing-detail'),'hosts');
+  assert.equal(ui.workflowVisible('diagnostics'),false);
+  assert.equal(ui.workflowVisible('hosts'),true);
+  ui.clickSubTask('routing-detail','reconcile');
+  assert.equal(ui.workflowVisible('hosts'),false);
+  assert.equal(ui.workflowVisible('reconcile'),true);
+  assert.match(ui.elementText('#ach-routing-task-effect'),/Recovery/);
+  assert.equal(ui.requests.length,count,'Choosing read-only task never dispatches an Apply/Restore');
+});
+
+test('S2: WordPress subtasks only show their own values and revoke stale evidence', () => {
+  const ui=loadUi();
+  ui.openSites().respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.clickSiteTask('wordpress');
+  assert.equal(ui.currentSubTask('wp-task'),'debug');
+  assert.equal(ui.subStageVisible('wp-field','debug'),true);
+  assert.equal(ui.subStageVisible('wp-field','cron'),false);
+  ui.clickSubTask('wp-task','cron');
+  assert.equal(ui.elementValue('#ach-wp-settings-kind'),'cron');
+  assert.equal(ui.subStageVisible('wp-field','debug'),false);
+  assert.equal(ui.subStageVisible('wp-field','cron'),true);
+  const before=ui.requests.length;
+  ui.clickSubTask('wp-task','https');
+  assert.equal(ui.elementValue('#ach-wp-settings-kind'),'https');
+  assert.equal(ui.subStageVisible('wp-field','cron'),false);
+  assert.match(ui.elementText('#ach-wp-task-effect'),/certificate.*NOT verified/);
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  assert.equal(ui.requests.length,before,'Selection alone never writes WordPress settings');
+});
+
+test('S3: Cache stages provide a findable Recheck without duplicated backend actions', () => {
+  const ui=loadUi();
+  ui.openSites().respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.clickSiteTask('cache');
+  assert.equal(ui.subStageVisible('cache-stage','inspect'),true);
+  assert.equal(ui.subStageVisible('cache-stage','clear'),false);
+  ui.clickSubTask('cache-task','clear');
+  assert.equal(ui.subStageVisible('cache-stage','clear'),true);
+  assert.equal(ui.subStageVisible('cache-stage','inspect'),false);
+  assert.equal(ui.subStageVisible('cache-stage','configure'),false);
+  assert.match(ui.elementText('#ach-cache-task-effect'),/verified URL/);
+  const n=ui.requests.length;
+  ui.statusClick('#ach-cache-clear-recheck-route');
+  assert.equal(ui.currentSubTask('cache-task'),'configure');
+  assert.equal(ui.subStageVisible('cache-stage','configure'),true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  ui.clickSubTask('cache-task','bridge');
+  ui.statusClick('#ach-bridge-recheck-route');
+  assert.equal(ui.currentSubTask('cache-task'),'configure');
+  assert.equal(ui.requests.length,n,'Navigation is not a new Cache management endpoint');
+});
+
+test('S3: PHP stage chooser retains one shared service and independent saved recovery', () => {
+  const ui=loadUi();
+  ui.clickDestination('server');ui.clickServerTask('php');
+  assert.equal(ui.currentSubTask('php-task'),'inspect');
+  const n=ui.requests.length;
+  ui.clickSubTask('php-task','restore');
+  assert.equal(ui.subStageVisible('php-stage','restore'),true);
+  assert.equal(ui.subStageVisible('php-stage','policy'),false);
+  assert.match(ui.elementText('#ach-php-task-effect'),/Recovery/);
+  ui.clickSubTask('php-task','apply');
+  assert.equal(ui.subStageVisible('php-stage','apply'),true);
+  ui.statusClick('#ach-php-preview-route');
+  assert.equal(ui.currentSubTask('php-task'),'policy');
+  assert.equal(ui.requests.length,n,'Choosing PHP screen does not Apply or Restore');
+});
+
+test('S4: Error Pages stages never silently change branding scope or publication', () => {
+  const ui=loadUi();
+  ui.openStatus();
+  assert.equal(ui.currentSubTask('status-mode'),'design');
+  assert.equal(ui.subStageVisible('status-stage','design'),true);
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  const n=ui.requests.length;
+  ui.clickSubTask('status-mode','site');
+  assert.equal(ui.subStageVisible('status-stage','site'),true);
+  assert.equal(ui.subStageVisible('status-stage','design'),false);
+  assert.equal(ui.navElementHidden('#ach-status-task-setup'),false);
+  assert.match(ui.elementText('#ach-status-task-setup'),/Website override/);
+  ui.clickSubTask('status-mode','defaults');
+  assert.equal(ui.subStageVisible('status-stage','defaults'),true);
+  assert.equal(ui.navElementHidden('#ach-status-task-setup'),true,
+    'Global + 404 matches future-site defaults without auto-selecting other scope');
+  ui.clickDestination('server');ui.clickServerTask('http');
+  assert.equal(ui.subStageVisible('status-stage','fallback'),true);
+  assert.equal(ui.navElementHidden('#ach-status-modes'),true);
+  assert.equal(ui.navElementHidden('#ach-status-server-return'),false);
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  ui.statusClick('#ach-status-design-shortcut');
+  assert.equal(ui.selectedDestination(),'status');
+  assert.equal(ui.subStageVisible('status-stage','design'),true);
+  assert.ok(ui.requests.slice(n).every(request => /s=(status_preferences|get_php_versions)$/.test(request.options.url)),
+    'Stage navigation must not write: ' + ui.requests.slice(n).map(r=>r.options.url).join(', '));
+});
+
+test('S4: Activity follows owning recovery without selecting a target or dispatching a write', () => {
+  const ui=loadUi();
+  ui.openActivity().respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[{
+    schema:1,time_utc:'2026-11-23T12:00:00+00:00',level:'WARNING',module:'php_fpm',
+    action:'fpm_rollback',stage:'recheck',outcome:'Recovery Required',target:'PHP85',
+    detail:'Inspect saved service recovery',error_class:'',
+    operation_id:'a'.repeat(32),recovery_id:'b'.repeat(32)
+  }]});
+  const count=ui.requests.length;
+  ui.followActivity(0);
+  assert.equal(ui.selectedDestination(),'server');
+  assert.equal(ui.selectedServerTask(),'php');
+  assert.equal(ui.subStageVisible('php-stage','restore'),true);
+  assert.equal(ui.requests.length,count+1,'Only passive PHP inventory read may start');
+  assert.match(ui.requests.at(-1).options.url,/s=get_php_versions$/);
+});
+
+test('S2-S4: all original privileged action controls still have one canonical owner', () => {
+  for (const id of ['ach-guard-apply','ach-guard-restore','ach-wp-settings-apply',
+    'ach-wp-settings-restore','ach-cache-activation-apply','ach-cache-activation-restore',
+    'ach-cache-clear-files','ach-cache-clear-url','ach-wp-cache-setup','ach-wp-cache-restore',
+    'ach-bridge-enable','ach-bridge-disable','ach-fpm-commit','ach-fpm-rollback',
+    'ach-status-manage-apply','ach-status-manage-restore',
+    'ach-status-default-apply','ach-status-default-restore',
+    'ach-status-unbound-apply','ach-status-unbound-restore',
+    'ach-status-tls-apply','ach-status-tls-restore',
+    'ach-status-stopped-apply','ach-status-stopped-restore']) {
+    assert.equal(html.split('id="'+id+'"').length,2,'Unique owner of '+id);
+  }
+  for (const name of ['inspect','connect','configure','clear','bridge'])
+    assert.match(html,new RegExp('data-cache-stage="'+name+'"'));
+  for (const name of ['inspect','policy','apply','restore'])
+    assert.match(html,new RegExp('data-php-stage="'+name+'"'));
+  for (const name of ['design','site','defaults','fallback','stopped'])
+    assert.match(html,new RegExp('data-status-stage="'+name+'"'));
 });

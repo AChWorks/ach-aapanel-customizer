@@ -462,6 +462,18 @@
   #ach-customizer .ach-main .ach-task-nav button[aria-current="page"] {
     border-color:#81b59a; background:#edf6f0; color:#245a38; font-weight:700;
   }
+  #ach-customizer .ach-subtask-nav {
+    grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); padding:8px 0 12px;
+    background:transparent;
+  }
+  #ach-customizer .ach-task-effect {
+    margin:0; padding:10px 12px; border:1px solid #d2e1e6; border-radius:8px;
+    background:#f3f8fa; color:#334e60; line-height:1.5; overflow-wrap:anywhere;
+  }
+  #ach-customizer .ach-activity-owner {
+    display:block; margin-top:8px; min-height:36px; font-size:12px;
+    white-space:normal; text-align:left;
+  }
   #ach-customizer .ach-task-empty {
     padding:16px; border:1px solid #d4e2ee; background:#f6f9fc;
     border-radius:9px; color:#314c62;
@@ -618,8 +630,12 @@
     </section>
     <section class="ach-view" id="ach-panel-routing" aria-label="Website and server workflows" data-view="routing" role="region" hidden>
       <div class="ach-workflow" data-routing-group="intro">
-      <h4>Routing &amp; Nginx</h4>
-      <p class="ach-note">Local Hosts aliases are available without selecting a website. Other Nginx and recovery inspections still use the selected native site.</p>
+        <nav class="ach-task-nav ach-subtask-nav" id="ach-routing-workflows" aria-label="Selected website routing tasks">
+          <button type="button" data-routing-detail="diagnostics" aria-current="page">Check Nginx routing</button>
+          <button type="button" data-routing-detail="hosts" aria-current="false">Local Hosts for this site</button>
+          <button type="button" data-routing-detail="reconcile" aria-current="false">Review drift &amp; recovery</button>
+        </nav>
+        <p class="ach-task-effect" id="ach-routing-task-effect" role="status" aria-live="polite">Read-only inspection of the selected site's generated Nginx configuration and local HTTP/80. No live change.</p>
       </div>
       <div class="ach-workflow" data-routing-group="aliases">
       <div class="ach-note" aria-label="Origin-local Hosts aliases">
@@ -796,9 +812,16 @@
         </div>
       </div>
       <div class="ach-workflow" data-routing-group="wordpress">
+      <nav class="ach-task-nav ach-subtask-nav" id="ach-wordpress-workflows" aria-label="WordPress setting tasks">
+        <button type="button" data-wp-task="debug" aria-current="page">Debug mode</button>
+        <button type="button" data-wp-task="cron" aria-current="false">System WP-Cron</button>
+        <button type="button" data-wp-task="xmlrpc" aria-current="false">Block XML-RPC</button>
+        <button type="button" data-wp-task="https" aria-current="false">HTTPS URLs</button>
+      </nav>
+      <p class="ach-task-effect" id="ach-wp-task-effect" role="status" aria-live="polite">Change WP_DEBUG in this website's wp-config.php. Recheck the source before Apply or Restore.</p>
       <div class="ach-note" aria-label="Selected WordPress operational settings">
-        <strong>Selected WordPress — HTTPS URLs, Debug, Cron and XML-RPC (manual)</strong>
-        <p>Choose an operation, select a website and run Recheck. Review the result before you Apply or Restore that setting. Changes are never automatic.</p>
+        <strong>Current WordPress task</strong>
+        <p>Choose a setting above, Recheck its actual source, then Apply or Restore only that setting. No other WordPress task is changed automatically.</p>
         <p><strong>Before changing WordPress HTTPS URLs:</strong> Make sure this website's HTTPS connection and certificate already work, or its admin pages may become unreachable.</p>
         <details class="ach-help"><summary>What does each WordPress operation change?</summary>
           <p><strong>Debug:</strong> changes one verified <code>wp-config.php</code> constant.</p>
@@ -808,16 +831,16 @@
           <p>Restore reverses only the matching owned change. If another tool changed the source, run Recheck; never overwrite a foreign setting blindly. Exact recovery details appear after Recheck.</p>
         </details>
         <div class="ach-controls">
-          <div class="ach-inline-field"><label for="ach-wp-settings-kind">Operation</label>
+          <div class="ach-inline-field" hidden><label for="ach-wp-settings-kind">Operation (controlled by task buttons)</label>
             <select id="ach-wp-settings-kind">
               <option value="debug">WordPress debug mode</option>
               <option value="cron">System WP-Cron scheduler</option>
               <option value="xmlrpc">Block XML-RPC requests</option>
               <option value="https">WordPress HTTPS home/siteurl</option>
             </select></div>
-          <div class="ach-inline-field"><label for="ach-wp-settings-debug">Debug mode (WP_DEBUG)</label>
+          <div class="ach-inline-field" data-wp-field="debug"><label for="ach-wp-settings-debug">Debug mode (WP_DEBUG)</label>
             <select id="ach-wp-settings-debug"><option value="true">Enable</option><option value="false" selected>Disable</option></select></div>
-          <div class="ach-inline-field"><label for="ach-wp-settings-interval">Cron minute step (resets hourly)</label>
+          <div class="ach-inline-field" data-wp-field="cron" hidden><label for="ach-wp-settings-interval">Cron minute step (resets hourly)</label>
             <input id="ach-wp-settings-interval" type="number" min="1" max="59" step="1" value="5" disabled /></div>
         </div>
         <div class="ach-controls">
@@ -829,13 +852,23 @@
         <details class="ach-technical-report"><summary>WordPress setting and Recovery evidence</summary>
           <p id="ach-wp-settings-result" class="ach-status-metadata" role="status" aria-live="polite">No WordPress settings source inspected.</p>
         </details>
+        <p>Need native WordPress installer/failed-install diagnostics? Those are server-local observations and do not use this selected site's WordPress settings.</p>
+        <div class="ach-controls"><button type="button" id="ach-wordpress-installer-route">Open server installer diagnostics</button></div>
       </div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-label="Website cache" data-view="cache" role="region" hidden>
       <h4>FastCGI Cache</h4>
       <p class="ach-note">Inspect FastCGI Cache sources and ownership before changing them. Native selected-site file clear is available only after a verified Applied Recheck and separate approval. Nginx Helper Purge All is a separate vendor operation; this plugin neither intercepts it nor certifies it as site-safe.</p>
-      <details class="ach-help"><summary>Cache workflow and recovery</summary><p>Select a website, inspect its sources, preview a site-owned policy, then Recheck. Apply requires a separate approval; keep the recovery ID and use Restore when needed.</p></details>
+      <nav class="ach-task-nav ach-subtask-nav" id="ach-cache-tasks" aria-label="Selected website Cache tasks">
+        <button type="button" data-cache-task="inspect" aria-current="page">Inspect &amp; probe</button>
+        <button type="button" data-cache-task="connect" aria-current="false">Connect WordPress</button>
+        <button type="button" data-cache-task="configure" aria-current="false">Apply &amp; restore</button>
+        <button type="button" data-cache-task="clear" aria-current="false">Clear Cache</button>
+        <button type="button" data-cache-task="bridge" aria-current="false">Advanced URL mapping</button>
+      </nav>
+      <p class="ach-task-effect" id="ach-cache-task-effect" role="status" aria-live="polite">Read the selected site's Nginx Cache sources and run optional local synthetic checks; no configuration is changed.</p>
+      <div class="ach-workflow" data-cache-stage="inspect">
       <p class="ach-note"><strong>Inspect this website's Cache (read-only):</strong> See where its Nginx Cache files may be stored and whether its configuration shares a directory with other sites. This does not prove a Cache is safe to clear.</p>
       <details class="ach-help"><summary>What does the Cache audit check?</summary>
         <p>Reads the site's VHost/PHP snippets and aaPanel's top-level <code>0.fastcgi_cache.conf</code> source for zone paths, shared-directory Purge All risk, bypass/write rules, Host keys and ignored headers. Source inspection cannot prove effective routing, private-data safety, live Cache hits or safe vendor Purge All.</p>
@@ -857,6 +890,8 @@
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
       <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
+      </div>
+      <div class="ach-workflow" data-cache-stage="connect" hidden>
       <div class="ach-note" aria-label="One-time WordPress Nginx Helper connection">
         <strong>WordPress + Nginx Helper — one-time connection</strong>
         <p>After installing Nginx Helper and ACh aaPanel Bridge in this WordPress site, check the connection and choose Connect once. Nginx and PHP may reload.</p>
@@ -870,6 +905,8 @@
         </div>
         <p id="ach-wp-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native WordPress site. Connect is the one-click authorization; there is no separate checklist or approval checkbox.</p>
       </div>
+      </div>
+      <div class="ach-workflow" data-cache-stage="configure" hidden>
       <div class="ach-note" aria-label="Guarded site-specific FastCGI Cache activation">
         <strong>Site-owned FastCGI Cache — manual Apply / Restore</strong>
         <p>Create an isolated FastCGI Cache for one verified website, with a separate approval and shared Nginx reload.</p>
@@ -888,6 +925,11 @@
         <p id="ach-cache-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore is unavailable until Recheck Cache / recovery confirms a saved, site-owned recovery. No verified recovery means no Restore.</p>
         <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" disabled /> I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
+      </div>
+      </div>
+      <div class="ach-workflow" data-cache-stage="clear" hidden>
+        <p>First Recheck the selected site's Cache ownership and Applied state. The Recheck action is under Apply &amp; restore; it does not modify files.</p>
+        <div class="ach-controls"><button type="button" id="ach-cache-clear-recheck-route">Open Cache Recheck / recovery</button></div>
         <p class="ach-note"><strong>Clear this website's Cache files:</strong> After a fresh Applied Recheck and your approval, remove verified files only from this site's isolated Cache directory. Other sites remain untouched; new requests may refill the Cache. This is <strong>not</strong> Nginx Helper Purge All.</p>
       <details class="ach-help"><summary>Exactly which files can be cleared?</summary>
         <p>The verified site-owned physical directory may contain earlier Cache generations and aliases. Physical isolation from peer sites is checked again before clearing. The operation does not modify Nginx, shared WORDPRESS Cache, Nginx Helper or saved recovery journals.</p>
@@ -904,7 +946,11 @@
         <p id="ach-cache-url-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm this site's Cache is Applied; enter a canonical URL path.</p>
         <label><input id="ach-cache-url-reviewed" type="checkbox" aria-describedby="ach-cache-url-why" disabled /> I approve removing only this site's exact URL Cache entries, leaving other paths and sites unchanged.</label>
         <div class="ach-controls"><button type="button" id="ach-cache-clear-url" class="btn btn-warning" disabled>Clear selected URL Cache</button></div>
-        <details class="ach-help"><summary>Optional WordPress Bridge URL mapping (no Purge All)</summary>
+      </div>
+      <div class="ach-workflow" data-cache-stage="bridge" hidden>
+        <p>Provision requires a current Applied Cache Recheck. Open the owning configuration task to verify the selected site's exact Cache generation.</p>
+        <div class="ach-controls"><button type="button" id="ach-bridge-recheck-route">Open Cache Recheck / recovery</button></div>
+        <details class="ach-help" open><summary>Optional WordPress Bridge URL mapping (no Purge All)</summary>
           <p>Only a freshly Rechecked Applied native WordPress Cache may provision a root-owned site manifest for the independently installed ACh aaPanel Bridge. The WordPress plugin and Nginx Helper must be activated separately; the verified Bridge maps exact, generation-matched public GET/HEAD URL objects for its own post/homepage dispatch through the Helper's per-URL filter. It does not intercept the vendor's independent recursive Purge All, change the Helper's configured cache path, clear a shared root, reload Nginx, or install plugins automatically. Restore revokes the manifest before retiring the Nginx generation.</p>
           <div class="ach-controls"><button type="button" id="ach-bridge-inspect" disabled>Inspect Bridge manifest</button></div>
           <p id="ach-bridge-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a website; inspect does not prove Helper activation or live Nginx workers.</p>
@@ -925,6 +971,14 @@
         <div class="ach-inline-field"><label for="ach-php-version">Select installed PHP version</label>
           <select id="ach-php-version" name="php_version" form="ach-php-form" disabled required><option value="">Discover PHP installations first</option></select></div>
       </div>
+      <nav class="ach-task-nav ach-subtask-nav" id="ach-php-tasks" aria-label="PHP shared service tasks">
+        <button type="button" data-php-task="inspect" aria-current="page">Inspect service &amp; sites</button>
+        <button type="button" data-php-task="policy" aria-current="false">Policy &amp; preview</button>
+        <button type="button" data-php-task="apply" aria-current="false">Apply prepared change</button>
+        <button type="button" data-php-task="restore" aria-current="false">Recover PHP service</button>
+      </nav>
+      <p class="ach-task-effect" id="ach-php-task-effect" role="status" aria-live="polite">Inspect the selected PHP master process, socket and assigned native site files. This does not modify the shared service.</p>
+      <div class="ach-workflow" data-php-stage="inspect">
       <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP service + site files (read-only)</button></div>
       <p id="ach-php-runtime-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect the selected PHP service and site file assignments.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
@@ -935,6 +989,8 @@
         <thead><tr><th>Site ID</th><th>Native site key</th><th>File-assigned PHP</th><th>Attribution</th></tr></thead>
         <tbody id="ach-php-topology-rows"><tr><td colspan="4">Inspect selected PHP to map source files.</td></tr></tbody>
       </table></div>
+      </div>
+      <div class="ach-workflow" data-php-stage="policy" hidden>
       <details class="ach-help">
         <summary>What do these PHP-FPM settings mean?</summary>
         <dl>
@@ -985,6 +1041,10 @@
       <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Configured / PHP default</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
       <p id="ach-impact-summary" role="status" aria-live="polite">Shared PHP-FPM site attribution not loaded.</p>
       <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-impact-rows"></tbody></table></div>
+      </div>
+      <div class="ach-workflow" data-php-stage="apply" hidden>
+      <p>Prepare is available only after a fresh file preview in Policy &amp; preview. Preparation is read-only; Apply requires the shared-service review below.</p>
+      <div class="ach-controls"><button type="button" id="ach-php-preview-route">Open policy &amp; preview</button></div>
       <div class="ach-note" aria-label="Guarded manual PHP-FPM change">
         <strong>Manual shared PHP-FPM change — verified PHP 8.1 / 8.5</strong>
         <p>PHP 8.1 or 8.5 on aaPanel 8.0.7 + Nginx with unambiguous site-file mapping. Changes the shared <code>[www]</code> pool, checks syntax, reloads PHP-FPM and verifies service health. Other consumers may be affected; file mapping does not prove traffic health. No automatic reapply after external changes.</p>
@@ -997,7 +1057,12 @@
           <label><input id="ach-fpm-approval" type="checkbox" /> I approve changing the selected PHP version’s shared [www] pool for all affected consumers.</label>
           <div class="ach-controls"><button id="ach-fpm-commit" type="button" class="btn btn-danger" disabled>Apply shared PHP-FPM change</button></div>
         </div>
-        <hr />
+      </div>
+      </div>
+      <div class="ach-workflow" data-php-stage="restore" hidden>
+      <div class="ach-note" aria-label="Exact saved PHP-FPM recovery">
+        <strong>Restore saved PHP-FPM configuration</strong>
+        <p>Recovery is independent of the discovered PHP inventory. Inspect the saved Recovery ID and current shared-site impact before restoring; the owning PHP service may reload.</p>
         <div class="ach-fields">
           <div><label for="ach-fpm-recovery-version">Saved recovery service (independent of PHP inventory)</label>
             <select id="ach-fpm-recovery-version">
@@ -1014,10 +1079,23 @@
           <div class="ach-controls"><button id="ach-fpm-rollback" type="button" class="btn btn-warning" disabled>Restore saved configuration</button></div>
         </div>
       </div>
+      </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-label="Error pages and default routing" data-view="status" role="region" hidden>
-      <h4>Status Pages · Branding &amp; delivery</h4>
-      <p class="ach-note">Choose a template and scope to preview. Save/Reset changes branding only; live Apply/Restore requires Recheck and explicit approval. Unsupported combinations are preview-only; unknown-SNI HTTPS/443 rejection is a separate optional, recoverable operation.</p>
+      <h4>Error pages — design and delivery</h4>
+      <p class="ach-note">Preview and Save change branding only. Live site or shared routing changes use their own Recheck, approval and exact Recovery below; unsupported choices stay preview-only.</p>
+      <nav class="ach-task-nav ach-subtask-nav" id="ach-status-modes" aria-label="Error page tasks">
+        <button type="button" data-status-mode="design" aria-current="page">Design &amp; preview</button>
+        <button type="button" data-status-mode="site" aria-current="false">Show on website</button>
+        <button type="button" data-status-mode="defaults" aria-current="false">New site defaults</button>
+        <button type="button" data-status-mode="stopped" aria-current="false">Stopped website</button>
+        <button type="button" data-status-mode="fallback" aria-current="false">Server HTTP/TLS</button>
+      </nav>
+      <div class="ach-controls" id="ach-status-server-return" hidden>
+        <button type="button" id="ach-status-design-shortcut">Edit error page design</button>
+      </div>
+      <p class="ach-task-effect" id="ach-status-task-effect" role="status" aria-live="polite">Preview any of 11 templates in English/LTR or Persian/RTL. Saving branding does not publish it.</p>
+      <p id="ach-status-task-setup" class="ach-availability" role="status" aria-live="polite" hidden></p>
       <div class="ach-fields">
         <div><label for="ach-status-template">Template</label><select id="ach-status-template">
           <option value="403">403 Forbidden</option><option value="404" selected>404 Not Found</option>
@@ -1041,6 +1119,7 @@
           </div>
           <small id="ach-status-sites-state" role="status">Available websites load when selecting website scope.</small></div>
       </div>
+      <div class="ach-workflow" data-status-stage="design">
       <p id="ach-status-source" role="status">Branding not loaded.</p>
       <div class="ach-status-fields">
         <div><label for="ach-status-name">Brand name</label><input id="ach-status-name" maxlength="80" autocomplete="off" /></div>
@@ -1070,6 +1149,9 @@
         <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
         <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
       </div>
+      </div>
+      <div class="ach-workflow" data-status-stage="site" hidden>
+      <p>Choose <strong>Website override</strong> and a verified native website above. 404/502 use exact selected-site delivery; the 50x Nginx-generated template requires the extension method. Recheck before a live Apply or Restore.</p>
       <div id="ach-status-site-audit" hidden>
         <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
         <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
@@ -1107,6 +1189,9 @@
         <div class="ach-controls"><button id="ach-status-manage-restore" type="button" aria-describedby="ach-status-site-restore-why" class="btn btn-warning" disabled>Restore selected site status</button></div>
         <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site recovery before Restore. An uncertain write must not be blindly repeated.</p>
       </div>
+      </div>
+      <div class="ach-workflow" data-status-stage="defaults" hidden>
+      <p>Choose <strong>Global defaults</strong> and <strong>404</strong>, <strong>502</strong> or <strong>New site</strong> above. Recheck the template copied into future websites; existing websites stay unchanged.</p>
       <div class="ach-note" id="ach-status-default-section" aria-label="aaPanel new-site source defaults">
         <strong>Panel default templates for future newly created sites</strong>
         <p>Global branding scope only. Choose <code>new-site</code>, <code>404</code> or <code>502</code> above. aaPanel copies <code>defaultDoc.html</code>, <code>404.html</code> or <code>502.html</code> when creating a new site. Changing these sources <strong>does not change existing sites or active HTTP/Nginx routing</strong>, and does not reload Nginx. Recheck first, then approve the exact source replacement; Restore uses the saved original bytes and recovery ID.</p>
@@ -1119,6 +1204,9 @@
         <div class="ach-controls"><button id="ach-status-default-restore" type="button" aria-describedby="ach-status-default-restore-why" class="btn btn-warning" disabled>Restore previous default source</button></div>
         <p id="ach-status-default-result" role="status" aria-live="polite">Choose global scope and a supported template, then Recheck. No active site is modified.</p>
       </div>
+      </div>
+      <div class="ach-workflow" data-status-stage="fallback" hidden>
+      <p>Choose <strong>Global defaults</strong> and <strong>Unbound domain</strong> above, then Recheck the HTTP/80 and HTTPS/443 policies independently. Both affect the server's shared Nginx listeners; neither changes a selected website's branding.</p>
       <div class="ach-note" id="ach-status-unbound-section" aria-label="HTTP unbound default-server management" hidden>
         <strong>Unknown domains · global HTTP/80 catch-all (native IPv4 / IPv6)</strong>
         <p>Show a 404 page for unknown HTTP hostnames on this server's existing Nginx listeners. This is a <strong>global change</strong> and requires a shared Nginx reload and your approval. Named websites and HTTPS are left unchanged.</p>
@@ -1150,6 +1238,9 @@
         <div class="ach-controls"><button id="ach-status-tls-restore" type="button" class="btn btn-warning" disabled>Restore previous TLS default routing</button></div>
         <p id="ach-status-tls-result" class="ach-status-metadata" role="status" aria-live="polite">Choose global/unbound and Recheck. No HTTPS setting has been changed.</p>
       </div>
+      </div>
+      <div class="ach-workflow" data-status-stage="stopped" hidden>
+      <p>Choose <strong>Website override</strong>, <strong>Stopped</strong> and a verified running website above. This arms one site-owned HTTP 503 rule for aaPanel SiteStop; it does not stop or start the site.</p>
       <div class="ach-note" id="ach-status-stopped-section" aria-label="Stopped-site 503 management" hidden>
         <strong>Stopped website · real HTTP 503 (native SiteStop/Start)</strong>
         <p>Show a 503 page when this website is stopped in aaPanel. The rule stays inactive while the site runs. Enabling or restoring it requires approval and reloads shared Nginx.</p>
@@ -1165,10 +1256,11 @@
         <div class="ach-controls"><button id="ach-status-stopped-restore" type="button" aria-describedby="ach-status-stopped-restore-why" class="btn btn-warning" disabled>Restore native stopped-site route</button></div>
         <p id="ach-status-stopped-result" role="status" aria-live="polite">Select a verified website, stopped template and locale, then Recheck. Native stop requires a fresh website inventory.</p>
       </div>
+      </div>
     </section>
     <section class="ach-view" id="ach-panel-activity" aria-label="Activity and recovery" data-view="activity" role="region" hidden>
-      <h4>Activity &amp; Logs</h4>
-      <p class="ach-note">Filter by severity and module. Use Operation or Recovery IDs to investigate results and expand technical details when needed. Records are limited to the primary aaPanel administrator.</p>
+      <h4>Activity &amp; recovery</h4>
+      <p class="ach-note">Filter by severity or module, inspect the exact Operation / Recovery ID, then open the owning task and Recheck current state. A log entry is not permission to Restore; opening a task never automatically selects a website or applies a change. Records are limited to the primary aaPanel administrator.</p>
       <div class="ach-controls">
         <div class="ach-inline-field"><label for="ach-activity-level">Severity</label>
           <select id="ach-activity-level"><option value="">All</option><option value="ERROR">Errors</option><option value="WARNING">Warnings</option><option value="INFO">Information</option><option value="DEBUG">Debug</option></select></div>
@@ -2377,7 +2469,23 @@
     return {id:id,site:site,kind:kind,desired:desired,interval:interval,
       key:JSON.stringify([id,site.name,site.snapshot,kind,desired,interval])};
   }
+  var wpTaskEffects = {
+    debug:'Change WP_DEBUG in this selected website\'s wp-config.php. Only the verified config source is affected; no Nginx reload.',
+    cron:'Install or remove this site\'s system WP-Cron job running as www. Recheck the site config and saved Recovery before any change.',
+    xmlrpc:'Block XML-RPC POST requests using a website-owned WordPress must-use plugin. This is not the separate Nginx XML-RPC guard.',
+    https:'Change only this WordPress site\'s home and siteurl database options to HTTPS. The certificate, public TLS reachability and redirects are NOT verified by this action.'
+  };
+  function renderWordPressTask() {
+    var kind = String(root.find('#ach-wp-settings-kind').val() || 'debug');
+    if (!Object.prototype.hasOwnProperty.call(wpTaskEffects,kind)) return;
+    root.find('[data-wp-task]').attr('aria-current','false');
+    root.find('[data-wp-task="'+kind+'"]').attr('aria-current','page');
+    root.find('[data-wp-field]').prop('hidden',true);
+    root.find('[data-wp-field="'+kind+'"]').prop('hidden',false);
+    root.find('#ach-wp-task-effect').text(wpTaskEffects[kind]);
+  }
   function wpSettingsLock() {
+    renderWordPressTask();
     var selected = wpSettingsSelection();
     var locked = wpSettingsBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable';
     var match = selected && wpSettingsEvidence &&
@@ -2499,7 +2607,14 @@
     });
   }
   root.find('#ach-wp-settings-kind, #ach-wp-settings-debug, #ach-wp-settings-interval')
-    .on('input change', wpSettingsInvalidate);
+    .on('input change', function () { wpSettingsInvalidate(); renderWordPressTask(); });
+  root.find('[data-wp-task]').on('click', function () {
+    var kind = $(this).attr('data-wp-task');
+    if (wpSettingsBusy || !Object.prototype.hasOwnProperty.call(wpTaskEffects,kind)) return;
+    if (root.find('#ach-wp-settings-kind').val() !== kind)
+      root.find('#ach-wp-settings-kind').val(kind).trigger('change');
+    else renderWordPressTask();
+  });
   root.find('#ach-wp-settings-recheck').on('click',function(){wpSettingsRequest('recheck');});
   root.find('#ach-wp-settings-apply').on('click',function(){wpSettingsRequest('apply');});
   root.find('#ach-wp-settings-restore').on('click',function(){wpSettingsRequest('restore');});
@@ -4382,6 +4497,7 @@
     root.find('#ach-status-stopped-section').prop('hidden', !stopped);
     root.find('#ach-status-workflow-note').prop('hidden',
       manage || defaults || unbound || stopped);
+    renderStatusStage();
   }
   function statusLock(busy) {
     statusBusy = busy;
@@ -5878,6 +5994,40 @@
     statusClearPreview();
     statusLock(statusBusy);
   });
+  function activityOwnerTask(entry) {
+    if (entry.module === 'php_fpm') {
+      if (/rollback|restore|recovery/.test(entry.action)) return ['server','php','restore'];
+      if (/fpm_apply|fpm_prepare/.test(entry.action)) return ['server','php','apply'];
+      if (/policy|auto|preview_php_fpm/.test(entry.action)) return ['server','php','policy'];
+      return ['server','php','inspect'];
+    }
+    if (entry.module === 'monitor') return ['server','monitor'];
+    if (entry.module === 'status_pages') {
+      if (/unbound|status_tls/.test(entry.action)) return ['server','http'];
+      if (/stopped/.test(entry.action)) return ['status',null,'stopped'];
+      if (/default/.test(entry.action)) return ['status',null,'defaults'];
+      if (/status_manage|status_apply|status_restore|status_probe|status_inspect/.test(entry.action))
+        return ['status',null,'site'];
+      return ['status',null,'design'];
+    }
+    if (entry.module === 'lifecycle') return ['server','hosts'];
+    if (entry.module === 'websites') {
+      var action = entry.action;
+      if (/nginx_guard|manage_nginx_protection/.test(action)) return ['websites','protection'];
+      if (/abusive_scan|manage_abusive_scan/.test(action)) return ['server','attack'];
+      if (/wp_settings/.test(action)) return ['websites','wordpress'];
+      if (/manage_wordpress_cache/.test(action)) return ['websites','cache','connect'];
+      if (/cache.*(clear|url)|bridge/.test(action)) return ['websites','cache',/bridge/.test(action)?'bridge':'clear'];
+      if (/manage_cache_policy|preview_cache_activation/.test(action)) return ['websites','cache','configure'];
+      if (/cache/.test(action)) return ['websites','cache','inspect'];
+      if (/hosts_alias/.test(action)) return ['server','hosts'];
+      if (/manage_local_hosts|inspect_local_hosts/.test(action)) return ['websites','routing','hosts'];
+      if (/reconcile/.test(action)) return ['websites','routing','reconcile'];
+      if (/vhost|nginx_candidate/.test(action)) return ['websites','routing','diagnostics'];
+      return ['websites','summary'];
+    }
+    return null; // Unknown diagnostics source is not assigned a guessed writer.
+  }
   function loadActivity() {
     // Filters and refresh may change while a request is pending. Accept only
     // the latest selection, not the fastest outdated network reply.
@@ -5934,7 +6084,25 @@
         $('<td>').text(entry.level).addClass('ach-activity-' + entry.level.toLowerCase()).appendTo(tr);
         $('<td>').text(entry.module + ' / ' + entry.action + (entry.target ? ' · ' + entry.target : '')).appendTo(tr);
         $('<td>').text(entry.outcome + ' · ' + entry.stage + (entry.error_class ? ' (' + entry.error_class + ')' : '') + (entry.detail ? ': ' + entry.detail : '')).appendTo(tr);
-        $('<td>').text(entry.operation_id + (entry.recovery_id ? ' / recovery ' + entry.recovery_id : '')).appendTo(tr);
+        var identityCell = $('<td>').text(entry.operation_id +
+          (entry.recovery_id ? ' / recovery ' + entry.recovery_id : '')).appendTo(tr);
+        var owningTask = activityOwnerTask(entry);
+        if (owningTask) {
+          $('<button>').attr('type','button').addClass('ach-activity-owner')
+            .text('Open task (Recheck first)').on('click',function () {
+              // An Activity target string is never trusted as the selected site.
+              // Navigate only; backend ownership/authorization remain unchanged.
+              if (owningTask[0] === 'websites' && owningTask[1] === 'cache' && owningTask[2])
+                activeCacheStage = owningTask[2];
+              if (owningTask[0] === 'websites' && owningTask[1] === 'routing' && owningTask[2])
+                activeRoutingDetail = owningTask[2];
+              if (owningTask[0] === 'server' && owningTask[1] === 'php' && owningTask[2])
+                activePhpStage = owningTask[2];
+              if (owningTask[0] === 'status' && owningTask[2])
+                activeStatusStage = owningTask[2];
+              navigateTask(owningTask[0],owningTask[1],true);
+            }).appendTo(identityCell);
+        }
         rows.append(tr);
       });
       if (!r.entries.length) rows.append($('<tr>').append($('<td colspan="5">').text('No matching activity records.')));
@@ -6230,6 +6398,40 @@
   // backend-bound view regions are implementation details, not main menu items.
   // A task switches one canonical owner view and never duplicates a writer.
   var activeDestination = 'overview', activeTask = null;
+  var activeRoutingDetail = 'diagnostics';
+  var activeCacheStage = 'inspect', activePhpStage = 'inspect', activeStatusStage = 'design';
+  var statusStageEffects = {
+    design:'Preview any of 11 available templates in English/LTR or Persian/RTL. Save branding only; live delivery is a separate task.',
+    site:'Deliver 404/502 or Nginx 50x to one explicitly chosen website after read-only checks, fresh Recheck and exact approval.',
+    defaults:'Change the aaPanel template copied to future new websites. Existing websites and Nginx listeners are unchanged.',
+    stopped:'Arm site-owned HTTP 503 for a website when aaPanel stops it. Nginx reload and exact Recovery are separate from branding.',
+    fallback:'Unknown HTTP hostnames and unknown HTTPS SNI are distinct origin-wide Nginx policies with independent Recheck/Restore.'
+  };
+  var statusStageRequirements = {
+    design:null,
+    site:{scope:'site', templates:['404','502','50x'], note:'Choose Website override and 404, 502 or 50x above. Select a verified website before Recheck or Apply.'},
+    defaults:{scope:'global', templates:['404','502','new-site'], note:'Choose Global defaults and 404, 502 or New site above. Applies to future websites only.'},
+    stopped:{scope:'site', templates:['stopped'], note:'Choose Website override and Stopped above, then a verified native website.'},
+    fallback:{scope:'global', templates:['unbound'], note:'Choose Global defaults and Unbound domain above. HTTP/80 and HTTPS/443 actions are independent.'}
+  };
+  var cacheStageEffects = {
+    inspect:'Read the selected site\'s Nginx Cache sources. Optional synthetic local probes do not prove private-user safety or live worker state.',
+    connect:'One-time WordPress + Nginx Helper connection. Check installed plugins and native site ownership before a guarded Connect or exact Restore.',
+    configure:'Manage one isolated, site-owned FastCGI Cache with a shared Nginx reload. A fresh Preview/Recheck and saved Recovery evidence control each action.',
+    clear:'Clear an exact verified URL or selected site-owned Cache tree only after Applied Recheck. This does not perform Nginx Helper Purge All.',
+    bridge:'Optional per-site WordPress Bridge URL mapping only. The vendor Nginx Helper Purge All and unrelated Cache paths remain independent.'
+  };
+  var phpStageEffects = {
+    inspect:'Inspect this PHP process, Unix socket and native site-file attribution. No values are applied or inferred from a process check alone.',
+    policy:'Edit and preview desired shared PHP-FPM values; saving Monitor policy does not reload PHP. Automatic repair is a separate explicit opt-in.',
+    apply:'Apply only the current validated preview for this shared PHP service. The [www] pool reload can affect multiple websites.',
+    restore:'Inspect saved Recovery and current affected-site evidence before restoring this exact PHP service. Recovery is available independently of the service inventory.'
+  };
+  var routingTaskEffects = {
+    diagnostics:'Inspect selected-site Nginx VHost files, native bindings and local HTTP/80. Source-only checks do not prove active workers or public TLS.',
+    hosts:'Inspect exact selected-site aliases in this server\'s shared /etc/hosts file. Removing or restoring an alias affects origin-local resolution, not public DNS.',
+    reconcile:'Compare selected-site file/source drift and inspect the owning module before any exact Recovery action. No automatic repair or blind Restore.'
+  };
   var activeNavKey = 'overview';
   var taskScroll = {overview:0};
   var destinations = ['overview','websites','server','status','activity'];
@@ -6263,6 +6465,41 @@
     }
     return null;
   }
+  function renderStatusStage() {
+    if (typeof activeStatusStage !== 'string') return;
+    var serverFallback = activeDestination === 'server' && activeTask === 'http';
+    var statusVisible = activeDestination === 'status' || serverFallback;
+    var mode = serverFallback ? 'fallback' : activeStatusStage;
+    root.find('[data-status-stage]').prop('hidden',true);
+    if (statusVisible)
+      root.find('[data-status-stage="'+mode+'"]').prop('hidden',false);
+    root.find('#ach-status-modes').prop('hidden',serverFallback);
+    root.find('#ach-status-server-return').prop('hidden',!serverFallback);
+    root.find('[data-status-mode]').attr('aria-current','false');
+    root.find('[data-status-mode="'+activeStatusStage+'"]').attr('aria-current','page');
+    root.find('#ach-status-task-effect').text(statusStageEffects[mode]);
+    var requirement = statusStageRequirements[mode];
+    var mismatch = requirement &&
+      (root.find('#ach-status-scope').val() !== requirement.scope ||
+       !requirement.templates.includes(root.find('#ach-status-template').val()));
+    root.find('#ach-status-task-setup').prop('hidden',!mismatch)
+      .text(mismatch ? requirement.note : '');
+  }
+  function renderOperationalStages() {
+    var cacheVisible = activeDestination === 'websites' && activeTask === 'cache';
+    var phpVisible = activeDestination === 'server' && activeTask === 'php';
+    root.find('[data-cache-stage]').prop('hidden',true);
+    root.find('[data-php-stage]').prop('hidden',true);
+    if (cacheVisible)
+      root.find('[data-cache-stage="'+activeCacheStage+'"]').prop('hidden',false);
+    if (phpVisible)
+      root.find('[data-php-stage="'+activePhpStage+'"]').prop('hidden',false);
+    root.find('[data-cache-task], [data-php-task]').attr('aria-current','false');
+    root.find('[data-cache-task="'+activeCacheStage+'"]').attr('aria-current','page');
+    root.find('[data-php-task="'+activePhpStage+'"]').attr('aria-current','page');
+    root.find('#ach-cache-task-effect').text(cacheStageEffects[activeCacheStage]);
+    root.find('#ach-php-task-effect').text(phpStageEffects[activePhpStage]);
+  }
   function renderNavigationScope() {
     var siteSelected = !!hostsSiteId();
     var selectedSiteTask = activeDestination === 'websites' &&
@@ -6282,7 +6519,7 @@
     if (activeDestination === 'websites' && (siteSelected || !selectedSiteTask)) {
       if (activeTask === 'protection') groups = ['protection'];
       if (activeTask === 'wordpress') groups = ['wordpress'];
-      if (activeTask === 'routing') groups = ['hosts','reconcile','diagnostics'];
+      if (activeTask === 'routing') groups = ['intro',activeRoutingDetail];
     }
     if (activeDestination === 'server') {
       if (activeTask === 'hosts') groups = ['aliases','witness'];
@@ -6292,6 +6529,12 @@
     groups.forEach(function (key) {
       root.find('[data-routing-group="' + key + '"]').prop('hidden', false);
     });
+    root.find('[data-routing-detail]').attr('aria-current','false');
+    root.find('[data-routing-detail="'+activeRoutingDetail+'"]').attr('aria-current','page');
+    root.find('#ach-routing-task-effect').text(routingTaskEffects[activeRoutingDetail]);
+    renderWordPressTask();
+    renderOperationalStages();
+    renderStatusStage();
     // Avoid a forest of disabled site actions before a website is chosen.
     if (activeDestination === 'websites' && activeTask === 'cache')
       root.find('#ach-panel-cache').prop('hidden', !siteSelected);
@@ -6383,6 +6626,45 @@
   root.find('[data-server-task]').on('click', function () {
     navigateTask('server',$(this).attr('data-server-task'),false);
   });
+  root.find('[data-routing-detail]').on('click', function () {
+    var detail = $(this).attr('data-routing-detail');
+    if (!Object.prototype.hasOwnProperty.call(routingTaskEffects,detail)) return;
+    activeRoutingDetail = detail;
+    renderNavigationScope();
+  });
+  root.find('[data-cache-task]').on('click', function () {
+    var stage = $(this).attr('data-cache-task');
+    if (!Object.prototype.hasOwnProperty.call(cacheStageEffects,stage)) return;
+    activeCacheStage = stage;
+    renderOperationalStages();
+  });
+  root.find('[data-php-task]').on('click', function () {
+    var stage = $(this).attr('data-php-task');
+    if (!Object.prototype.hasOwnProperty.call(phpStageEffects,stage)) return;
+    activePhpStage = stage;
+    renderOperationalStages();
+  });
+  root.find('#ach-cache-clear-recheck-route,#ach-bridge-recheck-route').on('click',function () {
+    activeCacheStage = 'configure';
+    renderOperationalStages();
+  });
+  root.find('#ach-php-preview-route').on('click',function () {
+    activePhpStage = 'policy';
+    renderOperationalStages();
+  });
+  root.find('[data-status-mode]').on('click', function () {
+    var mode = $(this).attr('data-status-mode');
+    if (!Object.prototype.hasOwnProperty.call(statusStageEffects,mode)) return;
+    activeStatusStage = mode;
+    renderStatusStage();
+  });
+  root.find('#ach-status-design-shortcut').on('click', function () {
+    activeStatusStage = 'design';
+    navigateTask('status',null,true);
+  });
+  root.find('#ach-wordpress-installer-route').on('click', function () {
+    navigateTask('server','hosts',true);
+  });
   root.find('#ach-menu-toggle').on('click', function () {
     var expanded = root.find('#ach-menu-toggle').attr('aria-expanded') === 'true';
     root.find('#ach-menu-toggle').attr('aria-expanded', String(!expanded));
@@ -6405,9 +6687,14 @@
       direction && index >= 0 ? (index + direction + list.length) % list.length : -1;
     if (next >= 0) { event.preventDefault(); list[next].focus(); list[next].click(); }
   });
-  root.find('[data-task], [data-server-task]').on('keydown', function (event) {
+  root.find('[data-task], [data-server-task], [data-routing-detail], [data-wp-task], [data-cache-task], [data-php-task], [data-status-mode]').on('keydown', function (event) {
     if (!event || !root[0]) return;
-    var query = this.hasAttribute('data-task') ? '[data-task]' : '[data-server-task]';
+    var query = this.hasAttribute('data-task') ? '[data-task]' :
+      this.hasAttribute('data-server-task') ? '[data-server-task]' :
+      this.hasAttribute('data-routing-detail') ? '[data-routing-detail]' :
+      this.hasAttribute('data-wp-task') ? '[data-wp-task]' :
+      this.hasAttribute('data-cache-task') ? '[data-cache-task]' :
+      this.hasAttribute('data-php-task') ? '[data-php-task]' : '[data-status-mode]';
     var list = Array.from(root[0].querySelectorAll(query));
     var index = list.indexOf(this), direction = event.key === 'ArrowRight' ? 1 :
       event.key === 'ArrowLeft' ? -1 : 0;
