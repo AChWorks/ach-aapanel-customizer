@@ -38,11 +38,11 @@
     /* Spacing tokens: controls (sm), independent stack items (md), major breaks (lg).
        Never position unrelated bordered sections by guessing sibling margins. */
     --ach-space-xs:4px; --ach-space-sm:8px; --ach-space-md:12px; --ach-space-lg:20px;
-    --ach-control-height:32px;
+    --ach-control-height:36px;
     color:var(--ach-text); background:var(--ach-surface); width:100%;
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
     font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
-    font-size:13px; line-height:1.5; overflow:hidden;
+    font-size:14px; line-height:1.5; overflow:hidden;
     border-radius:0 0 10px 10px;
   }
   #ach-customizer .ach-shell { display:flex; flex-direction:column; height:100%; min-width:0; }
@@ -63,9 +63,6 @@
   #ach-customizer .ach-sidebar-label {
     display:block; padding:15px 18px 5px; color:#5b6974;
     font-size:10px; font-weight:700; letter-spacing:.065em; text-transform:uppercase;
-  }
-  #ach-customizer .ach-sidebar button[aria-selected="true"] {
-    box-shadow:inset 3px 0 0 var(--ach-green);
   }
   #ach-customizer .ach-site-context {
     display:flex; align-items:center; flex-wrap:wrap; gap:10px 16px;
@@ -151,10 +148,6 @@
     border:0; border-radius:0; background:transparent;
     text-align:left; color:var(--ach-text); font:inherit; line-height:1.4; cursor:pointer;
     transition:background-color .12s ease, color .12s ease;
-  }
-  #ach-customizer .ach-sidebar button:hover:not([aria-selected="true"]) { background:#e7e7e8; }
-  #ach-customizer .ach-sidebar button[aria-selected="true"] {
-    background:var(--ach-surface); color:#333; font-weight:500;
   }
   #ach-customizer .ach-main {
     display:flex; flex-direction:column; gap:var(--ach-space-md);
@@ -418,17 +411,9 @@
   }
   @media (max-width:720px) {
     #ach-customizer .ach-sidebar-label { display:none; }
-    #ach-customizer .ach-sidebar button[aria-selected="true"] { box-shadow:none; }
     #ach-customizer .ach-site-context { align-items:stretch; }
     #ach-customizer .ach-site-context label { flex-wrap:wrap; }
     #ach-customizer .ach-help dl { grid-template-columns:minmax(0,1fr); }
-    #ach-customizer .ach-workspace { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
-    #ach-customizer .ach-sidebar {
-      display:flex; align-items:stretch; gap:2px; overflow-x:auto; overflow-y:hidden;
-      border-right:0; border-bottom:1px solid var(--ach-line); padding:0 6px;
-    }
-    #ach-customizer .ach-sidebar button { white-space:nowrap; width:auto; flex:none; border-bottom:3px solid transparent; padding:10px 12px; }
-    #ach-customizer .ach-sidebar button[aria-selected="true"] { border-bottom-color:var(--ach-green); }
     #ach-customizer .ach-main { padding:14px 14px 26px; }
     #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { grid-template-columns:minmax(0,1fr); }
   }
@@ -453,37 +438,125 @@
     }
   }
 
+  /* S1b task-first navigation. Each workflow retains one original action owner. */
+  #ach-customizer .ach-sidebar button[aria-current="page"] {
+    background:#fff; box-shadow:inset 3px 0 0 var(--ach-primary-fill);
+    color:#1d5130; font-weight:700;
+  }
+  #ach-customizer .ach-sidebar button:hover:not([aria-current="page"]) { background:#e6ece9; }
+  #ach-customizer .ach-task-heading { border-bottom:1px solid var(--ach-line); padding-bottom:12px; }
+  #ach-customizer .ach-mobile-nav button:focus-visible,
+  #ach-customizer #ach-task-title:focus-visible {
+    outline:2px solid var(--ach-focus); outline-offset:2px;
+  }
+  #ach-customizer #ach-breadcrumb { margin:0 0 5px; color:var(--ach-muted); font-size:12px; }
+  #ach-customizer #ach-task-title { margin:0 0 5px; font-size:21px; line-height:1.35; color:#263544; }
+  #ach-customizer #ach-task-intro { margin:0; max-width:75ch; color:#526171; font-size:13px; }
+  #ach-customizer .ach-task-nav {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr));
+    gap:7px; padding:0 0 12px; border-bottom:1px solid var(--ach-line);
+  }
+  #ach-customizer .ach-main .ach-task-nav button {
+    min-height:42px; justify-content:flex-start; text-align:left; font-size:13px;
+  }
+  #ach-customizer .ach-main .ach-task-nav button[aria-current="page"] {
+    border-color:#81b59a; background:#edf6f0; color:#245a38; font-weight:700;
+  }
+  #ach-customizer .ach-task-empty {
+    padding:16px; border:1px solid #d4e2ee; background:#f6f9fc;
+    border-radius:9px; color:#314c62;
+  }
+  #ach-customizer .ach-task-empty strong { display:block; font-size:15px; }
+  #ach-customizer .ach-task-empty p { margin:7px 0 12px; }
+  #ach-customizer .ach-workflow {
+    display:flex; flex-direction:column; gap:var(--ach-space-md); min-width:0;
+  }
+  #ach-customizer #ach-content .ach-workflow > * { margin-block:0; }
+  #ach-customizer .ach-mobile-nav { display:none; }
+  #ach-customizer .ach-workflow[hidden],
+  #ach-customizer [data-home-only][hidden] { display:none !important; }
+  @media (max-width:720px) {
+    #ach-customizer .ach-workspace { display:flex; flex-direction:column; }
+    #ach-customizer .ach-mobile-nav {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:8px 14px; border-bottom:1px solid var(--ach-line);
+    }
+    #ach-customizer .ach-mobile-nav button {
+      border:1px solid #b8c8bd; border-radius:8px; background:#fff;
+      padding:7px 12px; min-height:36px;
+    }
+    #ach-customizer .ach-sidebar {
+      display:none; flex-direction:column; flex:none; align-items:stretch;
+      max-height:min(45vh,300px); overflow:auto; padding:6px;
+      border-bottom:1px solid var(--ach-line);
+    }
+    #ach-customizer .ach-sidebar[data-open="true"] { display:flex; }
+    #ach-customizer .ach-sidebar button {
+      display:block; white-space:normal; width:100%; border:0;
+      border-radius:7px; text-align:left;
+    }
+    #ach-customizer .ach-sidebar button[aria-current="page"] {
+      box-shadow:inset 3px 0 0 var(--ach-primary-fill); border:0;
+    }
+    #ach-customizer .ach-main { flex:1; min-height:0; }
+  }
+
 </style>
 <div class="bt-form" id="ach-customizer" dir="ltr" lang="en">
   <div class="ach-shell">
     <h2 class="ach-sr-only">ACh aaPanel Customizer</h2>
     <div class="ach-workspace">
-      <nav class="ach-sidebar" role="tablist" aria-label="Plugin sections" aria-orientation="vertical">
-        <span class="ach-sidebar-label" role="presentation">Workspace</span>
-        <button type="button" data-tab="overview" role="tab" id="ach-tab-overview" aria-controls="ach-panel-overview" aria-selected="true" tabindex="0">Home</button>
-        <span class="ach-sidebar-label" role="presentation">Websites</span>
-        <button type="button" data-tab="websites" role="tab" id="ach-tab-websites" aria-controls="ach-panel-websites" aria-selected="false" tabindex="-1">Website list</button>
-        <button type="button" data-tab="routing" role="tab" id="ach-tab-routing" aria-controls="ach-panel-routing" aria-selected="false" tabindex="-1">Routing &amp; Nginx</button>
-        <button type="button" data-tab="cache" role="tab" id="ach-tab-cache" aria-controls="ach-panel-cache" aria-selected="false" tabindex="-1">FastCGI Cache</button>
-        <span class="ach-sidebar-label" role="presentation">Server &amp; pages</span>
-        <button type="button" data-tab="php" role="tab" id="ach-tab-php" aria-controls="ach-panel-php" aria-selected="false" tabindex="-1">PHP-FPM</button>
-        <button type="button" data-tab="status" role="tab" id="ach-tab-status" aria-controls="ach-panel-status" aria-selected="false" tabindex="-1">Status Pages</button>
-        <button type="button" data-tab="activity" role="tab" id="ach-tab-activity" aria-controls="ach-panel-activity" aria-selected="false" tabindex="-1">Activity &amp; Logs</button>
+      <div class="ach-mobile-nav">
+        <strong>Customizer</strong>
+        <button id="ach-menu-toggle" type="button" aria-controls="ach-primary-nav" aria-expanded="false">Sections</button>
+      </div>
+      <nav class="ach-sidebar" id="ach-primary-nav" aria-label="Main sections" data-open="false">
+        <span class="ach-sidebar-label">Tasks</span>
+        <button type="button" data-destination="overview" id="ach-tab-overview" aria-current="page">Home</button>
+        <button type="button" data-destination="websites" id="ach-tab-websites" aria-current="false">Websites</button>
+        <button type="button" data-destination="server" id="ach-tab-server" aria-current="false">Server</button>
+        <button type="button" data-destination="status" id="ach-tab-status" aria-current="false">Error pages</button>
+        <button type="button" data-destination="activity" id="ach-tab-activity" aria-current="false">Activity &amp; recovery</button>
       </nav>
       <main class="ach-main" id="ach-content" tabindex="-1">
         <p id="ach-message" role="status" aria-live="polite"></p>
         <p id="ach-worker-version-status" class="ach-note" role="status" aria-live="polite" data-state="pending">Checking resident Python entrypoint; this does not verify loaded helpers or Nginx workers.</p>
+        <header class="ach-task-heading">
+          <p id="ach-breadcrumb">Home</p>
+          <h3 id="ach-task-title" tabindex="-1">Start a task</h3>
+          <p id="ach-task-intro">Choose a task to begin. Inspections do not change server settings.</p>
+        </header>
+        <nav class="ach-task-nav" id="ach-website-tasks" aria-label="Website tasks" hidden>
+          <button type="button" data-task="summary" aria-current="page">Summary &amp; changes</button>
+          <button type="button" data-task="protection" aria-current="false">Protection</button>
+          <button type="button" data-task="cache" aria-current="false">Cache &amp; performance</button>
+          <button type="button" data-task="wordpress" aria-current="false">WordPress</button>
+          <button type="button" data-task="routing" aria-current="false">Routing &amp; diagnostics</button>
+        </nav>
+        <nav class="ach-task-nav" id="ach-server-tasks" aria-label="Server tasks" hidden>
+          <button type="button" data-server-task="php" aria-current="page">PHP services</button>
+          <button type="button" data-server-task="hosts" aria-current="false">Local hostnames</button>
+          <button type="button" data-server-task="attack" aria-current="false">Attack protection</button>
+          <button type="button" data-server-task="http" aria-current="false">Default HTTP/TLS</button>
+          <button type="button" data-server-task="monitor" aria-current="false">Monitoring controls</button>
+        </nav>
+        <div id="ach-site-required" class="ach-task-empty" hidden>
+          <strong id="ach-site-required-title">Choose a website to continue</strong>
+          <p id="ach-site-required-detail">This task needs an exact native aaPanel website. Select it below, or browse the website list to find the right ID and name.</p>
+          <button type="button" id="ach-choose-website">Browse websites</button>
+        </div>
         <div id="ach-website-context" class="ach-site-context" hidden>
-          <div><strong>Selected website</strong><small>Shared across Website list, Routing &amp; Nginx and FastCGI Cache.</small><small id="ach-website-context-status" role="status" aria-live="polite">Open a website tool to load the site list.</small></div>
+          <div><strong>Selected website</strong><small>Targets website tasks; supplies a log source for origin-wide attack protection. Server effects are separate.</small><small id="ach-website-context-status" role="status" aria-live="polite">Open Websites to load the native site list.</small></div>
           <label for="ach-hosts-site-id">Website
             <select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select>
           </label>
           <button id="ach-website-browse" type="button">Browse websites</button>
+          <button id="ach-website-error-pages" type="button">Error pages (choose scope there)</button>
         </div>
-        <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
-      <h4>Home</h4>
-      <p class="ach-home-intro">Choose what you want to do. Customizer checks current sources first and shows the exact target and effect before a change.</p>
-      <div class="ach-task-launch-grid" aria-label="Common tasks">
+        <section class="ach-view" id="ach-panel-overview" aria-label="Home and monitoring" data-view="overview" role="region">
+      <h4 data-home-only>Home</h4>
+      <p class="ach-home-intro" data-home-only>Choose what you want to do. Customizer checks current sources first and shows the exact target and effect before a change.</p>
+      <div class="ach-task-launch-grid" data-home-only aria-label="Common tasks">
         <button id="ach-overview-browse-sites" type="button" class="ach-task-link">
           <strong>Manage a website</strong><span>Choose a site, review changes, protection, WordPress and Cache.</span>
         </button>
@@ -513,7 +586,7 @@
         <p id="ach-state-revision" role="status">Monitor state unavailable</p>
       </details>
     </section>
-    <section class="ach-view" id="ach-panel-websites" aria-labelledby="ach-tab-websites" data-view="websites" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-websites" aria-label="Website list and baseline" data-view="websites" role="region" hidden>
       <h4>Website list</h4>
       <p class="ach-note">Browse native aaPanel website records and select a site above for routing or Cache checks. Database names do not prove public DNS or live routing.</p>
       <div class="ach-toolbar">
@@ -543,9 +616,12 @@
         <div class="ach-controls"><button type="button" id="ach-site-changes-save" class="btn btn-warning" disabled>Save baseline for ALL websites</button></div>
       </div>
     </section>
-    <section class="ach-view" id="ach-panel-routing" aria-labelledby="ach-tab-routing" data-view="routing" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-routing" aria-label="Website and server workflows" data-view="routing" role="region" hidden>
+      <div class="ach-workflow" data-routing-group="intro">
       <h4>Routing &amp; Nginx</h4>
       <p class="ach-note">Local Hosts aliases are available without selecting a website. Other Nginx and recovery inspections still use the selected native site.</p>
+      </div>
+      <div class="ach-workflow" data-routing-group="aliases">
       <div class="ach-note" aria-label="Origin-local Hosts aliases">
         <strong>Local Hosts — one-click removal</strong>
         <p>Detected loopback mappings from this server's current <code>/etc/hosts</code> appear here after successful or failed WordPress installation, even if the site no longer exists in aaPanel. Choose the hostname and click Remove. Only that hostname's loopback mappings are removed; external DNS and other Hosts names remain unchanged. No automatic deletion or extra approval checkbox.</p>
@@ -557,6 +633,8 @@
         </div>
         <p id="ach-hosts-alias-result" role="status" aria-live="polite">Open Routing &amp; Nginx to inspect current local loopback aliases.</p>
       </div>
+      </div>
+      <div class="ach-workflow" data-routing-group="hosts">
       <p class="ach-note"><strong>Local hosts override:</strong> inspect exact site-bound names in the origin server's /etc/hosts. An unwanted loopback alias can be removed only after a fresh file/site inspection and explicit approval, with a saved original for guarded Restore. This neither proves remote DNS/Gateway failure nor prevents WordPress Toolkit from recreating the entry.</p>
       <div class="ach-controls"><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts file</button></div>
       <p class="ach-note">Use the shared website selector above. For another page, choose Browse websites. This checks the server's local file, not public DNS or a remote host.</p>
@@ -576,6 +654,8 @@
         <label><input type="checkbox" id="ach-hosts-restore-reviewed" disabled /> I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</label>
         <div class="ach-controls"><button id="ach-hosts-restore-button" type="button" class="btn btn-warning" disabled>Restore saved local hosts file</button></div>
       </details>
+      </div>
+      <div class="ach-workflow" data-routing-group="witness">
       <div class="ach-note" aria-label="Native WordPress failed-install read-only witness">
         <strong>Native WordPress failed-install witness — opt-in, observation only</strong>
         <p>Optional diagnostics for failed WordPress installations. You can remove an unwanted local Hosts alias above without enabling this feature. It never edits Hosts or PHP automatically.</p>
@@ -598,6 +678,8 @@
         </details>
       </div>
       <hr />
+      </div>
+      <div class="ach-workflow" data-routing-group="reconcile">
       <div class="ach-note" aria-label="Selected website onboarding and recovery">
         <strong>Site onboarding, drift &amp; guided recovery (read-only)</strong>
         <p>Check what changed on the selected website since your last review. This report only compares information; it does not change the website.</p>
@@ -624,6 +706,8 @@
         </div>
       </div>
       <hr />
+      </div>
+      <div class="ach-workflow" data-routing-group="diagnostics">
       <p class="ach-note"><strong>Generated Nginx VHost comparison (read-only):</strong> Compare the selected aaPanel site's bound hostnames and document root with the generated VHost file. This cannot prove active Nginx routing, TLS, WordPress Toolkit policy or effective runtime.</p>
       <div class="ach-controls"><button id="ach-vhost-inspect-button" type="button" disabled>Compare selected website VHost</button></div>
       <p id="ach-vhost-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Compare the selected site with its generated Nginx file.</p>
@@ -641,6 +725,8 @@
         <p id="ach-nginx-candidate-result" class="ach-status-metadata" role="status">Select a website to inspect the next-load Nginx source and optional local HTTP/80 response.</p>
       </details>
       <hr />
+      </div>
+      <div class="ach-workflow" data-routing-group="protection">
       <div class="ach-note" aria-label="Native site sensitive-path protection">
         <strong>Protect sensitive website files — optional</strong>
         <p>Block common configuration files, backups and debug logs, plus PHP scripts inside upload folders, for the selected website. Ordinary downloads and certificate verification still work.</p>
@@ -663,6 +749,8 @@
         <p id="ach-guard-restore-why" class="ach-availability" data-state="blocked" role="status">Select a website and Recheck to see whether Restore is available.</p>
         <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Remove managed Guard (reload Nginx)</button></div>
       </div>
+      </div>
+      <div class="ach-workflow" data-routing-group="attack">
       <div class="ach-note" aria-label="Fail2ban abusive scan protection">
         <strong>Abusive-scan protection — Fail2ban (opt-in)</strong>
         <p>Enable the site's <strong>sensitive-path Nginx guard</strong> first. This separate Fail2ban jail watches only this site's native combined access log for repeated malicious file and executable-upload probes returning 403/404. Requires installed/running system Fail2ban and nftables. It does not ban ordinary 404s, OAuth, ACME or .well-known. It never installs packages or enables itself.</p>
@@ -688,9 +776,12 @@
         <details class="ach-technical-report"><summary>Source, policy and recovery evidence</summary>
           <p id="ach-scan-result" class="ach-status-metadata" role="status">No Fail2ban protection inspected yet.</p>
         </details>
-        <div class="ach-note">
+      </div>
+      </div>
+      <div class="ach-workflow" data-routing-group="attack-orphan">
+        <div class="ach-note" aria-label="Orphan-jail recovery without website selection">
           <strong>Recover scanner bans after deleting a website</strong>
-          <p>If a deleted website still has a Customizer Fail2ban jail, find its saved recovery and Restore that jail. No website selection is needed.</p>
+          <p><strong>No website selection needed.</strong> If a deleted website still has a Customizer Fail2ban jail, find its saved Recovery ID and Restore that exact owned jail. This action is separate from configuring a scanner for a current website.</p>
           <p><strong>Important:</strong> If the missing log prevents Fail2ban from starting, the first Restore removes only the owned jail source. Existing bans are <strong>not yet verified removed</strong>.</p>
           <details class="ach-help"><summary>How to complete orphan-jail recovery</summary>
             <p>After the first offline Restore, start Fail2ban, refresh the orphan list and Restore the same Recovery ID again. Only after verifying that the jail and owned nftables action are absent is recovery marked Restored. Foreign jails and actions are preserved. This does not require Monitor to be enabled.</p>
@@ -704,6 +795,7 @@
           <p id="ach-scan-orphan-result" class="ach-status-metadata" role="status" aria-live="polite">Check for recovery journals after a website is removed.</p>
         </div>
       </div>
+      <div class="ach-workflow" data-routing-group="wordpress">
       <div class="ach-note" aria-label="Selected WordPress operational settings">
         <strong>Selected WordPress — HTTPS URLs, Debug, Cron and XML-RPC (manual)</strong>
         <p>Choose an operation, select a website and run Recheck. Review the result before you Apply or Restore that setting. Changes are never automatic.</p>
@@ -738,8 +830,9 @@
           <p id="ach-wp-settings-result" class="ach-status-metadata" role="status" aria-live="polite">No WordPress settings source inspected.</p>
         </details>
       </div>
+      </div>
     </section>
-    <section class="ach-view" id="ach-panel-cache" aria-labelledby="ach-tab-cache" data-view="cache" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-cache" aria-label="Website cache" data-view="cache" role="region" hidden>
       <h4>FastCGI Cache</h4>
       <p class="ach-note">Inspect FastCGI Cache sources and ownership before changing them. Native selected-site file clear is available only after a verified Applied Recheck and separate approval. Nginx Helper Purge All is a separate vendor operation; this plugin neither intercepts it nor certifies it as site-safe.</p>
       <details class="ach-help"><summary>Cache workflow and recovery</summary><p>Select a website, inspect its sources, preview a site-owned policy, then Recheck. Apply requires a separate approval; keep the recovery ID and use Restore when needed.</p></details>
@@ -822,7 +915,7 @@
         </details>
       </div>
     </section>
-    <section class="ach-view" id="ach-panel-php" aria-labelledby="ach-tab-php" data-view="php" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-php" aria-label="PHP shared services" data-view="php" role="region" hidden>
       <h4>PHP-FPM · Shared service settings</h4>
       <p class="ach-note">Check PHP service versions, see which sites share a pool and compare desired settings with saved configuration. Changes can affect multiple websites; viewing a report never applies changes.</p>
       <details class="ach-help"><summary>PHP-FPM change and recovery steps</summary><p>Discover installed PHP, inspect the service and affected sites, then preview the settings. Applying shared-service changes requires explicit preparation and approval; the recovery workflow remains available below.</p></details>
@@ -922,7 +1015,7 @@
         </div>
       </div>
     </section>
-    <section class="ach-view" id="ach-panel-status" aria-labelledby="ach-tab-status" data-view="status" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-status" aria-label="Error pages and default routing" data-view="status" role="region" hidden>
       <h4>Status Pages · Branding &amp; delivery</h4>
       <p class="ach-note">Choose a template and scope to preview. Save/Reset changes branding only; live Apply/Restore requires Recheck and explicit approval. Unsupported combinations are preview-only; unknown-SNI HTTPS/443 rejection is a separate optional, recoverable operation.</p>
       <div class="ach-fields">
@@ -1073,7 +1166,7 @@
         <p id="ach-status-stopped-result" role="status" aria-live="polite">Select a verified website, stopped template and locale, then Recheck. Native stop requires a fresh website inventory.</p>
       </div>
     </section>
-    <section class="ach-view" id="ach-panel-activity" aria-labelledby="ach-tab-activity" data-view="activity" role="tabpanel" hidden>
+    <section class="ach-view" id="ach-panel-activity" aria-label="Activity and recovery" data-view="activity" role="region" hidden>
       <h4>Activity &amp; Logs</h4>
       <p class="ach-note">Filter by severity and module. Use Operation or Recovery IDs to investigate results and expand technical details when needed. Records are limited to the primary aaPanel administrator.</p>
       <div class="ach-controls">
@@ -1140,13 +1233,10 @@
   // All sections share one native scroll pane. Preserve each section's reading
   // position across tab changes instead of jumping to the top on every click.
   var activeSection = 'overview';
-  var sectionScroll = {overview:0, websites:0, routing:0, cache:0, php:0, status:0, activity:0};
   var overviewBusy = false, overviewTicket = 0;
   function fitNativeLayer() {
     // Only resize the aaPanel layer that actually owns this plugin instance.
     if (!root[0] || typeof window === 'undefined') return;
-    var tablist = root[0].querySelector('.ach-sidebar');
-    if (tablist) tablist.setAttribute('aria-orientation', window.innerWidth <= 720 ? 'horizontal' : 'vertical');
     var layer = root[0].closest('.layui-layer');
     if (!layer) return; // Static tests/embedded pages keep intrinsic dimensions.
     var width = Math.min(980, Math.max(240, window.innerWidth - 32));
@@ -1318,7 +1408,7 @@
     root.find('#ach-activity-rows').empty();
     root.find('#ach-activity-refresh').prop('disabled', false);
     root.find('#ach-activity-result').text('An operation may have changed Activity. Refresh to check current records.');
-    if (root.find('#ach-tab-activity').attr('aria-selected') === 'true') loadActivity();
+    if (activeDestination === 'activity') loadActivity();
   }
   function hasPotentialActivity(method) {
     return method === 'set_control' || method === 'inspect_local_hosts' ||
@@ -2475,6 +2565,7 @@
     root.find('#ach-hosts-result').text(message || 'Select a discovered website to inspect.');
     inspectionSummary('hosts', 'Choose a website to inspect its local hosts file.');
     hostsLock(false);
+    renderNavigationScope();
   }
   function updateHostsSiteChoices(sites) {
     wpSettingsInvalidate();
@@ -2490,6 +2581,7 @@
       hostsPageSites.set(id, {name:site.name, snapshot:snapshot});
       $('<option>').val(id).text(site.name + ' (#' + id + ')').appendTo(select);
     });
+    renderNavigationScope();
     root.find('#ach-hosts-result').text(
       hostsPageSites.size ? 'Select a website to inspect its origin-local /etc/hosts entries.' :
       'No website available for selection on this inventory page.');
@@ -2541,6 +2633,7 @@
     invalidateCacheAudit('Website selection changed; no previous cache audit is current.');
     hostsLock(false);
     refreshSelectedSiteBaselineGate();
+    renderNavigationScope();
   });
   root.find('#ach-hosts-inspect-button').on('click', function () {
     var id = hostsSiteId();
@@ -2770,7 +2863,10 @@
   [['websites','websites'], ['cache','cache'], ['php','php'],
    ['status','status']].forEach(function (pair) {
     root.find('#ach-reconcile-to-' + pair[0]).on('click', function () {
-      root.find('#ach-tab-' + pair[1])[0].click();
+      var target = pair[1] === 'php' ? ['server','php'] :
+        pair[1] === 'status' ? ['status',null] :
+        pair[1] === 'cache' ? ['websites','cache'] : ['websites','summary'];
+      navigateTask(target[0], target[1], true);
     });
   });
   function validVhostInspection(r, id) {
@@ -6130,62 +6226,192 @@
         String(root.find('#ach-php-version').val() || '') === selected;
     });
   });
+  // One navigation router for the native dialog. The seven existing
+  // backend-bound view regions are implementation details, not main menu items.
+  // A task switches one canonical owner view and never duplicates a writer.
+  var activeDestination = 'overview', activeTask = null;
+  var activeNavKey = 'overview';
+  var taskScroll = {overview:0};
+  var destinations = ['overview','websites','server','status','activity'];
+  var websiteTasks = ['summary','protection','cache','wordpress','routing'];
+  var serverTasks = ['php','hosts','attack','http','monitor'];
+  var taskDescriptions = {
+    'overview': ['Home','Start a task','Choose a task. Read-only inspections do not change website or server configuration.'],
+    'websites:summary': ['Websites','Summary & changes','Browse native website records. Compare observed changes before accepting any saved baseline.'],
+    'websites:protection': ['Websites','Protect sensitive files','Selected website Nginx rule. Enabling or removing it may reload the shared Nginx service.'],
+    'websites:cache': ['Websites','Cache & performance','Selected website Cache and optional WordPress integration. Clear affects only verified owned Cache objects.'],
+    'websites:wordpress': ['Websites','WordPress settings','Configure Debug, Cron, XML-RPC or HTTPS URLs for the selected native WordPress site.'],
+    'websites:routing': ['Websites','Routing & diagnostics','Inspect the selected website VHost, local Hosts mappings and recovery evidence. Inspections are read-only.'],
+    'server:php': ['Server','PHP services','PHP-FPM settings are shared. Inspect discovered services and affected websites before live Apply.'],
+    'server:hosts': ['Server','Local hostnames','Inspect this server\'s actual loopback mappings. The machine hostname is protected; no website is required to inspect aliases.'],
+    'server:attack': ['Server','Attack protection','A selected website log can trigger Fail2ban bans across the entire origin server; orphan-jail recovery works without a site.'],
+    'server:http': ['Server','Default HTTP/TLS routing','Review unknown-host HTTP and unknown-SNI TLS routing. The Error pages editor currently shares this owner view.'],
+    'server:monitor': ['Server','Monitoring controls','Manage Customizer inspection availability. Disabling related checks also suspends separately enabled PHP auto-repair.'],
+    'status': ['Error pages','Error pages','Design and preview first. Saving branding does not publish to a website or change fallback routing.'],
+    'activity': ['Activity & recovery','Recent events and recovery','Find exact operation evidence and return to its module-owned Recheck or Restore workflow.']
+  };
+  function taskRoute(destination, task) {
+    if (destination === 'overview') return 'overview';
+    if (destination === 'status') return 'status';
+    if (destination === 'activity') return 'activity';
+    if (destination === 'websites') {
+      return task === 'summary' ? 'websites' : task === 'cache' ? 'cache' : 'routing';
+    }
+    if (destination === 'server') {
+      return task === 'php' ? 'php' : task === 'monitor' ? 'overview' :
+        task === 'http' ? 'status' : 'routing';
+    }
+    return null;
+  }
+  function renderNavigationScope() {
+    var siteSelected = !!hostsSiteId();
+    var selectedSiteTask = activeDestination === 'websites' &&
+      ['protection','cache','wordpress','routing'].includes(activeTask);
+    var attackTask = activeDestination === 'server' && activeTask === 'attack';
+    var needsSiteBanner = selectedSiteTask || attackTask;
+    var needChooser = activeDestination === 'websites' || attackTask;
+    root.find('#ach-site-required-title').text(attackTask ?
+      'Choose a source website to configure scanner bans' : 'Choose a website to continue');
+    root.find('#ach-site-required-detail').text(attackTask ?
+      'Scanner settings need a native website access log. Orphan-jail recovery below works without selecting a website.' :
+      'This task needs an exact native aaPanel website. Select it below, or browse the website list to find the right ID and name.');
+    root.find('#ach-website-context').prop('hidden', !needChooser);
+    root.find('#ach-site-required').prop('hidden', !needsSiteBanner || siteSelected);
+    root.find('[data-routing-group]').prop('hidden', true);
+    var groups = [];
+    if (activeDestination === 'websites' && (siteSelected || !selectedSiteTask)) {
+      if (activeTask === 'protection') groups = ['protection'];
+      if (activeTask === 'wordpress') groups = ['wordpress'];
+      if (activeTask === 'routing') groups = ['hosts','reconcile','diagnostics'];
+    }
+    if (activeDestination === 'server') {
+      if (activeTask === 'hosts') groups = ['aliases','witness'];
+      if (activeTask === 'attack') groups = siteSelected ?
+        ['attack','attack-orphan'] : ['attack-orphan'];
+    }
+    groups.forEach(function (key) {
+      root.find('[data-routing-group="' + key + '"]').prop('hidden', false);
+    });
+    // Avoid a forest of disabled site actions before a website is chosen.
+    if (activeDestination === 'websites' && activeTask === 'cache')
+      root.find('#ach-panel-cache').prop('hidden', !siteSelected);
+    root.find('[data-home-only]').prop('hidden', activeDestination !== 'overview');
+    if (activeDestination === 'server' && activeTask === 'monitor')
+      root.find('.ach-home-advanced').prop('open', true);
+  }
+  function navigateTask(destination, task, focusDestination) {
+    if (!destinations.includes(destination)) return;
+    var valid = destination === 'websites' ? websiteTasks :
+      destination === 'server' ? serverTasks : [];
+    if (valid.length && !valid.includes(task)) task = valid[0];
+    if (!valid.length) task = null;
+    var route = taskRoute(destination, task);
+    if (!route) return;
+    var key = destination + (task ? ':' + task : '');
+    var switching = key !== activeNavKey;
+    var content = root[0] && root[0].querySelector('#ach-content');
+    if (switching && content) taskScroll[activeNavKey] = content.scrollTop;
+    activeDestination = destination;
+    activeTask = task;
+    activeSection = route;
+    activeNavKey = key;
+    root.find('[data-destination]').attr('aria-current', 'false');
+    root.find('[data-destination="' + destination + '"]').attr('aria-current', 'page');
+    root.find('[data-task]').attr('aria-current', 'false');
+    root.find('[data-server-task]').attr('aria-current', 'false');
+    if (destination === 'websites')
+      root.find('[data-task="' + task + '"]').attr('aria-current', 'page');
+    if (destination === 'server')
+      root.find('[data-server-task="' + task + '"]').attr('aria-current', 'page');
+    root.find('#ach-website-tasks').prop('hidden', destination !== 'websites');
+    root.find('#ach-server-tasks').prop('hidden', destination !== 'server');
+    root.find('[data-view]').prop('hidden', true);
+    root.find('[data-view="' + route + '"]').prop('hidden', false);
+    renderNavigationScope();
+    var description = taskDescriptions[key];
+    root.find('#ach-breadcrumb').text(description[0] + (task ? ' / ' + description[1] : ''));
+    root.find('#ach-task-title').text(description[1]);
+    root.find('#ach-task-intro').text(description[2]);
+    root.find('#ach-primary-nav').attr('data-open', 'false');
+    root.find('#ach-menu-toggle').attr('aria-expanded', 'false');
+    if (switching && content) content.scrollTop = taskScroll[key] || 0;
+    syncWorkerVersionVisibility();
+    msg('', false);
+    if ((activeDestination === 'server' && activeTask === 'hosts') && !hostsAliasBusy) loadHostsAliases();
+    if ((activeDestination === 'websites' || activeDestination === 'server' && activeTask === 'attack') &&
+        !sectionsLoaded.websites && !siteBusy) sites();
+    if (route === 'overview' && !sectionsLoaded.overview && !overviewBusy) overview();
+    if (route === 'php' && !sectionsLoaded.php && !phpInventoryBusy) loadPhpInventory();
+    if (route === 'status') {
+      if (!sectionsLoaded.status && !statusReadBusy) statusLoad();
+      if (root.find('#ach-status-scope').val() === 'site' && !statusSites.length && !statusSitesBusy)
+        loadStatusSites(true);
+    }
+    if (route === 'activity' && !sectionsLoaded.activity && !activityBusy) loadActivity();
+    if (focusDestination) {
+      var title = root.find('#ach-task-title')[0];
+      if (title && title.focus) title.focus({preventScroll:true});
+    }
+  }
   function openNativeTask(section) {
-    var tab = root.find('#ach-tab-' + section)[0];
-    if (!tab) return;
-    tab.click();
-    // Keep focus in the live destination rather than on the hidden Home task.
-    tab.focus({preventScroll:true});
+    if (section === 'php') navigateTask('server','php',true);
+    else if (section === 'websites') navigateTask('websites','summary',true);
+    else if (section === 'status' || section === 'activity')
+      navigateTask(section,null,true);
   }
   function browseWebsites() { openNativeTask('websites'); }
-  root.find('#ach-website-browse').on('click', browseWebsites);
+  root.find('#ach-website-browse, #ach-choose-website').on('click', browseWebsites);
+  root.find('#ach-website-error-pages').on('click', function () {
+    // The Error pages editor owns a separate explicit site/global scope.
+    // Never silently assume a website selection implies live site delivery.
+    navigateTask('status',null,true);
+  });
   root.find('#ach-overview-browse-sites').on('click', browseWebsites);
   root.find('#ach-home-php').on('click', function () { openNativeTask('php'); });
   root.find('#ach-home-status').on('click', function () { openNativeTask('status'); });
   root.find('#ach-home-activity').on('click', function () { openNativeTask('activity'); });
-  root.find('[data-tab]').on('click', function () {
-    var tab = $(this).attr('data-tab');
-    if (['overview','websites','routing','cache','php','status','activity'].indexOf(tab) < 0) return;
-    var switching = tab !== activeSection;
-    var content = root[0] && root[0].querySelector('#ach-content');
-    if (switching && content) sectionScroll[activeSection] = content.scrollTop;
-    root.find('[data-tab]').attr('aria-selected', 'false').attr('tabindex', '-1');
-    $(this).attr('aria-selected', 'true').attr('tabindex', '0');
-    // Do not scroll the enclosing aaPanel dialog on desktop just to select a
-    // sidebar item. Narrow layouts have an overflowing horizontal tab strip.
-    if (typeof window !== 'undefined' && window.innerWidth <= 720 &&
-        typeof this.scrollIntoView === 'function')
-      this.scrollIntoView({block:'nearest', inline:'nearest'});
-    root.find('[data-view]').prop('hidden', true);
-    root.find('[data-view="' + tab + '"]').prop('hidden', false);
-    if (switching) {
-      activeSection = tab;
-      if (content) content.scrollTop = sectionScroll[tab];
+  root.find('[data-destination]').on('click', function () {
+    navigateTask($(this).attr('data-destination'),null,false);
+    if (typeof window !== 'undefined' && window.innerWidth <= 720) {
+      var title = root.find('#ach-task-title')[0];
+      if (title && title.focus) title.focus({preventScroll:true});
     }
-    root.find('#ach-website-context').prop('hidden',
-      !['websites','routing','cache'].includes(tab));
-    syncWorkerVersionVisibility();
-    msg('', false);
-    if (tab === 'overview' && !sectionsLoaded.overview) overview();
-    // Use the live origin file rather than WP success/failure or site records.
-    if (tab === 'routing' && !hostsAliasBusy) loadHostsAliases();
-    if (['websites','routing','cache'].includes(tab) && !sectionsLoaded.websites && !siteBusy) sites();
-    if (tab === 'php' && !sectionsLoaded.php && !phpInventoryBusy) loadPhpInventory();
-    if (tab === 'status') {
-      // Preserve unsaved branding and its preview across native tab switches.
-      if (!sectionsLoaded.status && !statusReadBusy) statusLoad();
-      if (root.find('#ach-status-scope').val() === 'site' && !statusSites.length && !statusSitesBusy) loadStatusSites(true);
-    }
-    if (tab === 'activity' && !sectionsLoaded.activity && !activityBusy) loadActivity();
   });
-  root.find('[data-tab]').on('keydown', function (event) {
+  root.find('[data-task]').on('click', function () {
+    navigateTask('websites',$(this).attr('data-task'),false);
+  });
+  root.find('[data-server-task]').on('click', function () {
+    navigateTask('server',$(this).attr('data-server-task'),false);
+  });
+  root.find('#ach-menu-toggle').on('click', function () {
+    var expanded = root.find('#ach-menu-toggle').attr('aria-expanded') === 'true';
+    root.find('#ach-menu-toggle').attr('aria-expanded', String(!expanded));
+    root.find('#ach-primary-nav').attr('data-open', String(!expanded));
+  });
+  root.find('#ach-menu-toggle').on('keydown', function (event) {
+    if (event && event.key === 'Escape') {
+      root.find('#ach-primary-nav').attr('data-open','false');
+      $(this).attr('aria-expanded','false');
+    }
+  });
+  // Arrow keys are conveniences; native Tab/Enter/Space always remain available.
+  root.find('[data-destination]').on('keydown', function (event) {
     if (!root[0] || !event) return;
-    var list = Array.from(root[0].querySelectorAll('[data-tab]'));
+    var list = Array.from(root[0].querySelectorAll('[data-destination]'));
     var index = list.indexOf(this), direction = 0;
-    var horizontal = typeof window !== 'undefined' && window.innerWidth <= 720;
-    if (event.key === (horizontal ? 'ArrowRight' : 'ArrowDown')) direction = 1;
-    if (event.key === (horizontal ? 'ArrowLeft' : 'ArrowUp')) direction = -1;
+    if (event.key === 'ArrowDown') direction = 1;
+    if (event.key === 'ArrowUp') direction = -1;
     var next = event.key === 'Home' ? 0 : event.key === 'End' ? list.length - 1 :
+      direction && index >= 0 ? (index + direction + list.length) % list.length : -1;
+    if (next >= 0) { event.preventDefault(); list[next].focus(); list[next].click(); }
+  });
+  root.find('[data-task], [data-server-task]').on('keydown', function (event) {
+    if (!event || !root[0]) return;
+    var query = this.hasAttribute('data-task') ? '[data-task]' : '[data-server-task]';
+    var list = Array.from(root[0].querySelectorAll(query));
+    var index = list.indexOf(this), direction = event.key === 'ArrowRight' ? 1 :
+      event.key === 'ArrowLeft' ? -1 : 0;
+    var next = event.key === 'Home' ? 0 : event.key === 'End' ? list.length-1 :
       direction && index >= 0 ? (index + direction + list.length) % list.length : -1;
     if (next >= 0) { event.preventDefault(); list[next].focus(); list[next].click(); }
   });
@@ -7031,6 +7257,6 @@
   root.find('#ach-wp-terminal-enable').on('click', function () { updateWpTerminal('enable'); });
   root.find('#ach-wp-terminal-disable').on('click', function () { updateWpTerminal('disable'); });
 
-  overview();
+  navigateTask('overview',null,false);
 })();
 </script>
