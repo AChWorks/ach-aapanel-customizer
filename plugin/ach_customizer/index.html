@@ -1119,8 +1119,14 @@
           </div>
           <small id="ach-status-sites-state" role="status">Available websites load when selecting website scope.</small></div>
       </div>
+      <div class="ach-note" id="ach-status-branding-read" aria-label="Saved branding source and recheck">
+        <strong>Saved branding source — required before live delivery checks</strong>
+        <p id="ach-status-source" role="status">Branding not loaded.</p>
+        <p id="ach-status-branding-guidance" role="status" aria-live="polite">Load saved branding for this scope before checking live delivery. Use Recheck saved branding below.</p>
+        <div class="ach-controls"><button id="ach-status-load" type="button" aria-describedby="ach-status-branding-guidance">Recheck saved branding</button></div>
+        <p id="ach-status-result" role="status" aria-live="polite" data-state="info">Open Status Pages to load saved preferences.</p>
+      </div>
       <div class="ach-workflow" data-status-stage="design">
-      <p id="ach-status-source" role="status">Branding not loaded.</p>
       <div class="ach-status-fields">
         <div><label for="ach-status-name">Brand name</label><input id="ach-status-name" maxlength="80" autocomplete="off" /></div>
         <div><label for="ach-status-tagline">Tagline</label><input id="ach-status-tagline" maxlength="120" autocomplete="off" /></div>
@@ -1133,11 +1139,9 @@
       <label><input id="ach-status-footer" type="checkbox" checked /> Show footer attribution</label>
       <p class="ach-note" id="ach-status-color-notes">Accessibility recommendation: Preview your chosen colors and check readability before publishing. Low contrast is a warning, not a Save restriction.</p>
       <div class="ach-controls">
-        <button id="ach-status-load" type="button">Recheck saved branding</button>
         <button id="ach-status-preview-button" type="button" disabled>Preview unsaved settings</button>
         <button id="ach-status-save" type="button" class="btn btn-success" disabled>Save branding preferences</button>
       </div>
-      <p id="ach-status-result" role="status" aria-live="polite" data-state="info">Open Status Pages to load saved preferences.</p>
       <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
       <div class="ach-controls">
         <p id="ach-status-reset-why" class="ach-note" role="status" aria-live="polite">Reset changes only the selected saved branding preferences, not live error pages. Check the scope if needed, then select Reset to continue.</p>
@@ -4729,6 +4733,7 @@
     if (!scope) {
       statusReadBusy = false;
       statusNotice('Select a valid native aaPanel site ID first.', 'error');
+      renderStatusStage();
       return;
     }
     statusLock(true);
@@ -6484,6 +6489,17 @@
        !requirement.templates.includes(root.find('#ach-status-template').val()));
     root.find('#ach-status-task-setup').prop('hidden',!mismatch)
       .text(mismatch ? requirement.note : '');
+    // The canonical branding reader serves every delivery task, not only Design.
+    // No source Recheck is eligible until its saved revision matches this scope.
+    var scope = statusScope();
+    var brandingReady = !!scope && statusRevision !== null && !!statusSavedBrand &&
+      statusLoadedScope === scope.scope + ':' + scope.site_id;
+    var guidance = statusReadBusy ? 'Loading saved branding for the selected scope...' :
+      !scope ? 'Choose a verified website for this scope, then Recheck saved branding.' :
+      'Saved branding is not loaded for this scope. Recheck saved branding above before ' +
+      'using the selected task\'s source Recheck. Apply and Restore remain unavailable.';
+    root.find('#ach-status-branding-guidance').prop('hidden',brandingReady)
+      .text(brandingReady ? '' : guidance);
   }
   function renderOperationalStages() {
     var cacheVisible = activeDestination === 'websites' && activeTask === 'cache';

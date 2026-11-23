@@ -108,6 +108,7 @@ function loadUi() {
     '#ach-php-tasks', '#ach-php-task-effect',
     '#ach-status-modes', '#ach-status-server-return', '#ach-status-design-shortcut',
     '#ach-status-task-effect', '#ach-status-task-setup',
+    '#ach-status-branding-read', '#ach-status-branding-guidance',
     '#ach-cache-clear-recheck-route', '#ach-bridge-recheck-route', '#ach-php-preview-route',
     '#ach-vhost-summary', '#ach-nginx-candidate-summary', '#ach-reconcile-summary', '#ach-cache-summary', '#ach-php-runtime-summary',
     '#ach-cache-inspect-button', '#ach-cache-result',
@@ -4015,7 +4016,9 @@ test('All tabs place routine feedback by its operation rather than below long co
   ordered('ach-sites-status','ach-sites-refresh','ach-hosts-inspect-button','ach-hosts-result');
   ordered('ach-fpm-prepare','ach-fpm-plan','ach-fpm-operation-notice','ach-fpm-commit');
   ordered('ach-fpm-check-recovery','ach-fpm-recovery-status','ach-fpm-rollback');
-  ordered('ach-status-save','ach-status-result','ach-status-reset','ach-status-inspect-button');
+  // Branding read, error, and retry remain one shared source above every task stage.
+  ordered('ach-status-source','ach-status-load','ach-status-result',
+    'ach-status-save','ach-status-reset','ach-status-inspect-button');
   ordered('ach-activity-result','ach-activity-rows');
   assert.equal((html.match(/id="ach-status-result"/g) || []).length,1);
   assert.match(html,/id="ach-status-result"[^>]*aria-live="polite"/);
@@ -10338,4 +10341,120 @@ test('S2-S4: all original privileged action controls still have one canonical ow
     assert.match(html,new RegExp('data-php-stage="'+name+'"'));
   for (const name of ['design','site','defaults','fallback','stopped'])
     assert.match(html,new RegExp('data-status-stage="'+name+'"'));
+});
+
+test('S2S4-01: saved branding source, failure and canonical Recheck live outside every Error Pages stage', () => {
+  const panel=html.slice(html.indexOf('<section class="ach-view" id="ach-panel-status"'),
+    html.indexOf('<section class="ach-view" id="ach-panel-activity"'));
+  const design=panel.indexOf('<div class="ach-workflow" data-status-stage="design">');
+  assert.ok(design>0,'Design stage exists');
+  for(const id of ['ach-status-source','ach-status-load','ach-status-result',
+    'ach-status-branding-guidance']) {
+    const marker='id="'+id+'"';
+    const position=panel.indexOf(marker);
+    assert.ok(position>0 && position<design,id+' must be shared by site/default/stopped/HTTP/TLS');
+    assert.equal(html.split(marker).length,2,'Only one canonical '+id);
+  }
+  assert.match(panel,/id="ach-status-load"[^>]+aria-describedby="ach-status-branding-guidance"/);
+  assert.equal((html.match(/root\.find\('#ach-status-load'\)\.on\('click'/g)||[]).length,1,
+    'Keep one status_preferences reader and unsaved-draft guard');
+  for (const id of ['ach-status-manage-recheck','ach-status-default-recheck',
+    'ach-status-stopped-recheck','ach-status-unbound-recheck','ach-status-tls-recheck'])
+    assert.equal(html.split('id="'+id+'"').length,2,'No duplicated source Recheck '+id);
+});
+
+test('S2S4-01: failed branding read in Server HTTP/TLS is visible, retry enables only source Recheck', () => {
+  const ui=loadUi();
+  ui.clickDestination('server'); ui.clickServerTask('http');
+  const first=ui.requests.find(req=>/s=status_preferences$/.test(req.options.url));
+  assert.ok(first,'Loading preferences starts from canonical Status owner');
+  first.reject(null,'timeout');
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  assert.equal(ui.subStageVisible('status-stage','fallback'),true);
+  assert.equal(ui.navElementHidden('#ach-status-task-setup'),true,'No mismatched-template prompt');
+  assert.equal(ui.navElementHidden('#ach-status-branding-guidance'),false);
+  assert.match(ui.elementText('#ach-status-branding-guidance'),/Saved branding is not loaded.*Recheck saved branding/);
+  assert.match(ui.state().statusResult,/Unable to load saved branding preferences/);
+  assert.equal(ui.state().statusFeedbackState,'error');
+  assert.equal(ui.state().unboundRecheckDisabled,true);
+  assert.equal(ui.state().tlsRecheckDisabled,true);
+  const attempts=ui.requests.filter(req=>/s=status_preferences$/.test(req.options.url)).length;
+  const retry=ui.statusClick('#ach-status-load');
+  assert.match(retry.options.url,/s=status_preferences$/);
+  assert.equal(ui.requests.filter(req=>/s=status_preferences$/.test(req.options.url)).length,attempts+1);
+  assert.equal(ui.state().unboundRecheckDisabled,true,'Retry is not proof of readiness');
+  retry.respond(statusPrefs(8));
+  assert.equal(ui.navElementHidden('#ach-status-branding-guidance'),true);
+  assert.match(ui.state().statusSource,/revision 8/);
+  assert.equal(ui.state().unboundRecheckDisabled,false);
+  assert.equal(ui.state().tlsRecheckDisabled,false);
+  assert.equal(ui.state().unboundApplyDisabled,true,'Successful read never approves HTTP Apply');
+  assert.equal(ui.state().tlsApplyDisabled,true,'Successful read never approves TLS Apply');
+  const methods=ui.requests.map(req=>req.options.url.split('s=').at(-1));
+  assert.equal(methods.some(method=>/^(status_unbound|status_tls|status_save)$/.test(method)),false,
+    'Retry never automatically writes or performs source action');
+});
+
+test('S2S4-01: site/default/stopped all retain visible branding error and canonical retry', () => {
+  for (const mode of ['site','defaults','stopped']) {
+    const ui=loadUi();
+    let first;
+    if (mode === 'defaults') {
+      first=ui.openStatus();
+      ui.clickSubTask('status-mode','defaults');
+      first.respond({...statusPrefs(),schema:2});
+      ui.statusSetValue('#ach-status-template','new-site','change');
+    } else {
+      ui.openStatus().respond(statusPrefs());
+      ui.statusSetValue('#ach-status-scope','site','change');
+      loadNativeStatusSiteSelection(ui);
+      first=ui.requests.at(-1);
+      assert.match(first.options.url,/s=status_preferences$/);
+      first.respond({...statusPrefs(),effective:null});
+      ui.statusSetValue('#ach-status-template',mode==='stopped'?'stopped':'404','change');
+      ui.clickSubTask('status-mode',mode);
+    }
+    assert.equal(ui.subStageVisible('status-stage',mode),true,mode);
+    assert.equal(ui.navElementHidden('#ach-status-task-setup'),true,mode+' scope/template match');
+    assert.equal(ui.navElementHidden('#ach-status-branding-guidance'),false,mode);
+    assert.match(ui.state().statusResult,/Unable to load saved branding preferences/,mode);
+    assert.match(ui.elementText('#ach-status-branding-guidance'),/Recheck saved branding/,mode);
+    const before=ui.requests.length;
+    const retry=ui.statusClick('#ach-status-load');
+    assert.equal(ui.requests.length,before+1,mode);
+    assert.match(retry.options.url,/s=status_preferences$/);
+    assert.equal(retry.options.data.site_id,mode==='defaults'?'':'7');
+    assert.equal(ui.state().statusSaveDisabled,true,mode+' not eligible while retry pending');
+    retry.respond(statusPrefs(12,mode==='defaults'?'Global default':'Site override'));
+    assert.equal(ui.navElementHidden('#ach-status-branding-guidance'),true,mode);
+    assert.match(ui.state().statusSource,/revision 12/,mode);
+    assert.equal(mode==='site'?ui.state().statusManageRecheckDisabled:
+      mode==='stopped'?ui.state().stoppedRecheckDisabled:
+      ui.state().defaultSourceRecheckDisabled,false,mode+' Recheck enabled after valid source read');
+    assert.equal(mode==='site'?ui.state().statusManageApplyDisabled:
+      mode==='stopped'?ui.state().stoppedApplyDisabled:
+      ui.state().defaultSourceApplyDisabled,true,mode+' Apply still needs separate evidence');
+  }
+});
+
+test('S2S4-01: shared Recheck never discards an unsaved branding draft without approval', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs());
+  ui.statusSetValue('#ach-status-template','unbound','change');
+  ui.clickDestination('server');ui.clickServerTask('http');
+  ui.statusSetValue('#ach-status-name','Unsaved local draft','input change');
+  const old=ui.requests.length;
+  const confirmBefore=ui.statusConfirmations().length;
+  ui.statusClick('#ach-status-load');
+  assert.equal(ui.requests.length,old,'Cancelled Recheck sends no backend request');
+  assert.equal(ui.statusConfirmations().length,confirmBefore+1);
+  assert.equal(ui.state().statusName,'Unsaved local draft');
+  assert.match(ui.state().statusResult,/Unsaved changes kept/);
+  assert.equal(ui.subStageVisible('status-stage','fallback'),true);
+  ui.statusPermitDiscard(true);
+  const fresh=ui.statusClick('#ach-status-load');
+  assert.match(fresh.options.url,/s=status_preferences$/);
+  fresh.respond(statusPrefs(4));
+  assert.equal(ui.state().statusName,brand().brand_name);
+  assert.equal(ui.state().unboundRecheckDisabled,false);
 });
