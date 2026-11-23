@@ -7608,6 +7608,9 @@ for (const scope of ['selected','all']) {
     assert.match(summary,/baseline_revision_check/);
     assert.match(summary,/Saved baseline revision changed/);
     assert.match(summary,/d{32}/);
+    assert.match(summary,/Compare website records/);
+    assert.doesNotMatch(summary,/Recheck saved recovery|Restore|Recovery ID/i,
+      'Baseline Save has Compare, not a separate Recovery journal');
     assert.doesNotMatch(summary,/may already have committed/);
     assert.equal(disabled(ui),true);
     const count=ui.requests.length;
@@ -7616,6 +7619,20 @@ for (const scope of ['selected','all']) {
     ui.siteChangesCompare().respond(comparison);
     assert.equal(disabled(ui),false);
     assert.doesNotMatch(ui.state().siteChangesSummary,/was rejected/);
+  });
+
+  test(scope+' Baseline rejection keeps authoritative ID without invented Recovery guidance', () => {
+    const {ui,save}=pendingBaselineSave(scope);
+    save.respond({status:false,stage:'baseline_source_check',
+      msg:'Source changed during Compare; inspect current records',
+      operation_id:'a'.repeat(32),request_id:'b'.repeat(32)});
+    const summary=ui.state().siteChangesSummary;
+    assert.match(summary,/baseline_source_check/);
+    assert.match(summary,/Source changed during Compare/);
+    assert.match(summary,/Request ID: a{32}/);
+    assert.doesNotMatch(summary,/Request ID: b{32}|Recheck saved recovery|Restore/i);
+    assert.match(summary,/Compare website records/);
+    assert.equal(disabled(ui),true);
   });
 
   test(scope+' Baseline timeout preserves unknown outcome until fresh Compare', () => {

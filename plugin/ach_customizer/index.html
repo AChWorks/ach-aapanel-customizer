@@ -1251,9 +1251,27 @@
     var transport = failure && typeof failure.transport_status === 'string' &&
       /^[a-z_-]{1,32}$/.test(failure.transport_status) ?
       failure.transport_status : null;
-    var detail = rejected ? statusBackendFailure('save', failure, '') :
-      transport ? 'Network/transport status: ' + transport + '.' :
+    // Baseline Save has Compare (not a Recovery/Restore journal). Keep the
+    // backend's diagnostics, but do not inherit another module's Restore advice.
+    var detail = transport ? 'Network/transport status: ' + transport + '.' :
       'The returned Save receipt was missing or incompatible.';
+    if (rejected) {
+      var validId = function (value) {
+        return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
+      };
+      var validStage = typeof failure.stage === 'string' &&
+        /^[a-z0-9_]{1,80}$/.test(failure.stage);
+      var message = typeof failure.msg === 'string' ?
+        failure.msg.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 320) : '';
+      detail = validStage && message ?
+        'Server rejected Save at ' + failure.stage + ': ' + message + '.' :
+        'Server rejected Save without compatible diagnostic details.';
+      // The native endpoint's operation_id is authoritative when both
+      // correlation fields are present but disagree.
+      var correlation = validId(failure.operation_id) ? failure.operation_id :
+        validId(failure.request_id) ? failure.request_id : null;
+      if (correlation) detail += '\nRequest ID: ' + correlation;
+    }
     if (!rejected && response && typeof response.operation_id === 'string' &&
         /^[0-9a-f]{32}$/.test(response.operation_id))
       detail += ' Operation ID: ' + response.operation_id + '.';
