@@ -135,17 +135,15 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn('data-i18n', html)
         self.assertNotIn('navigator.language', html)
 
-    def test_overview_distinguishes_monitor_from_opt_in_auto_repair(self):
+    def test_home_disclosure_distinguishes_monitor_from_opt_in_auto_repair(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
         main = (PACKAGE / 'ach_customizer_main.py').read_text(encoding='utf-8')
-        self.assertNotIn('Unreleased preview.', html)
-        self.assertNotIn('No automatic enforcement.', html)
-        self.assertNotIn('Monitor changes only observation preferences', html)
-        self.assertIn('Monitor switches do not directly change server settings or restart services.', html)
-        self.assertIn('Disabling Overall Monitor or a relevant module blocks related inspections and manual workflows', html)
-        self.assertIn('turning off Overall Monitor or PHP-FPM preview also stops opted-in PHP-FPM repair from running', html)
-        self.assertIn('Automatic repair still needs separate explicit Enable/Disable.', html)
-        self.assertIn('even if its profile stays enabled.', html)
+        self.assertIn('<summary>Advanced: plugin monitoring controls</summary>', html)
+        self.assertIn('These controls determine whether Customizer inspections', html)
+        self.assertIn('They do not stop PHP or Nginx services or enable automatic repair.', html)
+        self.assertIn('Disabling the overall or PHP check also suspends any separately enabled PHP auto-repair.', html)
+        for control in ('ach-monitor-enabled', 'ach-site-enabled', 'ach-fpm-enabled'):
+            self.assertIn('id="' + control + '"', html)
         self.assertIn('Monitor switches do not directly change services or enable automatic repair.', main)
         self.assertIn('disabling Overall Monitor or PHP-FPM preview also blocks opted-in PHP-FPM repair.', main)
         self.assertIn('Monitor disabled: existing services keep running, but related inspections/manual workflows and already opted-in PHP-FPM automatic repair cannot run.', main)
@@ -158,16 +156,18 @@ class PackageContractTests(unittest.TestCase):
         self.assertIn('.ach-activity-table td:nth-child(2) { white-space:nowrap; }', html)
         self.assertIn("$('<time>').addClass('ach-activity-time').attr('datetime', entry.time_utc)", html)
 
-    def test_overview_starts_with_clear_website_task_and_no_unconditional_writes(self):
+    def test_home_starts_with_four_task_launchers_and_no_unconditional_writes(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('aria-label="Start using Customizer"', html)
-        self.assertIn('<strong>Start with a website</strong>', html)
-        self.assertIn('Open Website list, then use the Website dropdown in the Selected website bar above the table.', html)
-        self.assertIn('Routing &amp; Nginx for protection and recovery', html)
-        self.assertIn('FastCGI Cache to inspect caching', html)
-        self.assertIn('PHP-FPM covers shared PHP settings', html)
-        self.assertIn('Start with read-only Inspect, Preview or Recheck before making changes.', html)
-        self.assertIn('<button id="ach-overview-browse-sites" type="button">Browse websites</button>', html)
+        self.assertIn('<h4>Home</h4>', html)
+        self.assertIn('aria-label="Common tasks"', html)
+        for control, task in (
+                ('ach-overview-browse-sites', 'Manage a website'),
+                ('ach-home-php', 'Inspect PHP services'),
+                ('ach-home-status', 'Design an error page'),
+                ('ach-home-activity', 'Review recent activity')):
+            self.assertIn('id="' + control + '" type="button" class="ach-task-link"', html)
+            self.assertIn('<strong>' + task + '</strong>', html)
+        self.assertIn("root.find('#ach-home-php').on('click'", html)
         self.assertIn('tab.focus({preventScroll:true});', html)
 
     def test_fpm_auto_disclosure_rejects_retired_profile_upgrade_promise(self):

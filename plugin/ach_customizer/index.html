@@ -96,6 +96,7 @@
   #ach-customizer .ach-inspection-summary[data-tone="error"] {
     background:#fff3f2; border-color:#efc8c4; color:#9b342e;
   }
+  #ach-customizer #ach-site-changes-summary { white-space:pre-line; }
   #ach-customizer .ach-technical-report {
     margin:8px 0 16px; border:1px solid #e0e6eb; border-radius:8px;
     background:#fff; overflow:hidden;
@@ -182,6 +183,20 @@
     background:#fff8eb; color:#77510f; border-color:#e8c68e; font-weight:600;
   }
   #ach-customizer .ach-view > p.ach-note { padding:0; border:0; background:transparent; }
+  #ach-customizer .ach-home-intro { font-size:14px; line-height:1.6; color:#445566; max-width:66ch; }
+  #ach-customizer .ach-task-launch-grid {
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:12px; margin:0 0 8px;
+  }
+  #ach-customizer .ach-main button.ach-task-link {
+    display:block; width:100%; min-height:112px; text-align:left;
+    padding:16px; background:#fff; border:1px solid #d5dfe4; border-radius:10px;
+    color:var(--ach-text); line-height:1.5; white-space:normal;
+  }
+  #ach-customizer .ach-task-link strong { display:block; font-size:15px; margin-bottom:5px; }
+  #ach-customizer .ach-task-link span { display:block; font-size:13px; color:#526171; }
+  #ach-customizer .ach-main button.ach-task-link:hover { background:#f2f8f4; border-color:#87b99a; }
+  #ach-customizer .ach-home-advanced { margin-top:8px; }
   #ach-customizer .ach-view[hidden], #ach-customizer [hidden] { display:none !important; }
   #ach-customizer .ach-note {
     padding:11px 13px; background:var(--ach-soft); border:1px solid #e8ecef;
@@ -417,6 +432,9 @@
     #ach-customizer .ach-main { padding:14px 14px 26px; }
     #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { grid-template-columns:minmax(0,1fr); }
   }
+  @media (max-width:600px) {
+    #ach-customizer .ach-task-launch-grid { grid-template-columns:minmax(0,1fr); }
+  }
   @media (max-width:460px) {
     #ach-customizer .ach-fields > div, #ach-customizer .ach-status-fields > div,
     #ach-customizer .ach-fields > .ach-field-site {
@@ -442,7 +460,7 @@
     <div class="ach-workspace">
       <nav class="ach-sidebar" role="tablist" aria-label="Plugin sections" aria-orientation="vertical">
         <span class="ach-sidebar-label" role="presentation">Workspace</span>
-        <button type="button" data-tab="overview" role="tab" id="ach-tab-overview" aria-controls="ach-panel-overview" aria-selected="true" tabindex="0">Overview</button>
+        <button type="button" data-tab="overview" role="tab" id="ach-tab-overview" aria-controls="ach-panel-overview" aria-selected="true" tabindex="0">Home</button>
         <span class="ach-sidebar-label" role="presentation">Websites</span>
         <button type="button" data-tab="websites" role="tab" id="ach-tab-websites" aria-controls="ach-panel-websites" aria-selected="false" tabindex="-1">Website list</button>
         <button type="button" data-tab="routing" role="tab" id="ach-tab-routing" aria-controls="ach-panel-routing" aria-selected="false" tabindex="-1">Routing &amp; Nginx</button>
@@ -463,29 +481,37 @@
           <button id="ach-website-browse" type="button">Browse websites</button>
         </div>
         <section class="ach-view" id="ach-panel-overview" aria-labelledby="ach-tab-overview" data-view="overview" role="tabpanel">
-      <h4 class="ach-sr-only">Overview</h4>
-      <div class="ach-note" aria-label="Start using Customizer">
-        <strong>Start with a website</strong>
-        <p>Open Website list, then use the Website dropdown in the Selected website bar above the table. After choosing a site, open Routing &amp; Nginx for protection and recovery, or FastCGI Cache to inspect caching. PHP-FPM covers shared PHP settings; Status Pages covers page design and delivery. Start with read-only Inspect, Preview or Recheck before making changes.</p>
-        <div class="ach-controls"><button id="ach-overview-browse-sites" type="button">Browse websites</button></div>
+      <h4>Home</h4>
+      <p class="ach-home-intro">Choose what you want to do. Customizer checks current sources first and shows the exact target and effect before a change.</p>
+      <div class="ach-task-launch-grid" aria-label="Common tasks">
+        <button id="ach-overview-browse-sites" type="button" class="ach-task-link">
+          <strong>Manage a website</strong><span>Choose a site, review changes, protection, WordPress and Cache.</span>
+        </button>
+        <button id="ach-home-php" type="button" class="ach-task-link">
+          <strong>Inspect PHP services</strong><span>Understand shared PHP settings before changing them.</span>
+        </button>
+        <button id="ach-home-status" type="button" class="ach-task-link">
+          <strong>Design an error page</strong><span>Preview a page before choosing where it should appear.</span>
+        </button>
+        <button id="ach-home-activity" type="button" class="ach-task-link">
+          <strong>Review recent activity</strong><span>Find operation details and supported recovery actions.</span>
+        </button>
       </div>
-      <p class="ach-note">Monitor switches do not directly change server settings or restart services. Disabling Overall Monitor or a relevant module blocks related inspections and manual workflows; turning off Overall Monitor or PHP-FPM preview also stops opted-in PHP-FPM repair from running. Automatic repair still needs separate explicit Enable/Disable.</p>
       <div class="ach-toolbar">
-        <p id="ach-overview-status" role="status" aria-live="polite">Loading monitor state...</p>
-        <button type="button" id="ach-overview-refresh">Refresh state</button>
+        <p id="ach-overview-status" role="status" aria-live="polite">Checking available inspections...</p>
+        <button type="button" id="ach-overview-refresh">Refresh observations</button>
       </div>
-      <div class="ach-note">
-        <strong>Monitor controls</strong>
-        <p>Choose which website and PHP-FPM inspections remain available. These switches also gate related manual workflows and opted-in PHP-FPM repair; turning them off does not stop running services.</p>
+      <details class="ach-help ach-home-advanced">
+        <summary>Advanced: plugin monitoring controls</summary>
+        <p>These controls determine whether Customizer inspections and related workflows are available. They do not stop PHP or Nginx services or enable automatic repair. Disabling the overall or PHP check also suspends any separately enabled PHP auto-repair.</p>
         <div class="ach-switches">
           <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /> Overall Monitor</label>
           <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /> Website inventory</label>
           <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" disabled /> PHP-FPM preview</label>
         </div>
-        <details class="ach-help"><summary>What do Monitor settings control?</summary><p>Overall Monitor gates the related workflows. Website inventory gates native site discovery and selected WordPress actions. PHP-FPM preview gates PHP file checks.</p><p>Disabling Overall Monitor or PHP-FPM preview blocks existing opted-in PHP-FPM repair runs, even if its profile stays enabled. Monitor toggles never Apply configuration or Enable automatic repair; use its separate Enable/Disable controls. If a control is unavailable, Refresh state and read the status above.</p></details>
         <p id="ach-overview-control-result" role="status" aria-live="polite" data-state="info">Change a Monitor control to update its saved state.</p>
         <p id="ach-state-revision" role="status">Monitor state unavailable</p>
-      </div>
+      </details>
     </section>
     <section class="ach-view" id="ach-panel-websites" aria-labelledby="ach-tab-websites" data-view="websites" role="tabpanel" hidden>
       <h4>Website list</h4>
@@ -1218,6 +1244,44 @@
     explainGate('ach-site-changes-why', 'blocked',
       'Locked: select Compare website records above. Review added, removed and changed site records before accepting a new observation baseline.');
   }
+  function showBaselineSaveUnconfirmed(scope, response, failure) {
+    // A write can commit even if its acknowledgement is lost. The next safe
+    // action is a fresh Compare, never a retry against a stale review token.
+    var rejected = !!(failure && failure.status === false);
+    var transport = failure && typeof failure.transport_status === 'string' &&
+      /^[a-z_-]{1,32}$/.test(failure.transport_status) ?
+      failure.transport_status : null;
+    // Baseline Save has Compare (not a Recovery/Restore journal). Keep the
+    // backend's diagnostics, but do not inherit another module's Restore advice.
+    var detail = transport ? 'Network/transport status: ' + transport + '.' :
+      'The returned Save receipt was missing or incompatible.';
+    if (rejected) {
+      var validId = function (value) {
+        return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
+      };
+      var validStage = typeof failure.stage === 'string' &&
+        /^[a-z0-9_]{1,80}$/.test(failure.stage);
+      var message = typeof failure.msg === 'string' ?
+        failure.msg.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 320) : '';
+      detail = validStage && message ?
+        'Server rejected Save at ' + failure.stage + ': ' + message + '.' :
+        'Server rejected Save without compatible diagnostic details.';
+      // The native endpoint's operation_id is authoritative when both
+      // correlation fields are present but disagree.
+      var correlation = validId(failure.operation_id) ? failure.operation_id :
+        validId(failure.request_id) ? failure.request_id : null;
+      if (correlation) detail += '\nRequest ID: ' + correlation;
+    }
+    if (!rejected && response && typeof response.operation_id === 'string' &&
+        /^[0-9a-f]{32}$/.test(response.operation_id))
+      detail += ' Operation ID: ' + response.operation_id + '.';
+    var summary = scope + ' baseline Save ' + (rejected ?
+      'was rejected by the server. The stored baseline has not been verified.' :
+      'outcome unconfirmed. The change may already have committed.') +
+      ' Compare website records to verify what was stored before any new Save.';
+    resetSiteChanges(summary + '\n' + detail);
+    inspectionSummary('site-changes', summary + '\n' + detail, 'error');
+  }
   function invalidateWebsitesSnapshot() {
     // Reject an inventory request started under an earlier Monitor policy.
     resetSiteChanges('Monitor policy changed; compare again after Refresh.');
@@ -1392,7 +1456,10 @@
                 '. Automatic repair outcome unknown: inspect current enabled state before retrying.' :
                 '. Outcome unknown: inspect saved recovery before any retry.') : ''), true);
         }
-        done(null);
+        // Preserve the transport category for the two Baseline writes so the
+        // owning task can explain an unknown completion beyond the global toast.
+        done(null, ['save_site_baseline', 'save_selected_site_baseline'].includes(method) ?
+          {transport_status:status} : null);
         if (hasPotentialActivity(method)) invalidateActivitySnapshot();
       });
   }
@@ -1626,7 +1693,7 @@
       root.find('#ach-prev, #ach-next').prop('disabled', true);
       root.find('#ach-sites-status').text(websitePolicyState === 'pending' ?
         'Monitor update pending. Website inventory will load only after confirmation.' :
-        'Monitor policy unverified. Open Overview and Refresh state before loading websites.');
+        'Monitor policy unverified. Open Home and Refresh observations before loading websites.');
       siteContextNotice('Site list paused: verify Monitor state in Overview before inspecting.');
       return;
     }
@@ -1821,17 +1888,21 @@
     siteChangesBusy = busy;
     root.find('#ach-site-changes-compare').prop('disabled',
       busy || siteBusy || websitePolicyState !== 'stable');
+    var allNeedsSave = !!siteChangesSnapshot &&
+      siteChangesSnapshot.state !== 'No Changes';
     root.find('#ach-site-changes-save').prop('disabled',
-      busy || !siteChangesSnapshot || siteBusy || websitePolicyState !== 'stable');
+      busy || !allNeedsSave || siteBusy || websitePolicyState !== 'stable');
     var explanation = websitePolicyState !== 'stable' ?
-      'Locked: Monitor state needs verification. Open Overview and Refresh state, then compare again.' :
+      'Locked: Monitor state needs verification. Open Home and Refresh observations, then compare again.' :
       busy || siteBusy ?
       'Checking current site records. Wait for this comparison or website inventory load to finish.' :
       !siteChangesSnapshot ?
-      'Locked: choose Compare website records above. Review the records before updating the plugin-owned baseline.' :
-      'Comparison ready. Review the listed records if useful, then select Save to accept this plugin-owned baseline. Live website configuration stays unchanged.';
+      'Choose Compare website records to review the current plugin-owned baseline.' :
+      !allNeedsSave ?
+      'Up to date: the saved baseline already matches the current native website records. No Save is needed; Compare again after changes.' :
+      'Changes found. Review the listed records, then Save to accept the new plugin-owned baseline. Live website configuration stays unchanged.';
     explainGate('ach-site-changes-why',
-      siteChangesSnapshot && !busy && !siteBusy && websitePolicyState === 'stable' ? 'ready' : 'blocked',
+      allNeedsSave && !busy && !siteBusy && websitePolicyState === 'stable' ? 'ready' : 'blocked',
       explanation);
     refreshSelectedSiteBaselineGate();
   }
@@ -1898,6 +1969,8 @@
     siteChangesSnapshot = null; // An ambiguous write must be reconciled before retry.
     root.find('#ach-site-changes-status').text(
       'Saving reviewed selected website record; other saved baselines are preserved...');
+    inspectionSummary('site-changes',
+      'Saving the selected website baseline. The result has not been verified yet.');
     siteChangesLock(true);
     request('save_selected_site_baseline', Object.assign(
       {}, cacheNativeArgs(id), {
@@ -1916,40 +1989,51 @@
           r.source_sha256 !== snapshot.source_sha256 ||
           !/^[0-9a-f]{64}$/.test(String(r.baseline_sha256 || '')) ||
           r.baseline_revision !== snapshot.baseline_revision + (r.changed ? 1 : 0)) {
-        resetSiteChanges(
-          'Selected-site save unconfirmed. Do not retry blindly; Compare again to verify the baseline. ' +
-          statusBackendFailure('save', failure, ''));
+        showBaselineSaveUnconfirmed('Selected website', r, failure);
         return;
       }
       resetSiteChanges(r.state + ' — selected #' + id +
         ', baseline revision ' + r.baseline_revision +
         '. Other pending website differences were left unchanged. Compare again to verify.');
+      inspectionSummary('site-changes',
+        (r.changed ? 'Selected website baseline saved.' : 'Selected website baseline already unchanged.') +
+        ' Site #' + id + ', revision ' + r.baseline_revision +
+        '. Other website baselines remain untouched. Compare again for current changes.',
+        'observed');
     });
   });
   root.find('#ach-site-changes-save').on('click', function () {
     if (siteChangesBusy || siteBusy || !siteChangesSnapshot ||
+        siteChangesSnapshot.state === 'No Changes' ||
         websitePolicyState !== 'stable') return;
     var snapshot = siteChangesSnapshot, ticket = ++siteChangesTicket;
     siteChangesSnapshot = null; // An uncertain request must not be retried blindly.
     root.find('#ach-site-changes-status').text('Saving reviewed plugin-owned baseline...');
+    inspectionSummary('site-changes',
+      'Saving the all-websites baseline. The result has not been verified yet.');
     siteChangesLock(true);
     request('save_site_baseline', {
       expected_revision:snapshot.baseline_revision,
       expected_monitor_revision:snapshot.monitor_revision,
       expected_source_sha256:snapshot.source_sha256, reviewed:'true'
-    }, function (r) {
+    }, function (r, failure) {
       if (ticket !== siteChangesTicket) return;
-      if (!r || r.schema !== 1 ||
+      if (!r || r.status !== true || r.schema !== 1 ||
           !['Baseline Saved', 'Baseline Unchanged'].includes(r.state) ||
           typeof r.changed !== 'boolean' ||
           r.changed !== (r.state === 'Baseline Saved') ||
           r.source_sha256 !== snapshot.source_sha256 ||
           r.baseline_revision !== snapshot.baseline_revision + (r.changed ? 1 : 0)) {
-        resetSiteChanges('Baseline outcome unconfirmed; Compare again to reconcile before another save.');
+        showBaselineSaveUnconfirmed('All websites', r, failure);
         return;
       }
       resetSiteChanges(r.state + ' — revision ' + r.baseline_revision +
         '. Compare again to verify the stored baseline against current records.');
+      inspectionSummary('site-changes',
+        (r.changed ? 'All reviewed website records saved.' : 'The saved baseline is already up to date.') +
+        ' Baseline revision ' + r.baseline_revision +
+        '. No live website configuration was changed. Compare again to check current records.',
+        'observed');
     });
   });
   var hostsBusy = false, hostsTicket = 0, hostsPageSites = new Map();
@@ -1987,7 +2071,7 @@
       .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity ||
         root.find('#ach-cache-clear-reviewed').prop('checked') !== true);
     var common = websitePolicyState !== 'stable' ?
-      'Monitor state is unverified. Open Overview and Refresh state first.' :
+      'Monitor state is unverified. Open Home and Refresh observations first.' :
       !id ? 'Select a website above before checking Cache readiness.' :
       siteBusy || hostsBusy ? 'Website inventory or selection is loading. Try again after it is verified.' : '';
     var urlValid = validCacheUrlPath(root.find('#ach-cache-url-path').val());
@@ -6046,15 +6130,19 @@
         String(root.find('#ach-php-version').val() || '') === selected;
     });
   });
-  function browseWebsites() {
-    var tab = root.find('#ach-tab-websites')[0];
+  function openNativeTask(section) {
+    var tab = root.find('#ach-tab-' + section)[0];
+    if (!tab) return;
     tab.click();
-    // The originating button may be hidden now; keep keyboard focus on the destination.
-    // The tab handler already scrolls the horizontal tablist on narrow screens.
+    // Keep focus in the live destination rather than on the hidden Home task.
     tab.focus({preventScroll:true});
   }
+  function browseWebsites() { openNativeTask('websites'); }
   root.find('#ach-website-browse').on('click', browseWebsites);
   root.find('#ach-overview-browse-sites').on('click', browseWebsites);
+  root.find('#ach-home-php').on('click', function () { openNativeTask('php'); });
+  root.find('#ach-home-status').on('click', function () { openNativeTask('status'); });
+  root.find('#ach-home-activity').on('click', function () { openNativeTask('activity'); });
   root.find('[data-tab]').on('click', function () {
     var tab = $(this).attr('data-tab');
     if (['overview','websites','routing','cache','php','status','activity'].indexOf(tab) < 0) return;

@@ -5,7 +5,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import mock_open, patch
 
 PLUGIN = Path(__file__).resolve().parents[1] / "plugin" / "ach_customizer"
 sys.path.insert(0, str(PLUGIN))
@@ -97,7 +98,52 @@ class HostsRemediationTests(unittest.TestCase):
                 with self.assertRaises(manager.HostsManageError):
                     self.remove(domain=domain)
                 self.assertEqual(self.source.read_bytes(), before)
-        self.assertEqual(list(self.state.iterdir()), [])
+        self.assertEqual(list(self.state.glob("*.backup")), [])
+        self.assertEqual(list(self.state.glob("*.json")), [])
+
+    def test_selected_site_writer_also_protects_system_identity(self):
+        self.site["name"] = "qa-native-host"
+        self.site["bound_domains"] = [{"name": "qa-native-host", "port": 80}]
+        self.domains = ["qa-native-host"]
+        self.write(b"127.0.1.1 qa-native-host\n")
+        with patch.object(manager, "_protected_hostnames",
+                          return_value={"localhost", "qa-native-host"}):
+            with self.assertRaisesRegex(manager.HostsManageError,
+                                        "server's own hostname"):
+                self.remove(domain="qa-native-host")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 qa-native-host\n")
+        self.assertEqual(list(self.state.glob("*.backup")), [])
+        self.assertEqual(list(self.state.glob("*.json")), [])
+
+    def test_selected_site_rejects_short_nodename_local_canonical_fqdn(self):
+        self.site["name"] = "node.example.test"
+        self.site["bound_domains"] = [{"name": "node.example.test", "port": 80}]
+        self.domains = ["node.example.test"]
+        original = b"127.0.1.1 node.example.test node\n127.0.0.4 site-old.test\n"
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="node")), \
+             patch("builtins.open", mock_open(read_data="node\n")):
+            with self.assertRaisesRegex(manager.HostsManageError, "server's own hostname"):
+                self.remove(domain="node.example.test")
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual(list(self.state.glob("*.backup")), [])
+        self.assertEqual(list(self.state.glob("*.json")), [])
+
+    def test_selected_site_rejects_new_identity_after_short_hostname_transition(self):
+        self.site["name"] = "node-new.example.test"
+        self.site["bound_domains"] = [{"name": "node-new.example.test", "port": 80}]
+        self.domains = ["node-new.example.test"]
+        original = b"127.0.1.1 node-old.example.test node-old\n127.0.1.2 node-new.example.test node-new\n"
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="node-old")), \
+             patch("builtins.open", mock_open(read_data="node-new\n")):
+            with self.assertRaisesRegex(manager.HostsManageError, "server's own hostname"):
+                self.remove(domain="node-new.example.test")
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual(list(self.state.glob("*.backup")), [])
+        self.assertEqual(list(self.state.glob("*.json")), [])
 
     def test_reject_missing_current_loopback_and_stale_digest(self):
         self.write(b"192.0.2.4 site.test\n")
@@ -336,6 +382,153 @@ class OneClickHostsTests(unittest.TestCase):
                     self.remove(domain)
                 self.assertEqual(self.source.read_bytes(), original)
         self.assertEqual(self.inspect()["entries"][0]["domain"], "other.test")
+
+    def test_dynamic_machine_identity_is_not_offered_or_removable(self):
+        # A live kernel name must not be mistaken for an abandoned WP alias.
+        self.write(b"127.0.1.1 qa-native-host\n127.0.0.2 old-site.test\n")
+        before = self.source.read_bytes()
+        with patch.object(manager, "_protected_hostnames",
+                          return_value={"localhost", "qa-native-host"}):
+            self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                             ["old-site.test"])
+            with self.assertRaisesRegex(manager.HostsManageError,
+                                        "server's own hostname"):
+                self.remove("qa-native-host")
+            self.assertEqual(self.source.read_bytes(), before)
+            self.assertEqual(self.remove("old-site.test")["state"], "Alias Removed")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 qa-native-host\n")
+
+    def test_mutator_rejects_identity_even_if_earlier_listing_was_stale(self):
+        self.write(b"127.0.1.1 newly-renamed-host\n")
+        # Protect at the mutation boundary even when this hostname was
+        # displayed earlier before a machine rename.
+        self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                         ["newly-renamed-host"])
+        with patch.object(manager, "_protected_hostnames",
+                          return_value={"newly-renamed-host"}):
+            with self.assertRaisesRegex(manager.HostsManageError,
+                                        "server's own hostname"):
+                self.remove("newly-renamed-host")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 newly-renamed-host\n")
+
+    def test_short_machine_name_and_verified_local_fqdn_are_protected(self):
+        original = (b"127.0.1.1 node.example.test node # canonical\n"
+                    b"127.0.0.4 node.legacy.test\n"
+                    b"127.0.0.5 stale-site.test\n")
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="node")), \
+             patch("builtins.open", mock_open(read_data="node\n")):
+            listed = self.inspect()
+            self.assertEqual([x["domain"] for x in listed["entries"]],
+                             ["node.legacy.test", "stale-site.test"])
+            for protected in ("node", "node.example.test"):
+                with self.subTest(protected=protected):
+                    with self.assertRaisesRegex(manager.HostsManageError,
+                                                "server's own hostname"):
+                        self.remove(protected)
+                    self.assertEqual(self.source.read_bytes(), original)
+                    self.assertEqual(list(self.state.glob("*.backup")), [])
+                    self.assertEqual(list(self.state.glob("*.json")), [])
+            self.assertEqual(self.remove("node.legacy.test")["state"], "Alias Removed")
+        self.assertIn(b"127.0.1.1 node.example.test node", self.source.read_bytes())
+        self.assertIn(b"127.0.0.5 stale-site.test", self.source.read_bytes())
+
+    def test_local_fqdn_after_short_name_on_same_record_is_protected(self):
+        original = (b"127.0.1.1 node node.example.test manual.test\n"
+                    b"127.0.0.8 node.other.test\n")
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="node")), \
+             patch("builtins.open", mock_open(read_data="node\n")):
+            self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                             ["manual.test", "node.other.test"])
+            with self.assertRaisesRegex(manager.HostsManageError, "server's own hostname"):
+                self.remove("node.example.test")
+            self.assertEqual(self.source.read_bytes(), original)
+            self.assertEqual(self.remove("manual.test")["state"], "Alias Removed")
+        self.assertIn(b"node node.example.test", self.source.read_bytes())
+
+    def test_peer_fqdn_on_same_machine_record_remains_selectively_removable(self):
+        original = b"127.0.1.1 node.example.test node node.manual.test\n"
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="node")), \
+             patch("builtins.open", mock_open(read_data="node\n")):
+            self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                             ["node.manual.test"])
+            self.assertEqual(self.remove("node.manual.test")["state"], "Alias Removed")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 node.example.test node\n")
+
+    def test_fqdn_kernel_and_configured_short_hostname_have_shared_protection(self):
+        original = b"127.0.1.1 node.example.test node\n127.0.0.9 old-site.test\n"
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="node.example.test")), \
+             patch("builtins.open", mock_open(read_data="node\n")):
+            self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                             ["old-site.test"])
+            for protected in ("node.example.test", "node"):
+                with self.assertRaisesRegex(manager.HostsManageError, "server's own hostname"):
+                    self.remove(protected)
+            self.assertEqual(self.source.read_bytes(), original)
+            self.assertEqual(self.remove("old-site.test")["state"], "Alias Removed")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 node.example.test node\n")
+
+    def test_kernel_and_configured_short_hostname_transition_preserves_both_fqdns(self):
+        original = (b"127.0.1.1 old-node.example.test old-node\n"
+                    b"127.0.1.2 new-node.example.test new-node\n"
+                    b"127.0.0.9 orphan.example.test\n")
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="old-node")), \
+             patch("builtins.open", mock_open(read_data="new-node\n")):
+            self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                             ["orphan.example.test"])
+            for protected in ("old-node.example.test", "new-node.example.test"):
+                with self.assertRaisesRegex(manager.HostsManageError, "server's own hostname"):
+                    self.remove(protected)
+            self.assertEqual(self.source.read_bytes(), original)
+            self.assertEqual(list(self.state.glob("*.backup")), [])
+            self.assertEqual(list(self.state.glob("*.json")), [])
+
+    def test_same_short_label_on_another_line_is_not_machine_identity(self):
+        original = (b"127.0.1.1 node.example.test node\n"
+                    b"127.0.0.7 node.old-domain.test\n")
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="node")), \
+             patch("builtins.open", mock_open(read_data="node\n")):
+            self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                             ["node.old-domain.test"])
+            self.assertEqual(self.remove("node.old-domain.test")["state"], "Alias Removed")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 node.example.test node\n")
+
+    def test_mutation_rechecks_machine_name_when_kernel_identity_changes(self):
+        original = b"127.0.1.1 renamed.example.test renamed\n"
+        self.write(original)
+        with patch.object(manager.os, "uname",
+                          side_effect=[SimpleNamespace(nodename="old"),
+                                       SimpleNamespace(nodename="old"),
+                                       SimpleNamespace(nodename="renamed")]), \
+             patch("builtins.open", mock_open(read_data="old\n")):
+            # Before the write, the configured name appears old. The kernel
+            # name transitions; the locked source check must catch it.
+            with self.assertRaisesRegex(manager.HostsManageError, "server's own hostname"):
+                self.remove("renamed.example.test")
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual(list(self.state.glob("*.backup")), [])
+        self.assertEqual(list(self.state.glob("*.json")), [])
+
+    def test_system_fqdn_and_short_names_are_both_protected(self):
+        from types import SimpleNamespace
+        from unittest.mock import mock_open
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="Node-QA.example.test")), \
+             patch("builtins.open", mock_open(read_data="file-node.example.test\n")):
+            protected = manager._protected_hostnames()
+        self.assertTrue({"node-qa.example.test", "node-qa",
+                         "file-node.example.test", "file-node"} <= protected)
 
     def test_external_edit_detected_before_publication_is_not_discarded(self):
         self.write(b"127.0.0.1 localhost\n127.0.0.1 remove.test\n")

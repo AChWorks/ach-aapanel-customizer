@@ -40,6 +40,20 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 
 **Verified reference, not a universal support promise:** non-production **aaPanel 8.0.7**, Nginx, PHP-FPM **8.1/8.5** on representative sites. Other aaPanel/Nginx/PHP writer layouts are inspected by capability, not arbitrarily rejected by version, but a write requires a supported real source/ownership contract. See [installed-native QA evidence, exact candidate and remaining coverage](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), [feature/compatibility backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [TLS/Status Pages scope](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). **Publishing a Stable Release is not a claim of comprehensive Production certification or permission to deploy to Production.**
 
+## In-progress task-first interface redesign (not released)
+
+The Owner approved a comprehensive native UI redesign focused on plain-language
+tasks, selected-site context, explicit server-wide effects, transparent errors,
+and simple recovery. [The redesign contract](docs/UX-REDESIGN.md) and
+[Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
+track the design and implementation slices. The **published Release** still
+uses the current seven-tab interface until a separately reviewed and
+authorized replacement is delivered; follow the current installation steps
+above for that Release, not the unreleased IA. Historical Customizer UI
+compatibility is not a requirement because no earlier Customizer Production
+installation exists. Current third-party interoperability and peer safety
+remain mandatory.
+
 ## License
 
 **Mozilla Public License 2.0 (MPL-2.0)** governs the original project source,

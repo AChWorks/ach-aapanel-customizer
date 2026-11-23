@@ -162,9 +162,12 @@ const {chromium} = require('playwright');
           const failures=found.filter(el=>{
             const r=el.getBoundingClientRect();
             const css=getComputedStyle(el);
-            return r.height<31 || r.height>96 || r.width<15 ||
+            // Home task tiles have a deliberate multi-line 112px+ target;
+            // they are navigation cards, not compact form buttons.
+            const task=el.matches('button.ach-task-link');
+            return r.height<(task?104:31) || r.height>(task?240:96) || r.width<15 ||
               r.left<edge.left-1 || r.right>edge.right+1 ||
-              css.borderRadius!=='8px';
+              css.borderRadius!==(task?'10px':'8px');
           }).map(el=>el.id||el.tagName);
           return {visible:found.length,failures};
         });
