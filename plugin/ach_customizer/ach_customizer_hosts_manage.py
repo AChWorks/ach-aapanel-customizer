@@ -348,8 +348,40 @@ def _replace_source(parent, payload, baseline, *, expected_sha, recovery_id):
 _RESERVED = frozenset(("localhost", "ip6-localhost", "ip6-loopback"))
 
 
+def _protected_hostnames():
+    """Identify this machine's names at the point of inspection or removal.
+
+    /etc/hostname and the live kernel nodename can differ during a hostname
+    transition. Neither is a removable WordPress/site alias. Reading them is
+    independent of the current /etc/hosts file or native site inventory.
+    """
+    protected = set(_RESERVED)
+    candidates = [os.uname().nodename]
+    try:
+        with open("/etc/hostname", encoding="utf-8") as source:
+            candidates.extend(source.read().splitlines()[:1])
+    except (OSError, UnicodeError):
+        pass
+    for candidate in candidates:
+        try:
+            name = _hostname(candidate.strip())
+        except HostsInspectionError:
+            continue
+        protected.add(name)
+        # A kernel or configured FQDN also identifies the same short host.
+        if "." in name:
+            protected.add(name.split(".", 1)[0])
+    return protected
+
+
+def _require_removable_name(domain):
+    if domain in _protected_hostnames():
+        raise HostsManageError("The server's own hostname cannot be removed here")
+
+
 def _available_aliases(payload):
     entries = []
+    protected = _protected_hostnames()
     for line_number, line in enumerate(payload.splitlines(), 1):
         parts = line.partition(b"#")[0].split()
         if len(parts) < 2:
@@ -366,7 +398,7 @@ def _available_aliases(payload):
                 domain = _hostname(alias.decode("utf-8"))
             except (HostsInspectionError, UnicodeError):
                 continue
-            if domain in _RESERVED or domain in seen:
+            if domain in protected or domain in seen:
                 continue
             seen.add(domain)
             entries.append({"domain": domain, "address": str(ip),
@@ -398,9 +430,11 @@ def remove_available_alias(*, domain, source_path=HOSTS_PATH, data_dir=DATA_DIR)
         canonical = _hostname(domain)
     except HostsInspectionError as exc:
         raise HostsManageError("Choose a valid local hostname") from exc
-    if canonical != domain or canonical in _RESERVED:
+    if canonical != domain:
         raise HostsManageError("Choose a listed non-system local hostname")
+    _require_removable_name(domain)
     with _locked_state(data_dir):
+        _require_removable_name(domain)
         parent = _open_parent(source_path)
         try:
             before, meta = _read_source(parent)
@@ -409,6 +443,7 @@ def remove_available_alias(*, domain, source_path=HOSTS_PATH, data_dir=DATA_DIR)
                 return {"state": "Already Absent", "changed": False,
                         "domain": domain, "removed_aliases": 0,
                         "hosts_sha256": _sha(before)}
+            _require_removable_name(domain)
             op = uuid4().hex
             try:
                 _replace_source(parent, after, meta, expected_sha=_sha(before),
@@ -473,7 +508,9 @@ def remove_loopback_alias(*, site, domains, domain, expected_sha,
             domain in ("localhost", "ip6-localhost", "ip6-loopback") or
             not isinstance(expected_sha, str) or not _SHA.fullmatch(expected_sha)):
         raise HostsManageError("Select a current exact website alias and refresh inspection")
+    _require_removable_name(domain)
     with _locked_state(data_dir) as state:
+        _require_removable_name(domain)
         existing = _record(state, site)
         parent = _open_parent(source_path)
         try:
@@ -502,6 +539,7 @@ def remove_loopback_alias(*, site, domains, domain, expected_sha,
             after, removed = _remove_domain_aliases(before, domain)
             if removed == 0 or after == before or not after:
                 raise HostsManageError("No eligible alias could be removed safely")
+            _require_removable_name(domain)
             op = uuid4().hex
             row = {
                 "schema": 1, "site_id": site["id"], "site_key": site["name"],

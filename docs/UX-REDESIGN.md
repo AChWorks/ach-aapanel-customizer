@@ -1,0 +1,117 @@
+# Native UI redesign — accepted task-first experience contract
+
+Status: Owner-approved product direction, **implementation in progress**. Scope: `AChWorks/ach-aapanel-customizer`. Source of approval and complete audit: [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7090292152). This document owns the intended UI/navigation and testing contract, not backend authorization, actual installed capabilities, or release status.
+
+## Outcome and compatibility
+
+An aaPanel administrator must be able to find a task without knowing an implementation module, identify the exact website/service/server/future-site scope, distinguish read-only inspection from write, see the supported next action, understand failure and recovery, and complete routine work without consulting developer documentation. Skilled operators retain direct access to evidence and Recovery IDs.
+
+No previous Customizer release has a Production installation. **Prior Customizer UI tab structure, old internal version schemas, and historical fallback adapters are not compatibility targets.** Do not keep obsolete control flows solely to preserve their old appearance. Existing real aaPanel, Nginx, PHP, WordPress, WordPress Bridge and data/permission contracts are separate external/live obligations. The single retained QA VM, its native websites, source files, existing owned recovery records and peer services must not be destroyed by development. Current-candidate repair/Restore remains trustworthy. No invented migration or alternate state store.
+
+Retain one native aaPanel plugin, its authentication, primary-admin restrictions and CSRF rules. Avoid a standalone SPA, independent login/service or mandatory build chain. Split UI modules only when the resulting reuse and testability justify it. **Do not implement all new views as one long form under renamed tabs.**
+
+## Final information architecture
+
+Five top-level destinations. The count follows actual task grouping and can be refined against first-click and task tests without changing the invariant that scoped jobs have a clear home:
+
+```text
+Home
+  Start a task; recent activity; current observation state; open blocked jobs
+Websites
+  Website inventory → select native website (stable, explicit ID/name)
+    Summary & changes       site identity, source observations, reviewed baseline
+    Protection             Guard sensitive files, optional Nginx XML-RPC policy
+    Cache & performance    inspect, configure, WP connect, purge exact owned scope
+    WordPress              Debug, Cron, app XML-RPC, HTTPS URLs, install witness
+    Routing & diagnostics  VHost, local HTTP, selected-site Hosts, related Recovery
+    Error page             deep-link into canonical Error Pages delivery editor
+Server
+  PHP services             installed versions/pools, desired Monitor, live Apply,
+                           opted-in repair, exact shared-service Recovery
+  Local hostnames          list current loopback entries, protected system names,
+                           manual/deleted-site aliases, exact eligible removal
+  Attack protection        Fail2ban from selected site log; firewall bans are
+                           **origin-wide**, not site-scoped, with relevant Recovery
+  Default HTTP/TLS routing unknown Host HTTP/80 vs unknown SNI HTTPS/443
+  Monitoring controls      inspection availability and auto-repair gating
+Error pages
+  Design & preview         all 11 supported templates, English/Persian, branding
+  Show on a website        actual supported 404/502/50x and stopped-site 503
+  New website defaults     future native site templates
+  Server fallback          cross-link to Server routing, no duplicate writer
+Activity & recovery
+  Understand event, identify exact target, follow link to owning workflow,
+  Recheck before Restore; advanced IDs, raw logs and two-phase orphan scanners
+```
+
+An operation has **one canonical owner view**. A relevant shortcut may open that same view with an explicit target; it must not duplicate privileged Apply, persistence or Recovery code. A site selection never falsely changes the scope of server-wide work. Advanced source/path/hash evidence is expandable and reachable, not deleted.
+
+### Common novice journeys
+
+| Intent | First-click path | Exact effect to show |
+|---|---|---|
+| Check website record | Websites → select → Summary & changes → Compare | Observation-only vs plugin-saved baseline; choose one-site accept, bulk only explicitly |
+| Protect files | Websites → select → Protection → Sensitive files | Site config plus shared Nginx reload; verify eligible Nginx include |
+| Stop malicious IPs | Server → Attack protection → choose source site | Site log feeds **whole-origin firewall ban**; do not imply site-only impact |
+| Manage Cache | Websites → select → Cache & performance | Inspect source ≠ worker proof; connect optional WP integration vs site policy; clear exact URL/owned tree |
+| Adjust PHP | Server → PHP services → choose discovered pool | Desired Monitor Save ≠ live shared Apply; show peers and recheck |
+| Modify WordPress | Websites → select → WordPress → choose task | Independent Debug, Cron, MU XML-RPC, HTTPS URL source and owner |
+| Customize 404 | Error pages → design/preview → show on website | Saved branding ≠ live site delivery; unsupported destination is preview-only |
+| Recover error | Activity & recovery → event → exact owning workflow | No universal rollback; exact current-generation evidence and ID |
+| Fix host override | Server → Local hostnames → inspect | Machine name is immutable here; stale non-system aliases remain manageable |
+
+Use existing capability inventory and **91-button/57-form/36-disclosure original-to-new crosswalk** in [Issue #128 Part 2](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7089964275), revised by the server-side Fail2ban navigation and present hierarchy. Every old capability must be discoverable through its canonical task; controls need not retain historical HTML IDs after a coherent tested refactor.
+
+## Page pattern and visual system
+
+**Standard task layout:**
+
+1. Breadcrumb + plain-language task heading; website/service/server/future/preview target clearly visible.
+2. Current observations: what was inspected, when, from which source; native managed status and last operation separately.
+3. A short primary action named by outcome. Missing target → prominent `Choose website`, not a forest of disabled actions.
+4. Before any consequential write: current → proposed change, exact blast radius (peer service reload, firewall bans, cache deletion), prerequisites and supported current-generation recovery. `Cancel` and `Apply` are distinct; do not require a redundant "I understand" checkbox when an explicit authorized action suffices.
+5. Persistent outcome, verified effect or precise partial/uncertain state, useful next action; technical details/Operation and Recovery IDs in a labelled disclosure.
+
+### Canonical action verbs
+
+`Refresh` = refresh observation. `Inspect` = read current source. `Compare` = show before/after. `Preview` = render/plan without write. `Recheck` = reconcile current source, identity and saved Recovery. `Save` = persist plugin preference/desired policy, not live config. `Apply` = write eligible live config with actual verification. `Enable/Disable` = explicit named behavior toggle. `Connect/Disconnect` = optional WordPress integration. `Clear` = delete an identified cache target. `Restore` = guarded current-generation module-owned saved state. Use the exact consequence for high-risk buttons rather than just `Run`.
+
+One dominant action per local decision; neutral read-only links, red destructive actions, substantive warnings amber, success green **only after verified success**, info/next step in blue or neutral, no state determined by color alone. Avoid competing primary actions or styling Restore as proof of success.
+
+### Design tokens and components (targets, not proof of rendering)
+
+- Retain aaPanel-compatible brand green for identity and verified-success emphasis; choose a darker accessible `primary` foreground on white. Distinct semantic `surface`, `text`, `muted`, `border`, `action`, `focus`, `success`, `attention`, `error`, `danger`, and `disabled` roles.
+- Suggested body 14–16px, field labels 13–14px, secondary metadata 12–13px, section title 16–18px, page title 20–24px, line-height 1.5–1.6; 4/8/12/16/24/32px spacing scale. Color pairs must be tested in actual rendered states (WCAG 2.2 AA target). Contrast: 4.5:1 ordinary text, 3:1 large text and applicable UI boundaries.
+- Forms: associated persistent label, meaningful current value, units/range, required/optional explanation, inline validation and preserved input on failure. Error summary attracts focus for blocking errors; routine status uses polite live announcement, consequential failure uses an appropriate alert and stable visibility.
+- Context header; site/service chooser; task link/list row; evidence summary; scoped review; one next-action row; clear blocked/empty/loading/success/partial/error/uncertain/recovery surface; labelled advanced evidence; copyable IDs. No gratuitous nested card hierarchy or mandatory onboarding wizard.
+- Responsive at 320/375/800/1024/1280 and browser zoom 200%; narrow top-level navigation becomes a labelled menu, not a horizontally hidden seven-tab strip. Site selection, edits and focus survive safe navigation/resize; source or site change invalidates only affected prepared operations. Technical tables can scroll inside a clearly labelled container.
+- Native interface starts English/LTR, but text is localizable and all eleven existing Status templates preserve correct EN/LTR and FA/RTL previews with bidi-safe domains and codes. Full native Persian translation is **not a prerequisite** for the approved redesign; do not block later i18n.
+
+## Protect sensitive files — reference interaction states
+
+The image concept previously generated is **not runtime proof** and its compulsory acknowledgement checkbox is **not mandatory** in this contract.
+
+| State | Main user-facing status and action | Invariant |
+|---|---|---|
+| Inspect | Not checked → `Inspect protection` | no write |
+| Ready | Eligible → `Review & enable` | exact source/target and Nginx reload known |
+| Blocked | Missing site-specific include → `View setup guidance` / `Recheck` | no fake Apply; exact manual fix; no silent VHost rewrite |
+| Apply | Current → proposed + shared reload → `Enable protection` / `Cancel` | fresh identity/source and authorization |
+| Success | Applied **and verified** → `Recheck` / `View recovery` | only claim proof actually observed |
+| Error/partial | Could not prove completion → `Recheck` + exact outcome | rollback only when verified, no blind repeat |
+| Recovery | Exact owned journal and changed-source guard → `Restore` | recheck stale data; no universal undo |
+
+## Validation and delivery slices
+
+- **S0** (design baseline): this agreed contract, Issue mapping, source/API review and operator journey benchmark; **accepted in principle**. Improve when real usability evidence changes an assumption.
+- **S1** (foundation): backend dynamic system hostname protection (including direct mutator); truthful Baseline saved/unchanged messaging; shared navigation/site context/Home task flow and reusable state/visual primitives. Use a coherent worktree/PR.
+- **S2** (website tasks): Protection, Routing/Hosts/VHost, four WordPress task views and advanced witness/recovery.
+- **S3** (Cache/Server tasks): independent Cache/WordPress Connect and exact Clear, PHP shared service vs Monitor, origin-wide Fail2ban, local hostname tasks, default HTTP/TLS routing.
+- **S4** (Error Pages/Activity): all 11 template types, supported real delivery/ownership and module-derived Activity/Recovery.
+- **S5** (integrated acceptance): ensure no original capability orphaned, native import, 13 retained QA peer sites, current-source/worker checks, scoped real Apply/Restore only with reversible task-owned fixtures, keyboard/accessible feedback/viewport/zoom/RTL and representative novice task completion. Automated tests must bind to actual source/HEAD; source tests never imply live aaPanel verification. Independent review before integration.
+
+All implementation is scoped to the repository and QA permission. **GitHub Merge, public Release and Production require separate explicit Owner authorization after the review gates.** No new VM, snapshot or Production deployment.
+
+## Measured success targets, not current claims
+
+100% current capabilities reachable with truthful scope and backend guarantees; normal tasks within three meaningful navigation choices after target selection; no system hostname removable by UI or direct API; no first-use inactive button maze; no false success or generic Restore; no global horizontal overflow for 320px; keyboard/focus semantics and 200% zoom; actual beginner task evidence (suggested five-person formative cycle, target ≥4/5 unassisted ordinary tasks and 5/5 correct cross-site scope identification before sensitive action). Those participant success criteria remain **unverified** until tested.

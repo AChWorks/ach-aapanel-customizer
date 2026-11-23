@@ -99,6 +99,19 @@ class HostsRemediationTests(unittest.TestCase):
                 self.assertEqual(self.source.read_bytes(), before)
         self.assertEqual(list(self.state.iterdir()), [])
 
+    def test_selected_site_writer_also_protects_system_identity(self):
+        self.site["name"] = "qa-native-host"
+        self.site["bound_domains"] = [{"name": "qa-native-host", "port": 80}]
+        self.domains = ["qa-native-host"]
+        self.write(b"127.0.1.1 qa-native-host\n")
+        with patch.object(manager, "_protected_hostnames",
+                          return_value={"localhost", "qa-native-host"}):
+            with self.assertRaisesRegex(manager.HostsManageError,
+                                        "server's own hostname"):
+                self.remove(domain="qa-native-host")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 qa-native-host\n")
+        self.assertEqual(list(self.state.iterdir()), [])
+
     def test_reject_missing_current_loopback_and_stale_digest(self):
         self.write(b"192.0.2.4 site.test\n")
         with self.assertRaisesRegex(manager.HostsManageError, "no current loopback"):
@@ -336,6 +349,44 @@ class OneClickHostsTests(unittest.TestCase):
                     self.remove(domain)
                 self.assertEqual(self.source.read_bytes(), original)
         self.assertEqual(self.inspect()["entries"][0]["domain"], "other.test")
+
+    def test_dynamic_machine_identity_is_not_offered_or_removable(self):
+        # A live kernel name must not be mistaken for an abandoned WP alias.
+        self.write(b"127.0.1.1 qa-native-host\n127.0.0.2 old-site.test\n")
+        before = self.source.read_bytes()
+        with patch.object(manager, "_protected_hostnames",
+                          return_value={"localhost", "qa-native-host"}):
+            self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                             ["old-site.test"])
+            with self.assertRaisesRegex(manager.HostsManageError,
+                                        "server's own hostname"):
+                self.remove("qa-native-host")
+            self.assertEqual(self.source.read_bytes(), before)
+            self.assertEqual(self.remove("old-site.test")["state"], "Alias Removed")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 qa-native-host\n")
+
+    def test_mutator_rejects_identity_even_if_earlier_listing_was_stale(self):
+        self.write(b"127.0.1.1 newly-renamed-host\n")
+        # Protect at the mutation boundary even when this hostname was
+        # displayed earlier before a machine rename.
+        self.assertEqual([x["domain"] for x in self.inspect()["entries"]],
+                         ["newly-renamed-host"])
+        with patch.object(manager, "_protected_hostnames",
+                          return_value={"newly-renamed-host"}):
+            with self.assertRaisesRegex(manager.HostsManageError,
+                                        "server's own hostname"):
+                self.remove("newly-renamed-host")
+        self.assertEqual(self.source.read_bytes(), b"127.0.1.1 newly-renamed-host\n")
+
+    def test_system_fqdn_and_short_names_are_both_protected(self):
+        from types import SimpleNamespace
+        from unittest.mock import mock_open
+        with patch.object(manager.os, "uname",
+                          return_value=SimpleNamespace(nodename="Node-QA.example.test")), \
+             patch("builtins.open", mock_open(read_data="file-node.example.test\n")):
+            protected = manager._protected_hostnames()
+        self.assertTrue({"node-qa.example.test", "node-qa",
+                         "file-node.example.test", "file-node"} <= protected)
 
     def test_external_edit_detected_before_publication_is_not_discarded(self):
         self.write(b"127.0.0.1 localhost\n127.0.0.1 remove.test\n")

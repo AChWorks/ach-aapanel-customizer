@@ -49,6 +49,7 @@ function loadUi() {
   }
   for (const name of [
     '#ach-message', '#ach-worker-version-status', '#ach-overview-status', '#ach-overview-control-result', '#ach-overview-refresh', '#ach-overview-browse-sites',
+    '#ach-home-php', '#ach-home-status', '#ach-home-activity',
     '#ach-sites-rows', '#ach-sites-loading', '#ach-sites-status', '#ach-sites-refresh',
     '#ach-site-changes-compare', '#ach-site-changes-why',
     '#ach-site-changes-save', '#ach-site-changes-status', '#ach-site-changes-summary', '#ach-site-changes-rows',
@@ -460,6 +461,7 @@ function loadUi() {
       statusName: elements.get('#ach-status-name').props.value,
       siteStatus: elements.get('#ach-sites-status').textContent,
       siteChangesStatus: elements.get('#ach-site-changes-status').textContent,
+      siteChangesSummary: elements.get('#ach-site-changes-summary').textContent,
       siteChangesSaveDisabled: elements.get('#ach-site-changes-save').props.disabled,
       selectedBaselineSaveDisabled: elements.get('#ach-site-changes-save-selected').props.disabled,
       selectedBaselineEvidence: elements.get('#ach-site-changes-selected-evidence').textContent,
@@ -634,6 +636,7 @@ function loadUi() {
   }
   return { openSites, refreshSites, openOverview, refreshOverview,
     startWithWebsite:() => { trigger(elements.get('#ach-overview-browse-sites'), 'click'); return requests.at(-1); },
+    homeTask:id => { trigger(elements.get('#ach-home-' + id), 'click'); return requests.at(-1); },
     browseFromContext:() => { trigger(elements.get('#ach-website-browse'), 'click'); return requests.at(-1); },
     focusedTab:() => focusedTab?.attributes['data-tab'] || null,
     openTab:name => {
@@ -954,6 +957,24 @@ test('First-use website action transfers focus to the selected tab without any w
   const next=ui.keyTab('websites','ArrowDown');
   assert.equal(next.focused,'routing');
   assert.equal(next.selected,'routing');
+});
+
+test('Task-first Home routes common jobs with keyboard focus and without writes', () => {
+  const cases=[['php','php',/s=list_php_versions$/],
+               ['status','status',/s=get_status_preferences$/],
+               ['activity','activity',/s=get_activity$/]];
+  for (const [task,target] of cases) {
+    const ui=loadUi();
+    ui.respondOverview(monitorOverview());
+    ui.homeTask(task);
+    assert.equal(ui.selectedTab(),target);
+    assert.equal(ui.focusedTab(),target,'Hidden Home link must not retain focus');
+    assert.ok(ui.requests.every(r => !/s=(set_|apply_|restore_|remove_)/.test(r.options.url)),
+      'Home navigation must not mutate configuration');
+  }
+  assert.match(html,/id="ach-home-php"/);
+  assert.match(html,/id="ach-home-status"/);
+  assert.match(html,/id="ach-home-activity"/);
 });
 
 test('Shared Browse websites action also transfers focus to Website list', () => {
@@ -5215,7 +5236,8 @@ test('Native sidebar sections are linked to panels and scrollable content', () =
   assert.match(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:var\(--ach-control-height\)/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
-  assert.match(html, /<h4 class="ach-sr-only">Overview<\/h4>/);
+  assert.match(html, /<h4>Home<\/h4>/);
+  assert.match(html, /class="ach-task-launch-grid"/);
 });
 
 test('Shared native form-row primitive aligns actual labeled controls, not label boxes', () => {
@@ -7376,6 +7398,25 @@ test('Scoped baseline follows the selected site and rejects stale source', () =>
   assert.equal(ui.state().selectedBaselineSaveDisabled,true);
 });
 
+test('Successful selected-site Save persists one-site result in the main summary', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const selected={id:7,name:'site.test',document_root:'/www/site.test',
+    panel_status:'1',bound_domains:[['site.test',80]]};
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'Changes Observed',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    changes:[{id:7,kind:'Added',fields:[],before:null,after:selected}]
+  }));
+  ui.siteChangesSelectedSave().respond({
+    status:true,schema:1,scope:'selected_site_only',state:'Selected Site Baseline Saved',
+    site_id:7,site_key:'site.test',changed:true,baseline_revision:2,
+    source_sha256:'a'.repeat(64),baseline_sha256:'c'.repeat(64),runtime_verified:false
+  });
+  assert.match(ui.state().siteChangesSummary,/Selected website baseline saved.*revision 2/);
+  assert.match(ui.state().siteChangesSummary,/Other website baselines remain untouched/);
+  assert.doesNotMatch(ui.state().siteChangesSummary,/Comparison not current/);
+  assert.equal(ui.state().selectedBaselineSaveDisabled,true);
+});
+
 test('Selected-site typed CAS errors show the cause and require a fresh comparison', () => {
   const ui=loadUi();selectHostsSite(ui);
   const site={
@@ -7470,6 +7511,28 @@ test('Site lifecycle comparison uses direct Save and refuses blind retry', () =>
     baseline_revision:1,source_sha256:'a'.repeat(64)});
   assert.match(ui.state().siteChangesStatus,/Baseline Saved/);
   assert.equal(ui.state().siteChangesSaveDisabled,true);
+});
+
+test('Confirmed baseline Save keeps a dominant Saved state until a new comparison', () => {
+  const ui=loadUi();
+  ui.openSites().respond(page());
+  ui.siteChangesCompare().respond(siteChangesPayload());
+  ui.siteChangesSave().respond({status:true,schema:1,state:'Baseline Saved',changed:true,
+    baseline_revision:1,source_sha256:'a'.repeat(64)});
+  assert.match(ui.state().siteChangesSummary,/All reviewed website records saved.*revision 1/);
+  assert.doesNotMatch(ui.state().siteChangesSummary,/Comparison not current/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true);
+  ui.siteChangesCompare().respond(siteChangesPayload({
+    state:'No Changes',baseline_revision:1,baseline_sha256:'b'.repeat(64),
+    initial_sites:[],changes:[]
+  }));
+  assert.match(ui.state().siteChangesSummary,/No site-record changes/);
+  assert.equal(ui.state().siteChangesSaveDisabled,true,
+    'A fresh unchanged baseline must not show a redundant Save action');
+  assert.match(ui.gate('ach-site-changes-why').text,/Up to date.*No Save is needed/);
+  const count=ui.requests.length;
+  ui.siteChangesSave();
+  assert.equal(ui.requests.length,count,'No Changes cannot send a redundant write');
 });
 
 test('Website lifecycle Monitor renders HTML as text and invalidates the old comparison on Refresh', () => {

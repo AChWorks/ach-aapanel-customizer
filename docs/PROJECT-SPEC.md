@@ -147,6 +147,28 @@ owns unmet functionality and [Issue #21](https://github.com/AChWorks/ach-aapanel
 owns QA evidence. Exact shipping versions belong to GitHub Releases and
 the independent source manifests, not this product specification.
 
+### Owner-approved task-first redesign and current-version-only compatibility (2026-11-23)
+
+The Owner approved **design completion followed by phased implementation** of a
+user-centered native aaPanel interface; meaningful root-cause refactoring is
+allowed when tested and maintainable. Navigation is organized by administrator
+tasks and truthful scope rather than exposing backend module boundaries. The
+accepted baseline has five main destinations (Home, Websites, Server, Error
+pages, Activity & recovery) with selected-site contextual subnavigation. It
+is a product-design choice, not a permanent hardcoded limit.
+
+See [UX redesign contract](UX-REDESIGN.md) and [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
+for the feature-to-task crosswalk, view and status patterns, visual rules, and
+acceptance scenarios. Do not publish a renamed seven-tab interface as the
+completed redesign or drop advanced features to make screens look simpler.
+
+No previous Customizer version has Production users, so backward compatibility
+with historical Customizer UI routes/state shims is **not** required. This does
+not waive real aaPanel/vendor/WordPress integrations, current target/peer
+ownership, authorization, write verification, or Recovery correctness.
+The existing sole QA VM remains preserved during development. Merge, public
+Release, and Production installation retain separate Owner approval gates.
+
 ## 2. Problem and desired outcomes
 
 aaPanel may regenerate shared and per-site configuration during normal operations. Manually edited files can change unexpectedly when a site is created, a module runs an optimization, or an upgrade replaces generated content. Repeating the same modification across websites is brittle, especially as additional sites or non-WordPress applications are added.
