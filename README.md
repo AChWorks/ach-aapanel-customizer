@@ -40,40 +40,45 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 
 **Verified reference, not a universal support promise:** non-production **aaPanel 8.0.7**, Nginx, PHP-FPM **8.1/8.5** on representative sites. Other aaPanel/Nginx/PHP writer layouts are inspected by capability, not arbitrarily rejected by version, but a write requires a supported real source/ownership contract. See [installed-native QA evidence, exact candidate and remaining coverage](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), [feature/compatibility backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [TLS/Status Pages scope](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). **Publishing a Stable Release is not a claim of comprehensive Production certification or permission to deploy to Production.**
 
-## In-progress task-first interface redesign (not released)
+## Task-first interface redesign (source in progress, not released)
 
-The Owner approved a comprehensive native UI redesign focused on plain-language
-tasks, selected-site context, explicit server-wide effects, transparent errors,
-and simple recovery.
-
-**Source implementation S1b (not an installed or published feature):** The
-work-in-progress interface replaces the old technical tab strip with five
-destinations: **Home**, **Websites**, **Server**, **Error pages**, and
-**Activity & recovery**. Websites adds contextual **Summary & changes**,
-**Protection**, **Cache & performance**, **WordPress**, and **Routing &
-diagnostics** tasks with one visible native site ID/name; Server separates
-**PHP services**, **Local hostnames**, **Attack protection**, **Default
-HTTP/TLS**, and **Monitoring controls**. Site selection never converts a
-server-wide Fail2ban ban into a site-only effect. Existing backend writers,
-authorization, source checks, evidence and Recovery remain module-owned.
-The 320px navigation uses an explicit menu, and a site-dependent task
-without a valid selected site offers a Browse websites action instead of
-enabled-looking stale controls.
-
-The **Install** and **What you can do** sections above describe the
-currently **published Native** ZIP, not permission to install an unreviewed
-S1b source candidate. S2-S5 remain required for complete task-level redesign,
-native installed acceptance, usability verification and public Release.
-
-[The redesign contract](docs/UX-REDESIGN.md) and
+The Owner-approved redesign is being implemented in stages under
 [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
-track the design and implementation slices. The **published Release** still
-uses the current seven-tab interface until a separately reviewed and
-authorized replacement is delivered; follow the current installation steps
-above for that Release, not the unreleased IA. Historical Customizer UI
-compatibility is not a requirement because no earlier Customizer Production
-installation exists. Current third-party interoperability and peer safety
-remain mandatory.
+and the [screen and task contract](docs/UX-REDESIGN.md). The **merged S1**
+source (PRs [#129](https://github.com/AChWorks/ach-aapanel-customizer/pull/129)
+and [#130](https://github.com/AChWorks/ach-aapanel-customizer/pull/130))
+has a task-first native shell with **Home**, **Websites**, **Server**,
+**Error pages** and **Activity & recovery**. It is not part of the
+published v0.1.100 package.
+
+The **S2–S4 candidate is under development/review, not merged or installed**.
+Its task-level navigation groups the original module-owned controls instead of
+introducing another writer, store, permission route or Recovery mechanism:
+
+| Start here in redesigned source | Next task choices | What stays separate |
+| --- | --- | --- |
+| **Websites → choose a verified website → Protection** | Inspect / enable sensitive-file Guard, optional Nginx XML-RPC rule | Other websites, shared Nginx reload and unrelated settings |
+| **Websites → WordPress** | Debug, WP-Cron, XML-RPC, HTTPS URLs | Independent WordPress source and Recovery for each task; HTTPS certificates not installed |
+| **Websites → Routing & diagnostics** | Nginx/VHost observations, selected-site Hosts, drift and saved Recovery | Inspect never Apply; local Hosts are not public DNS |
+| **Websites → Cache & performance** | Inspect, Connect WordPress, Apply/Restore, exact Clear, advanced Bridge URL mapping | Vendor Purge All, other sites' physical Cache, and separate Recheck/approval |
+| **Server → PHP services** | Inspect, desired Monitor Policy, guarded shared Apply, saved-service Restore | Saving a policy never reloads PHP; Restore remains available when discovery is incomplete |
+| **Server → Attack protection / Local hostnames / Default HTTP/TLS** | Site-log scanner and independent orphan-jail recovery; local aliases; unknown HTTP/80 and TLS/443 | Origin-wide firewall or Nginx effects are never presented as site-only |
+| **Error pages** | Design/preview, selected-site delivery, future-site defaults, stopped-site 503, server fallback | The eleven EN/FA templates, explicit scope and independent backend source/recovery authority |
+| **Activity & recovery** | Inspect event and IDs, open the original owning task, then Recheck | An Activity row does not select a site or authorize a Restore |
+
+The original native UI behavior, source and safety checks remain the authority
+for all live actions; task navigation alone never authorizes a write. A disabled
+operation explains its missing evidence and guides the operator back to Recheck
+or the relevant source check. The new screen layout and novice flows require
+**S5 installed-native acceptance**, independent source review, and separate
+Owner Merge and Release approvals before they may be considered delivered.
+
+The **Install** and **What you can do** sections above describe the currently
+**published native ZIP** (seven-tab interface), not an unreviewed source build.
+Use published assets and matching checksums from GitHub Releases. Historical
+Customizer UI compatibility is not required because no previous Customizer
+Production installation exists; aaPanel and active vendor integrations, primary
+administrator authorization, current Recovery data and peer safety remain binding.
 
 ## License
 

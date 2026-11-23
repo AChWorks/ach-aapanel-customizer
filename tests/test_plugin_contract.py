@@ -214,7 +214,7 @@ class PackageContractTests(unittest.TestCase):
             'ach-php-version', 'ach-activity-level', 'ach-activity-module',
         ):
             field = re.search(
-                r'<div class="ach-inline-field">\s*'
+                r'<div class="ach-inline-field"(?:\s+[^>]*)?>\s*'
                 r'<label for="' + re.escape(control_id) +
                 r'">.*?</label>\s*<(?:input|select)\s+id="' +
                 re.escape(control_id) + r'"', html, re.S)
