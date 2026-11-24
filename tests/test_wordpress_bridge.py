@@ -1,5 +1,7 @@
 """Independent WordPress companion: source-only PHP stubs and deterministic ZIP."""
+import gettext
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,7 +33,7 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_boot_only_registers_admin_menu(self):
+    def test_boot_registers_only_locale_loader_and_admin_menu_when_disconnected(self):
         source = f"""
         define('ABSPATH', '/not-a-wordpress-install/');
         $actions = [];
@@ -41,7 +43,86 @@ class WordPressBridgeRuntimeTests(unittest.TestCase):
         """
         result = php_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), ["admin_menu"])
+        self.assertEqual(json.loads(result.stdout), ["init", "admin_menu"])
+
+    def test_bundled_text_domain_registered_at_init(self):
+        source = f"""
+        define('ABSPATH', '/test/');
+        $actions = [];
+        $loaded = [];
+        function add_action($name, $handler) {{ global $actions; $actions[$name] = $handler; }}
+        function plugin_basename($file) {{ return 'ach-aapanel-bridge/ach-aapanel-bridge.php'; }}
+        function load_plugin_textdomain($domain, $unused, $path) {{
+            $GLOBALS['loaded'][] = [$domain, $unused, $path];
+        }}
+        require {json.dumps(str(ENTRY))};
+        $before = $loaded;
+        $actions['init']();
+        echo json_encode([$before, $loaded], JSON_THROW_ON_ERROR);
+        """
+        result = php_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [
+            [], [["ach-aapanel-bridge", False, "ach-aapanel-bridge/languages"]]
+        ])
+
+    def test_admin_locale_rendering_preserves_brand_and_technical_values(self):
+        with (PLUGIN / "languages/ach-aapanel-bridge-fa_IR.mo").open("rb") as mo:
+            fa = gettext.GNUTranslations(mo)
+        translations = {k: v for k, v in fa._catalog.items() if k}
+        # An external catalog cannot replace the literal page/menu brand.
+        translations["ACh aaPanel Bridge"] = "DO NOT DISPLAY"
+        for locale in ("en_US", "fa_IR", "untranslated"):
+            with self.subTest(locale=locale):
+                table = translations if locale == "fa_IR" else {}
+                source = f"""
+                define('ABSPATH', '/test/');
+                define('RT_WP_NGINX_HELPER_CACHE_PATH', '/www/cache/<path>');
+                $GLOBALS['translations'] = json_decode(
+                    {json.dumps(json.dumps(table, ensure_ascii=False))}, true);
+                function add_action($name, $handler) {{}}
+                function current_user_can($capability) {{ return true; }}
+                function __($str, $domain) {{
+                    if ($domain !== 'ach-aapanel-bridge') throw new Exception('unexpected domain');
+                    return $GLOBALS['translations'][$str] ?? $str;
+                }}
+                function esc_html($value) {{
+                    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                }}
+                function esc_html__($str, $domain) {{ return esc_html(__($str, $domain)); }}
+                function add_management_page($title,$menu,$cap,$slug,$cb) {{
+                    $GLOBALS['menu'] = [$title,$menu,$cap,$slug];
+                }}
+                $GLOBALS['nginx_helper_admin'] = (object)['options'=>[
+                    'purge_method'=>'unlink_files', 'enable_purge'=>1
+                ]];
+                require {json.dumps(str(ENTRY))};
+                \\AChWorks\\AaPanelBridge\\Plugin::registerAdminPage();
+                ob_start();
+                \\AChWorks\\AaPanelBridge\\Plugin::renderAdminPage();
+                $html=ob_get_clean();
+                echo json_encode([$GLOBALS['menu'],$html], JSON_THROW_ON_ERROR);
+                """
+                result = php_run(source)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                menu, html = json.loads(result.stdout)
+                self.assertEqual(menu, ["ACh aaPanel Bridge", "ACh aaPanel Bridge",
+                                        "manage_options", "ach-aapanel-bridge"])
+                self.assertIn("<h1><bdi>ACh aaPanel Bridge</bdi></h1>", html)
+                self.assertNotIn("DO NOT DISPLAY", html)
+                self.assertEqual(html.count("<table "), 2)
+                self.assertEqual(html.count("</table>"), 2)
+                self.assertEqual(html.count("<tr>"), 8)
+                self.assertIn('dir="ltr"', html)
+                self.assertIn("unlink_files</code>", html)
+                self.assertIn("/www/cache/&lt;path&gt;</code>", html)
+                for key in ("Not connected", "No verified native-managed site manifest",
+                            "Readiness", "Configured cache path", "Important:",
+                            "Not verified / blocked", "Unavailable"):
+                    self.assertIn(table.get(key, key), html)
+                if locale == "fa_IR":
+                    self.assertNotIn(">Not connected<", html)
+                    self.assertNotIn("No verified native-managed site manifest", html)
 
     def test_unauthorized_admin_page_refused(self):
         source = f"""
@@ -1254,6 +1335,7 @@ class WordPressBridgePackagingTests(unittest.TestCase):
         import re
         self.assertRegex(entry, r"(?m)^ \* Version: (?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}$")
         self.assertIn("Text Domain: ach-aapanel-bridge", entry)
+        self.assertIn("Domain Path: /languages", entry)
         self.assertIn("Update URI: https://github.com/AChWorks/", entry)
         self.assertNotIn("Requires Plugins:", entry)
         self.assertNotIn("register_activation_hook", entry)
@@ -1343,6 +1425,67 @@ class WordPressBridgePackagingTests(unittest.TestCase):
                     builder.build(destination)
             self.assertFalse(destination.exists())
 
+    def test_persian_catalog_matches_all_literal_messages_and_plugin_description(self):
+        messages = set()
+        for source in PLUGIN.rglob("*.php"):
+            messages.update(re.findall(
+                r"(?:esc_html__|__)\(\s*'([^']*)'\s*,\s*'ach-aapanel-bridge'\s*\)",
+                source.read_text(encoding="utf-8")))
+        description = re.search(r"(?m)^ \* Description: (.+)$",
+                                ENTRY.read_text(encoding="utf-8"))
+        self.assertIsNotNone(description)
+        messages.add(description.group(1))
+        self.assertNotIn("ACh aaPanel Bridge", messages)
+
+        # All current messages are singular/context-free. Support normal
+        # gettext continuation lines as produced by standard PO editors.
+        def read_catalog(path):
+            entries = {}
+            current = {}
+            field = None
+            def flush():
+                if "msgid" in current:
+                    key = current["msgid"]
+                    self.assertNotIn(key, entries)
+                    entries[key] = current.get("msgstr", "")
+                current.clear()
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    flush()
+                    field = None
+                elif line.startswith("#"):
+                    self.assertFalse(line.startswith("#, fuzzy"), line)
+                elif line.startswith("msgid ") or line.startswith("msgstr "):
+                    name, value = line.split(" ", 1)
+                    if name == "msgid" and "msgid" in current:
+                        flush()
+                    field = name
+                    current[field] = json.loads(value)
+                elif line.startswith('"'):
+                    self.assertIsNotNone(field, line)
+                    current[field] += json.loads(line)
+                else:
+                    self.fail("Unexpected non-singular catalog entry: " + line)
+            flush()
+            entries.pop("", None)
+            return entries
+
+        languages = PLUGIN / "languages"
+        template = read_catalog(languages / "ach-aapanel-bridge.pot")
+        po = read_catalog(languages / "ach-aapanel-bridge-fa_IR.po")
+        with (languages / "ach-aapanel-bridge-fa_IR.mo").open("rb") as file:
+            mo = gettext.GNUTranslations(file)
+        self.assertEqual(set(template), messages)
+        self.assertTrue(all(not value for value in template.values()))
+        self.assertEqual(set(po), messages)
+        self.assertEqual({key: value for key, value in mo._catalog.items() if key}, po)
+        self.assertEqual(mo.info()["language"], "fa_IR")
+        for key, translated in po.items():
+            self.assertTrue(re.search(r"[\u0600-\u06ff]", translated), key)
+            self.assertNotEqual(key, translated)
+        self.assertEqual(mo.gettext("ACh aaPanel Bridge"), "ACh aaPanel Bridge")
+        self.assertEqual(mo.gettext("unlink_files"), "unlink_files")
+
     def test_deterministic_standalone_zip(self):
         from scripts.build_wordpress_bridge import build
 
@@ -1357,11 +1500,16 @@ class WordPressBridgePackagingTests(unittest.TestCase):
             self.assertEqual(first["version"], source_version.group(1))
             with ZipFile(a) as package:
                 names = package.namelist()
-                self.assertEqual(len(names), 6)
+                self.assertEqual(len(names), 9)
                 self.assertTrue(all(p.startswith("ach-aapanel-bridge/") for p in names))
                 self.assertIn("ach-aapanel-bridge/ach-aapanel-bridge.php", names)
                 self.assertIn("ach-aapanel-bridge/readme.txt", names)
                 self.assertIn("ach-aapanel-bridge/LICENSE", names)
+                for name in ("ach-aapanel-bridge.pot", "ach-aapanel-bridge-fa_IR.po",
+                             "ach-aapanel-bridge-fa_IR.mo"):
+                    member = "languages/" + name
+                    self.assertEqual(package.read("ach-aapanel-bridge/" + member),
+                                     (PLUGIN / member).read_bytes())
                 self.assertEqual(package.read("ach-aapanel-bridge/LICENSE"),
                                  (ROOT / "LICENSE").read_bytes())
                 self.assertNotIn("ach-aapanel-bridge/README.md", names)

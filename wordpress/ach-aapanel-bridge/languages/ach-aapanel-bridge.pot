@@ -1,0 +1,164 @@
+# ACh aaPanel Bridge translation catalog.
+# Licensed under MPL-2.0, like the plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: ACh aaPanel Bridge 0.1.11\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: includes/class-plugin.php:44
+msgid "Active"
+msgstr ""
+
+#: includes/class-plugin.php:104
+msgid "Automatic purge setting"
+msgstr ""
+
+#: includes/class-plugin.php:106
+msgid "Configured cache path"
+msgstr ""
+
+#: includes/class-plugin.php:60
+msgid "Connection"
+msgstr ""
+
+#: includes/class-plugin.php:103
+msgid "Disabled"
+msgstr ""
+
+#: includes/class-plugin.php:102
+msgid "Enabled"
+msgstr ""
+
+#: includes/class-plugin.php:122
+msgid "Important:"
+msgstr ""
+
+#: includes/class-plugin.php:45
+msgid "Installed but inactive"
+msgstr ""
+
+#: includes/class-plugin.php:69
+msgid "Manifest"
+msgstr ""
+
+#: includes/class-plugin.php:71
+msgid "Native manifest verified"
+msgstr ""
+
+#: includes/class-cache-invalidation.php:172
+msgid "Nginx Helper automatic purge is disabled"
+msgstr ""
+
+#: includes/class-cache-invalidation.php:170
+msgid "Nginx Helper cache path is not the verified site-owned directory"
+msgstr ""
+
+#: includes/class-cache-invalidation.php:166
+msgid "Nginx Helper is not active"
+msgstr ""
+
+#: includes/class-cache-invalidation.php:168
+msgid "Nginx Helper is not in unlink_files mode"
+msgstr ""
+
+#: includes/class-plugin.php:88
+msgid "Nginx Helper observations"
+msgstr ""
+
+#: includes/class-plugin.php:117
+msgid "Nginx Helper unlink_files requires generation-aware site ownership checks before it can invalidate Customizer-managed entries."
+msgstr ""
+
+#: includes/class-cache-invalidation.php:165
+msgid "No verified native-managed site manifest"
+msgstr ""
+
+#: includes/class-plugin.php:51 includes/class-plugin.php:100
+msgid "Not available"
+msgstr ""
+
+#: includes/class-plugin.php:72
+msgid "Not connected"
+msgstr ""
+
+#: includes/class-plugin.php:46
+msgid "Not installed"
+msgstr ""
+
+#: includes/class-plugin.php:47
+msgid "Not verified"
+msgstr ""
+
+#: includes/class-plugin.php:84
+msgid "Not verified / blocked"
+msgstr ""
+
+#: ach-aapanel-bridge.php:5
+msgid "Optional WordPress companion and diagnostics for ACh aaPanel Customizer."
+msgstr ""
+
+#: includes/class-plugin.php:56
+msgid "Optional WordPress companion for ACh aaPanel Customizer."
+msgstr ""
+
+#: includes/class-plugin.php:91
+msgid "Plugin status"
+msgstr ""
+
+#: includes/class-plugin.php:77
+msgid "Provisioned (worker state unverified)"
+msgstr ""
+
+#: includes/class-plugin.php:95
+msgid "Purge method"
+msgstr ""
+
+#: includes/class-plugin.php:83
+msgid "Readable and writable by this PHP process"
+msgstr ""
+
+#: includes/class-plugin.php:86
+msgid "Readiness"
+msgstr ""
+
+#: includes/class-plugin.php:81
+msgid "Site Cache filesystem access"
+msgstr ""
+
+#: includes/class-cache-invalidation.php:174
+msgid "Site PHP-FPM cannot access its own Cache directory. Check the per-site open_basedir and filesystem permissions; never include a shared cache directory."
+msgstr ""
+
+#: includes/class-plugin.php:66
+msgid "Site cache URL mapping"
+msgstr ""
+
+#: includes/class-plugin.php:61
+msgid "The Bridge never enables Nginx Helper purging or Purge All. The URL-file filter requires a verified native-managed site manifest and an active unlink_files Helper. Other Nginx workers are not certified."
+msgstr ""
+
+#: includes/class-plugin.php:112
+msgid "The Nginx Helper get_request route is not verified against any Customizer-owned cache zone or generation."
+msgstr ""
+
+#: includes/class-plugin.php:123
+msgid "These are WordPress-side observations, not proof of the effective Nginx cache configuration or site ownership. Nginx Helper Purge All can affect shared cache directories. Do not enable it based on this page."
+msgstr ""
+
+#: includes/class-cache-invalidation.php:175
+msgid "URL remapping is provisioned; effective Nginx workers not independently certified"
+msgstr ""
+
+#: includes/class-plugin.php:75
+msgid "URL-file mapping"
+msgstr ""
+
+#: includes/class-plugin.php:78
+msgid "Unavailable"
+msgstr ""
+
+#: includes/class-plugin.php:35
+msgid "You are not allowed to view this page."
+msgstr ""
