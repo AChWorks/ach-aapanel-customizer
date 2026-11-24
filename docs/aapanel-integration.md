@@ -186,11 +186,12 @@ rollback requirements use the [upgrade/recovery runbook](aapanel-upgrade-recover
 
 ## Native interface contract
 
-The Customizer opens **inside** aaPanel. Merged task-first source exposes
-Home, Websites, Server, Error pages, and Activity & recovery. Website and
+The Customizer opens **inside** aaPanel. Task-first Native source/package
+identity 0.1.101 exposes Home, Websites, Server, Error pages, and
+Activity & recovery. Website and
 server tasks have contextual stages; the shared selected-site context is not
-replaced with a raw-ID field. The official published Native v0.1.100 ZIP
-still has Overview, Website list, Routing & Nginx, FastCGI Cache, PHP-FPM,
+replaced with a raw-ID field. The earlier official Native v0.1.100 ZIP
+has Overview, Website list, Routing & Nginx, FastCGI Cache, PHP-FPM,
 Status Pages, and Activity & Logs. Use the instructions matching the actual
 installed package; the [redesign contract](UX-REDESIGN.md) maps source tasks. Readiness, errors and recovery steps
 belong **beside their action**, with the technical report available on demand.

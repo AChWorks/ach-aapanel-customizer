@@ -650,7 +650,7 @@
             <select id="ach-hosts-alias-select" disabled><option value="">No aliases inspected</option></select></div>
           <button id="ach-hosts-alias-remove" type="button" class="btn btn-warning" disabled>Remove selected hostname</button>
         </div>
-        <p id="ach-hosts-alias-result" role="status" aria-live="polite">Open Routing &amp; Nginx to inspect current local loopback aliases.</p>
+        <p id="ach-hosts-alias-result" role="status" aria-live="polite">Open Server / Local hostnames to inspect current local loopback aliases.</p>
       </div>
       </div>
       <div class="ach-workflow" data-routing-group="hosts">
@@ -710,18 +710,15 @@
         </div>
         <p id="ach-reconcile-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Select a website to inspect saved intent and current sources.</p>
         <details class="ach-technical-report"><summary>Site change and recovery evidence</summary>
-          <p id="ach-reconcile-result" class="ach-status-metadata" role="status">No current reconciliation evidence. Website baselines are managed from Website list.</p>
+          <p id="ach-reconcile-result" class="ach-status-metadata" role="status">No current reconciliation evidence. Website baselines are managed under Websites / Summary &amp; changes.</p>
         </details>
-        <p class="ach-note"><strong>Next steps:</strong> Check website changes in Website list; use
-          the selected-site FastCGI Cache Recheck / new Preview, or select the
-          PHP-FPM shared service and Recheck saved policy, or inspect the applicable
-          Status Pages template and saved recovery independently. Each
+        <p class="ach-note"><strong>Next steps:</strong> Compare website records under Websites / Summary &amp; changes. For Cache, use Apply &amp; restore and Recheck Cache / recovery. For PHP, select the shared service under PHP services / Policy &amp; preview. For a website error page, choose its scope and template explicitly. Each
           supported Apply/Restore still requires its own fresh approval.</p>
         <div class="ach-controls">
           <button id="ach-reconcile-to-websites" type="button">Website changes</button>
           <button id="ach-reconcile-to-cache" type="button">Cache Recheck / Restore</button>
-          <button id="ach-reconcile-to-php" type="button">PHP-FPM policy</button>
-          <button id="ach-reconcile-to-status" type="button">Status Pages recovery</button>
+          <button id="ach-reconcile-to-php" type="button">PHP policy &amp; preview</button>
+          <button id="ach-reconcile-to-status" type="button">Website error page recovery (choose scope)</button>
         </div>
       </div>
       <hr />
@@ -969,7 +966,7 @@
       <p class="ach-note">Check PHP service versions, see which sites share a pool and compare desired settings with saved configuration. Changes can affect multiple websites; viewing a report never applies changes.</p>
       <details class="ach-help"><summary>PHP-FPM change and recovery steps</summary><p>Discover installed PHP, inspect the service and affected sites, then preview the settings. Applying shared-service changes requires explicit preparation and approval; the recovery workflow remains available below.</p></details>
       <div class="ach-controls"><button id="ach-php-discover" type="button">Refresh installed PHP</button></div>
-      <p id="ach-php-discovery-status" role="status" aria-live="polite">Open PHP-FPM to discover installed versioned services. File presence does not verify running processes or enable Apply.</p>
+      <p id="ach-php-discovery-status" role="status" aria-live="polite">Use Refresh installed PHP to discover available versioned services. File presence does not verify running processes or enable Apply.</p>
       <div class="ach-controls ach-php-selection">
         <div class="ach-inline-field"><label for="ach-php-version">Select installed PHP version</label>
           <select id="ach-php-version" name="php_version" form="ach-php-form" disabled required><option value="">Discover PHP installations first</option></select></div>
@@ -1289,7 +1286,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.100'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.101'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1385,7 +1382,7 @@
       'Upgrade needs review: UI v' + shippedUiVersion +
       ', but resident Python entrypoint ' + (seen ? 'reports v' + seen : 'does not report a supported version') +
       '. Reopen the plugin to exclude a cached UI; check installed version and Activity Operation ID. '
-      + 'an authorized operator may schedule a controlled aaPanel reload, then reopen the plugin and Refresh state. '
+      + 'an authorized operator may schedule a controlled aaPanel reload, then reopen the plugin and Refresh observations. '
       + 'This diagnostic does not restart services.' :
       'Python entrypoint matches UI v' + shippedUiVersion +
       '; imported helpers and Nginx workers are not certified.')
@@ -1398,7 +1395,7 @@
     root.find('#ach-website-context-status').text(text);
   }
   function invalidateInventory(message) {
-    siteContextNotice('Website inventory unavailable. Open Website list and Refresh.');
+    siteContextNotice('Website inventory unavailable. Open Websites / Summary & changes and select Refresh websites.');
     hasMore = false;
     root.find('#ach-page').text('Unavailable');
     root.find('#ach-prev, #ach-next').prop('disabled', true);
@@ -1786,7 +1783,7 @@
       var accepted = displayControls(r);
       if (accepted && r && r.status === true) showWorkerVersion(r);
       else root.find('#ach-worker-version-status')
-        .text('Resident worker version not checked: Overview response is unavailable or unverified. Refresh state and inspect Activity before deciding on a panel reload.')
+        .text('Resident worker version not checked: Home observations are unavailable or unverified. Use Home / Refresh observations and inspect Activity & recovery before deciding on a panel reload.')
         .attr('data-state', 'pending').attr('role', 'status').attr('aria-live', 'polite');
       syncWorkerVersionVisibility();
       if (accepted) {
@@ -1804,12 +1801,12 @@
       root.find('#ach-overview-status').text(accepted ?
         r.mode + ' — ' + r.notice :
         monitorRecheckRequired ?
-          'Monitor state unverified. Last known controls shown; Refresh state to retry. Changes remain locked.' :
+          'Monitor state unverified. Last known controls shown; Refresh observations to retry. Changes remain locked.' :
           'Older Monitor state ignored; latest acknowledged revision retained.');
       sectionsLoaded.overview = Boolean(accepted);
       monitorNotice(accepted ?
         'Monitor settings verified. Revision ' + r.state_revision + '.' :
-        'Monitor state not confirmed. Refresh state before making changes.',
+        'Monitor state not confirmed. Refresh observations before making changes.',
         accepted ? 'info' : 'error');
     });
   }
@@ -1850,9 +1847,9 @@
         settleWebsitesPolicy(false);
         sectionsLoaded.overview = false;
         root.find('#ach-overview-status').text(!r ?
-          'Monitor update not confirmed. Last known controls shown; Refresh state before retrying. Changes locked.' :
-          'Monitor response stale or incompatible. Last known state shown; Refresh state before any new change. Changes locked.');
-        monitorNotice('Monitor change not confirmed. Refresh state before retrying.', 'error');
+          'Monitor update not confirmed. Last known controls shown; Refresh observations before retrying. Changes locked.' :
+          'Monitor response stale or incompatible. Last known state shown; Refresh observations before any new change. Changes locked.');
+        monitorNotice('Monitor change not confirmed. Refresh observations before retrying.', 'error');
         return;
       }
       monitorRecheckRequired = false;
@@ -1861,8 +1858,8 @@
         displayControls(previousSnapshot);
         settleWebsitesPolicy(false);
         sectionsLoaded.overview = false;
-        root.find('#ach-overview-status').text('Monitor response unverified. Refresh state before any new change. Changes locked.');
-        monitorNotice('Monitor change not confirmed. Refresh state before retrying.', 'error');
+        root.find('#ach-overview-status').text('Monitor response unverified. Refresh observations before any new change. Changes locked.');
+        monitorNotice('Monitor change not confirmed. Refresh observations before retrying.', 'error');
         return;
       }
       sectionsLoaded.overview = true;
@@ -1882,7 +1879,7 @@
       root.find('#ach-sites-status').text(websitePolicyState === 'pending' ?
         'Monitor update pending. Website inventory will load only after confirmation.' :
         'Monitor policy unverified. Open Home and Refresh observations before loading websites.');
-      siteContextNotice('Site list paused: verify Monitor state in Overview before inspecting.');
+      siteContextNotice('Site list paused: use Home / Refresh observations to verify Monitor state before inspecting.');
       return;
     }
     var ticket = ++siteTicket, requestedPage = page;
@@ -1936,7 +1933,7 @@
       hasMore = r.has_more;
       siteContextNotice(r.sites.length ?
         'Page ' + requestedPage + ' ready · Choose a site to inspect.' :
-        'No sites on this page. Open Website list to navigate.');
+        'No sites on this page. Open Websites / Summary & changes to navigate.');
       root.find('#ach-sites-status').text(
         'Page ' + requestedPage + ' · ' + r.sites.length + ' website(s) · ' +
         (hasMore ? 'More pages available' : 'Last page') +
@@ -2965,11 +2962,11 @@
         (cr.recovery_id ? '\nSaved Cache Recovery ID: ' + cr.recovery_id : '') +
         (cr.journal_phase ? '\nJournal phase: ' + cr.journal_phase : '') +
         '\nCache recovery detail: ' + (cr.note || 'None') +
-        '\nStatus Pages recovery: inspect the site/template in Status Pages separately.' +
-        '\n\nNext: If newly added/changed, review the Website list baseline first. ' +
-        'For VHost source conflicts, inspect Routing/Nginx; for a Cache recovery ' +
-        'issue, open FastCGI Cache and fresh Recheck. PHP desired drift must be ' +
-        'rechecked in PHP-FPM before independently approved Apply/Restore. ' +
+        '\nError page recovery: choose the website scope and template independently under Error pages / Show on website.' +
+        '\n\nNext: If newly added/changed, compare website records in Websites / Summary & changes first. ' +
+        'For VHost source conflicts, open Routing & diagnostics / Check Nginx routing; for a Cache recovery ' +
+        'issue, open Cache & performance / Apply & restore and run Recheck Cache / recovery. PHP desired drift must be ' +
+        'rechecked in Server / PHP services / Policy & preview before independently approved Apply/Restore. ' +
         'No combined report grants permission for host changes.\n' + r.note;
       root.find('#ach-reconcile-result').text(resultText);
       inspectionSummary('reconcile',
@@ -2981,13 +2978,14 @@
         r.state === 'Observed' ? 'observed' : 'review');
     });
   });
-  [['websites','websites'], ['cache','cache'], ['php','php'],
-   ['status','status']].forEach(function (pair) {
+  [
+    ['websites',['websites','summary']],
+    ['cache',['websites','cache','configure']],
+    ['php',['server','php','policy']],
+    ['status',['status',null,'site']]
+  ].forEach(function (pair) {
     root.find('#ach-reconcile-to-' + pair[0]).on('click', function () {
-      var target = pair[1] === 'php' ? ['server','php'] :
-        pair[1] === 'status' ? ['status',null] :
-        pair[1] === 'cache' ? ['websites','cache'] : ['websites','summary'];
-      navigateTask(target[0], target[1], true);
+      openTaskRoute(pair[1]);
     });
   });
   function validVhostInspection(r, id) {
@@ -4463,7 +4461,7 @@
     if (typeof window === 'undefined' || typeof window.confirm !== 'function')
       return false; // Unknown host confirmation support cannot discard edits.
     return window.confirm(
-      'Discard unsaved Status Pages branding changes? This cannot be undone.');
+      'Discard unsaved error page branding changes? This cannot be undone.');
   }
   function statusRestoreAcceptedSelection() {
     root.find('#ach-status-scope').val(statusAcceptedScope);
@@ -6109,15 +6107,7 @@
             .text('Open task (Recheck first)').on('click',function () {
               // An Activity target string is never trusted as the selected site.
               // Navigate only; backend ownership/authorization remain unchanged.
-              if (owningTask[0] === 'websites' && owningTask[1] === 'cache' && owningTask[2])
-                activeCacheStage = owningTask[2];
-              if (owningTask[0] === 'websites' && owningTask[1] === 'routing' && owningTask[2])
-                activeRoutingDetail = owningTask[2];
-              if (owningTask[0] === 'server' && owningTask[1] === 'php' && owningTask[2])
-                activePhpStage = owningTask[2];
-              if (owningTask[0] === 'status' && owningTask[2])
-                activeStatusStage = owningTask[2];
-              navigateTask(owningTask[0],owningTask[1],true);
+              openTaskRoute(owningTask);
             }).appendTo(identityCell);
         }
         rows.append(tr);
@@ -6624,11 +6614,24 @@
       if (title && title.focus) title.focus({preventScroll:true});
     }
   }
+  // An explicit task shortcut opens its promised stage; ordinary section
+  // navigation preserves the last stage and all existing selections.
+  function openTaskRoute(route) {
+    if (route[0] === 'websites' && route[1] === 'cache' && route[2])
+      activeCacheStage = route[2];
+    if (route[0] === 'websites' && route[1] === 'routing' && route[2])
+      activeRoutingDetail = route[2];
+    if (route[0] === 'server' && route[1] === 'php' && route[2])
+      activePhpStage = route[2];
+    if (route[0] === 'status' && route[2])
+      activeStatusStage = route[2];
+    navigateTask(route[0],route[1],true);
+  }
   function openNativeTask(section) {
-    if (section === 'php') navigateTask('server','php',true);
-    else if (section === 'websites') navigateTask('websites','summary',true);
-    else if (section === 'status' || section === 'activity')
-      navigateTask(section,null,true);
+    if (section === 'php') openTaskRoute(['server','php','inspect']);
+    else if (section === 'websites') openTaskRoute(['websites','summary']);
+    else if (section === 'status') openTaskRoute(['status',null,'design']);
+    else if (section === 'activity') openTaskRoute(['activity',null]);
   }
   function browseWebsites() { openNativeTask('websites'); }
   root.find('#ach-website-browse, #ach-choose-website').on('click', browseWebsites);

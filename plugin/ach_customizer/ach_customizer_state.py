@@ -213,7 +213,7 @@ def set_enabled(control, enabled, *, expected_revision, directory=DATA_DIR):
         try:
             state = _read_at(directory_fd)
             if state["revision"] != expected_revision:
-                raise StateError("Monitor state revision changed; reopen Overview before retrying")
+                raise StateError("Monitor state revision changed; use Home / Refresh observations before retrying")
             if control == "overall":
                 old = state["enabled"]
             else:

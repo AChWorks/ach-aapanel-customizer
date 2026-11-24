@@ -103,12 +103,13 @@ The image concept previously generated is **not runtime proof** and its compulso
 
 ## Current source implementation and acceptance boundary
 
-S1–S4 are merged into `main` through PRs #129–#131. The published and
-retained installed Native v0.1.100 still uses the earlier UI; a source ZIP
-with the same manifest version is not the official Release asset.
-The exact-main installed import and bounded QA receipt is linked from
-Issue #128 and Issue #21; it is partial acceptance, not release. The browser projection adds only one selected workflow
-at a time; privileged actions continue through the original native backend.
+S1–S5 are merged into `main` through PRs #129–#132. Native source version
+0.1.101 provides a distinct package identity for the redesign; the earlier
+published 0.1.100 package uses the seven-tab interface. A source ZIP is not
+a published Release asset. Current release availability belongs to GitHub
+Releases; exact installed QA and human acceptance belong to Issues #21 and
+#128. The browser projection adds only one selected workflow at a time;
+privileged actions continue through the original native backend.
 
 - **Selected website:** Protection remains site-owned; WordPress exposes four
   independent setting choices; Routing exposes VHost, local Hosts, and drift;
@@ -130,7 +131,10 @@ at a time; privileged actions continue through the original native backend.
   stage. The mobile Sections menu supports Escape from inside the menu.
   Error page branding read/retry feedback stays common to every mode, while
   editor Save/Reset/Preview outcomes appear beside their controls with one
-  canonical live announcement. There is no duplicate backend action or automatic writer.
+  canonical live announcement. Explicit Home and reconciliation shortcuts
+  open the promised stage rather than a previously visited one; they do not
+  change site/service/branding scope or submit an operation. There is no
+  duplicate backend action or automatic writer.
 
 **Source/interaction structure is not proof of installed acceptance.** Unit tests,
 real Chromium with mocked native reads, and automation can demonstrate specific

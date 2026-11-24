@@ -48,16 +48,17 @@ as separate observations.
    When investigating an update failure, compare ZIP file hashes to installed
    plugin members if authorized; the inventory label alone does not prove
    that Python workers adopted the same code.
-2. Open **Overview → Refresh state**. The UI displays its packaged version
+2. Open **Home → Refresh observations** in the task-first interface
+   (earlier v0.1.100: **Overview → Refresh state**). The UI displays its packaged version
    and the version compiled into the currently resident Python *entrypoint*.
-   An older or missing `worker_source_version` in an otherwise valid Overview
+   An older or missing `worker_source_version` in an otherwise valid Home observations
    response is **Upgrade needs review**. This can be observed without
    restarting services, changing cache, or writing site files.
-3. If Overview is unavailable or invalid, treat the worker version as
+3. If Home observations are unavailable or invalid, treat the worker version as
    **unverified**, not as a confirmed stale import. Investigate native session,
    request failure, authorization, and plugin Activity first.
 4. For a new feature failing despite exact installed source, open
-   **Activity & Logs**. Capture its UTC timestamp, action/stage, error class,
+   **Activity & recovery** (earlier: **Activity & Logs**). Capture its UTC timestamp, action/stage, error class,
    Operation ID, installed version, and the exact action attempted.
    A `TypeError` alone is not conclusive: check source and call-contract
    compatibility instead of assuming a restart fixes every error.
@@ -165,7 +166,8 @@ disable, uninstall and reinstall. The selected-site report does not
 modify or migrate any of those stores and is not an automatic repair process.
 
 For a new or modified website, accept only its reviewed native identity with
-**Website list → Compare website records → Save only selected website baseline**.
+**Websites → Summary & changes → Compare website records → Save only selected website baseline**
+(earlier: **Website list**).
 This preserves other sites' previous saved baseline records and pending
 changes. The older **Save baseline for ALL websites** deliberately replaces
 the complete snapshot; never use it merely to accept one new website. An
@@ -177,9 +179,10 @@ member hashes, primary administrator role, current native site key/ID and
 bindings, saved baseline revision, relevant shared PHP service, journal
 Recovery ID, Nginx syntax, and healthy peer sites **before** lifecycle testing.
 After a replacement, reopen/refresh the panel and confirm the resident
-Python entrypoint version. Use Website list Compare, Routing & Nginx Review
-selected site & recovery, and the relevant module's **fresh independent**
-Recheck. Never use an old combined report as a write precondition.
+Python entrypoint version. Use **Websites → Summary & changes → Compare
+website records**, then **Routing & diagnostics → Review drift & recovery →
+Review selected site & recovery** and the relevant module's **fresh
+independent Recheck**. Never use an old combined report as a write precondition.
 
 When the selected native site identity, baseline revision, PHP source or
 generated VHost changes while a review is running, its report is invalid;

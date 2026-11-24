@@ -229,6 +229,47 @@ async function walk(page, width, record) {
     });
     assert.deepEqual(result,{visible:true,bounded:true,scroll:true,text:true,images:0});
   }
+  // Explicit links must reopen their promised stages, even if another
+  // stage was previously selected. Never switch an independent target or
+  // dispatch a source/privileged action just to follow a shortcut.
+  const scope=await page.locator('#ach-status-scope').inputValue();
+  const statusSite=await page.locator('#ach-status-site-id').inputValue();
+  const template=await page.locator('#ach-status-template').inputValue();
+  await openDestination(page,'overview');
+  await page.locator('#ach-home-php').click();
+  assert.equal(await page.locator('[data-php-stage="inspect"]').isVisible(),true);
+  assert.equal(await page.locator('#ach-task-title').evaluate(el=>document.activeElement===el),true);
+  await clickStage(page,'data-php-task','restore');
+  await openDestination(page,'overview');
+  await page.locator('#ach-home-status').click();
+  assert.equal(await page.locator('[data-status-stage="design"]').isVisible(),true);
+  assert.equal(await page.locator('#ach-status-scope').inputValue(),scope);
+  assert.equal(await page.locator('#ach-status-site-id').inputValue(),statusSite);
+  assert.equal(await page.locator('#ach-status-template').inputValue(),template);
+  await clickStage(page,'data-status-mode','fallback');
+  await openDestination(page,'websites');
+  await clickStage(page,'data-task','cache');
+  await clickStage(page,'data-cache-task','bridge');
+  await clickStage(page,'data-task','routing');
+  await clickStage(page,'data-routing-detail','reconcile');
+  await page.locator('#ach-reconcile-to-cache').click();
+  assert.equal(await page.locator('[data-cache-stage="configure"]').isVisible(),true);
+  assert.equal(await page.locator('#ach-hosts-site-id').inputValue(),'7');
+  assert.equal(await page.locator('#ach-cache-activation-apply').isEnabled(),false);
+  await sample('reconcile to cache');
+  await clickStage(page,'data-task','routing');
+  await page.locator('#ach-reconcile-to-php').click();
+  assert.equal(await page.locator('[data-php-stage="policy"]').isVisible(),true);
+  await sample('reconcile to php');
+  await openDestination(page,'websites');
+  await clickStage(page,'data-task','routing');
+  await page.locator('#ach-reconcile-to-status').click();
+  assert.equal(await page.locator('[data-status-stage="site"]').isVisible(),true);
+  assert.equal(await page.locator('#ach-status-scope').inputValue(),scope);
+  assert.equal(await page.locator('#ach-status-site-id').inputValue(),statusSite);
+  assert.equal(await page.locator('#ach-status-template').inputValue(),template);
+  assert.equal(await page.locator('#ach-status-manage-apply').isEnabled(),false);
+  await sample('reconcile to status');
   await openDestination(page,'activity');
   await resolveLatest(page,'get_activity',{status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
   await sample('activity');
