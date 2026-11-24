@@ -92,19 +92,19 @@ location = /fixture-fill {
     content_by_lua_block {
         local d = ngx.shared.ach_customizer_scan_state
         for i=1,100000 do
-            local ok, err = d:safe_add(string.format("fixture:%050d", i), 1, 60)
-            if not ok then ngx.say(i-1, ":", err); return end
+            local ok, err = d:safe_add(string.format([[fixture:%050d]], i), 1, 60)
+            if not ok then ngx.say(i-1, [[:]], err); return end
         end
-        ngx.say("not-full")
+        ngx.say([[not-full]])
     }
 }
 location = /fixture-release {
     content_by_lua_block {
         local d = ngx.shared.ach_customizer_scan_state
         for i=1,tonumber(ngx.var.arg_count) do
-            d:delete(string.format("fixture:%050d", i))
+            d:delete(string.format([[fixture:%050d]], i))
         end
-        ngx.say("released")
+        ngx.say([[released]])
     }
 }
 """)
