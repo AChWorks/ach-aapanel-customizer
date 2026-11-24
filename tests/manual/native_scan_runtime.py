@@ -214,8 +214,9 @@ location = /fixture-release {
             check("blocked before cached response",status("/cached"),429)
             check("no upstream call",Upstream.calls,calls)
             before_php = php_marker.read_bytes()
-            check("sensitive denied before FastCGI",status("/backups/proof.php",ip="198.51.100.20"),403)
-            check("blocked before FastCGI",status("/health.php"),429)
+            for _ in range(3):
+                check("sensitive denied before FastCGI",status("/backups/proof.php",ip="198.51.100.20"),403)
+            check("blocked before FastCGI",status("/health.php",ip="198.51.100.20"),429)
             check("no PHP execution after denial",php_marker.read_bytes(),before_php)
             check("other client can execute PHP",request("/health.php",ip="198.51.100.21")[1],b"fixture-php")
             check("peer unaffected",status(host=PEER),200)

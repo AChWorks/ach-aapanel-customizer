@@ -199,6 +199,50 @@ async function walk(browser,width,height,touch){
         assert.ok(await button('ach-guard-apply').isDisabled());
       }
     }
+    // #146: proposed settings never become recovery prerequisites.
+    assert.equal(await button('ach-guard-scan-settings').isVisible(),false);
+    await button('ach-guard-scan').check();
+    assert.equal(await button('ach-guard-scan-settings').isVisible(),true);
+    for(const [id,value] of [['maxretry','6'],['findtime','120'],['bantime','600']])
+      assert.equal(await button('ach-guard-'+id).inputValue(),value);
+    await button('ach-guard-maxretry').fill('0');
+    const invalidCount=await count();
+    await button('ach-guard-preview').click();
+    assert.equal(await count(),invalidCount);
+    assert.match(await button('ach-guard-summary').innerText(),/positive whole numbers/);
+    await button('ach-guard-maxretry').fill('6');
+    await button('ach-guard-preview').click();
+    const scanRequest=await lastRequest(page,'manage_nginx_protection');
+    assert.equal(scanRequest.data.guard_scan,'true');
+    assert.equal(scanRequest.data.maxretry,'6');
+    await resolveLatest(page,'manage_nginx_protection',protection('guard','Unmanaged',{
+      scan_policy:{maxretry:0,findtime:120,bantime:600}
+    }));
+    assert.equal(await button('ach-guard-apply').isDisabled(),true);
+    assert.match(await button('ach-guard-summary').innerText(),/could not be verified/);
+    await button('ach-guard-maxretry').fill('0');
+    await button('ach-guard-recheck').click();
+    const recheck=await lastRequest(page,'manage_nginx_protection');
+    assert.equal(recheck.data.guard_scan,'false');
+    assert.equal(recheck.data.maxretry,undefined);
+    await resolveLatest(page,'manage_nginx_protection',protection('guard','Applied',{
+      scan_policy:{maxretry:4,findtime:60,bantime:120}
+    }));
+    assert.equal(await button('ach-guard-maxretry').inputValue(),'4');
+    assert.equal(await button('ach-guard-findtime').inputValue(),'60');
+    assert.match(await button('ach-guard-summary').innerText(),/Temporary IP blocking is on/);
+    await button('ach-guard-maxretry').fill('0');
+    assert.equal(await button('ach-guard-restore').isEnabled(),true);
+    await button('ach-guard-restore').click();
+    const recovery=await lastRequest(page,'manage_nginx_protection');
+    assert.equal(recovery.data.guard_action,'restore');
+    assert.equal(recovery.data.recovery_id,'a'.repeat(32));
+    assert.equal(recovery.data.maxretry,undefined);
+    await resolveLatest(page,'manage_nginx_protection',protection('guard','Restored',{
+      read_only:false,changed:true
+    }));
+    assert.match(await button('ach-guard-summary').innerText(),/^Restored:/);
+    assert.equal(await button('ach-guard-restore').isDisabled(),true);
     await openDestination(page,'server');
     await resolveLatest(page,'get_php_versions',phpInventory);
     await page.locator('[data-server-task=http]').click();
