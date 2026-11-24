@@ -118,7 +118,7 @@ exceptions, while retaining required protocol/source/recovery invariants.
 Provide truthful partial observations and usable independent tasks when a
 specific capability is unavailable; report the target, source, actual
 condition and next action. Revalidate relevant dependencies, not unrelated
-changes. Maintain supported Stable state as required by section 8.
+changes. Follow the Owner-approved compatibility boundary in section 8.
 
 Test representative mixed-site environments rather than one uniform
 WordPress or stock-PHP fixture. Derive representative variations from
@@ -219,9 +219,8 @@ for the feature-to-task crosswalk, view and status patterns, visual rules, and
 acceptance scenarios. Do not publish a renamed seven-tab interface as the
 completed redesign or drop advanced features to make screens look simpler.
 
-Historical experimental pre-Stable Customizer UI routes/state shims need
-not be revived. The Stable-version boundary in section 8 governs supported
-published state and recovery. This does not waive real aaPanel/vendor/WordPress
+Historical Customizer UI routes/state shims need not be revived. The
+Owner-final-acceptance boundary in section 8 governs internal compatibility. This does not waive real aaPanel/vendor/WordPress
 integrations, current target/peer ownership, authorization, write verification,
 or Recovery correctness.
 The existing sole QA VM remains preserved during development. Merge, public
@@ -261,20 +260,18 @@ stale previews, cache manifests and recoveries; never silently replace it
 with a default path. Certify each module with representative real custom-root
 behavior rather than inferring compatibility from inventory alone.
 
-**Historical pre-Stable internal compatibility policy:** Before the first
-published Stable, experimental Customizer installations did not impose
-production compatibility obligations. Across all subsystems, do not revive
-retired experimental version/schema/ruleset shims, automatic Hosts Restore
-paths, or old role/profile baseline guesses. The published Stable boundary
-in section 8 now governs supported state, active contracts and durable
-Recovery. Never discard supported Stable recovery because a newer
-candidate exists. Names such as aaPanel's `class_v2` and native
-Nginx Helper's older cache paths are **external vendor/source contracts**,
-not old Customizer adapters; assess them by real active use.
-Real aaPanel vendor sources, supported PHP/WordPress versions,
-third-party plugin contracts and user-created site files are
-external compatibility requirements and must not be removed under this
-policy. The persistent QA VM is for testing, not a compatibility customer.
+**Internal compatibility policy:** Until the Owner explicitly grants final
+acceptance to a specific version, use one clean current implementation and
+state contract, even if earlier iterations were published under a Stable
+label. Do not maintain retired version/schema/ruleset shims, old UI paths,
+or migrations merely to support development versions. Follow section 8
+for the distinction between current operation recovery, existing data, and
+version compatibility. Names such as aaPanel's `class_v2` and native
+Nginx Helper's cache paths are **external vendor/source contracts**, not
+old Customizer adapters; assess them by real active use. Real aaPanel
+vendor sources, supported PHP/WordPress versions, third-party contracts and
+user-created site files are not removed under this policy.
+The persistent QA VM is for testing, not a compatibility customer.
 
 An opt-in site-specific Nginx sensitive-path policy should deny known
 sensitive dotfile, backup-directory and upload-PHP requests *before* PHP-FPM
@@ -285,10 +282,9 @@ or ordinary downloads. When native Nginx already disables directory listing,
 do **not** duplicate that policy. A small fixed pre-PHP rule may block common
 website-local `debug.log`/`error_log`, WordPress config backups, raw SQL
 dumps and `.bak` artifacts. Do not globally block ZIP files or add a site
-crawler, watcher, ownership rewrite or another plugin. Before the first
-Stable release, prefer one current source/journal contract; the retained QA
-VM must explicitly retire its old test-only state before exercising a
-new incompatible policy.
+crawler, watcher, ownership rewrite or another plugin. Before explicit Owner final acceptance, prefer one current
+source/journal contract; the retained QA VM must explicitly retire obsolete test-only
+state before exercising a new incompatible policy.
 Every active security policy needs fresh
 source ownership, guarded apply/reload, live response proof, durable recovery,
 separate approval for Restore and drift awareness. Exact URL probes are
@@ -576,12 +572,22 @@ The distribution target is one aaPanel-compatible, versioned plugin package, inc
 - Treat schema migrations and code activation as verifiable lifecycle steps; failures must be diagnosable and recoverable or safely stopped.
 - Detect changes in aaPanel's plugin APIs or target configuration syntax; prevent incompatible enforcement after upgrading either side.
 
-**Stable-version boundary:** Earlier experimental Customizer QA and development
-pre-releases do not impose backward-compatibility migrations on the first
-Stable package. Starting with that published Stable baseline, future updates
-must preserve supported operator configuration, active contracts and owned
-recovery records, or provide an explicitly verified migration/recovery path.
-This does not turn a third-party or unsupported writer into a supported one.
+**Owner-final-acceptance compatibility boundary (2026-11-24):**
+Until the Owner explicitly confirms a named version as the final accepted
+baseline, develop as a clean first installation. A GitHub Release labeled
+Stable, a successful independent review, or approval to merge/publish is
+not this final acceptance. Do not introduce or retain previous-version
+adapters, schema migrations, retired routes or legacy-only recovery paths
+solely because a development version was previously installed. Prefer a
+single maintainable current contract, including normal current-generation
+Restore and safe handling of partial operations. Keep legitimate platform
+and third-party compatibility. Where older experimental state is
+incompatible, report it truthfully; do not silently discard operator data,
+logs, journals or applied settings, and do not infer permission to reset,
+delete, restore or mutate Production. A clean test installation/reset
+requires its own approved scope. After explicit final acceptance, preserve
+that accepted baseline's actual supported contracts and data, or provide an
+explicitly verified migration path when a later change needs one.
 
 ### Uninstall and reset
 

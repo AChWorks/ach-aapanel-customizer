@@ -94,6 +94,7 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_cache_policy.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_manage.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_runtime.py', names)
+                self.assertIn('ach_customizer/ach_customizer_origin_http.py', names)
                 self.assertEqual(
                     {Path(x).name for x in names if x.endswith('.py')},
                     {p.name for p in PACKAGE.glob('*.py') if p.is_file()},

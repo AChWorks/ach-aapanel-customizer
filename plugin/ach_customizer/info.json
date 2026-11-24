@@ -2,7 +2,7 @@
   "title": "ACh aaPanel Customizer",
   "name": "ach_customizer",
   "ps": "Native aaPanel customization with paginated site and domain inventory, plugin-owned baseline comparisons, PHP-FPM policy and opt-in verified WordPress/native-regeneration recovery, Status Pages, Nginx and FastCGI Cache tools, and Activity diagnostics. Operator decisions use concise, nonblocking advice for acceptable risks; existing authorized actions and their actual results remain visible. Write adapters depend on the target's real capabilities. Administrator-click origin-local Hosts alias removal does not use unattended automation. General Production qualification is not included.",
-  "versions": "0.1.111",
+  "versions": "0.1.112",
   "checks": "/www/server/panel/plugin/ach_customizer",
   "author": "AChWorks",
   "home": "https://github.com/AChWorks/ach-aapanel-customizer"

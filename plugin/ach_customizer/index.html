@@ -971,11 +971,11 @@
       <details class="ach-help"><summary>Advanced: privacy probes and policy reference</summary>
       <p class="ach-note"><strong>Check private-request Cache headers:</strong> Use local test requests to see whether WordPress appears to bypass caching for fake cookies and Authorization headers. This is not a real logged-in user test. A faulty policy may cache a test response.</p>
       <details class="ach-help"><summary>What does this probe send and exclude?</summary>
-        <p>Sends four synthetic HTTP/80 HEAD requests from localhost, observes native or site-owned Cache headers and checks homepage/WordPress REST bypass. It does not test real users, WooCommerce carts, HTTPS edges, vendor Purge All or private-data safety.</p>
+        <p>Sends four synthetic HTTP(S) HEAD requests from localhost, observes native or site-owned Cache headers and checks homepage/WordPress REST bypass. It does not test real users, WooCommerce carts, HTTPS edges, vendor Purge All or private-data safety.</p>
       </details>
       <div class="ach-controls"><button type="button" id="ach-cache-private-probe-button" data-ach-disabled-help="Select a verified website." disabled>Probe local private-request Cache headers</button></div>
       <p id="ach-cache-private-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to test synthetic request bypass without changing configuration.</p>
-      <p class="ach-note"><strong>Default WooCommerce guest-route probe (no login):</strong> five extra fixed anonymous HTTP/80 HEAD checks for <code>/cart/</code>, <code>/checkout/</code>, <code>/my-account/</code> and Store API cart/checkout, after four synthetic WordPress checks. Customized page slugs, GET behavior, identity/session cookies and the responding VHost are not verified. A faulty policy could warm a guest response.</p>
+      <p class="ach-note"><strong>Default WooCommerce guest-route probe (no login):</strong> five extra fixed anonymous HTTP(S) HEAD checks for <code>/cart/</code>, <code>/checkout/</code>, <code>/my-account/</code> and Store API cart/checkout, after four synthetic WordPress checks. Customized page slugs, GET behavior, identity/session cookies and the responding VHost are not verified. A faulty policy could warm a guest response.</p>
       <div class="ach-controls"><button type="button" id="ach-cache-woo-probe-button" data-ach-disabled-help="Select a verified website." disabled>Probe default WooCommerce guest Cache routes</button></div>
       <p id="ach-cache-woo-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native WooCommerce website to test fixed default routes without login or configuration changes.</p>
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
@@ -1004,7 +1004,7 @@
         <p>Create an isolated FastCGI Cache for one verified website, with a separate approval and shared Nginx reload.</p>
         <p><strong>Not included:</strong> This does not enable Nginx Helper Purge All or certify the privacy of logged-in WooCommerce customers.</p>
         <details class="ach-help"><summary>Supported source and exact Nginx changes</summary>
-          <p>Requires a verified aaPanel 8.0.7 Nginx HTTP/80 site with stock PHP 8.1/8.5 or an exact native WordPress wpfastcgi source match. A site-owned extension takes precedence over the matching PHP location while retaining its routing and headers; no aaPanel vendor source is edited. Nginx syntax, reload and the PHP route are verified. Shared WORDPRESS Cache and native <code>/purge</code> remain untouched, as do Nginx Helper automatic invalidation settings.</p>
+          <p>Requires a verified aaPanel 8.0.7 Nginx site with a registered HTTP/80 identity and stock PHP 8.1/8.5 or an exact native WordPress wpfastcgi source match. A site-owned extension takes precedence over the matching PHP location while retaining its routing and headers; no aaPanel vendor source is edited. Nginx syntax, reload and the PHP route (including an exact same-host HTTPS upgrade) are verified. Shared WORDPRESS Cache and native <code>/purge</code> remain untouched, as do Nginx Helper automatic invalidation settings.</p>
         </details>
         <div class="ach-controls">
           <button type="button" id="ach-cache-activation-preview" class="ach-check" data-ach-disabled-help="Select a verified website." disabled>Check site-specific Cache Apply readiness</button>
@@ -1381,7 +1381,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.111'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.112'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -4230,7 +4230,7 @@
         r.read_only !== true || r.runtime_verified !== false ||
         r.cache_safe_verified !== false || r.purge_supported !== false ||
         typeof r.private_probe_bypass_observed !== 'boolean' ||
-        r.request_method !== 'HEAD' || r.origin !== '127.0.0.1:80' ||
+        r.request_method !== 'HEAD' || r.origin !== '127.0.0.1' ||
         !['Observed BYPASS','Needs Review','Unsupported','Unavailable'].includes(r.state) ||
         !Array.isArray(r.probes) || r.probes.length > (woo ? 9 : 4) ||
         (woo && (r.profile !== 'woocommerce_default' ||
@@ -4255,6 +4255,7 @@
     return r.probes.every((p, i) => p &&
       p.path === expected[i].path && p.route === expected[i].route &&
       p.scenario === expected[i].scenario &&
+      ['HTTP','HTTPS'].includes(p.scheme) &&
       Number.isSafeInteger(p.http_status) && p.http_status >= 100 &&
       p.http_status <= 599 &&
       ['BYPASS','HIT','MISS','EXPIRED','STALE','UPDATING','REVALIDATED','Not Observed'].includes(p.cache)) &&
@@ -4269,7 +4270,7 @@
     cacheProbeBusy = true;
     cacheLock();
     root.find('#ach-cache-private-probe-result').text(
-      'Sending four fixed synthetic HEAD probes to this site on local HTTP/80…');
+      'Sending four fixed synthetic HEAD probes to this site on local HTTP(S)…');
     request('probe_private_cache', {
       site_id:id,
       expected_site_key:hostsPageSites.get(id).name,
@@ -4284,7 +4285,7 @@
         return;
       }
       var details = r.probes.map(p =>
-        p.route + ' / ' + p.scenario + ': HTTP ' + p.http_status + ', Cache ' + p.cache);
+        p.route + ' / ' + p.scenario + ': ' + p.scheme + ' ' + p.http_status + ', Cache ' + p.cache);
       root.find('#ach-cache-private-probe-result').text(
         r.state + (r.reason ? ' — ' + r.reason : '') +
         '\n' + (details.join('\n') || 'No local requests were made.') +
@@ -4315,7 +4316,7 @@
         return;
       }
       var details = r.probes.map(p =>
-        p.route + ' / ' + p.scenario + ': HTTP ' + p.http_status + ', Cache ' + p.cache);
+        p.route + ' / ' + p.scenario + ': ' + p.scheme + ' ' + p.http_status + ', Cache ' + p.cache);
       root.find('#ach-cache-woo-probe-result').text(
         r.state + (r.reason ? ' — ' + r.reason : '') +
         '\n' + (details.join('\n') || 'No local requests were made.') +
@@ -4444,6 +4445,10 @@
       /^[0-9a-f]{32}$/.test(response.cache_generation || '') &&
       Number.isInteger(response.php_probe_status) &&
       response.php_probe_status >= 200 && response.php_probe_status < 400 &&
+      (response.php_probe_https_status === undefined ||
+        ([301,302,307,308].includes(response.php_probe_status) &&
+          Number.isInteger(response.php_probe_https_status) &&
+          response.php_probe_https_status >= 200 && response.php_probe_https_status < 400)) &&
       ['81','85'].includes(response.php_version) &&
       ['stock','wpfastcgi'].includes(response.native_handler) &&
       (response.native_handler !== 'wpfastcgi' ||
@@ -4560,7 +4565,8 @@
         '\nSelected site #'+id+' / PHP '+r.php_version+
         '\nNative PHP mode: '+(r.native_handler === 'wpfastcgi' ?
           'WordPress wpfastcgi (source-matched, manual cache)' : 'stock PHP')+
-        '\nOrigin PHP route: HTTP '+r.php_probe_status+
+        '\nOrigin PHP route: '+(r.php_probe_https_status === undefined ?
+          'HTTP '+r.php_probe_status : 'HTTPS '+r.php_probe_https_status+' (HTTP redirect '+r.php_probe_status+')')+
         (r.native_handler === 'wpfastcgi' ?
           '\nNative wpfastcgi PHP response headers: source-matched and preserved; server HSTS is not inherited in this location' :
           '\nNative server HSTS: '+(r.preserved_server_hsts ?

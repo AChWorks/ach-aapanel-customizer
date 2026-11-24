@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.111'
+WORKER_SOURCE_VERSION = '0.1.112'
 
 _STATE_DIR = DATA_DIR
 
@@ -1172,7 +1172,7 @@ class ach_customizer_main:
             return self._fail("cache_inspection", exc, request_id)
 
     def probe_private_cache(self, args):
-        """Full-admin synthetic cache-bypass observations on local HTTP/80.
+        """Full-admin synthetic cache-bypass observations on local HTTP(S).
 
         Never accept a browser-supplied URL, header or cache path. This is
         separate from source inspection, real-session tests and Purge All.

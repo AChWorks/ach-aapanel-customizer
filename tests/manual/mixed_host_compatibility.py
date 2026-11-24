@@ -9,6 +9,10 @@ synthetic PHP pages. This is a runtime fixture, not a native UI Apply test.
 """
 import argparse
 import hashlib
+import functools
+import http.client
+import ssl
+from unittest.mock import patch
 import json
 import os
 from pathlib import Path
@@ -23,6 +27,7 @@ import time
 PARSER = argparse.ArgumentParser(description=__doc__)
 PARSER.add_argument("--plugin-root", type=Path, default=Path(__file__).resolve().parents[2] / "plugin/ach_customizer")
 PARSER.add_argument("--well-known", type=Path, default=Path(__file__).resolve().parents[1] / "fixtures/native-well-known.conf")
+PARSER.add_argument("--cache-force-https-only", action="store_true", help="Exercise fresh guarded Force HTTPS Cache lifecycle on isolated Nginx")
 PARSER.add_argument("--status-only", action="store_true", help="Run the nested NL status evidence/lifecycle without repeating Guard or Cache writes")
 ARGS = PARSER.parse_args()
 sys.path.insert(0, str(ARGS.plugin_root))
@@ -30,6 +35,8 @@ import ach_customizer_cache_audit as audit
 import ach_customizer_cache_manage as manage
 import ach_customizer_cache_policy as policy
 import ach_customizer_cache_wordpress as wp
+import ach_customizer_cache_runtime as runtime
+import ach_customizer_origin_http as origin
 import ach_customizer_wp_settings as settings
 import ach_customizer_monitor as monitor
 import ach_customizer_vhost_drift as drift
@@ -182,6 +189,118 @@ def process(conf, directory, callback):
                     child.wait(timeout=5)
 
 
+def force_https_lifecycle(directory, confdir, vhosts, main, rows, panel, selected, cert,
+                          http_port, tls_port):
+    """Real source validation and real Nginx reloads with only fixture-local paths.
+
+    Native source files retain their actual 80/443 shape; the independent
+    process receives a copy with just the listener ports mapped to high
+    loopback ports. The generated owned extensions stay byte-identical.
+    """
+    live = directory / "runtime-vhosts"
+    live.mkdir()
+    live_main = confdir / "runtime.conf"
+    state = directory / "cache-state"
+    state.mkdir(mode=0o700)
+    cache_root = str(directory / "managed-cache")
+    selected_names = {r["name"] for r in selected}
+    for row in selected:
+        path = vhosts / (row["name"] + ".conf")
+        write(path, path.read_text().replace(
+            " ssl_certificate ", ' if ($server_port !~ 443) { rewrite ^(/.*)$ https://$host$1 permanent; }\n ssl_certificate ', 1))
+        # Match the actual IR database: only port 80 is registered even
+        # though the native VHost listens on both 80 and 443.
+        row["bound_domains"] = [{"name":row["name"],"port":80}]
+        if row is selected[0]:
+            root = Path(row["path"])
+            # Real PHP canonical /index.php -> / redirect, just as observed
+            # on the WordPress site. All other routes still execute PHP.
+            write(root/"index.php", PHP.replace(
+                "$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);",
+                "$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);\n"
+                "if ($path === '/index.php') { header('Location: https://' . $_SERVER['HTTP_HOST'] . '/', true, 301); exit; }"))
+            (root/"wp-json").mkdir()
+            write(root/"wp-json"/"index.php", PHP)
+    original = {p: p.read_bytes() for p in vhosts.glob("*.conf")}
+    def render_runtime():
+        for path in live.glob("*.conf"):
+            path.unlink()
+        for path in vhosts.glob("*.conf"):
+            write(live/path.name,path.read_text().replace(
+                "listen 80;",f"listen 127.0.0.1:{http_port};").replace(
+                "listen 443 ssl;",f"listen 127.0.0.1:{tls_port} ssl;").replace(
+                "listen 443 quic;",f"listen 127.0.0.1:{tls_port} quic;").replace(
+                "$server_port !~ 443",f"$server_port !~ ^{tls_port}$"))
+        write(live_main,main.read_text().replace(str(vhosts)+"/*.conf",str(live)+"/*.conf"))
+    render_runtime()
+    commands = []
+    def runner(argv, **kwargs):
+        assert argv[0]==NGINX and argv[-2:]==["-c",str(main)]
+        assert argv[1] in ("-t","-s")
+        render_runtime()
+        commands.append(argv[1])
+        return subprocess.run([NGINX,"-p",str(directory)+"/"]+argv[1:-1]+[str(live_main)],**kwargs)
+    context = ssl.create_default_context(cafile=str(cert))
+    def probe(site, *, marker=None):
+        return manage._probe(site, marker=marker, http_port=http_port,
+                             https_port=tls_port,tls_context=context)
+    ref = functools.partial(policy.generate_reference,cache_root=cache_root)
+    owned = functools.partial(manage._path_owned,cache_root=cache_root)
+    kw = {"vhost_root":str(vhosts),"nginx_root":str(confdir),"data_dir":str(state),"probe":probe}
+    peer = next(row for row in rows if row["name"] not in selected_names)
+    def exercise():
+        outputs=[]
+        peer_before=probe(peer)
+        for row, expected in zip(selected, ((301,301),(301,200))):
+            assert probe(row)==expected, (row["name"],probe(row),expected)
+            # A bad trust store must not reach PHP nor authorize any write.
+            try:
+                manage._probe(row,http_port=http_port,https_port=tls_port)
+            except manage.CacheManageError as exc:
+                assert "certificate verification" in str(exc), str(exc)
+            else:
+                raise AssertionError("Untrusted fixture certificate was accepted")
+            plan=manage.preview_cache_activation(row,panel,**kw)
+            assert (plan["php_probe_status"],plan["php_probe_https_status"])==expected
+            assert not list(state.glob("ach_customizer.cache.%d.json"%row["id"]))
+            applied=manage.manage_cache("apply",row,panel,approved=True,
+                expected_source=plan["source_sha256"],expected_proposal=plan["proposal_sha256"],
+                cache_generation=plan["cache_generation"],runner=runner,**kw)
+            assert applied["state"]=="Applied" and applied["runtime_verified"],applied
+            assert probe(row,marker=row["id"])==expected
+            assert manage.manage_cache("recheck",row,panel,**kw)["state"]=="Applied"
+            fd=manage._open_state_dir(str(state))
+            try:
+                saved=manage._record_read(fd,row["id"])
+                assert manage._saved_probe_status(saved)==expected
+            finally:
+                os.close(fd)
+            if row is selected[0]:
+                source=audit.inspect_site_fastcgi_cache(panel,row["id"],row["name"],
+                    vhost_root=str(vhosts),nginx_root=str(confdir),rewrite_root=str(vhosts.parent/"rewrite"))
+                observed=runtime.probe_private_cache(row,source,vhost_root=str(vhosts),
+                    connection_factory=lambda: http.client.HTTPConnection("127.0.0.1",http_port,timeout=4),
+                    https_factory=lambda: origin.https_connection(row["name"],tls_port,context=context))
+                assert observed["state"]=="Observed BYPASS",observed
+                assert all(p["scheme"]=="HTTPS" for p in observed["probes"]),observed
+            restored=manage.manage_cache("restore",row,panel,approved=True,
+                recovery_id=applied["recovery_id"],runner=runner,**kw)
+            assert restored["state"]=="Restored" and restored["runtime_verified"],restored
+            assert probe(row)==expected
+            assert manage.manage_cache("recheck",row,panel,**kw)["state"]=="Restored"
+            assert probe(peer)==peer_before
+            outputs.append({"handler":plan["native_handler"],"http_https_status":expected,
+                "apply_recheck_restore":"PASS","invalid_certificate":"rejected",
+                "peer":"unchanged"})
+        assert commands.count("-s")==4,commands
+        assert {p:p.read_bytes() for p in original}==original
+        return outputs
+    with patch.object(manage,"CACHE_ROOT",cache_root), patch.object(manage,"DATA_DIR",str(state)), \
+         patch.object(manage,"_path_owned",owned), patch.object(manage,"generate_reference",ref), \
+         patch.object(policy,"generate_reference",ref),patch.object(runtime,"CACHE_ROOT",cache_root):
+        return process(live_main,directory,exercise)
+
+
 def profile(base, label, wp_count, php_count):
     directory = base / label
     directory.mkdir()
@@ -199,7 +318,8 @@ def profile(base, label, wp_count, php_count):
     cert = directory / "fixture.crt"
     key = directory / "fixture.key"
     run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-         "-keyout", str(key), "-out", str(cert), "-subj", "/CN=qa.invalid", "-days", "1"])
+         "-keyout", str(key), "-out", str(cert), "-subj", "/CN=qa.invalid", "-days", "1",
+         "-addext", "subjectAltName="+",".join("DNS:site-%d.%s.test"%(i+1,label) for i in range(wp_count+php_count))])
     legacy = directory / "legacy-cache"
     legacy.mkdir()
     www = pwd.getpwnam("www")
@@ -303,6 +423,11 @@ def profile(base, label, wp_count, php_count):
     result["status_extension_source_ready"] = len(rows)
     # The stock site chosen for runtime has no foreign selected-route writer.
     selected = [rows[0], rows[-1]]
+    if ARGS.cache_force_https_only:
+        result["force_https_cache_lifecycle"] = force_https_lifecycle(
+            directory,confdir,vhosts,main,rows,panel,selected,cert,http_port,tls_port)
+        print(json.dumps(result),flush=True)
+        return result
     generated = []
     for row, handler in zip(selected, ("wpfastcgi", "stock")):
         sources = manage._site_sources(row,"85",native_handler=handler,**kw)
@@ -532,6 +657,7 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="achqa-mixed-hosts-",dir="/www") as folder:
         base = Path(folder)
         base.chmod(0o755)
-        results = ([profile(base,"nl",1,5)] if ARGS.status_only else
+        results = ([profile(base,"ir",2,1)] if ARGS.cache_force_https_only else
+                   [profile(base,"nl",1,5)] if ARGS.status_only else
                    [profile(base,"ir",6,2),profile(base,"nl",1,5)])
         print(json.dumps({"profiles":results,"fixture_cleanup":"automatic on exit"}),flush=True)

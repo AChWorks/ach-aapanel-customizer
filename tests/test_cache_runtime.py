@@ -88,6 +88,41 @@ class RuntimePrivateCacheTests(unittest.TestCase):
             self.assertNotIn("Authorization", headers.get("Cookie", ""))
         self.assertTrue(all(c.closed for c in self.connections))
 
+    def test_force_https_private_probe_reports_terminal_scheme_and_bypass(self):
+        self.managed()
+        paths = ["/", "/", "/wp-json/", "/wp-json/"]
+        self.responses = [Response(301, {"Location":"https://" + self.name + path})
+                          for path in paths]
+        tls_connections = []
+        def tls():
+            c = Connection(Response(200, {"X-ACh-Cache":"BYPASS",
+                                           "X-ACh-Cache-Site":"9"}), self.calls)
+            tls_connections.append(c)
+            return c
+        got = runtime.probe_private_cache(
+            self.site, self.audit, vhost_root=str(self.root),
+            connection_factory=self.factory, https_factory=tls)
+        self.assertEqual(got["state"], "Observed BYPASS")
+        self.assertEqual(got["origin"], "127.0.0.1")
+        self.assertTrue(all(p["scheme"] == "HTTPS" for p in got["probes"]))
+        self.assertEqual(len(self.calls), 8)
+        for a, b in zip(self.calls[::2], self.calls[1::2]):
+            self.assertEqual(a,b)
+        self.assertTrue(all(c.closed for c in self.connections+tls_connections))
+        self.assertFalse(got["cache_safe_verified"])
+
+    def test_foreign_redirect_and_first_hop_cache_evidence_are_not_followed(self):
+        self.managed()
+        self.responses[0] = Response(301, {"Location":"https://foreign.test/"})
+        self.responses[1] = Response(301, {"Location":"https://" + self.name + "/",
+                                         "X-ACh-Cache":"HIT","X-ACh-Cache-Site":"9"})
+        with patch.object(runtime, "https_connection",
+                          side_effect=AssertionError("must not follow")):
+            got = self.observe()
+        self.assertEqual(got["state"], "Unavailable")
+        self.assertEqual([p["scheme"] for p in got["probes"]],["HTTP"]*4)
+        self.assertEqual(got["probes"][1]["cache"],"HIT")
+
     def test_any_cached_synthetic_identity_request_fails_positive(self):
         self.responses[2] = Response(200, "HIT From " + self.name)
         got = self.observe()

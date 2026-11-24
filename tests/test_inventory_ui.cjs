@@ -3483,6 +3483,16 @@ test('Native wpfastcgi Cache readiness names the exact PHP scope and preserves m
   assert.equal(ui.state().cacheActivationApplyDisabled,false);
 });
 
+test('Cache readiness distinguishes HTTPS PHP response from HTTP upgrade', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady({
+    php_probe_status:301,php_probe_https_status:200
+  }));
+  assert.match(ui.state().cacheActivationResult,/HTTPS 200 \(HTTP redirect 301\)/);
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,false);
+});
+
 test('Forged Cache readiness never permits Apply, HTML text stays inert', () => {
   const ui=loadUi(); selectHostsSite(ui);
   for (const bad of [
@@ -3492,6 +3502,8 @@ test('Forged Cache readiness never permits Apply, HTML text stays inert', () => 
     {source_sha256:'broken'},{proposal_sha256:'broken'},
     {cache_generation:'bad'},{cache_generation:'d'.repeat(31)},
     {php_probe_status:404},{php_probe_status:599},
+    {php_probe_status:200,php_probe_https_status:200},
+    {php_probe_https_status:404},{php_probe_https_status:'200'},
     {state:'Needs Review'},{php_version:'86'},
     {native_handler:null},{native_handler:'unknown'},
     {native_handler:'wpfastcgi',preserved_server_hsts:true}
@@ -9491,13 +9503,13 @@ const privateCacheProbe = (overrides={}) => ({
   state:'Observed BYPASS',read_only:true,runtime_verified:false,
   cache_safe_verified:false,purge_supported:false,
   private_probe_bypass_observed:true,request_method:'HEAD',
-  origin:'127.0.0.1:80',reason:'',
+  origin:'127.0.0.1',reason:'',
   note:'Synthetic local HTTP/80 HEAD requests, no real user safety proof.',
   probes:[
-    {path:'/',route:'home',scenario:'authorization',http_status:200,cache:'BYPASS'},
-    {path:'/',route:'home',scenario:'cookie',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/',route:'rest',scenario:'authorization',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/',route:'rest',scenario:'cookie',http_status:200,cache:'BYPASS'}
+    {path:'/',route:'home',scenario:'authorization',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/',route:'home',scenario:'cookie',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/',route:'rest',scenario:'authorization',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/',route:'rest',scenario:'cookie',scheme:'HTTP',http_status:200,cache:'BYPASS'}
   ],
   ...overrides
 });
@@ -9517,6 +9529,13 @@ test('Native private Cache probe reports synthetic BYPASS without unsafe action'
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
   assert.equal(ui.state().cacheClearDisabled,true);
+});
+
+test('Private Cache probe reports the actual HTTPS origin scheme', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const probes=privateCacheProbe().probes.map(p=>({...p,scheme:'HTTPS'}));
+  ui.statusClick('#ach-cache-private-probe-button').respond(privateCacheProbe({probes}));
+  assert.match(ui.state().privateCacheProbeResult,/rest \/ authorization: HTTPS 200, Cache BYPASS/);
 });
 
 test('Private Cache probe refuses forged success and stale selection', () => {
@@ -9566,11 +9585,11 @@ const wooCacheProbe = (overrides={}) => ({
   note:'Default WooCommerce HTTP/80 HEAD only. Custom slugs, VHost and real sessions unverified.',
   probes:[
     ...privateCacheProbe().probes,
-    {path:'/cart/',route:'cart',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/checkout/',route:'checkout',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/my-account/',route:'account',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/wc/store/v1/cart/',route:'store-cart',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/wc/store/v1/checkout/',route:'store-checkout',scenario:'anonymous',http_status:200,cache:'BYPASS'}
+    {path:'/cart/',route:'cart',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/checkout/',route:'checkout',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/my-account/',route:'account',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/wc/store/v1/cart/',route:'store-cart',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/wc/store/v1/checkout/',route:'store-checkout',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'}
   ],
   ...overrides
 });
