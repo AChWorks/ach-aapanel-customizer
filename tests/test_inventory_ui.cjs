@@ -1195,7 +1195,7 @@ test('Overview Monitor write provides nearby pending/success and unconfirmed fee
   assert.match(ui.state().overviewControlResult,/Saving overall/);
   failed.respond({status:false,stage:'monitor_state_write',msg:'revision conflict'});
   assert.equal(ui.state().overviewFeedbackState,'error');
-  assert.match(ui.state().overviewControlResult,/Monitor change not confirmed.*Refresh state/);
+  assert.match(ui.state().overviewControlResult,/Monitor change not confirmed.*Refresh observations/);
   assert.equal(ui.state().controls.overall.disabled,true);
 });
 
@@ -1227,7 +1227,7 @@ test('Failed Monitor state update restores previous switches and exposes backend
   assert.equal(current.controls.overall.checked, true);
   assert.equal(current.controls.overall.disabled, true);
   assert.equal(current.stateRevision, 'State revision: 0');
-  assert.match(current.overview, /Refresh state before retrying/);
+  assert.match(current.overview, /Refresh observations before retrying/);
   assert.match(current.error, /monitor_authorization: Primary administrator required/);
   assert.match(current.error, /op123/);
   assert.equal(current.errorClass, true);
@@ -1253,7 +1253,7 @@ test('Stale control revision fails visibly without repeating the conflicting mut
   ui.respondControl({
     status: false,
     stage: 'monitor_state_write',
-    msg: 'Monitor state revision changed; reopen Overview before retrying',
+    msg: 'Monitor state revision changed; use Home / Refresh observations before retrying',
     operation_id: 'conflict'
   });
   const current = ui.state();
@@ -7121,7 +7121,7 @@ test('Review R2: a malformed refresh does not unlock after an uncertain write', 
   assert.equal(ui.state().controls.overall.checked,true);
   assert.equal(ui.state().controls.overall.disabled,true);
   assert.equal(ui.state().stateRevision,'State revision: 2');
-  assert.match(ui.state().overview,/unverified|Refresh state/);
+  assert.match(ui.state().overview,/unverified|Refresh observations/);
   const count=ui.requests.length;
   ui.toggleMonitor('overall',false);
   assert.equal(ui.requests.length,count);
@@ -10478,4 +10478,49 @@ test('S5 editor feedback mirrors the canonical status without duplicating the li
   ui.statusClick('#ach-status-load').respond(statusPrefs(5));
   assert.equal(ui.navElementHidden('#ach-status-design-result'),true);
   assert.match(ui.state().statusResult,/Revision 5/);
+});
+
+test('Release-ready task links open the promised stage without changing targets or approving writes', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview());
+  ui.openSites().respond(hostsInventory());
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  ui.clickSiteTask('cache');
+  ui.clickSubTask('cache-task','bridge');
+  ui.clickDestination('server');
+  ui.clickServerTask('php');
+  ui.clickSubTask('php-task','restore');
+  ui.openStatus();
+  ui.clickSubTask('status-mode','fallback');
+  ui.clickDestination('overview');
+  const before=ui.requests.length;
+  ui.homeTask('php');
+  assert.equal(ui.subStageVisible('php-stage','inspect'),true);
+  ui.clickDestination('overview');
+  ui.homeTask('status');
+  assert.equal(ui.subStageVisible('status-stage','design'),true);
+  ui.clickDestination('websites');
+  ui.clickSiteTask('routing');
+  ui.clickSubTask('routing-detail','reconcile');
+  ui.statusClick('#ach-reconcile-to-cache');
+  assert.equal(ui.subStageVisible('cache-stage','configure'),true);
+  assert.equal(ui.elementValue('#ach-hosts-site-id'),'7');
+  assert.equal(ui.state().cacheActivationApplyDisabled,true);
+  ui.statusClick('#ach-reconcile-to-php');
+  assert.equal(ui.subStageVisible('php-stage','policy'),true);
+  ui.statusClick('#ach-reconcile-to-status');
+  assert.equal(ui.subStageVisible('status-stage','site'),true);
+  assert.deepEqual(ui.statusSelection(),{scope:'global',site:''});
+  assert.equal(ui.navElementHidden('#ach-status-task-setup'),false);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.ok(ui.requests.slice(before).every(r=>/s=(get_sites|get_php_versions|status_preferences|get_overview)$/.test(r.options.url)));
+});
+
+test('Recovery instructions name the actual Home refresh and website task routes', () => {
+  const ui=loadUi();
+  ui.respondOverview(monitorOverview({worker_source_version:'0.1.40'}));
+  assert.match(ui.state().workerVersionNotice,/Refresh observations/);
+  assert.doesNotMatch(ui.state().workerVersionNotice,/Refresh state/);
+  ui.openSites().respond({status:false,stage:'website_discovery',msg:'unavailable'});
+  assert.match(ui.elementText('#ach-website-context-status'),/Websites \/ Summary & changes.*Refresh websites/);
 });

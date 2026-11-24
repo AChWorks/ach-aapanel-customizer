@@ -7,8 +7,8 @@ A native aaPanel plugin for **inspect → preview → explicit apply → recheck
 **Use the assets and checksums from [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases)**. GitHub source archives and locally built ZIPs are not substitutes for a published, checksum-verified package.
 
 1. Download the matching `ach-aapanel-customizer-vX.Y.Z.zip` and `SHA256SUMS.txt` from the **same Release**. Verify the native ZIP against the supplied SHA-256 manifest.
-2. In aaPanel open **App Store → Third-party Plug-ins → Import plugins** and import the native ZIP. Open **ACh aaPanel Customizer → Overview → Refresh state**.
-3. Open **Website list**, refresh the inventory and choose a site using the **Selected website → Website** dropdown. Start with a read-only inspection; use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation.
+2. In aaPanel open **App Store → Third-party Plug-ins → Import plugins** and import the native ZIP. For the task-first interface (source version **0.1.101**), open **ACh aaPanel Customizer → Home → Refresh observations**. If using the earlier v0.1.100 package, the equivalent is **Overview → Refresh state**.
+3. In the task-first interface, choose **Manage a website** or **Websites → Summary & changes**, select the exact native website, and start with a read-only inspection of its task. Use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation. In the earlier interface use **Website list** and the shared website selector.
 4. **Optional:** install the separately versioned `ach-aapanel-bridge-vX.Y.Z.zip` through **WordPress → Plugins → Add New → Upload Plugin** only for supported WordPress Cache integration. The Bridge is not embedded in or required by the native ZIP.
 
 The first Stable release was **Native 0.1.98** with optional **WordPress Bridge 0.1.9**. Later native and Bridge package versions advance independently. Earlier development previews are historical, not mandatory compatibility/migration targets. Always obtain the **latest published** assets and SHA256 checksums from Releases rather than assuming the source tree is a Release.
@@ -17,15 +17,25 @@ A successful import does **not** prove that aaPanel's resident Python helpers we
 
 ## What you can do
 
-| aaPanel section | Capabilities and boundaries |
+The task-first destinations below describe the redesigned source/package
+identity 0.1.101. The authoritative published package and its actual availability
+are recorded in GitHub Releases, not implied by this source guide.
+
+| Start here | Tasks and boundaries |
 | --- | --- |
-| **Overview** | Inspect module availability, Monitor switches and packaged/resident entrypoint versions. A matching entrypoint is not proof that every imported helper is current. |
-| **Website list** | Page through real aaPanel sites, bound domains and file-based WordPress/WooCommerce classifications. Compare native-record changes and explicitly save a selected-site or all-sites *observation* baseline; this does not Apply host settings. |
-| **Routing & Nginx** | Inspect native VHost/source; find and remove a chosen **origin-local Hosts loopback alias** with one administrator click; apply a selected-site, recoverable sensitive-file Guard (optional pre-PHP XML-RPC block). Optional Fail2ban scanner bans require trusted native access logs and have **origin-wide firewall impact**, even when watching one site. Manage selected WordPress HTTPS URLs, Debug, system Cron and application-level XML-RPC by separate guarded actions. |
-| **FastCGI Cache** | Inspect a selected site's source and real local Cache observations; opt in to site-scoped Cache Apply/Recheck/Restore and precisely verified Cache clears. A separate WordPress/Nginx Helper connection is available when private physical Cache ownership and prerequisites are satisfied. |
-| **PHP-FPM** | Discover installed PHP/services and shared pool consumers; inspect, save, apply and restore supported shared `[www]` policies. A separately enabled systemd worker can repair *witnessed* native PHP regeneration against saved intent; normal plugin import does not enable it. |
-| **Status Pages** | Preview 11 English/LTR + 11 Persian/RTL offline designs, set scoped branding and explicitly manage supported site/global Nginx error-page modes. Opt-in **unknown-SNI HTTPS/443 handshake rejection** requires an already configured, eligible HTTPS listener; it does not create certificates or a listener. |
-| **Activity & Logs** | Read real stage, result, timestamp and Operation/Recovery IDs; retain these when an action is uncertain. |
+| **Home / Server → Monitoring controls** | Inspect availability and packaged/resident entrypoint versions. Manage Monitor switches; a matching entrypoint is not proof that imported helpers are current. |
+| **Websites → Summary & changes** | Browse native sites, bound domains and file-based WordPress/WooCommerce classifications; compare and explicitly save selected-site or all-sites observation baselines (not host configuration). |
+| **Websites → Protection** | Inspect and apply a selected-site recoverable sensitive-file Guard and optional pre-PHP XML-RPC protection. Shared Nginx reload is disclosed. |
+| **Websites → WordPress** | Debug, system WP-Cron, application XML-RPC and HTTPS URLs. Separate source checks and recovery; certificates are not installed. |
+| **Websites → Routing & diagnostics** | Nginx/VHost observations, selected-site local Hosts and drift/Recovery evidence; no public DNS change. |
+| **Websites → Cache & performance** | Inspect, Connect WordPress, Apply/restore, Clear Cache, and Advanced URL mapping. Exact site-owned cache operations only; vendor Purge All remains separate. |
+| **Server → PHP services** | Inspect service/sites, desired policy, explicit shared Apply, independently available saved-service Recovery and separately opted-in automatic repair of witnessed regeneration. |
+| **Server → Local hostnames / Attack protection / Default HTTP/TLS** | Remove an exact chosen origin-local loopback alias without touching the system hostname; site-log Fail2ban bans are origin-wide; orphan Recovery is site-selection-independent. Unknown HTTP/80 and eligible TLS/443 fallback are separate. |
+| **Error pages** | Design/preview 11 EN/LTR + 11 FA/RTL templates; explicitly choose website delivery, future-site defaults, stopped-site 503 or server fallback. TLS handshake rejection does not create certificates/listeners. |
+| **Activity & recovery** | Read exact operation stage, result, time and Operation/Recovery IDs; open the owning task then Recheck without inferring a site or authorizing Restore. |
+
+For the older **v0.1.100** package, the equivalents are Overview, Website list,
+Routing & Nginx, FastCGI Cache, PHP-FPM, Status Pages and Activity & Logs.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a separate WordPress plugin. It supports verified, generation-bound, eligible per-URL invalidation; it does **not** automatically install Nginx Helper, replace vendor Purge All or make a shared Cache directory safe.
 
@@ -40,44 +50,21 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 
 **Verified reference, not a universal support promise:** non-production **aaPanel 8.0.7**, Nginx, PHP-FPM **8.1/8.5** on representative sites. Other aaPanel/Nginx/PHP writer layouts are inspected by capability, not arbitrarily rejected by version, but a write requires a supported real source/ownership contract. See [installed-native QA evidence, exact candidate and remaining coverage](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), [feature/compatibility backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [TLS/Status Pages scope](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). **Publishing a Stable Release is not a claim of comprehensive Production certification or permission to deploy to Production.**
 
-## Task-first interface redesign (merged source, acceptance in progress)
+## Task-first interface redesign
 
-The Owner-approved redesign is tracked under
-[Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
-and the [screen and task contract](docs/UX-REDESIGN.md). S1–S4 are merged
-through PRs #129–#131. The native shell uses **Home**, **Websites**, **Server**,
-**Error pages** and **Activity & recovery**. These are the merged source
-destinations, not the interface in the published v0.1.100 ZIP.
+The [accepted screen and task contract](docs/UX-REDESIGN.md) defines the
+five-destination native shell and task-stage navigation. S1–S5 were merged
+through PRs #129–#132. The UI groups the original module-owned controls,
+without another privileged writer, permission route or recovery store.
+Task navigation alone never authorizes a write. Direct task shortcuts open
+their named stage without silently selecting a website or changing a scope.
 
-Its task-level navigation groups the original module-owned controls instead of
-introducing another writer, store, permission route or Recovery mechanism:
-
-| Start here in redesigned source | Next task choices | What stays separate |
-| --- | --- | --- |
-| **Websites → choose a verified website → Protection** | Inspect / enable sensitive-file Guard, optional Nginx XML-RPC rule | Other websites, shared Nginx reload and unrelated settings |
-| **Websites → WordPress** | Debug, WP-Cron, XML-RPC, HTTPS URLs | Independent WordPress source and Recovery for each task; HTTPS certificates not installed |
-| **Websites → Routing & diagnostics** | Nginx/VHost observations, selected-site Hosts, drift and saved Recovery | Inspect never Apply; local Hosts are not public DNS |
-| **Websites → Cache & performance** | Inspect, Connect WordPress, Apply/Restore, exact Clear, advanced Bridge URL mapping | Vendor Purge All, other sites' physical Cache, and separate Recheck/approval |
-| **Server → PHP services** | Inspect, desired Monitor Policy, guarded shared Apply, saved-service Restore | Saving a policy never reloads PHP; Restore remains available when discovery is incomplete |
-| **Server → Attack protection / Local hostnames / Default HTTP/TLS** | Site-log scanner and independent orphan-jail recovery; local aliases; unknown HTTP/80 and TLS/443 | Origin-wide firewall or Nginx effects are never presented as site-only |
-| **Error pages** | Design/preview, selected-site delivery, future-site defaults, stopped-site 503, server fallback | The eleven EN/FA templates, explicit scope and independent backend source/recovery authority |
-| **Activity & recovery** | Inspect event and IDs, open the original owning task, then Recheck | An Activity row does not select a site or authorize a Restore |
-
-The original native UI behavior, source and safety checks remain the authority
-for all live actions; task navigation alone never authorizes a write. A disabled
-operation explains its missing evidence and guides the operator back to Recheck
-or the relevant source check. The installed-native S5 acceptance is tracked
-separately in Issue #128 and the exact QA receipt in Issue #21. Source tests
-and automated journeys do not establish unassisted human task completion.
-New changes require independent review and Owner Merge approval; public
-Release requires its own approval.
-
-The **Install** and **What you can do** sections above describe the currently
-**published native ZIP** (seven-tab interface), not an unreviewed source build.
-Use published assets and matching checksums from GitHub Releases. Historical
-Customizer UI compatibility is not required because no previous Customizer
-Production installation exists; aaPanel and active vendor integrations, primary
-administrator authorization, current Recovery data and peer safety remain binding.
+See [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
+for current acceptance and delivery status, and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
+for exact installed QA receipts. Automated task/geometry tests and bounded
+live Apply/Restore are distinct from unassisted human task completion.
+Public Release and Production require separate Owner approval. Use the
+published assets and checksums from GitHub Releases for normal installation.
 
 ## License
 
