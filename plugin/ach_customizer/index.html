@@ -40,7 +40,7 @@
        Never position unrelated bordered sections by guessing sibling margins. */
     --ach-space-xs:4px; --ach-space-sm:8px; --ach-space-md:12px; --ach-space-lg:16px;
     --ach-control-height:36px;
-    color:var(--ach-text); background:var(--ach-surface); width:100%;
+    position:relative; color:var(--ach-text); background:var(--ach-surface); width:100%;
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
     font-family:"Helvetica Neue",Helvetica,Arial,"Microsoft YaHei",sans-serif;
     font-size:14px; line-height:1.5; overflow:hidden;
@@ -77,12 +77,7 @@
   #ach-customizer .ach-site-context select { flex:1; width:100%; min-width:0; font-weight:400; }
   #ach-customizer .ach-site-context small { flex:1 0 100%; margin:0; font-size:12px; }
   #ach-customizer .ach-context-links {
-    display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center;
-  }
-  #ach-customizer .ach-main .ach-context-links button {
-    background:transparent; border:0; border-radius:3px; min-height:28px;
-    padding:2px 0; color:#235d32; text-decoration:underline; text-underline-offset:2px;
-    font-size:13px;
+    display:flex; flex-wrap:wrap; gap:var(--ach-space-sm); align-items:center; min-width:0;
   }
   /* Contextual help is optional disclosure, never a compulsory banner before
      controls. Keep safety/recovery guidance beside the affected action. */
@@ -208,7 +203,7 @@
   /* Direct note peers without their own spacing: comparison tables, buttons,
      sandbox previews and unlabeled-layout divs (for example, a delivery selector).
      Keep .ach-controls/.ach-fields owners untouched to avoid doubled margins. */
-  #ach-customizer .ach-note > :is(.ach-scroll, button, iframe, div:not([class])) {
+  #ach-customizer .ach-note > :is(.ach-scroll, button, .ach-disabled-anchor, iframe, div:not([class])) {
     margin-block-start:var(--ach-space-md);
   }
   /* Wrap each checkbox label's whole copy in one text column. */
@@ -305,6 +300,34 @@
     opacity:1; background:#f1f3f4; border-color:#dce1e4;
     color:#69757e; cursor:not-allowed; box-shadow:none;
   }
+  /* Native disabled controls do not reliably receive pointer or focus events.
+     Only while disabled, an action has a focusable, non-activating help anchor.
+     The shared bubble is outside scrolling sections and positioned within root. */
+  #ach-customizer span.ach-disabled-anchor {
+    display:inline-flex; align-items:center; max-width:100%; min-width:0;
+    cursor:help;
+  }
+  #ach-customizer label.ach-disabled-anchor { cursor:help; }
+  #ach-customizer .ach-disabled-anchor > button:disabled,
+  #ach-customizer .ach-disabled-anchor > input:disabled { pointer-events:none; }
+  #ach-customizer .ach-disabled-anchor:has(> [hidden]) { display:none !important; }
+  #ach-customizer .ach-disabled-anchor:focus-visible {
+    outline:2px solid var(--ach-focus); outline-offset:2px; border-radius:6px;
+  }
+  #ach-customizer .ach-disabled-bubble {
+    position:absolute; z-index:20; max-width:min(340px,calc(100% - 16px));
+    max-height:calc(100% - 16px); overflow:auto;
+    padding:9px 12px; border:1px solid #344b5d; border-radius:6px;
+    background:#293b49; color:#fff; font:13px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;
+    overflow-wrap:anywhere; box-shadow:0 4px 12px #0003;
+  }
+  @media (hover:none) {
+    #ach-customizer span.ach-disabled-anchor::after {
+      content:"?"; flex:none; margin-inline-start:4px; width:18px; height:18px;
+      border:1px solid var(--ach-control-line); border-radius:50%;
+      color:var(--ach-muted); text-align:center; font-size:12px; line-height:16px;
+    }
+  }
   #ach-customizer .ach-main button.ach-next:not(:disabled),
   #ach-customizer .ach-action-set:not(:has(.ach-commit:not(:disabled))) button.ach-check:not(:disabled),
   #ach-customizer .ach-main button.ach-commit:not(:disabled) {
@@ -366,7 +389,7 @@
   #ach-customizer .ach-toolbar [role="status"] {
     color:var(--ach-muted); flex:1 1 220px; min-width:0; margin:0; overflow-wrap:anywhere;
   }
-  #ach-customizer .ach-toolbar > button { flex:0 0 auto; }
+  #ach-customizer .ach-toolbar > :is(button,.ach-disabled-anchor) { flex:0 0 auto; }
   #ach-customizer #ach-message {
     margin:0; padding:9px 12px; border:1px solid #e1e7ed;
     border-radius:8px; background:#f7f9fb; color:#4b6174; overflow-wrap:anywhere;
@@ -582,8 +605,9 @@
           </div>
           <div class="ach-context-links">
             <button id="ach-website-browse" type="button">Browse websites</button>
-            <button id="ach-website-error-pages" type="button">Error pages (choose scope)</button>
+            <button id="ach-website-error-pages" type="button" aria-label="Error pages" aria-describedby="ach-website-error-scope">Error pages</button>
           </div>
+          <span id="ach-website-error-scope" class="ach-sr-only">Choose an independent Error pages scope; the selected website here is not automatically selected there.</span>
           <small id="ach-website-context-status" role="status" aria-live="polite">Loading website list…</small>
         </div>
         <div id="ach-site-required" class="ach-task-empty" hidden>
@@ -613,9 +637,9 @@
         <summary>Advanced: plugin monitoring controls</summary>
         <p>These controls determine whether Customizer inspections and related workflows are available. They do not stop PHP or Nginx services or enable automatic repair. Disabling the overall or PHP check also suspends any separately enabled PHP auto-repair.</p>
         <div class="ach-switches">
-          <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /><span class="ach-option-copy">Overall Monitor</span></label>
-          <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /><span class="ach-option-copy">Website inventory</span></label>
-          <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" disabled /><span class="ach-option-copy">PHP-FPM preview</span></label>
+          <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" data-ach-disabled-help="Refresh observations to verify Monitor state before changing this control." disabled /><span class="ach-option-copy">Overall Monitor</span></label>
+          <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" data-ach-disabled-help="Refresh observations to verify Monitor state before changing this control." disabled /><span class="ach-option-copy">Website inventory</span></label>
+          <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" data-ach-disabled-help="Refresh observations to verify Monitor state before changing this control." disabled /><span class="ach-option-copy">PHP-FPM preview</span></label>
         </div>
         <p id="ach-overview-control-result" role="status" aria-live="polite" data-state="info">Change a Monitor control to update its saved state.</p>
         <p id="ach-state-revision" role="status">Monitor state unavailable</p>
@@ -644,11 +668,11 @@
         <p>Choose a website from the native selector above, Compare website records, and review its before/after state. This updates <em>only that site's</em> record in the saved plugin baseline; other pending site changes remain visible and unaccepted. No Nginx or PHP settings are changed.</p>
         <p id="ach-site-changes-selected-evidence" class="ach-status-metadata" role="status" aria-live="polite">Select a current native website and Compare its database state.</p>
         <p id="ach-site-changes-selected-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: choose a selected site's Added/Changed/Initial record and Compare.</p>
-        <div class="ach-controls"><button type="button" id="ach-site-changes-save-selected" class="btn btn-warning" disabled>Save only selected website baseline</button></div>
+        <div class="ach-controls"><button type="button" id="ach-site-changes-save-selected" class="btn btn-warning" data-ach-disabled-help="#ach-site-changes-selected-why" disabled>Save only selected website baseline</button></div>
         <hr />
         <p id="ach-site-changes-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Not available yet: run Compare website records, then review the results before approving a new comparison baseline.</p>
         <p class="ach-note">Saving the all-sites baseline accepts the currently displayed comparison, including removed websites. This updates monitoring history only, not live website settings. Review the list if useful, then select Save to continue.</p>
-        <div class="ach-controls"><button type="button" id="ach-site-changes-save" class="btn btn-warning" disabled>Save baseline for ALL websites</button></div>
+        <div class="ach-controls"><button type="button" id="ach-site-changes-save" class="btn btn-warning" data-ach-disabled-help="#ach-site-changes-why" disabled>Save baseline for ALL websites</button></div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-routing" aria-label="Website and server workflows" data-view="routing" role="region" hidden>
@@ -668,14 +692,14 @@
           <button id="ach-hosts-alias-refresh" type="button" class="ach-next">Refresh local aliases</button>
           <div class="ach-inline-field"><label for="ach-hosts-alias-select">Detected hostname</label>
             <select id="ach-hosts-alias-select" disabled><option value="">No aliases inspected</option></select></div>
-          <button id="ach-hosts-alias-remove" type="button" class="btn btn-warning" disabled>Remove selected hostname</button>
+          <button id="ach-hosts-alias-remove" type="button" class="btn btn-warning" data-ach-disabled-help="Refresh local aliases and select a removable hostname." disabled>Remove selected hostname</button>
         </div>
         <p id="ach-hosts-alias-result" role="status" aria-live="polite">Open Server / Local hostnames to inspect current local loopback aliases.</p>
       </div>
       </div>
       <div class="ach-workflow" data-routing-group="hosts">
       <p class="ach-note"><strong>Local hosts override:</strong> inspect exact site-bound names in the origin server's /etc/hosts. An unwanted loopback alias can be removed only after a fresh file/site inspection and explicit approval, with a saved original for guarded Restore. This neither proves remote DNS/Gateway failure nor prevents WordPress Toolkit from recreating the entry.</p>
-      <div class="ach-controls"><button id="ach-hosts-inspect-button" type="button" disabled>Inspect local hosts file</button></div>
+      <div class="ach-controls"><button id="ach-hosts-inspect-button" type="button" data-ach-disabled-help="Choose a verified website before inspecting its local hosts aliases." disabled>Inspect local hosts file</button></div>
       <p class="ach-note">Use the shared website selector above. For another page, choose Browse websites. This checks the server's local file, not public DNS or a remote host.</p>
       <p id="ach-hosts-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Select a website, then inspect its local hosts entries.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
@@ -687,11 +711,11 @@
         <label for="ach-hosts-removal-domain">Loopback alias from latest inspection</label>
         <select id="ach-hosts-removal-domain" disabled><option value="">Inspect a selected website first</option></select>
         <p id="ach-hosts-removal-why" class="ach-availability" data-state="blocked" role="status">Not available: inspect the selected website and review an unwanted alias.</p>
-        <label><input type="checkbox" id="ach-hosts-removal-reviewed" disabled /><span class="ach-option-copy">I verified this alias is unintended and approve a recoverable, origin-local /etc/hosts edit.</span></label>
-        <div class="ach-controls"><button id="ach-hosts-removal-button" type="button" class="btn btn-warning" disabled>Remove selected loopback alias</button></div>
+        <label><input type="checkbox" id="ach-hosts-removal-reviewed" data-ach-disabled-help="Inspect the selected website and verify the matching source or recovery first." disabled /><span class="ach-option-copy">I verified this alias is unintended and approve a recoverable, origin-local /etc/hosts edit.</span></label>
+        <div class="ach-controls"><button id="ach-hosts-removal-button" type="button" class="btn btn-warning" data-ach-disabled-help="Inspect the selected website, choose an unwanted loopback alias and approve removal." disabled>Remove selected loopback alias</button></div>
         <p id="ach-hosts-recovery-why" class="ach-availability" data-state="blocked" role="status">No verified hosts recovery is available for this selection.</p>
-        <label><input type="checkbox" id="ach-hosts-restore-reviewed" disabled /><span class="ach-option-copy">I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</span></label>
-        <div class="ach-controls"><button id="ach-hosts-restore-button" type="button" class="btn btn-warning" disabled>Restore saved local hosts file</button></div>
+        <label><input type="checkbox" id="ach-hosts-restore-reviewed" data-ach-disabled-help="Inspect the selected website and verify the matching source or recovery first." disabled /><span class="ach-option-copy">I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</span></label>
+        <div class="ach-controls"><button id="ach-hosts-restore-button" type="button" class="btn btn-warning" data-ach-disabled-help="Inspect the selected website for a verified saved recovery and approve Restore." disabled>Restore saved local hosts file</button></div>
       </details>
       </div>
       <div class="ach-workflow" data-routing-group="witness">
@@ -705,15 +729,15 @@
         <label><input id="ach-wp-terminal-reviewed" type="checkbox" /><span class="ach-option-copy">Enable optional detailed failed-install diagnostics. Alias removal above works even without this watcher; it never edits /etc/hosts automatically.</span></label>
         <div class="ach-controls">
           <button type="button" id="ach-wp-terminal-refresh">Inspect witness policy</button>
-          <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck current witness</button>
-          <button type="button" id="ach-wp-terminal-enable" class="btn btn-warning" disabled>Enable failed-install witness</button>
-          <button type="button" id="ach-wp-terminal-disable" disabled>Emergency disable</button>
+          <button type="button" id="ach-wp-terminal-recheck" data-ach-disabled-help="Inspect the current failed-install witness policy first." disabled>Recheck current witness</button>
+          <button type="button" id="ach-wp-terminal-enable" class="btn btn-warning" data-ach-disabled-help="Inspect the current failed-install witness policy and review Enable." disabled>Enable failed-install witness</button>
+          <button type="button" id="ach-wp-terminal-disable" data-ach-disabled-help="Inspect the current failed-install witness policy first." disabled>Emergency disable</button>
         </div>
         <p id="ach-wp-terminal-recheck-result" role="status" aria-live="polite"></p>
         <details class="ach-help"><summary>Resolve an irrecoverable stale witness</summary>
           <p>After Emergency disable, an unverified witness can be discarded by explicit approval only when the native task is no longer active. This never edits /etc/hosts or any WordPress files.</p>
           <label><input id="ach-wp-terminal-abandon-reviewed" type="checkbox" /><span class="ach-option-copy">I verified that setup is no longer active and accept discarding this unverified witness without editing Hosts.</span></label>
-          <button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" disabled>Discard stale witness</button>
+          <button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" data-ach-disabled-help="Inspect the current failed-install witness policy and review Discard." disabled>Discard stale witness</button>
         </details>
       </div>
       <hr />
@@ -726,7 +750,7 @@
           <p>Compares the saved native website baseline with the current generated Nginx VHost, shared PHP policy and site-owned Cache recovery. It cannot prove which Nginx/PHP workers are currently running or authorize Status Pages recovery. Run the check again after changes in aaPanel.</p>
         </details>
         <div class="ach-controls">
-          <button id="ach-reconcile-button" type="button" disabled>Review selected site &amp; recovery</button>
+          <button id="ach-reconcile-button" type="button" data-ach-disabled-help="Select a verified website." disabled>Review selected site &amp; recovery</button>
         </div>
         <p id="ach-reconcile-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Select a website to inspect saved intent and current sources.</p>
         <details class="ach-technical-report"><summary>Site change and recovery evidence</summary>
@@ -745,7 +769,7 @@
       </div>
       <div class="ach-workflow" data-routing-group="diagnostics">
       <p class="ach-note"><strong>Generated Nginx VHost comparison (read-only):</strong> Compare the selected aaPanel site's bound hostnames and document root with the generated VHost file. This cannot prove active Nginx routing, TLS, WordPress Toolkit policy or effective runtime.</p>
-      <div class="ach-controls"><button id="ach-vhost-inspect-button" type="button" disabled>Compare selected website VHost</button></div>
+      <div class="ach-controls"><button id="ach-vhost-inspect-button" type="button" data-ach-disabled-help="Select a verified website." disabled>Compare selected website VHost</button></div>
       <p id="ach-vhost-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Compare the selected site with its generated Nginx file.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-vhost-result" class="ach-status-metadata" role="status">Select a website to compare native records with generated VHost source.</p>
@@ -755,7 +779,7 @@
       <details class="ach-help"><summary>What does this Nginx check verify?</summary>
         <p>Runs a bounded <code>nginx -T</code> syntax/include check and a local HTTP/80 HEAD request using the selected Host. This does not prove the active Nginx worker configuration, which website served the response, Cache safety or external DNS/TLS behavior.</p>
       </details>
-      <div class="ach-controls"><button id="ach-nginx-candidate-button" type="button" disabled>Check Nginx candidate and local HTTP</button></div>
+      <div class="ach-controls"><button id="ach-nginx-candidate-button" type="button" data-ach-disabled-help="Select a verified website." disabled>Check Nginx candidate and local HTTP</button></div>
       <p id="ach-nginx-candidate-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Check Nginx next-load source and local HTTP/80.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-nginx-candidate-result" class="ach-status-metadata" role="status">Select a website to inspect the next-load Nginx source and optional local HTTP/80 response.</p>
@@ -772,17 +796,17 @@
         </details>
         <label class="ach-guard-option"><input type="checkbox" id="ach-guard-block-xmlrpc" /><span class="ach-option-copy"><strong>Also block <code>/xmlrpc.php</code> at Nginx</strong><small>Optional. Leave this off if your website needs XML-RPC. Do not combine it with Customizer's separate WordPress XML-RPC blocker on the same site. Both options use different protection methods.</small></span></label>
         <div class="ach-controls">
-          <button id="ach-guard-preview" type="button" disabled class="ach-check">Check protection readiness</button>
-          <button id="ach-guard-recheck" type="button" disabled>Recheck current protection</button>
+          <button id="ach-guard-preview" type="button" data-ach-disabled-help="Select a verified website." disabled class="ach-check">Check protection readiness</button>
+          <button id="ach-guard-recheck" type="button" data-ach-disabled-help="Select a verified website." disabled>Recheck current protection</button>
         </div>
         <p id="ach-guard-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Choose a native website, then run readiness check.</p>
         <details class="ach-technical-report"><summary>Exact Nginx policy and recovery evidence</summary>
           <p id="ach-guard-result" class="ach-status-metadata" role="status">No native protection inspection yet.</p>
         </details>
         <p id="ach-guard-apply-why" class="ach-availability" data-state="blocked" role="status">Select a website and check readiness before enabling protection.</p>
-        <div class="ach-controls"><button id="ach-guard-apply" type="button" class="ach-commit" disabled>Enable protection (reload Nginx)</button></div>
+        <div class="ach-controls"><button id="ach-guard-apply" type="button" class="ach-commit" data-ach-disabled-help="#ach-guard-apply-why" disabled>Enable protection (reload Nginx)</button></div>
         <p id="ach-guard-restore-why" class="ach-availability" data-state="blocked" role="status">Select a website and Recheck to see whether Restore is available.</p>
-        <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Remove managed Guard (reload Nginx)</button></div>
+        <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" data-ach-disabled-help="#ach-guard-restore-why" disabled>Remove managed Guard (reload Nginx)</button></div>
       </div>
       </div>
       <div class="ach-workflow" data-routing-group="attack">
@@ -802,10 +826,10 @@
             <input id="ach-scan-bantime" type="number" min="1" step="1" value="600" /></div>
         </div>
         <div class="ach-controls">
-          <button id="ach-scan-preview" type="button" disabled>Check Fail2ban readiness</button>
-          <button id="ach-scan-recheck" type="button" disabled>Recheck jail / recovery</button>
-          <button id="ach-scan-apply" type="button" class="btn btn-warning" disabled>Enable site scanner bans (origin firewall)</button>
-          <button id="ach-scan-restore" type="button" class="btn btn-danger" disabled>Disable and restore Fail2ban jail</button>
+          <button id="ach-scan-preview" type="button" data-ach-disabled-help="Select a verified website." disabled>Check Fail2ban readiness</button>
+          <button id="ach-scan-recheck" type="button" data-ach-disabled-help="Select a verified website." disabled>Recheck jail / recovery</button>
+          <button id="ach-scan-apply" type="button" class="btn btn-warning" data-ach-disabled-help="Check Fail2ban readiness for the selected website and current scanner settings." disabled>Enable site scanner bans (origin firewall)</button>
+          <button id="ach-scan-restore" type="button" class="btn btn-danger" data-ach-disabled-help="Recheck the selected website for a matching saved Fail2ban recovery." disabled>Disable and restore Fail2ban jail</button>
         </div>
         <p id="ach-scan-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Select a website and check Fail2ban readiness.</p>
         <details class="ach-technical-report"><summary>Source, policy and recovery evidence</summary>
@@ -825,7 +849,7 @@
             <button id="ach-scan-orphan-list" type="button">Find orphaned scanner jails</button>
             <div class="ach-inline-field"><label for="ach-scan-orphan-choice">Orphan journal</label>
               <select id="ach-scan-orphan-choice" aria-label="Orphan scanner recovery journal" disabled></select></div>
-            <button id="ach-scan-orphan-restore" type="button" class="btn btn-warning" disabled>Restore selected orphan jail</button>
+            <button id="ach-scan-orphan-restore" type="button" class="btn btn-warning" data-ach-disabled-help="Find orphaned jails and select a verified recoverable journal." disabled>Restore selected orphan jail</button>
           </div>
           <p id="ach-scan-orphan-result" class="ach-status-metadata" role="status" aria-live="polite">Check for recovery journals after a website is removed.</p>
         </div>
@@ -855,9 +879,9 @@
         </div>
         <p id="ach-wp-settings-why" class="ach-availability" data-state="blocked" role="status">Choose a native website and Recheck. No WordPress file has been modified.</p>
         <div class="ach-controls ach-action-set">
-          <button type="button" id="ach-wp-settings-recheck" class="ach-check" disabled>Recheck WordPress setting</button>
-          <button type="button" id="ach-wp-settings-apply" class="ach-commit" disabled>Apply selected setting</button>
-          <button type="button" id="ach-wp-settings-restore" disabled>Restore saved WordPress setting</button>
+          <button type="button" id="ach-wp-settings-recheck" class="ach-check" data-ach-disabled-help="Select a verified website and valid setting." disabled>Recheck WordPress setting</button>
+          <button type="button" id="ach-wp-settings-apply" class="ach-commit" data-ach-disabled-help="Recheck the selected WordPress setting for fresh Source Ready or Restored evidence." disabled>Apply selected setting</button>
+          <button type="button" id="ach-wp-settings-restore" data-ach-disabled-help="Recheck the selected setting for a matching saved Recovery ID." disabled>Restore saved WordPress setting</button>
         </div>
         <details class="ach-help"><summary>What does each WordPress operation change?</summary>
           <p><strong>Debug:</strong> changes one verified <code>wp-config.php</code> constant.</p>
@@ -888,7 +912,7 @@
       <details class="ach-help"><summary>What does the Cache audit check?</summary>
         <p>Reads the site's VHost/PHP snippets and aaPanel's top-level <code>0.fastcgi_cache.conf</code> source for zone paths, shared-directory Purge All risk, bypass/write rules, Host keys and ignored headers. Source inspection cannot prove effective routing, private-data safety, live Cache hits or safe vendor Purge All.</p>
       </details>
-      <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled class="ach-next">Inspect selected website FastCGI cache</button></div>
+      <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" data-ach-disabled-help="Select a verified website." disabled class="ach-next">Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect Nginx cache sources and Nginx Helper presence.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-cache-result" class="ach-status-metadata" role="status">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
@@ -898,13 +922,13 @@
       <details class="ach-help"><summary>What does this probe send and exclude?</summary>
         <p>Sends four synthetic HTTP/80 HEAD requests from localhost, observes native or site-owned Cache headers and checks homepage/WordPress REST bypass. It does not test real users, WooCommerce carts, HTTPS edges, vendor Purge All or private-data safety.</p>
       </details>
-      <div class="ach-controls"><button type="button" id="ach-cache-private-probe-button" disabled>Probe local private-request Cache headers</button></div>
+      <div class="ach-controls"><button type="button" id="ach-cache-private-probe-button" data-ach-disabled-help="Select a verified website." disabled>Probe local private-request Cache headers</button></div>
       <p id="ach-cache-private-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to test synthetic request bypass without changing configuration.</p>
       <p class="ach-note"><strong>Default WooCommerce guest-route probe (no login):</strong> five extra fixed anonymous HTTP/80 HEAD checks for <code>/cart/</code>, <code>/checkout/</code>, <code>/my-account/</code> and Store API cart/checkout, after four synthetic WordPress checks. Customized page slugs, GET behavior, identity/session cookies and the responding VHost are not verified. A faulty policy could warm a guest response.</p>
-      <div class="ach-controls"><button type="button" id="ach-cache-woo-probe-button" disabled>Probe default WooCommerce guest Cache routes</button></div>
+      <div class="ach-controls"><button type="button" id="ach-cache-woo-probe-button" data-ach-disabled-help="Select a verified website." disabled>Probe default WooCommerce guest Cache routes</button></div>
       <p id="ach-cache-woo-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native WooCommerce website to test fixed default routes without login or configuration changes.</p>
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
-      <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
+      <div class="ach-controls"><button id="ach-cache-plan-button" type="button" data-ach-disabled-help="Select a verified website." disabled>Preview isolated cache policy</button></div>
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
       </details>
       </div>
@@ -916,9 +940,9 @@
           <p>Configures a site-owned Nginx Cache, the WordPress Cache path, PHP access, Nginx Helper <code>unlink_files</code> and Bridge URL mapping. Other sites' Cache directories are preserved; ordinary post updates should not need manual path changes.</p>
         </details>
         <div class="ach-controls">
-          <button type="button" id="ach-wp-cache-inspect" disabled>Check WordPress connection</button>
-          <button type="button" id="ach-wp-cache-setup" class="btn btn-warning" disabled>Connect WordPress Cache (once)</button>
-          <button type="button" id="ach-wp-cache-restore" class="btn btn-danger" disabled>Disconnect and restore</button>
+          <button type="button" id="ach-wp-cache-inspect" data-ach-disabled-help="Select a verified website." disabled>Check WordPress connection</button>
+          <button type="button" id="ach-wp-cache-setup" class="btn btn-warning" data-ach-disabled-help="Select a verified website." disabled>Connect WordPress Cache (once)</button>
+          <button type="button" id="ach-wp-cache-restore" class="btn btn-danger" data-ach-disabled-help="Select a verified website." disabled>Disconnect and restore</button>
         </div>
         <p id="ach-wp-cache-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native WordPress site. Connect is the one-click authorization; there is no separate checklist or approval checkbox.</p>
       </div>
@@ -932,16 +956,16 @@
           <p>Requires a verified aaPanel 8.0.7 Nginx HTTP/80 site with stock PHP 8.1/8.5 or an exact native WordPress wpfastcgi source match. A site-owned extension takes precedence over the matching PHP location while retaining its routing and headers; no aaPanel vendor source is edited. Nginx syntax, reload and the PHP route are verified. Shared WORDPRESS Cache and native <code>/purge</code> remain untouched, as do Nginx Helper automatic invalidation settings.</p>
         </details>
         <div class="ach-controls">
-          <button type="button" id="ach-cache-activation-preview" class="ach-check" disabled>Check site-specific Cache Apply readiness</button>
-          <button type="button" id="ach-cache-activation-recheck" disabled>Recheck Cache / recovery</button>
+          <button type="button" id="ach-cache-activation-preview" class="ach-check" data-ach-disabled-help="Select a verified website." disabled>Check site-specific Cache Apply readiness</button>
+          <button type="button" id="ach-cache-activation-recheck" data-ach-disabled-help="Select a verified website." disabled>Recheck Cache / recovery</button>
         </div>
         <p id="ach-cache-activation-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to check Apply readiness or inspect recovery.</p>
         <p id="ach-cache-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Not available yet: choose a website and run Check site-specific Cache Apply readiness. A Needs Review result cannot be approved.</p>
-        <label><input id="ach-cache-activation-reviewed" type="checkbox" aria-describedby="ach-cache-apply-why" disabled /><span class="ach-option-copy">I reviewed the selected site's cache zone, physical directory, shared Nginx reload, and current source hashes.</span></label>
-        <div class="ach-controls"><button type="button" id="ach-cache-activation-apply" class="ach-commit" disabled>Apply site-specific Cache (reload Nginx)</button></div>
+        <label><input id="ach-cache-activation-reviewed" type="checkbox" aria-describedby="ach-cache-apply-why" data-ach-disabled-help="#ach-cache-apply-why" disabled /><span class="ach-option-copy">I reviewed the selected site's cache zone, physical directory, shared Nginx reload, and current source hashes.</span></label>
+        <div class="ach-controls"><button type="button" id="ach-cache-activation-apply" class="ach-commit" data-ach-disabled-help="#ach-cache-apply-why" disabled>Apply site-specific Cache (reload Nginx)</button></div>
         <p id="ach-cache-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore is unavailable until Recheck Cache / recovery confirms a saved, site-owned recovery. No verified recovery means no Restore.</p>
-        <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" disabled /><span class="ach-option-copy">I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</span></label>
-        <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
+        <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" data-ach-disabled-help="#ach-cache-restore-why" disabled /><span class="ach-option-copy">I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</span></label>
+        <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" data-ach-disabled-help="#ach-cache-restore-why" disabled>Restore saved Cache / recovery</button></div>
       </div>
       </div>
       <div class="ach-workflow" data-cache-stage="clear" hidden>
@@ -952,8 +976,8 @@
         <p>The verified site-owned physical directory may contain earlier Cache generations and aliases. Physical isolation from peer sites is checked again before clearing. The operation does not modify Nginx, shared WORDPRESS Cache, Nginx Helper or saved recovery journals.</p>
       </details>
         <p id="ach-cache-clear-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm the selected site's Cache is Applied before file clear.</p>
-        <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" disabled /><span class="ach-option-copy">I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</span></label>
-        <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" disabled>Clear all selected-site Cache files</button></div>
+        <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" data-ach-disabled-help="#ach-cache-clear-why" disabled /><span class="ach-option-copy">I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</span></label>
+        <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" data-ach-disabled-help="#ach-cache-clear-why" disabled>Clear all selected-site Cache files</button></div>
         <p class="ach-note"><strong>Clear one cached URL:</strong> Remove verified Cache entries for one path on this site's primary hostname after a fresh Applied Recheck and approval. Other URLs and websites stay untouched.</p>
       <details class="ach-help"><summary>URL matching limits</summary>
         <p>Only current-generation GET/HEAD Cache files for a canonical URL path without query, encoding or fragment are eligible. HTTP and HTTPS keys are checked; other host aliases are separate. This is not an automatic Nginx Helper hook.</p>
@@ -961,20 +985,20 @@
         <label for="ach-cache-url-path">Cached URL path (for example, /news/ or /)</label>
         <input id="ach-cache-url-path" type="text" maxlength="1024" value="/" spellcheck="false" autocomplete="off" aria-describedby="ach-cache-url-why" />
         <p id="ach-cache-url-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm this site's Cache is Applied; enter a canonical URL path.</p>
-        <label><input id="ach-cache-url-reviewed" type="checkbox" aria-describedby="ach-cache-url-why" disabled /><span class="ach-option-copy">I approve removing only this site's exact URL Cache entries, leaving other paths and sites unchanged.</span></label>
-        <div class="ach-controls"><button type="button" id="ach-cache-clear-url" class="btn btn-warning" disabled>Clear selected URL Cache</button></div>
+        <label><input id="ach-cache-url-reviewed" type="checkbox" aria-describedby="ach-cache-url-why" data-ach-disabled-help="#ach-cache-url-why" disabled /><span class="ach-option-copy">I approve removing only this site's exact URL Cache entries, leaving other paths and sites unchanged.</span></label>
+        <div class="ach-controls"><button type="button" id="ach-cache-clear-url" class="btn btn-warning" data-ach-disabled-help="#ach-cache-url-why" disabled>Clear selected URL Cache</button></div>
       </div>
       <div class="ach-workflow" data-cache-stage="bridge" hidden>
         <p>Provision requires a current Applied Cache Recheck. Open the owning configuration task to verify the selected site's exact Cache generation.</p>
         <div class="ach-controls"><button type="button" id="ach-bridge-recheck-route">Open Cache Recheck / recovery</button></div>
         <details class="ach-help" open><summary>Optional WordPress Bridge URL mapping (no Purge All)</summary>
           <p>Only a freshly Rechecked Applied native WordPress Cache may provision a root-owned site manifest for the independently installed ACh aaPanel Bridge. The WordPress plugin and Nginx Helper must be activated separately; the verified Bridge maps exact, generation-matched public GET/HEAD URL objects for its own post/homepage dispatch through the Helper's per-URL filter. It does not intercept the vendor's independent recursive Purge All, change the Helper's configured cache path, clear a shared root, reload Nginx, or install plugins automatically. Restore revokes the manifest before retiring the Nginx generation.</p>
-          <div class="ach-controls"><button type="button" id="ach-bridge-inspect" disabled>Inspect Bridge manifest</button></div>
+          <div class="ach-controls"><button type="button" id="ach-bridge-inspect" data-ach-disabled-help="Select a verified website." disabled>Inspect Bridge manifest</button></div>
           <p id="ach-bridge-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a website; inspect does not prove Helper activation or live Nginx workers.</p>
           <p id="ach-bridge-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: fresh Applied Cache Recheck and matching WordPress site required before provisioning.</p>
           <p class="ach-note">Provision creates only this selected site's generation-bound native manifest after a fresh Applied Cache Recheck. Disable removes only the selected site's managed manifest, including a stale mapping. Each button is the administrator's explicit approval; neither changes Nginx Helper settings or enables Purge All.</p>
-          <div class="ach-controls"><button type="button" id="ach-bridge-enable" class="btn btn-warning" disabled>Provision URL mapping</button></div>
-          <div class="ach-controls"><button type="button" id="ach-bridge-disable" class="btn btn-danger" disabled>Disable Bridge mapping</button></div>
+          <div class="ach-controls"><button type="button" id="ach-bridge-enable" class="btn btn-warning" data-ach-disabled-help="#ach-bridge-why" disabled>Provision URL mapping</button></div>
+          <div class="ach-controls"><button type="button" id="ach-bridge-disable" class="btn btn-danger" data-ach-disabled-help="Select a verified website." disabled>Disable Bridge mapping</button></div>
         </details>
       </div>
     </section>
@@ -994,7 +1018,7 @@
       </nav>
       <p class="ach-task-effect" id="ach-php-task-effect" role="status" aria-live="polite">Inspect the selected PHP master process, socket and assigned native site files. This does not modify the shared service.</p>
       <div class="ach-workflow" data-php-stage="inspect">
-      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled class="ach-next">Inspect selected PHP service + site files (read-only)</button></div>
+      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" data-ach-disabled-help="Discover PHP installations and select a file-preview-capable service." disabled class="ach-next">Inspect selected PHP service + site files (read-only)</button></div>
       <p id="ach-php-runtime-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect the selected PHP service and site file assignments.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-php-runtime-result" class="ach-status-metadata" role="status">Select a discovered PHP installation for read-only Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
@@ -1037,11 +1061,11 @@
           <p>The existing watcher handles verified WordPress Toolkit changes and later PHP-FPM regeneration matching the installed aaPanel writer, after rechecking site ownership. Unexpected manual changes become Needs Review and are never silently overwritten.</p><p>Only current lifecycle-bearing automatic profiles are supported. A separate explicit Enable requires fresh source and policy verification; retired pre-Stable WordPress-only formats have no automatic migration or fallback.</p>
         </details>
         <div class="ach-controls ach-action-set">
-          <button id="ach-fpm-policy-recheck" type="button" class="ach-check" disabled>Recheck saved policy (read-only)</button>
-          <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
+          <button id="ach-fpm-policy-recheck" type="button" class="ach-check" data-ach-disabled-help="Discover PHP installations and select a file-preview-capable service." disabled>Recheck saved policy (read-only)</button>
+          <button id="ach-fpm-policy-load" type="button" data-ach-disabled-help="Discover PHP installations and select a file-preview-capable service." disabled>Load saved desired values</button>
           <p id="ach-fpm-policy-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Select PHP, enter five settings, then run Preview PHP-FPM settings. A current valid preview enables Save; the PHP service remains unchanged.</p>
           <p class="ach-note">Saving records desired Monitor settings only; it does not reload PHP. Review the affected service and proposed values if useful, then choose Save.</p>
-          <button id="ach-fpm-policy-save" type="button" class="ach-commit" disabled>Save desired policy (Monitor)</button>
+          <button id="ach-fpm-policy-save" type="button" class="ach-commit" data-ach-disabled-help="#ach-fpm-policy-why" disabled>Save desired policy (Monitor)</button>
         </div>
         <p id="ach-fpm-policy-status" role="status" aria-live="polite">Select an installed version and Preview to compare or save an explicit policy.</p>
         <p id="ach-fpm-policy-recheck-status" class="ach-status-metadata" role="status" aria-live="polite">Select a version and recheck saved policy against current PHP files.</p>
@@ -1055,10 +1079,10 @@
         <strong>Automatic repair (optional)</strong>
         <p>May reload this shared PHP service. Saving a Monitor policy does not enable repair.</p>
         <div class="ach-controls">
-          <button id="ach-fpm-auto-refresh" type="button" disabled>Inspect automatic repair</button>
-          <label><input type="checkbox" id="ach-fpm-auto-reviewed" disabled /><span class="ach-option-copy">Enable verified WordPress and aaPanel PHP-FPM regeneration repair of this entire shared service</span></label>
-          <button type="button" id="ach-fpm-auto-enable" disabled>Enable automatic repair</button>
-          <button type="button" id="ach-fpm-auto-disable" disabled>Emergency disable automatic repair</button>
+          <button id="ach-fpm-auto-refresh" type="button" data-ach-disabled-help="Discover PHP installations and select a file-preview-capable service." disabled>Inspect automatic repair</button>
+          <label><input type="checkbox" id="ach-fpm-auto-reviewed" data-ach-disabled-help="Inspect the selected PHP service and saved policy first." disabled /><span class="ach-option-copy">Enable verified WordPress and aaPanel PHP-FPM regeneration repair of this entire shared service</span></label>
+          <button type="button" id="ach-fpm-auto-enable" data-ach-disabled-help="Inspect automatic repair and recheck the selected saved policy." disabled>Enable automatic repair</button>
+          <button type="button" id="ach-fpm-auto-disable" data-ach-disabled-help="Inspect automatic repair to verify an enabled policy." disabled>Emergency disable automatic repair</button>
         </div>
         <p id="ach-fpm-auto-status" class="ach-status-metadata" role="status" aria-live="polite">Select a PHP version, inspect current automatic repair state, and recheck the saved policy before enabling. Normal install is disabled.</p>
       </div>
@@ -1070,13 +1094,13 @@
         <strong>Manual shared PHP-FPM change — verified PHP 8.1 / 8.5</strong>
         <p>PHP 8.1 or 8.5 on aaPanel 8.0.7 + Nginx with unambiguous site-file mapping. Changes the shared <code>[www]</code> pool, checks syntax, reloads PHP-FPM and verifies service health. Other consumers may be affected; file mapping does not prove traffic health. No automatic reapply after external changes.</p>
         <p id="ach-fpm-prepare-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Prepare stays unavailable until a valid file preview and supported shared-site mapping confirm this PHP service can be changed.</p>
-        <button id="ach-fpm-prepare" type="button" aria-describedby="ach-fpm-prepare-why" disabled>Prepare guarded change</button>
+        <button id="ach-fpm-prepare" type="button" aria-describedby="ach-fpm-prepare-why" data-ach-disabled-help="#ach-fpm-prepare-why" disabled>Prepare guarded change</button>
         <p id="ach-fpm-plan" role="status" aria-live="polite">Run a PHP 8.1 or 8.5 file preview before preparing a change.</p>
         <p id="ach-fpm-operation-notice" class="ach-fpm-operation-notice" role="status" aria-live="polite" hidden></p>
         <div id="ach-fpm-review" hidden>
           <p id="ach-fpm-details"></p>
           <label><input id="ach-fpm-approval" type="checkbox" /><span class="ach-option-copy">I approve changing the selected PHP version’s shared [www] pool for all affected consumers.</span></label>
-          <div class="ach-controls"><button id="ach-fpm-commit" type="button" class="btn btn-danger" disabled>Apply shared PHP-FPM change</button></div>
+          <div class="ach-controls"><button id="ach-fpm-commit" type="button" class="btn btn-danger" data-ach-disabled-help="Prepare a current guarded plan and approve its shared-service impact." disabled>Apply shared PHP-FPM change</button></div>
         </div>
       </div>
       </div>
@@ -1097,7 +1121,7 @@
         <div class="ach-scroll"><table><thead><tr><th>PHP-FPM setting</th><th>Current</th><th>Restore baseline</th></tr></thead><tbody id="ach-fpm-restore-rows"></tbody></table></div>
         <div id="ach-fpm-rollback-controls" hidden>
           <label><input id="ach-fpm-rollback-approval" type="checkbox" /><span class="ach-option-copy">I reviewed the selected version’s current shared-site impact and values, and approve restoring only its saved baseline and reloading that shared service.</span></label>
-          <div class="ach-controls"><button id="ach-fpm-rollback" type="button" class="btn btn-warning" disabled>Restore saved configuration</button></div>
+          <div class="ach-controls"><button id="ach-fpm-rollback" type="button" class="btn btn-warning" data-ach-disabled-help="Inspect the selected saved PHP recovery and approve Restore." disabled>Restore saved configuration</button></div>
         </div>
       </div>
       </div>
@@ -1160,9 +1184,9 @@
       <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
       <p id="ach-status-reset-why" class="ach-note" role="status" aria-live="polite">Reset changes only the selected saved branding preferences, not live error pages. Check the scope if needed, then select Reset to continue.</p>
       <div class="ach-controls">
-        <button id="ach-status-preview-button" type="button" disabled>Preview unsaved settings</button>
-        <button id="ach-status-save" type="button" class="btn btn-success" disabled>Save branding preferences</button>
-        <button id="ach-status-reset" type="button" aria-describedby="ach-status-reset-why" class="btn btn-warning" disabled>Reset selected branding scope</button>
+        <button id="ach-status-preview-button" type="button" data-ach-disabled-help="Load saved branding preferences for the current scope." disabled>Preview unsaved settings</button>
+        <button id="ach-status-save" type="button" class="btn btn-success" data-ach-disabled-help="Load saved branding preferences for the current scope." disabled>Save branding preferences</button>
+        <button id="ach-status-reset" type="button" aria-describedby="ach-status-reset-why" class="btn btn-warning" data-ach-disabled-help="Load saved branding preferences for the current scope." disabled>Reset selected branding scope</button>
       </div>
       <p id="ach-status-design-result" data-state="info" hidden></p>
       <p id="ach-status-workflow-note" class="ach-note" role="status" hidden>Preview only for this template and scope. No live Apply is supported.</p>
@@ -1177,7 +1201,7 @@
       <div class="ach-workflow" data-status-stage="site" hidden>
       <p>Choose <strong>Website override</strong> and a verified native website above. 404/502 use exact selected-site delivery; the 50x Nginx-generated template requires the extension method. Recheck before a live Apply or Restore.</p>
       <div id="ach-status-site-audit" hidden>
-        <div class="ach-controls"><button id="ach-status-inspect-button" type="button" disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
+        <div class="ach-controls"><button id="ach-status-inspect-button" type="button" data-ach-disabled-help="Select a verified website, load branding and choose 404 or 502." disabled>Inspect &amp; compare site 404/502 (read-only)</button></div>
         <p class="ach-note">Inspect compares only site files and textual Nginx configuration; this is not an Apply readiness, effective routing, or live HTTP verification.</p>
         <p id="ach-status-inspect-result" class="ach-status-metadata" role="status" aria-live="polite">Read-only site inspection not run.</p>
         <p id="ach-status-comparison-summary" role="status" aria-live="polite">Content comparison not run.</p>
@@ -1186,7 +1210,7 @@
       <div class="ach-note" id="ach-status-site-preflight" aria-label="Website status source preflight" hidden>
         <strong>Selected website — read-only source preflight</strong>
         <p>404 checks one local HTTP/80 response and native source. 502 and Nginx-generated 50x check source only; no artificial error is induced and no live 50x response is claimed. 50x requires the Nginx extension delivery mode. Any proof request may appear in access logs. A successful preflight alone never approves Apply.</p>
-        <div class="ach-controls"><button id="ach-status-probe-button" type="button" disabled>Check selected 404/502/50x source (read-only)</button></div>
+        <div class="ach-controls"><button id="ach-status-probe-button" type="button" data-ach-disabled-help="Select a running verified website, load branding and choose a supported delivery template." disabled>Check selected 404/502/50x source (read-only)</button></div>
         <p id="ach-status-probe-result" class="ach-status-metadata" role="status" aria-live="polite">Selected website source not checked.</p>
         <p id="ach-status-adoption-result" class="ach-status-metadata" role="status" aria-live="polite">Source preflight not checked. No change authorized.</p>
       </div>
@@ -1203,14 +1227,14 @@
           <p>On supported aaPanel 8.0.7 Nginx sites, extension mode preserves native HTML and installs an owned route with a checked shared-service reload. Site-file mode requires proven native 404.html/502.html routing, no competing extension, and a durable byte-exact backup; it does not edit the VHost. Extension-only 50x covers Nginx-generated 500/502/503/504. HTTP 404 and body hash are verified for 404; 502 remains source-only. Each mode requires a matching Recovery ID. Stopped or incompatible sites allow saved-state Recheck only, not Apply or Restore.</p>
         </details>
         <div class="ach-controls">
-          <button id="ach-status-manage-recheck" type="button" class="ach-next" disabled>Recheck selected site status</button>
+          <button id="ach-status-manage-recheck" type="button" class="ach-next" data-ach-disabled-help="Select a verified website, load branding and choose a supported delivery template." disabled>Recheck selected site status</button>
         </div>
         <p id="ach-status-site-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a running website, a current source check and explicit approval.</p>
         <label><input id="ach-status-manage-apply-approve" type="checkbox" aria-describedby="ach-status-site-apply-why" /><span class="ach-option-copy">I approve the selected site's exact delivery: extension mode reloads shared Nginx; native-file mode backs up and replaces the site's existing 404.html/502.html without reload.</span></label>
-        <div class="ach-controls"><button id="ach-status-manage-apply" type="button" aria-describedby="ach-status-site-apply-why" class="btn btn-danger" disabled>Apply selected status page</button></div>
+        <div class="ach-controls"><button id="ach-status-manage-apply" type="button" aria-describedby="ach-status-site-apply-why" class="btn btn-danger" data-ach-disabled-help="#ach-status-site-apply-why" disabled>Apply selected status page</button></div>
         <p id="ach-status-site-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a matching saved recovery result from Recheck selected site status.</p>
         <label><input id="ach-status-manage-restore-approve" type="checkbox" aria-describedby="ach-status-site-restore-why" /><span class="ach-option-copy">I reviewed this site's saved recovery ID and approve exact Restore (extension reloads Nginx; site-file restores saved original bytes).</span></label>
-        <div class="ach-controls"><button id="ach-status-manage-restore" type="button" aria-describedby="ach-status-site-restore-why" class="btn btn-warning" disabled>Restore selected site status</button></div>
+        <div class="ach-controls"><button id="ach-status-manage-restore" type="button" aria-describedby="ach-status-site-restore-why" class="btn btn-warning" data-ach-disabled-help="#ach-status-site-restore-why" disabled>Restore selected site status</button></div>
         <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site recovery before Restore. An uncertain write must not be blindly repeated.</p>
       </div>
       </div>
@@ -1219,13 +1243,13 @@
       <div class="ach-note" id="ach-status-default-section" aria-label="aaPanel new-site source defaults">
         <strong>Panel default templates for future newly created sites</strong>
         <p>Global branding scope only. Choose <code>new-site</code>, <code>404</code> or <code>502</code> above. aaPanel copies <code>defaultDoc.html</code>, <code>404.html</code> or <code>502.html</code> when creating a new site. Changing these sources <strong>does not change existing sites or active HTTP/Nginx routing</strong>, and does not reload Nginx. Recheck first, then approve the exact source replacement; Restore uses the saved original bytes and recovery ID.</p>
-        <div class="ach-controls"><button id="ach-status-default-recheck" type="button" class="ach-next" disabled>Recheck new-site default source</button></div>
+        <div class="ach-controls"><button id="ach-status-default-recheck" type="button" class="ach-next" data-ach-disabled-help="Select global scope, load branding and choose new-site, 404 or 502." disabled>Recheck new-site default source</button></div>
         <p id="ach-status-default-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires Recheck new-site default source to confirm a current, different proposed template.</p>
         <label><input id="ach-status-default-apply-approve" type="checkbox" aria-describedby="ach-status-default-apply-why" /><span class="ach-option-copy">I approve replacing this exact aaPanel new-site default source for future sites only.</span></label>
-        <div class="ach-controls"><button id="ach-status-default-apply" type="button" aria-describedby="ach-status-default-apply-why" class="btn btn-danger" disabled>Apply future-site default template</button></div>
+        <div class="ach-controls"><button id="ach-status-default-apply" type="button" aria-describedby="ach-status-default-apply-why" class="btn btn-danger" data-ach-disabled-help="#ach-status-default-apply-why" disabled>Apply future-site default template</button></div>
         <p id="ach-status-default-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a saved applied default-template recovery from Recheck.</p>
         <label><input id="ach-status-default-restore-approve" type="checkbox" aria-describedby="ach-status-default-restore-why" /><span class="ach-option-copy">I reviewed the saved recovery ID and approve restoring the previous default source.</span></label>
-        <div class="ach-controls"><button id="ach-status-default-restore" type="button" aria-describedby="ach-status-default-restore-why" class="btn btn-warning" disabled>Restore previous default source</button></div>
+        <div class="ach-controls"><button id="ach-status-default-restore" type="button" aria-describedby="ach-status-default-restore-why" class="btn btn-warning" data-ach-disabled-help="#ach-status-default-restore-why" disabled>Restore previous default source</button></div>
         <p id="ach-status-default-result" role="status" aria-live="polite">Choose global scope and a supported template, then Recheck. No active site is modified.</p>
       </div>
       </div>
@@ -1237,13 +1261,13 @@
         <details class="ach-help"><summary>Supported listeners and conflicts</summary>
           <p>On supported aaPanel 8.0.7 Nginx sources, choose the <code>unbound</code> template and global branding. An owned <code>default_server</code> serves static HTTP 404 on currently configured IPv4/IPv6 wildcard listeners, without adding an IP family. It does not change HTTPS/443, stopped-site pages or new-site templates. Recheck first; conflicting default servers are not overwritten.</p>
         </details>
-        <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" class="ach-next" disabled>Recheck HTTP unbound routing</button></div>
+        <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" class="ach-next" data-ach-disabled-help="Select global scope, load branding and choose unbound." disabled>Recheck HTTP unbound routing</button></div>
         <p id="ach-status-unbound-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a fresh valid global HTTP/80 Recheck and explicit approval.</p>
         <label><input id="ach-status-unbound-apply-approve" type="checkbox" aria-describedby="ach-status-unbound-apply-why" /><span class="ach-option-copy">I approve the exact global HTTP/80 default-server and shared Nginx reload.</span></label>
-        <div class="ach-controls"><button id="ach-status-unbound-apply" type="button" aria-describedby="ach-status-unbound-apply-why" class="btn btn-danger" disabled>Apply unbound HTTP 404</button></div>
+        <div class="ach-controls"><button id="ach-status-unbound-apply" type="button" aria-describedby="ach-status-unbound-apply-why" class="btn btn-danger" data-ach-disabled-help="#ach-status-unbound-apply-why" disabled>Apply unbound HTTP 404</button></div>
         <p id="ach-status-unbound-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires an existing saved global HTTP/80 recovery from Recheck.</p>
         <label><input id="ach-status-unbound-restore-approve" type="checkbox" aria-describedby="ach-status-unbound-restore-why" /><span class="ach-option-copy">I reviewed the recovery ID and approve restoring the previous HTTP routing and reloading Nginx.</span></label>
-        <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" aria-describedby="ach-status-unbound-restore-why" class="btn btn-warning" disabled>Restore previous HTTP default routing</button></div>
+        <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" aria-describedby="ach-status-unbound-restore-why" class="btn btn-warning" data-ach-disabled-help="#ach-status-unbound-restore-why" disabled>Restore previous HTTP default routing</button></div>
         <p id="ach-status-unbound-result" role="status" aria-live="polite">Select global/unbound and Recheck. HTTP/80 only; no TLS/443 changes.</p>
       </div>
       <div class="ach-note" id="ach-status-tls-section" aria-label="Unknown SNI HTTPS rejection" hidden>
@@ -1253,13 +1277,13 @@
           <p>Option A rejects TLS handshakes with unknown or absent SNI on compatible native TCP/443 wildcard listeners. Named HTTPS websites must still work, and HTTP/80 Status Pages are separate. Existing foreign defaults, address-specific listeners, or unsupported QUIC/stream setups are reported as incompatible; no website, certificate, listener or IP family is created or overwritten.</p>
         </details>
         <p>This is a separately opted-in <strong>shared Nginx reload</strong>. Preview the current TLS listeners and Recovery state first. After Apply or Restore, compare the actual TLS handshake of unknown SNI with a known configured HTTPS hostname. A failed or interrupted operation retains a Recovery ID for Recheck.</p>
-        <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" class="ach-next" disabled>Recheck HTTPS unknown-SNI policy</button></div>
+        <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" class="ach-next" data-ach-disabled-help="Select global scope, load branding and choose unbound." disabled>Recheck HTTPS unknown-SNI policy</button></div>
         <p id="ach-status-tls-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a compatible configured HTTPS/443 listener and a fresh Recheck.</p>
         <label><input id="ach-status-tls-apply-approve" type="checkbox" /><span class="ach-option-copy">I approve a plugin-owned unknown-SNI TLS default server on already configured HTTPS listeners and the shared Nginx reload.</span></label>
-        <div class="ach-controls"><button id="ach-status-tls-apply" type="button" class="btn btn-warning" disabled>Reject unknown TLS handshakes</button></div>
+        <div class="ach-controls"><button id="ach-status-tls-apply" type="button" class="btn btn-warning" data-ach-disabled-help="#ach-status-tls-apply-why" disabled>Reject unknown TLS handshakes</button></div>
         <p id="ach-status-tls-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a saved Recovery ID from Recheck.</p>
         <label><input id="ach-status-tls-restore-approve" type="checkbox" /><span class="ach-option-copy">I reviewed the exact TLS Recovery ID and approve restoring the original HTTPS default-server routing with shared Nginx reload.</span></label>
-        <div class="ach-controls"><button id="ach-status-tls-restore" type="button" class="btn btn-warning" disabled>Restore previous TLS default routing</button></div>
+        <div class="ach-controls"><button id="ach-status-tls-restore" type="button" class="btn btn-warning" data-ach-disabled-help="#ach-status-tls-restore-why" disabled>Restore previous TLS default routing</button></div>
         <p id="ach-status-tls-result" class="ach-status-metadata" role="status" aria-live="polite">Choose global/unbound and Recheck. No HTTPS setting has been changed.</p>
       </div>
       </div>
@@ -1271,13 +1295,13 @@
         <details class="ach-help"><summary>How stopped-site pages work</summary>
           <p>On supported aaPanel 8.0.7 Nginx sources, select the running website and <code>stopped</code> template first. The recoverable site-owned rule returns HTTP 503 with the selected HTML after aaPanel SiteStop. Refresh the native site after Stop/Start before Recheck or Restore. Unknown-domain HTTPS is unchanged, and Restore removes only the verified owned rule.</p>
         </details>
-        <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" class="ach-next" disabled>Recheck native stopped-site route</button></div>
+        <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" class="ach-next" data-ach-disabled-help="Select a verified website, load branding and choose stopped." disabled>Recheck native stopped-site route</button></div>
         <p id="ach-status-stopped-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Arm requires a running native site and a successful saved-rule Recheck.</p>
         <label><input id="ach-status-stopped-apply-approve" type="checkbox" aria-describedby="ach-status-stopped-apply-why" /><span class="ach-option-copy">I approve adding this website's exact native 503 rule and reloading shared Nginx.</span></label>
-        <div class="ach-controls"><button id="ach-status-stopped-apply" type="button" aria-describedby="ach-status-stopped-apply-why" class="btn btn-danger" disabled>Arm HTTP 503 for SiteStop</button></div>
+        <div class="ach-controls"><button id="ach-status-stopped-apply" type="button" aria-describedby="ach-status-stopped-apply-why" class="btn btn-danger" data-ach-disabled-help="#ach-status-stopped-apply-why" disabled>Arm HTTP 503 for SiteStop</button></div>
         <p id="ach-status-stopped-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a matching saved stopped-site recovery from Recheck.</p>
         <label><input id="ach-status-stopped-restore-approve" type="checkbox" aria-describedby="ach-status-stopped-restore-why" /><span class="ach-option-copy">I reviewed the selected website's saved Recovery ID and approve removing its managed rule with a shared Nginx reload.</span></label>
-        <div class="ach-controls"><button id="ach-status-stopped-restore" type="button" aria-describedby="ach-status-stopped-restore-why" class="btn btn-warning" disabled>Restore native stopped-site route</button></div>
+        <div class="ach-controls"><button id="ach-status-stopped-restore" type="button" aria-describedby="ach-status-stopped-restore-why" class="btn btn-warning" data-ach-disabled-help="#ach-status-stopped-restore-why" disabled>Restore native stopped-site route</button></div>
         <p id="ach-status-stopped-result" role="status" aria-live="polite">Select a verified website, stopped template and locale, then Recheck. Native stop requires a fresh website inventory.</p>
       </div>
       </div>
@@ -1306,7 +1330,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.103'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.105'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1328,6 +1352,7 @@
                        'pm.max_spare_servers','pm.max_requests'];
   var fpmActivePrepareTicket = 0;
   var wpSettingsBusy = false, wpSettingsEvidence = null, wpSettingsTicket = 0;
+  var wpSettingsUnconfirmed = false;
   var statusBusy = false, statusReadBusy = false;
   var statusRevision = null, statusLoadedScope = null, statusTicket = 0;
   var statusSavedBrand = null;
@@ -1374,12 +1399,209 @@
   function inspectionSummary(section, message, tone) {
     root.find('#ach-' + section + '-summary').text(message).attr('data-tone', tone || 'neutral');
   }
+  // Each disabled action receives its explanation at the existing eligibility
+  // transition. A #reference reuses the adjacent inline guidance verbatim.
+  // No observer, event interception of enabled controls, or second gate.
+  var pendingActionReason = 'A check or operation is in progress. Wait for its result.';
+  var phpSelectionReason = 'Discover PHP installations and select a file-preview-capable service.';
+  var witnessInspectionReason = 'Inspect the current failed-install witness policy first.';
+  var witnessStaleReason = 'The resident witness helper is incompatible. Ask an administrator to verify the installed version and reload the panel if needed.';
+  var disabledBubble = null, activeHelp = null;
+  var dismissedPointer = false, lastPointer = null;
+  var helpAnchors = new WeakMap();
+  function helpText(control) {
+    var reason = control.getAttribute('data-ach-disabled-help') || '';
+    if (reason.charAt(0) === '#') {
+      var source = root[0].querySelector(reason);
+      return source ? source.textContent.trim() : '';
+    }
+    return reason;
+  }
+  function hideDisabledHelp() {
+    activeHelp = null;
+    if (disabledBubble) disabledBubble.hidden = true;
+  }
+  function positionDisabledHelp() {
+    if (!activeHelp || !disabledBubble) return;
+    var anchor = activeHelp.anchor, control = activeHelp.control;
+    var parent = root[0].getBoundingClientRect();
+    var box = anchor.getBoundingClientRect();
+    var pane = anchor.closest('.ach-main');
+    var visible = pane ? pane.getBoundingClientRect() : parent;
+    if (!control.disabled || !anchor.getClientRects().length ||
+        box.bottom <= visible.top || box.top >= visible.bottom ||
+        box.right <= visible.left || box.left >= visible.right) {
+      hideDisabledHelp(); return;
+    }
+    disabledBubble.textContent = helpText(control);
+    disabledBubble.hidden = false;
+    var width = disabledBubble.offsetWidth, height = disabledBubble.offsetHeight;
+    var left = Math.max(8, Math.min(box.left - parent.left, parent.width - width - 8));
+    var top = box.bottom - parent.top;
+    if (top + height > parent.height - 8) top = box.top - parent.top - height;
+    disabledBubble.style.left = left + 'px';
+    disabledBubble.style.top = Math.max(8, Math.min(top, parent.height - height - 8)) + 'px';
+  }
+  function showDisabledHelp(entry) {
+    if (!entry.control.disabled || !helpText(entry.control)) return;
+    activeHelp = entry;
+    positionDisabledHelp();
+  }
+  function syncDisabledHelp(control) {
+    // Native browser presentation only; the lightweight contract-test DOM
+    // still exercises the same disabled property and explanation attributes.
+    if (!root[0].ownerDocument) return;
+    if (!control.matches('button, input[type=checkbox]')) return;
+    var doc = root[0].ownerDocument;
+    var entry = helpAnchors.get(control);
+    if (!control.disabled) {
+      if (!entry) return;
+      var focused = doc.activeElement === entry.anchor;
+      if (activeHelp === entry) hideDisabledHelp();
+      entry.description.remove();
+      if (entry.anchor === control.parentElement && control.matches('button')) {
+        entry.anchor.replaceWith(control);
+      } else {
+        entry.anchor.classList.remove('ach-disabled-anchor');
+        entry.anchor.removeAttribute('tabindex');
+        entry.anchor.removeAttribute('aria-describedby');
+        entry.anchor.removeAttribute('aria-label');
+        entry.anchor.removeEventListener('pointerenter',entry.enter);
+        entry.anchor.removeEventListener('pointerleave',entry.leave);
+        entry.anchor.removeEventListener('focus',entry.focus);
+        entry.anchor.removeEventListener('blur',entry.blur);
+        entry.anchor.removeEventListener('click',entry.click);
+      }
+      helpAnchors.delete(control);
+      if (focused && control.getClientRects().length) control.focus({preventScroll:true});
+      return;
+    }
+    if (!entry) {
+      var anchor = control.matches('button') ? doc.createElement('span') : control.closest('label');
+      if (!anchor) return;
+      if (control.matches('button')) {
+        control.before(anchor);
+        anchor.appendChild(control);
+        anchor.setAttribute('role','group');
+        anchor.setAttribute('aria-labelledby',control.id);
+      } else anchor.setAttribute('aria-label',anchor.textContent.trim());
+      anchor.classList.add('ach-disabled-anchor');
+      anchor.tabIndex = 0;
+      var description = doc.createElement('span');
+      description.id = control.id + '-disabled-help';
+      description.className = 'ach-sr-only';
+      anchor.appendChild(description);
+      anchor.setAttribute('aria-describedby',description.id);
+      entry = {anchor:anchor,control:control,description:description};
+      entry.enter = function(event) {
+        if (!dismissedPointer && event.pointerType !== 'touch') showDisabledHelp(entry);
+      };
+      entry.leave = function(event) {
+        if (activeHelp === entry && event.relatedTarget !== disabledBubble &&
+            doc.activeElement !== anchor) hideDisabledHelp();
+      };
+      entry.focus = function() { showDisabledHelp(entry); };
+      entry.blur = function() { if (activeHelp === entry && !anchor.matches(':hover') &&
+        !disabledBubble.matches(':hover')) hideDisabledHelp(); };
+      entry.click = function(event) {
+        // A tap exposes help but never clicks/submits the disabled action.
+        event.preventDefault();
+        showDisabledHelp(entry);
+      };
+      anchor.addEventListener('pointerenter',entry.enter);
+      anchor.addEventListener('pointerleave',entry.leave);
+      anchor.addEventListener('focus',entry.focus);
+      anchor.addEventListener('blur',entry.blur);
+      anchor.addEventListener('click',entry.click);
+      helpAnchors.set(control,entry);
+    }
+    entry.description.textContent = helpText(control);
+    if (activeHelp === entry) positionDisabledHelp();
+  }
+  function setActionDisabled(selector, disabled, reason) {
+    var controls = root.find(selector);
+    var doc = root[0].ownerDocument;
+    var focused = doc && doc.activeElement;
+    var retainFocus = disabled && focused && !focused.disabled && focused.matches(selector);
+    controls.prop('disabled', Boolean(disabled))
+      .attr('data-ach-disabled-help', disabled ? reason : '');
+    if (doc) {
+      root[0].querySelectorAll(selector).forEach(syncDisabledHelp);
+      var entry = retainFocus && helpAnchors.get(focused);
+      if (entry && entry.anchor.getClientRects().length) entry.anchor.focus({preventScroll:true});
+    }
+  }
+  function initializeDisabledHelp() {
+    if (!root[0].ownerDocument) return;
+    var doc = root[0].ownerDocument;
+    disabledBubble = doc.createElement('div');
+    disabledBubble.className = 'ach-disabled-bubble';
+    disabledBubble.setAttribute('aria-hidden','true'); // the focused anchor has its own associated description
+    disabledBubble.hidden = true;
+    root[0].appendChild(disabledBubble);
+    disabledBubble.addEventListener('pointerleave',function(event) {
+      if (activeHelp && !activeHelp.anchor.contains(event.relatedTarget) &&
+          doc.activeElement !== activeHelp.anchor) hideDisabledHelp();
+    });
+    // Layout changes can synthesize pointer-enter without physical movement.
+    // Keep Escape dismissal until an actual pointer move or explicit focus/tap.
+    // Track movement across the host document, not just the dialog. Leaving
+    // the dialog and returning to the same coordinates must also clear Escape.
+    $(doc).off('pointermove.achDisabledHelp').on('pointermove.achDisabledHelp',function(event) {
+      if (!root[0].isConnected) { $(doc).off('pointermove.achDisabledHelp'); return; }
+      var pointer = event.originalEvent || event;
+      var moved = !lastPointer || lastPointer.x !== pointer.clientX || lastPointer.y !== pointer.clientY;
+      lastPointer = {x:pointer.clientX,y:pointer.clientY};
+      if (dismissedPointer && moved && pointer.pointerType !== 'touch') {
+        dismissedPointer = false;
+        var anchor = event.target.closest && event.target.closest('.ach-disabled-anchor');
+        var control = anchor && root[0].contains(anchor) && anchor.querySelector('button:disabled,input:disabled');
+        if (control && helpAnchors.has(control)) showDisabledHelp(helpAnchors.get(control));
+      }
+    });
+    root[0].addEventListener('pointerdown',function(event) {
+      if (activeHelp && !activeHelp.anchor.contains(event.target) &&
+          !disabledBubble.contains(event.target)) hideDisabledHelp();
+    },true);
+    root[0].addEventListener('scroll',positionDisabledHelp,true);
+    $(window).off('resize.achDisabledHelp').on('resize.achDisabledHelp',positionDisabledHelp);
+    // Escape must also dismiss pointer help when focus is elsewhere in the
+    // native dialog; the namespace is replaced on plugin reopen.
+    $(doc).off('keydown.achDisabledHelp').on('keydown.achDisabledHelp',function(event) {
+      if (!root[0].isConnected) { $(doc).off('keydown.achDisabledHelp'); return; }
+      if (activeHelp && event.key === 'Escape') {
+        dismissedPointer = true;
+        hideDisabledHelp(); event.preventDefault(); event.stopPropagation();
+      }
+    });
+    root[0].querySelectorAll('[data-ach-disabled-help]').forEach(syncDisabledHelp);
+  }
+  function inventoryBlockReason(busy) {
+    return websitePolicyState === 'pending' ? 'A Monitor policy change is pending. Wait for its result.' :
+      websitePolicyState !== 'stable' ? 'Monitor state is unverified. Open Home and Refresh observations.' :
+      busy || siteBusy ? 'A check or website inventory operation is in progress. Wait for its result.' :
+      lastOverview && (!lastOverview.overall_enabled || !lastOverview.modules_enabled.site_inventory) ?
+        'Website inventory is disabled in Monitor. Open Home / Advanced monitoring controls, enable Overall Monitor and Website inventory, then Refresh websites.' : '';
+  }
+  function siteActionReason(busy) {
+    return inventoryBlockReason(busy || hostsBusy) ||
+      (!hostsSiteId() ? 'Select a verified website above; use Browse websites to refresh the inventory.' : '');
+  }
+  function statusScopeReason(busy, scope, actionable) {
+    return busy ? 'An Error pages operation is in progress. Wait for its result.' :
+      !scope ? 'Choose the required branding scope and website.' :
+      scope.scope === 'site' && !statusTrustedSelection(scope) ?
+        (statusSitesBusy ? 'Website inventory is loading. Wait for a verified selection.' :
+          'The selected website is not verified. Refresh the website inventory or choose a verified site.') :
+      !actionable ? 'Load saved branding preferences for this exact scope before proceeding.' : '';
+  }
   // Place a specific, visible next step beside each gated approval.
   // Keep the backend and existing enabled/disabled checks authoritative.
   function explainGate(id, state, message) {
     var node = root.find('#' + id);
     if (node.text() !== message) node.text(message);
     node.attr('data-state', state);
+    if (root[0].ownerDocument) root[0].querySelectorAll('[data-ach-disabled-help="#' + id + '"]').forEach(syncDisabledHelp);
   }
 
   function monitorNotice(message, state) {
@@ -1418,7 +1640,7 @@
     siteContextNotice('Website inventory unavailable. Open Websites / Summary & changes and select Refresh websites.');
     hasMore = false;
     root.find('#ach-page').text('Unavailable');
-    root.find('#ach-prev, #ach-next').prop('disabled', true);
+    setActionDisabled('#ach-prev, #ach-next', true, inventoryBlockReason(siteBusy) || 'Refresh websites to obtain a verified inventory.');
     root.find('#ach-hosts-result').text('Website inventory unavailable; local hosts inspection is disabled until a valid inventory is loaded.');
     if (message) msg(message, true);
   }
@@ -1436,13 +1658,13 @@
     siteChangesTicket++;
     siteChangesBusy = false;
     siteChangesSnapshot = null;
-    root.find('#ach-site-changes-save').prop('disabled', true);
-    root.find('#ach-site-changes-save-selected').prop('disabled', true);
+    setActionDisabled('#ach-site-changes-save', true, '#ach-site-changes-why');
+    setActionDisabled('#ach-site-changes-save-selected', true, '#ach-site-changes-selected-why');
     root.find('#ach-site-changes-selected-evidence').text(
       'Selection, inventory or baseline changed; choose a native site and Compare again.');
     explainGate('ach-site-changes-selected-why', 'blocked',
       'Locked: selected-site baseline review requires a fresh website comparison.');
-    root.find('#ach-site-changes-compare').prop('disabled', false);
+    setActionDisabled('#ach-site-changes-compare', false, '');
     root.find('#ach-site-changes-rows').empty();
     root.find('#ach-site-changes-status').text(note || 'Comparison needs Refresh.');
     inspectionSummary('site-changes', 'Comparison not current. Run Compare website records before approving a new baseline.');
@@ -1499,8 +1721,8 @@
     page = 1;
     root.find('#ach-sites-rows').empty();
     root.find('#ach-page').text('Refresh required');
-    root.find('#ach-prev, #ach-next').prop('disabled', true);
-    root.find('#ach-sites-refresh').prop('disabled', false);
+    setActionDisabled('#ach-prev, #ach-next', true, inventoryBlockReason(siteBusy) || 'Refresh websites to obtain a verified inventory.');
+    setActionDisabled('#ach-sites-refresh', false, '');
     root.find('#ach-sites-status').text('Monitor settings changed. Reload website inventory to verify current access.');
     if (['websites','routing','cache'].includes(activeSection)) sites();
   }
@@ -1510,7 +1732,7 @@
     if (!confirmed) {
       sites(); // Show the recheck requirement; never dispatch get_sites.
     } else {
-      root.find('#ach-sites-refresh').prop('disabled', false);
+      setActionDisabled('#ach-sites-refresh', false, '');
       if (['websites','routing','cache'].includes(activeSection)) sites();
     }
   }
@@ -1521,7 +1743,7 @@
     tableBusy('activity', false);
     sectionsLoaded.activity = false;
     root.find('#ach-activity-rows').empty();
-    root.find('#ach-activity-refresh').prop('disabled', false);
+    setActionDisabled('#ach-activity-refresh', false, '');
     root.find('#ach-activity-result').text('An operation may have changed Activity. Refresh to check current records.');
     if (activeDestination === 'activity') loadActivity();
   }
@@ -1771,7 +1993,7 @@
       // Keep last-known values visible, but do not authorize another mutation
       // on an unverified or incompatible Overview response.
       monitorRecheckRequired = true;
-      root.find('[data-monitor-control]').prop('disabled', true);
+      setActionDisabled('[data-monitor-control]', true, controlBusy ? pendingActionReason : 'Monitor state is not verified. Refresh observations before changing a control.');
       if (!lastOverview) root.find('#ach-state-revision').text('Monitor state unavailable');
       if (r) msg('Monitor state API mismatch: no preferences were inferred.', true);
       return false;
@@ -1785,21 +2007,22 @@
     root.find('#ach-site-enabled').prop('checked', r.modules_enabled.site_inventory);
     root.find('#ach-fpm-enabled').prop('checked', r.modules_enabled.php_fpm_file_preview);
     root.find('#ach-state-revision').text('State revision: ' + r.state_revision);
-    root.find('[data-monitor-control]').prop('disabled', controlBusy || monitorRecheckRequired);
+    setActionDisabled('[data-monitor-control]', controlBusy || monitorRecheckRequired, controlBusy ? pendingActionReason : 'Monitor state is not verified. Refresh observations before changing a control.');
     return true;
   }
   function overview() {
     if (overviewBusy || controlBusy) return;
     var ticket = ++overviewTicket;
     overviewBusy = true;
-    root.find('#ach-overview-refresh').prop('disabled', true);
+    if (monitorRecheckRequired || !sectionsLoaded.overview) setActionDisabled('[data-monitor-control]', true, pendingActionReason);
+    setActionDisabled('#ach-overview-refresh', true, pendingActionReason);
     monitorNotice(sectionsLoaded.overview ? 'Refreshing Monitor state...' : 'Loading Monitor state...');
     root.find('#ach-overview-status').text(
       sectionsLoaded.overview ? 'Refreshing monitor state...' : 'Loading monitor state...');
     request('get_overview', {}, function (r) {
       if (ticket !== overviewTicket) return;
       overviewBusy = false;
-      root.find('#ach-overview-refresh').prop('disabled', false);
+      setActionDisabled('#ach-overview-refresh', false, '');
       var accepted = displayControls(r);
       if (accepted && r && r.status === true) showWorkerVersion(r);
       else root.find('#ach-worker-version-status')
@@ -1810,10 +2033,10 @@
         // This request started after the uncertain write and is the only path
         // that can release the recheck gate.
         monitorRecheckRequired = false;
-        root.find('[data-monitor-control]').prop('disabled', false);
+        setActionDisabled('[data-monitor-control]', false, '');
         if (websitePolicyState === 'unverified') {
           websitePolicyState = 'stable';
-          root.find('#ach-sites-refresh').prop('disabled', false);
+          setActionDisabled('#ach-sites-refresh', false, '');
           root.find('#ach-sites-status').text('Monitor state verified. Reload website inventory for current access.');
           if (['websites','routing','cache'].includes(activeSection)) sites();
         }
@@ -1850,15 +2073,15 @@
     // An already pending Overview read may have been issued under an older state.
     overviewTicket++;
     overviewBusy = false;
-    root.find('#ach-overview-refresh').prop('disabled', true);
-    root.find('[data-monitor-control]').prop('disabled', true);
+    setActionDisabled('#ach-overview-refresh', true, pendingActionReason);
+    setActionDisabled('[data-monitor-control]', true, controlBusy ? pendingActionReason : 'Monitor state is not verified. Refresh observations before changing a control.');
     monitorNotice('Saving ' + control.replace(/_/g, ' ') + ' Monitor setting...');
     request('set_control', {
       control:control, enabled:enabled ? 'true' : 'false',
       expected_revision:lastOverview.state_revision
     }, function (r) {
       controlBusy = false;
-      root.find('#ach-overview-refresh').prop('disabled', false);
+      setActionDisabled('#ach-overview-refresh', false, '');
       if (!r || !validMonitorAck(r, previousSnapshot, control, enabled)) {
         // A timeout, rejected CAS, malformed ack or contradictory "success"
         // must not unlock writes until a fresh verified GET is observed.
@@ -1894,8 +2117,8 @@
     if (siteBusy) return;
     resetSiteChanges('Website inventory refresh invalidated the earlier comparison. Compare again.');
     if (websitePolicyState !== 'stable') {
-      root.find('#ach-sites-refresh').prop('disabled', true);
-      root.find('#ach-prev, #ach-next').prop('disabled', true);
+      setActionDisabled('#ach-sites-refresh', true, inventoryBlockReason(siteBusy));
+      setActionDisabled('#ach-prev, #ach-next', true, inventoryBlockReason(siteBusy) || 'Refresh websites to obtain a verified inventory.');
       root.find('#ach-sites-status').text(websitePolicyState === 'pending' ?
         'Monitor update pending. Website inventory will load only after confirmation.' :
         'Monitor policy unverified. Open Home and Refresh observations before loading websites.');
@@ -1906,15 +2129,15 @@
     siteBusy = true;
     resetHostsSelection('Loading website inventory...');
     tableBusy('sites', true);
-    root.find('#ach-prev, #ach-next').prop('disabled', true);
-    root.find('#ach-sites-refresh').prop('disabled', true);
+    setActionDisabled('#ach-prev, #ach-next', true, inventoryBlockReason(siteBusy) || 'Refresh websites to obtain a verified inventory.');
+    setActionDisabled('#ach-sites-refresh', true, inventoryBlockReason(siteBusy));
     root.find('#ach-sites-status').text('Loading website inventory...');
     siteContextNotice('Loading the current website page from aaPanel…');
     request('get_sites', {page:requestedPage, page_size:sitePageSize}, function (r) {
       if (ticket !== siteTicket) return;
       siteBusy = false;
       tableBusy('sites', false);
-      root.find('#ach-sites-refresh').prop('disabled', false);
+      setActionDisabled('#ach-sites-refresh', false, '');
       var body = root.find('#ach-sites-rows').empty();
       if (!r) {
         sectionsLoaded.websites = false;
@@ -1959,8 +2182,8 @@
         (hasMore ? 'More pages available' : 'Last page') +
         '. Use Refresh to check recent aaPanel changes.');
       root.find('#ach-page').text(requestedPage);
-      root.find('#ach-prev').prop('disabled', requestedPage <= 1);
-      root.find('#ach-next').prop('disabled', !hasMore);
+      setActionDisabled('#ach-prev', requestedPage <= 1, 'Already on the first website page.');
+      setActionDisabled('#ach-next', !hasMore, 'No additional website page is available.');
     });
   }
   function validSiteChangesSite(site, id) {
@@ -2074,7 +2297,7 @@
     var candidate = selectedSiteBaselineCandidate();
     var ready = !!candidate && !siteChangesBusy && !siteBusy &&
       websitePolicyState === 'stable';
-    root.find('#ach-site-changes-save-selected').prop('disabled', !ready);
+    setActionDisabled('#ach-site-changes-save-selected', !ready, '#ach-site-changes-selected-why');
     root.find('#ach-site-changes-selected-evidence').text(candidate ?
       'Selected #' + candidate.id + ' (' + candidate.kind + ')' +
       '\nPrevious observed: ' + (candidate.before ?
@@ -2084,19 +2307,17 @@
       'No eligible Added/Changed/Initial record matching the selected native site. ' +
       'Choose that website above, refresh native inventory if needed, and Compare again.');
     explainGate('ach-site-changes-selected-why', ready ? 'ready' : 'blocked',
-      !ready ?
+      inventoryBlockReason(siteChangesBusy) || (!ready ?
         'Locked: select an Added/Changed/Initial native site and compare again. ' +
         'Removed or unchanged sites cannot be re-baselined by this action.' :
-        'Review the selected native record above if useful, then select Save. This changes only its plugin-owned observation baseline.');
+        'Review the selected native record above if useful, then select Save. This changes only its plugin-owned observation baseline.'));
   }
   function siteChangesLock(busy) {
     siteChangesBusy = busy;
-    root.find('#ach-site-changes-compare').prop('disabled',
-      busy || siteBusy || websitePolicyState !== 'stable');
+    setActionDisabled('#ach-site-changes-compare', busy || siteBusy || websitePolicyState !== 'stable', inventoryBlockReason(busy));
     var allNeedsSave = !!siteChangesSnapshot &&
       siteChangesSnapshot.state !== 'No Changes';
-    root.find('#ach-site-changes-save').prop('disabled',
-      busy || !allNeedsSave || siteBusy || websitePolicyState !== 'stable');
+    setActionDisabled('#ach-site-changes-save', busy || !allNeedsSave || siteBusy || websitePolicyState !== 'stable', '#ach-site-changes-why');
     var explanation = websitePolicyState !== 'stable' ?
       'Locked: Monitor state needs verification. Open Home and Refresh observations, then compare again.' :
       busy || siteBusy ?
@@ -2257,41 +2478,28 @@
   function cacheActivationLock() {
     var id = hostsSiteId(), unready = hostsBusy || siteBusy ||
       websitePolicyState !== 'stable' || !id;
-    root.find('#ach-cache-activation-preview,#ach-cache-activation-recheck')
-      .prop('disabled', cacheActivationBusy || unready);
-    root.find('#ach-cache-activation-reviewed')
-      .prop('disabled', cacheActivationBusy || !cacheActivationSnapshot || unready);
-    root.find('#ach-cache-activation-apply')
-      .prop('disabled', cacheActivationBusy || unready ||
+    setActionDisabled('#ach-cache-activation-preview,#ach-cache-activation-recheck', cacheActivationBusy || unready, siteActionReason(cacheActivationBusy));
+    setActionDisabled('#ach-cache-activation-reviewed', cacheActivationBusy || !cacheActivationSnapshot || unready, '#ach-cache-apply-why');
+    setActionDisabled('#ach-cache-activation-apply', cacheActivationBusy || unready ||
         !cacheActivationSnapshot ||
-        root.find('#ach-cache-activation-reviewed').prop('checked') !== true);
-    root.find('#ach-cache-restore-reviewed')
-      .prop('disabled', cacheActivationBusy || unready || !cacheRecoveryIdentity);
-    root.find('#ach-cache-activation-restore')
-      .prop('disabled', cacheActivationBusy || unready || !cacheRecoveryIdentity ||
-        root.find('#ach-cache-restore-reviewed').prop('checked') !== true);
-    root.find('#ach-cache-clear-reviewed')
-      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity);
-    root.find('#ach-cache-clear-files')
-      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity ||
-        root.find('#ach-cache-clear-reviewed').prop('checked') !== true);
-    var common = websitePolicyState !== 'stable' ?
-      'Monitor state is unverified. Open Home and Refresh observations first.' :
-      !id ? 'Select a website above before checking Cache readiness.' :
-      siteBusy || hostsBusy ? 'Website inventory or selection is loading. Try again after it is verified.' : '';
+        root.find('#ach-cache-activation-reviewed').prop('checked') !== true, '#ach-cache-apply-why');
+    setActionDisabled('#ach-cache-restore-reviewed', cacheActivationBusy || unready || !cacheRecoveryIdentity, '#ach-cache-restore-why');
+    setActionDisabled('#ach-cache-activation-restore', cacheActivationBusy || unready || !cacheRecoveryIdentity ||
+        root.find('#ach-cache-restore-reviewed').prop('checked') !== true, '#ach-cache-restore-why');
+    setActionDisabled('#ach-cache-clear-reviewed', cacheActivationBusy || unready || !cacheClearIdentity, '#ach-cache-clear-why');
+    setActionDisabled('#ach-cache-clear-files', cacheActivationBusy || unready || !cacheClearIdentity ||
+        root.find('#ach-cache-clear-reviewed').prop('checked') !== true, '#ach-cache-clear-why');
+    var common = siteActionReason(cacheActivationBusy);
     var urlValid = validCacheUrlPath(root.find('#ach-cache-url-path').val());
-    root.find('#ach-cache-url-reviewed')
-      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity || !urlValid);
+    setActionDisabled('#ach-cache-url-reviewed', cacheActivationBusy || unready || !cacheClearIdentity || !urlValid, '#ach-cache-url-why');
     root.find('#ach-cache-url-path').prop('disabled', cacheActivationBusy);
-    root.find('#ach-cache-clear-url')
-      .prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity || !urlValid ||
+    setActionDisabled('#ach-cache-clear-url', cacheActivationBusy || unready || !cacheClearIdentity || !urlValid ||
         cacheUrlApprovedPath !== root.find('#ach-cache-url-path').val() ||
-        root.find('#ach-cache-url-reviewed').prop('checked') !== true);
-    root.find('#ach-bridge-inspect').prop('disabled', cacheActivationBusy || unready);
-    root.find('#ach-bridge-enable').prop('disabled', cacheActivationBusy || unready || !cacheClearIdentity);
-    root.find('#ach-bridge-disable').prop('disabled', cacheActivationBusy || unready);
-    root.find('#ach-wp-cache-inspect,#ach-wp-cache-setup,#ach-wp-cache-restore')
-      .prop('disabled', cacheActivationBusy || unready);
+        root.find('#ach-cache-url-reviewed').prop('checked') !== true, '#ach-cache-url-why');
+    setActionDisabled('#ach-bridge-inspect', cacheActivationBusy || unready, siteActionReason(cacheActivationBusy));
+    setActionDisabled('#ach-bridge-enable', cacheActivationBusy || unready || !cacheClearIdentity, '#ach-bridge-why');
+    setActionDisabled('#ach-bridge-disable', cacheActivationBusy || unready, siteActionReason(cacheActivationBusy));
+    setActionDisabled('#ach-wp-cache-inspect,#ach-wp-cache-setup,#ach-wp-cache-restore', cacheActivationBusy || unready, siteActionReason(cacheActivationBusy));
     explainGate('ach-bridge-why', !cacheActivationBusy && !unready && cacheClearIdentity ? 'ready' : 'blocked',
       common || (!cacheClearIdentity ?
         'Fresh Applied Cache Recheck required for Provision. Disable is still available for a stale native manifest.' :
@@ -2300,7 +2508,9 @@
       !unready && !cacheActivationBusy && cacheClearIdentity && urlValid ? 'ready' : 'blocked',
       common || (!cacheClearIdentity ? 'Locked: fresh Applied Cache Recheck required.' :
         !urlValid ? 'Use a canonical /path/ with no URL scheme, query, fragment, percent escapes or ambiguous segments.' :
-        'Current-generation URL Cache can be removed for the primary Host only. Approve this exact path; other aliases and URLs are unchanged.'));
+        cacheUrlApprovedPath !== root.find('#ach-cache-url-path').val() || root.find('#ach-cache-url-reviewed').prop('checked') !== true ?
+        'Enter and tick approval for this exact canonical path. Only primary Host Cache entries are removed.' :
+        'Approval selected for this exact path; other aliases and URLs are unchanged.'));
     explainGate('ach-cache-apply-why', !unready && !cacheActivationBusy && cacheActivationSnapshot ? 'ready' : 'blocked',
       common || (cacheActivationBusy ? 'Checking current Cache sources. Approval is locked until the result arrives.' :
         !cacheActivationSnapshot ?
@@ -2321,17 +2531,18 @@
         !cacheClearIdentity ?
         'Locked: run a fresh Recheck Cache / recovery and verify Applied. '+
         'Needs Review, Recovery Required, Restored and Unmanaged cannot clear files.' :
-        'Applied confirmed for this website and recovery ID. Explicitly approve removal '+
-        'of only this site-owned Cache files; shared WORDPRESS cache is untouched.'));
+        root.find('#ach-cache-clear-reviewed').prop('checked') !== true ?
+        'Applied confirmed for this website. Tick approval to remove only its site-owned Cache files.' :
+        'Approval selected for this site-owned Cache; shared WORDPRESS cache is untouched.'));
   }
   var vhostBusy = false, vhostTicket = 0;
   var nginxCandidateBusy = false, nginxCandidateTicket = 0;
   var reconcileBusy = false, reconcileTicket = 0;
   function vhostLock() {
     var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
-    root.find('#ach-vhost-inspect-button').prop('disabled', vhostBusy || unready);
-    root.find('#ach-nginx-candidate-button').prop('disabled', nginxCandidateBusy || unready);
-    root.find('#ach-reconcile-button').prop('disabled', reconcileBusy || unready);
+    setActionDisabled('#ach-vhost-inspect-button', vhostBusy || unready, siteActionReason(vhostBusy));
+    setActionDisabled('#ach-nginx-candidate-button', nginxCandidateBusy || unready, siteActionReason(nginxCandidateBusy));
+    setActionDisabled('#ach-reconcile-button', reconcileBusy || unready, siteActionReason(reconcileBusy));
     guardLock();
   }
   function invalidateVhostInspection(note) {
@@ -2383,21 +2594,20 @@
   }
   function cacheLock() {
     var unready = hostsBusy || siteBusy || websitePolicyState !== 'stable' || !hostsSiteId();
-    root.find('#ach-cache-inspect-button').prop('disabled', cacheBusy || unready);
-    root.find('#ach-cache-private-probe-button').prop('disabled', cacheProbeBusy || unready);
-    root.find('#ach-cache-woo-probe-button').prop('disabled', cacheProbeBusy || unready);
-    root.find('#ach-cache-plan-button').prop('disabled', cachePlanBusy || unready);
+    setActionDisabled('#ach-cache-inspect-button', cacheBusy || unready, siteActionReason(cacheBusy));
+    setActionDisabled('#ach-cache-private-probe-button', cacheProbeBusy || unready, siteActionReason(cacheProbeBusy));
+    setActionDisabled('#ach-cache-woo-probe-button', cacheProbeBusy || unready, siteActionReason(cacheProbeBusy));
+    setActionDisabled('#ach-cache-plan-button', cachePlanBusy || unready, siteActionReason(cachePlanBusy));
     cacheActivationLock();
     vhostLock();
   }
   var hostsAliasBusy = false, hostsAliasTicket = 0, hostsAliasDomains = [];
   function hostsAliasLock() {
     var selected = String(root.find('#ach-hosts-alias-select').val() || '');
-    root.find('#ach-hosts-alias-refresh').prop('disabled', hostsAliasBusy);
+    setActionDisabled('#ach-hosts-alias-refresh', hostsAliasBusy, pendingActionReason);
     root.find('#ach-hosts-alias-select').prop('disabled',
       hostsAliasBusy || !hostsAliasDomains.length);
-    root.find('#ach-hosts-alias-remove').prop('disabled',
-      hostsAliasBusy || !hostsAliasDomains.includes(selected));
+    setActionDisabled('#ach-hosts-alias-remove', hostsAliasBusy || !hostsAliasDomains.includes(selected), hostsAliasBusy ? pendingActionReason : hostsAliasDomains.length ? 'Select a removable hostname from the inspected list.' : 'No removable hostname is verified. Refresh local aliases and review the result.');
   }
   function loadHostsAliases(note) {
     if (hostsAliasBusy) return;
@@ -2513,31 +2723,45 @@
     var locked = wpSettingsBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable';
     var match = selected && wpSettingsEvidence &&
       wpSettingsEvidence.selection === selected.key;
-    root.find('#ach-wp-settings-recheck').prop('disabled', locked || !selected);
-    root.find('#ach-wp-settings-apply').prop('disabled',
-      locked || !match || !['Source Ready','Restored'].includes(wpSettingsEvidence.state));
-    root.find('#ach-wp-settings-restore').prop('disabled',
-      locked || !match || !['Applied','Recovery Required'].includes(wpSettingsEvidence.state) ||
-      !wpSettingsEvidence.recovery);
+    var applyReady = !locked && match && ['Source Ready','Restored'].includes(wpSettingsEvidence.state);
+    var restoreReady = !locked && match && ['Applied','Recovery Required'].includes(wpSettingsEvidence.state) && !!wpSettingsEvidence.recovery;
+    var wpBlock = siteActionReason(wpSettingsBusy) ||
+      (!selected ? 'Choose a valid WordPress setting and value (Cron interval 1–59 minutes).' : '');
+    var wpNextCheck = wpSettingsUnconfirmed ? 'The previous operation was not confirmed. Review its result and Recheck this setting. ' : 'Recheck the selected WordPress setting. ';
+    var wpApplyWhy = wpBlock || (!match ?
+      wpNextCheck + 'Apply requires fresh Source Ready or Restored evidence.' :
+      wpSettingsEvidence.state === 'Already Configured' ?
+        'The selected setting already has the requested value. No Apply is needed.' :
+      wpSettingsEvidence.state === 'Applied' || wpSettingsEvidence.state === 'Recovery Required' ?
+        'A saved change exists. Review its state and Recovery before attempting a different change.' :
+      !['Source Ready','Restored'].includes(wpSettingsEvidence.state) ?
+        wpSettingsEvidence.state + ': ' + wpSettingsEvidence.reason + ' Review the reported source before trying again.' : '');
+    var wpRestoreWhy = wpBlock || (!match ?
+      wpNextCheck + 'Restore requires a matching saved Applied or Recovery Required operation and Recovery ID.' :
+      !['Applied','Recovery Required'].includes(wpSettingsEvidence.state) || !wpSettingsEvidence.recovery ?
+        'No matching recoverable saved change is verified for this setting. Restore requires an Applied or Recovery Required state and its Recovery ID.' : '');
+    setActionDisabled('#ach-wp-settings-recheck', locked || !selected, wpBlock);
+    setActionDisabled('#ach-wp-settings-apply', !applyReady, wpApplyWhy);
+    setActionDisabled('#ach-wp-settings-restore', !restoreReady, wpRestoreWhy);
     root.find('#ach-wp-settings-debug').prop('disabled', wpSettingsBusy ||
       root.find('#ach-wp-settings-kind').val() !== 'debug');
     root.find('#ach-wp-settings-interval').prop('disabled', wpSettingsBusy ||
       root.find('#ach-wp-settings-kind').val() !== 'cron');
     root.find('#ach-wp-settings-kind').prop('disabled', wpSettingsBusy);
-    explainGate('ach-wp-settings-why', match && !locked ? 'ready' : 'blocked',
-      wpSettingsBusy ? 'WordPress source operation running; inspect the result before another action.' :
-      !selected ? 'Select a verified native website, an operation and valid value/interval.' :
-      !match ? 'Recheck the selected WordPress setting. Apply and Restore require fresh source/recovery evidence.' :
+    explainGate('ach-wp-settings-why', applyReady || restoreReady ? 'ready' : 'blocked',
+      wpBlock || (!selected ? 'Select a verified native website, an operation and valid value/interval.' :
+      !match ? wpNextCheck + 'Apply and Restore require fresh source/recovery evidence.' :
       wpSettingsEvidence.state === 'Source Ready' ?
       'Ready: Apply changes only the selected WordPress setting. HTTPS URLs update home/siteurl once; XML-RPC uses one MU-plugin, Cron runs as www.' :
-      wpSettingsEvidence.state === 'Applied' || wpSettingsEvidence.state === 'Recovery Required' ?
+      (wpSettingsEvidence.state === 'Applied' || wpSettingsEvidence.state === 'Recovery Required') && wpSettingsEvidence.recovery ?
       'Saved Recovery ID available. Restore reverts only the selected setting, HTTPS URLs, MU-plugin or Cron task.' :
       wpSettingsEvidence.state === 'Restored' ? 'Previous owned setting restored. Apply is available after Recheck.' :
-      'No compatible change is available. Review reported source and state.');
+      wpApplyWhy || wpRestoreWhy || 'No compatible change is available. Review reported source and state.'));
   }
   function wpSettingsInvalidate() {
     ++wpSettingsTicket;
     wpSettingsEvidence = null;
+    wpSettingsUnconfirmed = false;
     root.find('#ach-wp-settings-result').text('Selection or source changed. Recheck before WordPress Apply/Restore.');
     wpSettingsLock();
   }
@@ -2581,6 +2805,7 @@
            !['Applied','Recovery Required'].includes(previous.state))))) return;
     var ticket=++wpSettingsTicket;
     wpSettingsEvidence=null;
+    wpSettingsUnconfirmed=false;
     wpSettingsBusy=true;
     root.find('#ach-wp-settings-result').text('Checking selected WordPress source and saved recovery...');
     wpSettingsLock();
@@ -2593,14 +2818,21 @@
       expected_recovery_id:previous ? previous.recovery : '',
       approved:action==='recheck' ? 'false' : 'true'
     },function(r, failure) {
-      if (ticket!==wpSettingsTicket) return;
+      // A changed website invalidates evidence, not the completion of the
+      // sole outstanding request. Keep the busy guard until it settles, then
+      // release it without trusting a result from the superseded selection.
       wpSettingsBusy=false;
+      if (ticket!==wpSettingsTicket) {
+        wpSettingsLock();
+        return;
+      }
       if (!wpSettingsSelection() || wpSettingsSelection().key!==selected.key ||
           !validWpSettingsResponse(r,action,selected) ||
           (action==='apply' && (selected.kind==='xmlrpc' ?
             r.source_sha256!==previous.source :
             r.source_sha256===previous.source)) ||
           (action==='restore' && r.recovery_id!==previous.recovery)) {
+        wpSettingsUnconfirmed=true;
         root.find('#ach-wp-settings-result').text(
           statusBackendFailure(action, failure, action==='recheck' ?
             'WordPress setting inspection not confirmed. No change requested.' :
@@ -2608,7 +2840,7 @@
       } else {
         if (action==='recheck')
           wpSettingsEvidence={selection:selected.key,state:r.state,source:r.source_sha256,
-                              recovery:r.recovery_id};
+                              recovery:r.recovery_id,reason:r.reason};
         root.find('#ach-wp-settings-result').text(
           r.state + (r.changed ?
             (selected.kind==='xmlrpc' ? ' — XML-RPC policy changed' : ' — source changed') :
@@ -2674,7 +2906,7 @@
     var inventoryLocked = busy || siteBusy || websitePolicyState !== 'stable';
     var blocked = inventoryLocked || !hostsSiteId();
     root.find('#ach-hosts-site-id').prop('disabled', inventoryLocked || !hostsPageSites.size);
-    root.find('#ach-hosts-inspect-button').prop('disabled', blocked);
+    setActionDisabled('#ach-hosts-inspect-button', blocked, siteActionReason(hostsBusy));
     var fresh = !blocked && hostsVerified && hostsVerified.siteId === hostsSiteId();
     var canChoose = fresh && hostsVerified.domains.length &&
       ['None','Not Applied'].includes(hostsVerified.recovery.state) ||
@@ -2683,12 +2915,12 @@
     var removable = canChoose && hostsVerified.domains.includes(String(root.find('#ach-hosts-removal-domain').val() || ''));
     var recoverable = fresh && ['Applied','Not Applied'].includes(hostsVerified.recovery.state);
     root.find('#ach-hosts-removal-domain').prop('disabled', !canChoose);
-    root.find('#ach-hosts-removal-reviewed').prop('disabled', !removable);
-    root.find('#ach-hosts-removal-button').prop('disabled', !removable ||
-      !root.find('#ach-hosts-removal-reviewed').prop('checked'));
-    root.find('#ach-hosts-restore-reviewed').prop('disabled', !recoverable);
-    root.find('#ach-hosts-restore-button').prop('disabled', !recoverable ||
-      !root.find('#ach-hosts-restore-reviewed').prop('checked'));
+    var removalWhy = siteActionReason(hostsBusy) || (!fresh ? 'Inspect the selected website first.' : !canChoose ? 'No removable alias is verified, or the saved recovery needs review. Read the inspection result.' : !removable ? 'Select an inspected unwanted loopback alias.' : 'Review the selected alias and tick the removal approval.');
+    var restoreWhy = siteActionReason(hostsBusy) || (!fresh ? 'Inspect the selected website first.' : !recoverable ? 'No matching Applied or Not Applied hosts recovery is available. Review the inspection result.' : 'Review the saved Recovery ID and tick the Restore approval.');
+    setActionDisabled('#ach-hosts-removal-reviewed', !removable, removalWhy);
+    setActionDisabled('#ach-hosts-removal-button', !removable || !root.find('#ach-hosts-removal-reviewed').prop('checked'), removalWhy);
+    setActionDisabled('#ach-hosts-restore-reviewed', !recoverable, restoreWhy);
+    setActionDisabled('#ach-hosts-restore-button', !recoverable || !root.find('#ach-hosts-restore-reviewed').prop('checked'), restoreWhy);
     cacheLock();
   }
   function resetHostsSelection(message) {
@@ -3214,7 +3446,7 @@
     });
   });
   var guardBusy = false, guardTicket = 0, guardReady = null, guardRecovery = null;
-  var guardUnsupported = false;
+  var guardUnsupported = false, guardReport = null;
   function guardReset() {
     scanReset();
     ++guardTicket;
@@ -3222,30 +3454,52 @@
     guardReady = null;
     guardRecovery = null;
     guardUnsupported = false;
+    guardReport = null;
     root.find('#ach-guard-block-xmlrpc').prop('checked',false);
     root.find('#ach-guard-result').text('Website selection or source changed; run a fresh protection check.');
     inspectionSummary('guard', 'Select a website and inspect its current Nginx security source.');
     guardLock();
   }
+  function protectionBlockedReason(report, action, noun, check, recoverableStates) {
+    if (!report) return '';
+    var state = report.state;
+    var detail = state + (report.reason ? ': ' + report.reason : '') + '. ';
+    if (action === 'apply') {
+      if (state === 'Applied') return noun + ' is already Applied. No Enable is needed. Review the saved recovery before replacing the managed policy.';
+      if (state === 'Recovery Required') return detail + 'Resolve the saved recovery before enabling again. If Restore is unavailable, use ' + check + ' to verify its Recovery ID.';
+      if (['Needs Review','Suspended','Dependency Missing'].includes(state))
+        return detail + 'Investigate the reported cause before checking readiness again.';
+    } else {
+      if (state === 'Unmanaged' || state === 'Restored')
+        return state + ': no active saved ' + noun + ' operation needs Restore.';
+      if (report.recovery && recoverableStates.includes(state))
+        return detail + 'Run ' + check + ' to verify the saved Recovery ID before Restore.';
+      if (['Needs Review','Suspended','Dependency Missing'].includes(state))
+        return detail + 'No eligible matching recovery is verified. Investigate the reported cause.';
+    }
+    return '';
+  }
   function guardLock() {
     var id = hostsSiteId();
     var blocked = guardBusy || !id || hostsBusy || siteBusy ||
       websitePolicyState !== 'stable';
-    root.find('#ach-guard-preview,#ach-guard-recheck').prop('disabled',blocked);
-    root.find('#ach-guard-block-xmlrpc').prop('disabled',guardBusy || hostsBusy || siteBusy);
+    setActionDisabled('#ach-guard-preview,#ach-guard-recheck', blocked, siteActionReason(guardBusy));
+    setActionDisabled('#ach-guard-block-xmlrpc',guardBusy || hostsBusy || siteBusy,pendingActionReason);
     var applyAllowed = !blocked && !!guardReady && guardReady.siteId === id &&
       guardReady.xmlrpc === (root.find('#ach-guard-block-xmlrpc').prop('checked') === true);
     var restoreAllowed = !blocked && !!guardRecovery && guardRecovery.siteId === id;
-    root.find('#ach-guard-apply').prop('disabled',!applyAllowed);
-    root.find('#ach-guard-restore').prop('disabled',!restoreAllowed);
+    setActionDisabled('#ach-guard-apply', !applyAllowed, '#ach-guard-apply-why');
+    setActionDisabled('#ach-guard-restore', !restoreAllowed, '#ach-guard-restore-why');
     explainGate('ach-guard-apply-why',applyAllowed?'ready':'blocked',
-      guardUnsupported ? 'Locked: the saved ruleset cannot be verified by this version.' :
-      !applyAllowed ? 'Locked: select a native website and run a fresh Unmanaged/Restored readiness check.' :
-      'Ready: enabling protection changes this selected site and reloads shared Nginx.');
+      siteActionReason(guardBusy) || (guardUnsupported ? 'Locked: the saved ruleset cannot be verified by this version. Ask a server administrator to investigate the retained journal.' :
+      !applyAllowed ? protectionBlockedReason(guardReport, 'apply', 'Guard protection', 'Recheck current protection', ['Applied','Recovery Required']) ||
+        'Locked: select a native website and run a fresh Unmanaged/Restored readiness check.' :
+      'Ready: enabling protection changes this selected site and reloads shared Nginx.'));
     explainGate('ach-guard-restore-why',restoreAllowed?'ready':'blocked',
-      guardUnsupported ? 'Locked: this version cannot restore the retained journal.' :
-      !restoreAllowed ? 'Locked: run a fresh Recheck of this site with an Applied or Recovery Required saved operation.' :
-      'Ready: Restore retires this exact owned protection and reloads shared Nginx.');
+      siteActionReason(guardBusy) || (guardUnsupported ? 'Locked: this version cannot restore the retained journal. Ask a server administrator to investigate it separately.' :
+      !restoreAllowed ? protectionBlockedReason(guardReport, 'restore', 'Guard protection', 'Recheck current protection', ['Applied','Recovery Required']) ||
+        'Locked: run a fresh Recheck of this site with an Applied or Recovery Required saved operation.' :
+      'Ready: Restore retires this exact owned protection and reloads shared Nginx.'));
   }
   function validGuardReport(r,id,action) {
     var native = hostsPageSites.get(id);
@@ -3308,6 +3562,7 @@
     if ((isApply || isRestore) && (!selected || selected.siteId !== id)) return;
     var ticket = ++guardTicket;
     guardBusy = true;
+    guardReport = null;
     guardLock();
     inspectionSummary('guard', 'Checking native Nginx policy and recovery…');
     root.find('#ach-guard-result').text(action === 'apply' || action === 'restore' ?
@@ -3360,6 +3615,7 @@
         return;
       }
       guardUnsupported = false;
+      guardReport = {state:r.state,reason:r.reason,recovery:r.recovery_id};
       if ((action === 'preview' && ['Unmanaged','Restored'].includes(r.state)) &&
           r.vhost_sha256 && r.proposal_sha256) {
         guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256,
@@ -3395,11 +3651,13 @@
   root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
   root.find('#ach-guard-block-xmlrpc').on('change',function () {
     guardReady=null;
-    if (!guardUnsupported)
+    // Option edits invalidate readiness, not the verified existing journal state.
+    if (guardReport && !['Applied','Recovery Required'].includes(guardReport.state)) guardReport=null;
+    if (!guardUnsupported && !guardReport)
       root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
     guardLock();
   });
-  var scanBusy = false, scanTicket = 0, scanReady = null, scanRecovery = null;
+  var scanBusy = false, scanTicket = 0, scanReady = null, scanRecovery = null, scanReport = null;
   function scanParameters() {
     return {
       maxretry: root.find('#ach-scan-maxretry').val(),
@@ -3412,6 +3670,7 @@
     scanBusy = false;
     scanReady = null;
     scanRecovery = null;
+    scanReport = null;
     root.find('#ach-scan-result').text('Site or policy changed; run a fresh Fail2ban check.');
     inspectionSummary('scan', 'Choose a native site and check the current Fail2ban source.');
     scanLock();
@@ -3419,12 +3678,18 @@
   function scanLock() {
     var id = hostsSiteId();
     var blocked = scanBusy || !id || hostsBusy || siteBusy || websitePolicyState !== 'stable';
-    root.find('#ach-scan-preview,#ach-scan-recheck').prop('disabled',blocked);
+    setActionDisabled('#ach-scan-preview,#ach-scan-recheck', blocked, siteActionReason(scanBusy));
     var current = JSON.stringify(scanParameters());
-    root.find('#ach-scan-apply').prop('disabled',blocked || !scanReady ||
-      scanReady.siteId !== id || scanReady.params !== current);
-    root.find('#ach-scan-restore').prop('disabled',blocked || !scanRecovery ||
-      scanRecovery.siteId !== id);
+    var common = siteActionReason(scanBusy);
+    var recoverable = ['Applied','Recovery Required','Needs Review'];
+    setActionDisabled('#ach-scan-apply', blocked || !scanReady ||
+      scanReady.siteId !== id || scanReady.params !== current,
+      common || protectionBlockedReason(scanReport, 'apply', 'Fail2ban scanner', 'Recheck jail / recovery', recoverable) ||
+        'Check Fail2ban readiness for the current site and scanner settings; Apply needs a fresh Unmanaged or Restored plan.');
+    setActionDisabled('#ach-scan-restore', blocked || !scanRecovery ||
+      scanRecovery.siteId !== id,
+      common || protectionBlockedReason(scanReport, 'restore', 'Fail2ban scanner', 'Recheck jail / recovery', recoverable) ||
+        'Recheck this website for a verified saved Fail2ban recovery. No matching recoverable journal is currently confirmed.');
   }
   function validScanReport(r,id,action) {
     var site = hostsPageSites.get(id);
@@ -3468,6 +3733,7 @@
          (action === 'apply' && selected.params !== JSON.stringify(params)))) return;
     var ticket = ++scanTicket;
     scanBusy = true;
+    scanReport = null;
     scanLock();
     inspectionSummary('scan','Checking selected native site and Fail2ban state...');
     root.find('#ach-scan-result').text('Checking Fail2ban. After an uncertain write, Recheck the saved Recovery ID.');
@@ -3491,6 +3757,7 @@
           'Unable to confirm selected site Fail2ban outcome; inspect Activity / Recovery ID.');
         return;
       }
+      scanReport = {state:r.state,reason:r.reason,recovery:r.recovery_id};
       if (action === 'preview' && ['Unmanaged','Restored'].includes(r.state) &&
           /^[a-f0-9]{64}$/.test(r.plan_sha256 || '')) {
         scanReady = {siteId:id,plan:r.plan_sha256,params:JSON.stringify(params)};
@@ -3520,15 +3787,18 @@
   root.find('#ach-scan-apply').on('click',function () {scanRequest('apply');});
   root.find('#ach-scan-restore').on('click',function () {scanRequest('restore');});
   root.find('#ach-scan-maxretry,#ach-scan-findtime,#ach-scan-bantime')
-    .on('input change',function () {scanReady = null; scanLock();});
+    .on('input change',function () {
+      scanReady = null;
+      if (scanReport && !['Applied','Recovery Required'].includes(scanReport.state)) scanReport = null;
+      scanLock();
+    });
   var orphanTicket = 0, orphanBusy = false, orphanEntries = new Map();
   function orphanLock() {
     var choice = root.find('#ach-scan-orphan-choice').val();
     var entry = orphanEntries.get(String(choice || ''));
-    root.find('#ach-scan-orphan-list').prop('disabled',orphanBusy);
+    setActionDisabled('#ach-scan-orphan-list', orphanBusy, pendingActionReason);
     root.find('#ach-scan-orphan-choice').prop('disabled',orphanBusy || !orphanEntries.size);
-    root.find('#ach-scan-orphan-restore').prop('disabled',
-      orphanBusy || !entry || entry.recoverable !== true);
+    setActionDisabled('#ach-scan-orphan-restore', orphanBusy || !entry || entry.recoverable !== true, orphanBusy ? pendingActionReason : !orphanEntries.size ? 'Find orphaned jails. No orphan recovery is currently verified.' : !entry ? 'Select an orphan scanner journal.' : 'This journal is not recoverable: changed or foreign jail ownership must be investigated; do not remove it automatically.');
   }
   function validOrphanInventory(r) {
     if (!r || r.status !== true || r.schema !== 1 ||
@@ -4559,9 +4829,8 @@
     statusShowWorkflow();
     // Website inventory loads independently; their completion must not
     // release a pending branding, inspection or HTTP-probe operation.
-    root.find('#ach-status-sites-more, #ach-status-sites-retry').prop(
-      'disabled', busy || statusSitesBusy);
-    root.find('#ach-status-load').prop('disabled', busy);
+    setActionDisabled('#ach-status-sites-more, #ach-status-sites-retry', busy || statusSitesBusy, pendingActionReason);
+    setActionDisabled('#ach-status-load', busy, pendingActionReason);
     root.find('#ach-status-scope, #ach-status-template, #ach-status-locale').prop('disabled', busy);
     root.find('#ach-status-delivery').prop('disabled', busy || root.find('#ach-status-scope').val() !== 'site');
     root.find('#ach-status-site-id').prop('disabled',
@@ -4574,14 +4843,14 @@
     var editable = statusRevision !== null && !!statusSavedBrand &&
       !!scope && statusLoadedScope === scope.scope + ':' + scope.site_id;
     var actionable = editable && statusTrustedSelection(scope);
-    root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground, #ach-status-footer').prop('disabled', busy || !editable);
-    root.find('#ach-status-preview-button, #ach-status-save').prop(
-      'disabled', busy || !actionable);
-    root.find('#ach-status-reset').prop('disabled', busy || !actionable);
-    root.find('#ach-status-inspect-button').prop('disabled', busy || !actionable ||
+    root.find('#ach-status-name, #ach-status-tagline, #ach-status-url, #ach-status-label, #ach-status-accent, #ach-status-background, #ach-status-foreground').prop('disabled', busy || !editable);
+    setActionDisabled('#ach-status-footer', busy || !editable, busy ? pendingActionReason : 'Load saved branding preferences for this exact scope before editing.');
+    setActionDisabled('#ach-status-preview-button, #ach-status-save', busy || !actionable, statusScopeReason(busy, scope, actionable));
+    setActionDisabled('#ach-status-reset', busy || !actionable, statusScopeReason(busy, scope, actionable));
+    setActionDisabled('#ach-status-inspect-button', busy || !actionable ||
       !scope || scope.scope !== 'site' ||
       statusLoadedScope !== scope.scope + ':' + scope.site_id ||
-      (template !== '404' && template !== '502'));
+      (template !== '404' && template !== '502'), statusScopeReason(busy, scope, actionable) || 'Select a verified website with the 404 or 502 template for source inspection.');
     var selected = selectedProbeSite(scope);
     var selectedReady = !busy && !!actionable && statusRevision !== null && scope &&
       scope.scope === 'site' && selected &&
@@ -4589,62 +4858,52 @@
       (template === '404' || template === '502' ||
        (template === '50x' && root.find('#ach-status-delivery').val() === 'extension'));
     var siteRunning = selectedReady && String(selected.panel_status) === '1';
-    root.find('#ach-status-probe-button').prop('disabled', !siteRunning);
+    setActionDisabled('#ach-status-probe-button', !siteRunning, statusScopeReason(busy, scope, actionable) || (!selectedReady ? 'Choose a website and supported 404/502 or extension 50x delivery.' : 'The selected site is stopped. Start it before checking the live HTTP source.'));
     // A stopped site must retain a read-only recovery inspection path.
-    root.find('#ach-status-manage-recheck').prop('disabled', !selectedReady);
-    root.find('#ach-status-manage-apply').prop('disabled',
-      !siteRunning || !sameStatusSelection(statusProbeEvidence) ||
-      root.find('#ach-status-manage-apply-approve').prop('checked') !== true);
-    root.find('#ach-status-manage-restore').prop('disabled',
-      !siteRunning || !sameStatusSelection(statusManageEvidence) ||
+    setActionDisabled('#ach-status-manage-recheck', !selectedReady, statusScopeReason(busy, scope, actionable) || 'Choose a website and supported 404/502 or extension 50x delivery.');
+    setActionDisabled('#ach-status-manage-apply', !siteRunning || !sameStatusSelection(statusProbeEvidence) ||
+      root.find('#ach-status-manage-apply-approve').prop('checked') !== true, '#ach-status-site-apply-why');
+    setActionDisabled('#ach-status-manage-restore', !siteRunning || !sameStatusSelection(statusManageEvidence) ||
       !['Applied','Recovery Required'].includes(statusManageEvidence.state) ||
-      root.find('#ach-status-manage-restore-approve').prop('checked') !== true);
+      root.find('#ach-status-manage-restore-approve').prop('checked') !== true, '#ach-status-site-restore-why');
     var stoppedReady = !busy && !!actionable && scope.scope === 'site' &&
       template === 'stopped' && selected;
     var stoppedMatches = stoppedReady && sameStoppedSelection(statusStoppedEvidence);
-    root.find('#ach-status-stopped-recheck').prop('disabled', !stoppedReady);
-    root.find('#ach-status-stopped-apply').prop('disabled',
-      !stoppedMatches || String(selected.panel_status) !== '1' ||
+    setActionDisabled('#ach-status-stopped-recheck', !stoppedReady, statusScopeReason(busy, scope, actionable) || 'Choose website scope and the stopped template.');
+    setActionDisabled('#ach-status-stopped-apply', !stoppedMatches || String(selected.panel_status) !== '1' ||
       !['Source Ready','Restored'].includes(statusStoppedEvidence.state) ||
-      root.find('#ach-status-stopped-apply-approve').prop('checked') !== true);
-    root.find('#ach-status-stopped-restore').prop('disabled',
-      !stoppedMatches || !['Armed','Applied','Needs Review','Recovery Required'].includes(statusStoppedEvidence.state) ||
-      root.find('#ach-status-stopped-restore-approve').prop('checked') !== true);
+      root.find('#ach-status-stopped-apply-approve').prop('checked') !== true, '#ach-status-stopped-apply-why');
+    setActionDisabled('#ach-status-stopped-restore', !stoppedMatches || !['Armed','Applied','Needs Review','Recovery Required'].includes(statusStoppedEvidence.state) ||
+      root.find('#ach-status-stopped-restore-approve').prop('checked') !== true, '#ach-status-stopped-restore-why');
     var defaultReady = !busy && !!actionable && scope.scope === 'global' &&
       ['new-site','404','502'].includes(template);
     var defaultMatches = defaultReady && sameDefaultSelection(statusDefaultEvidence);
-    root.find('#ach-status-default-recheck').prop('disabled', !defaultReady);
-    root.find('#ach-status-default-apply').prop('disabled',
-      !defaultMatches || !['Source Ready','Restored'].includes(statusDefaultEvidence.state) ||
+    setActionDisabled('#ach-status-default-recheck', !defaultReady, statusScopeReason(busy, scope, actionable) || 'Choose global scope and new-site, 404 or 502.');
+    setActionDisabled('#ach-status-default-apply', !defaultMatches || !['Source Ready','Restored'].includes(statusDefaultEvidence.state) ||
       statusDefaultEvidence.current === statusDefaultEvidence.rendered ||
-      root.find('#ach-status-default-apply-approve').prop('checked') !== true);
-    root.find('#ach-status-default-restore').prop('disabled',
-      !defaultMatches || !['Applied','Recovery Required'].includes(statusDefaultEvidence.state) ||
-      root.find('#ach-status-default-restore-approve').prop('checked') !== true);
+      root.find('#ach-status-default-apply-approve').prop('checked') !== true, '#ach-status-default-apply-why');
+    setActionDisabled('#ach-status-default-restore', !defaultMatches || !['Applied','Recovery Required'].includes(statusDefaultEvidence.state) ||
+      root.find('#ach-status-default-restore-approve').prop('checked') !== true, '#ach-status-default-restore-why');
     var unboundReady = !busy && !!actionable && scope.scope === 'global' &&
       template === 'unbound';
     var unboundMatches = unboundReady && sameDefaultSelection(statusUnboundEvidence);
-    root.find('#ach-status-unbound-recheck').prop('disabled', !unboundReady);
-    root.find('#ach-status-unbound-apply').prop('disabled',
-      !unboundMatches || !['Source Ready','Restored'].includes(statusUnboundEvidence.state) ||
-      root.find('#ach-status-unbound-apply-approve').prop('checked') !== true);
-    root.find('#ach-status-unbound-restore').prop('disabled',
-      !unboundMatches || !['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) ||
+    setActionDisabled('#ach-status-unbound-recheck', !unboundReady, statusScopeReason(busy, scope, actionable) || 'Choose global scope and the unbound template.');
+    setActionDisabled('#ach-status-unbound-apply', !unboundMatches || !['Source Ready','Restored'].includes(statusUnboundEvidence.state) ||
+      root.find('#ach-status-unbound-apply-approve').prop('checked') !== true, '#ach-status-unbound-apply-why');
+    setActionDisabled('#ach-status-unbound-restore', !unboundMatches || !['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) ||
       !statusUnboundEvidence.recovery ||
-      root.find('#ach-status-unbound-restore-approve').prop('checked') !== true);
+      root.find('#ach-status-unbound-restore-approve').prop('checked') !== true, '#ach-status-unbound-restore-why');
     var tlsReady = unboundReady;
     var tlsMatches = tlsReady && sameDefaultSelection(statusTlsEvidence);
-    root.find('#ach-status-tls-recheck').prop('disabled', !tlsReady);
-    root.find('#ach-status-tls-apply').prop('disabled',
-      !tlsMatches || !['Source Ready','Restored'].includes(statusTlsEvidence.state) ||
-      root.find('#ach-status-tls-apply-approve').prop('checked') !== true);
-    root.find('#ach-status-tls-restore').prop('disabled',
-      !tlsMatches || !['Applied','Needs Review','Recovery Required'].includes(statusTlsEvidence.state) ||
+    setActionDisabled('#ach-status-tls-recheck', !tlsReady, statusScopeReason(busy, scope, actionable) || 'Choose global scope and the unbound template.');
+    setActionDisabled('#ach-status-tls-apply', !tlsMatches || !['Source Ready','Restored'].includes(statusTlsEvidence.state) ||
+      root.find('#ach-status-tls-apply-approve').prop('checked') !== true, '#ach-status-tls-apply-why');
+    setActionDisabled('#ach-status-tls-restore', !tlsMatches || !['Applied','Needs Review','Recovery Required'].includes(statusTlsEvidence.state) ||
       !statusTlsEvidence.recovery ||
-      root.find('#ach-status-tls-restore-approve').prop('checked') !== true);
+      root.find('#ach-status-tls-restore-approve').prop('checked') !== true, '#ach-status-tls-restore-why');
     // Do not invent readiness: the messages below derive from the very same
     // evidence conditions that already gate the corresponding action buttons.
-    var pending = busy ? 'A check is running. The controls will be updated after it completes.' : null;
+    var pending = statusScopeReason(busy, scope, actionable);
     var scopeHint = 'Select a supported template/scope and Recheck saved branding before using this action.';
     explainGate('ach-status-reset-why', actionable && !busy ? 'ready' : 'blocked',
       pending || (!actionable ? scopeHint :
@@ -4688,14 +4947,24 @@
     var unboundRestore = !!(unboundMatches &&
       ['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) &&
       !!statusUnboundEvidence.recovery);
+    var unboundWhy = unboundMatches ? ({
+      'Applied':'The managed HTTP/80 fallback is already Applied; no Apply is needed.',
+      'Recovery Required':'Recovery Required: the saved HTTP/80 operation needs recovery before a new Apply.',
+      'Needs Review':'Needs Review: current HTTP/80 runtime could not be verified against the saved operation. Investigate the runtime and saved recovery.',
+      'Conflict':'Conflict: existing HTTP/80 route or HTML assets have no matching owned journal. Ask a server administrator to investigate ownership; do not overwrite them.',
+      'Drift':'Drift: assets remain after the saved HTTP/80 operation was restored. Investigate the retained or foreign source before making changes.'
+    })[statusUnboundEvidence.state] : '';
     explainGate('ach-status-unbound-apply-why', unboundApply && !busy ? 'ready' : 'blocked',
       pending || (!unboundApply ?
-        'Choose global / unbound, load branding and Recheck HTTP routing. Apply is unavailable without a compatible source.' :
+        unboundWhy || (unboundReady ? 'Run Recheck HTTP unbound routing to verify the current source before Apply.' :
+          'Choose global / unbound and load saved branding before Recheck HTTP routing.') :
         root.find('#ach-status-unbound-apply-approve').prop('checked') ?
         'Approval selected for global unmatched-host HTTP/80 and the shared Nginx reload. Apply unbound HTTP 404 is enabled.' :
         'Current HTTP/80 source ready. Review the impact on unmatched hosts and shared Nginx reload, then tick to enable Apply.'));
     explainGate('ach-status-unbound-restore-why', unboundRestore && !busy ? 'ready' : 'blocked',
       pending || (!unboundRestore ?
+        unboundMatches ? (unboundWhy ? unboundWhy + ' No eligible saved HTTP/80 recovery is verified for Restore.' :
+          statusUnboundEvidence.state + ': no active saved HTTP/80 operation needs Restore.') :
         'Restore requires a verified saved global HTTP/80 recovery from Recheck. It does not change HTTPS/443.' :
         root.find('#ach-status-unbound-restore-approve').prop('checked') ?
         'Restore approval selected for the verified HTTP/80 recovery. Restore previous HTTP default routing is enabled.' :
@@ -4706,12 +4975,13 @@
       !!statusTlsEvidence.recovery);
     explainGate('ach-status-tls-apply-why', tlsApply && !busy ? 'ready' : 'blocked',
       pending || (!tlsApply ?
-        'Recheck HTTPS on a site with an existing compatible wildcard TCP/443 listener; no new listener will be created.' :
+        tlsMatches && statusTlsEvidence.reason ? statusTlsEvidence.state + ': ' + statusTlsEvidence.reason + ' Review the reported listener/source condition; no new listener will be created.' :
+        'Recheck HTTPS unknown-SNI policy for a compatible existing wildcard TCP/443 listener; no new listener will be created.' :
         root.find('#ach-status-tls-apply-approve').prop('checked') ?
         'Approval selected; the exact HTTPS default source will be checked and Nginx reloaded.' :
         'TLS source ready. Review the unknown-host effect and approve the shared reload.'));
     explainGate('ach-status-tls-restore-why', tlsRestore && !busy ? 'ready' : 'blocked',
-      pending || (!tlsRestore ? 'Recheck saved TLS Recovery ID before Restore.' :
+      pending || (!tlsRestore ? (tlsMatches && statusTlsEvidence.reason ? statusTlsEvidence.state + ': ' + statusTlsEvidence.reason + ' No eligible saved TLS recovery is verified.' : 'Recheck saved TLS Recovery ID before Restore.') :
         root.find('#ach-status-tls-restore-approve').prop('checked') ?
         'Approval selected for TLS Restore and a shared Nginx reload.' :
         'Saved TLS Recovery ID available. Review and approve Restore.'));
@@ -4824,13 +5094,13 @@
     if (statusSitesBusy || !statusSitesMore) return;
     statusSitesBusy = true;
     statusLock(statusBusy);
-    root.find('#ach-status-sites-more, #ach-status-sites-retry').prop('disabled', true);
+    setActionDisabled('#ach-status-sites-more, #ach-status-sites-retry', true, pendingActionReason);
     root.find('#ach-status-sites-state').text('Loading website inventory...');
     var expectedPage = statusSitePage, ticket = statusSitesTicket;
     request('status_sites', {page:expectedPage, page_size:sitePageSize}, function (r) {
       if (ticket !== statusSitesTicket || root.find('#ach-status-scope').val() !== 'site') return;
       statusSitesBusy = false;
-      root.find('#ach-status-sites-retry').prop('disabled', false);
+      setActionDisabled('#ach-status-sites-retry', false, '');
       if (!r || r.purpose !== 'status_site_selection' ||
           r.inventory_schema !== 2 || !validInventoryPage(r, expectedPage)) {
         statusSitesTrusted = false;
@@ -4876,7 +5146,8 @@
         ).appendTo(select);
       }
       select.val(selected);
-      root.find('#ach-status-sites-more').prop('hidden', !statusSitesMore).prop('disabled', !statusSitesMore);
+      root.find('#ach-status-sites-more').prop('hidden', !statusSitesMore);
+      setActionDisabled('#ach-status-sites-more', !statusSitesMore, 'No additional website page is available.');
       root.find('#ach-status-sites-state').text(
         statusSites.length + ' website(s) loaded' +
         (statusSitesMore ? '; more available.' : '.') +
@@ -5947,7 +6218,7 @@
           statusTlsEvidence = {
             ticket:ticket, revision:revision, template:'unbound', locale:locale,
             brand:JSON.stringify(brand), state:r.state, source:r.source_sha256,
-            recovery:r.recovery_id
+            recovery:r.recovery_id, reason:r.reason
           };
         }
         root.find('#ach-status-tls-result').text(
@@ -6091,7 +6362,7 @@
     var ticket = ++activityTicket;
     activityBusy = true;
     tableBusy('activity', true);
-    root.find('#ach-activity-refresh').prop('disabled', true);
+    setActionDisabled('#ach-activity-refresh', true, pendingActionReason);
     root.find('#ach-activity-result').text('Loading recent activity...');
     request('get_activity', {
       level:root.find('#ach-activity-level').val() || '',
@@ -6100,7 +6371,7 @@
       if (ticket !== activityTicket) return;
       activityBusy = false;
       tableBusy('activity', false);
-      root.find('#ach-activity-refresh').prop('disabled', false);
+      setActionDisabled('#ach-activity-refresh', false, '');
       var rows = root.find('#ach-activity-rows').empty();
       var valid = r && r.schema === 1 && r.read_only === true &&
         ['DEBUG','INFO','WARNING','ERROR'].indexOf(r.configured_level) >= 0 &&
@@ -6173,8 +6444,7 @@
   var phpRuntimeTicket = 0, phpRuntimeBusy = false;
   function phpRuntimeLock() {
     var version = String(root.find('#ach-php-version').val() || '');
-    root.find('#ach-php-runtime-check').prop('disabled',
-      phpRuntimeBusy || phpInventoryBusy || !phpInventory.get(version)?.preview_candidate);
+    setActionDisabled('#ach-php-runtime-check', phpRuntimeBusy || phpInventoryBusy || !phpInventory.get(version)?.preview_candidate, phpRuntimeBusy || phpInventoryBusy ? pendingActionReason : phpSelectionReason);
   }
   function clearPhpTopology(reason) {
     root.find('#ach-php-topology-rows').empty();
@@ -6348,22 +6618,23 @@
     invalidatePhpRuntime('PHP inventory refresh invalidated earlier process/socket evidence.');
     root.find('#ach-php-version').empty().val('').prop('disabled', true);
     ++fpmPolicyLoadTicket;
-    root.find('#ach-fpm-policy-load').prop('disabled', true);
+    setActionDisabled('#ach-fpm-policy-load', true, pendingActionReason);
     resetFpmRecheck('PHP inventory changed; select a service to recheck saved policy.');
     resetFpmAuto('PHP inventory changed; select and inspect automatic repair state.');
     $('<option>').val('').text('Select installed PHP').appendTo(root.find('#ach-php-version'));
-    root.find('#ach-php-discover').prop('disabled', true);
+    setActionDisabled('#ach-php-discover', true, pendingActionReason);
     root.find('#ach-php-discovery-status').text('Discovering native PHP versioned files...');
-    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    fpmFormGeneration++;
     invalidatePhpPreview('PHP inventory refreshed: run a new Preview for the selected version.');
     resetRecovery();
     root.find('#ach-fpm-recovery-status').text('PHP inventory refreshed. Select a version and inspect recovery again.');
     request('get_php_versions', {}, function (r) {
       if (ticket !== phpInventoryTicket) return;
       phpInventoryBusy = false;
-      root.find('#ach-php-discover').prop('disabled', false);
+      setActionDisabled('#ach-php-discover', false, '');
       if (!validPhpInventory(r)) {
         root.find('#ach-php-discovery-status').text('PHP installation inventory unavailable or incompatible. Reopen the plugin after backend update; no version was inferred.');
+        setActionDisabled('#ach-fpm-policy-load', true, 'PHP discovery was not verified. Review the discovery error and retry Discover PHP installations.');
         msg('PHP discovery API mismatch; no version can be selected.', true);
         return;
       }
@@ -6380,11 +6651,10 @@
       });
       root.find('#ach-php-version').val(selectable && phpInventory.get(previous)?.preview_candidate ? previous : '');
       root.find('#ach-php-version').prop('disabled', !selectable);
-      root.find('#ach-fpm-policy-load').prop('disabled', !selectable ||
-        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+      setActionDisabled('#ach-fpm-policy-load', fpmPolicyBusy || !selectable ||
+        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, fpmPolicyBusy ? pendingActionReason : phpSelectionReason);
       resetFpmRecheck('PHP inventory ready; recheck saved policy for the selected service.');
-      root.find('#ach-fpm-auto-refresh').prop('disabled',
-        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+      setActionDisabled('#ach-fpm-auto-refresh', !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, phpSelectionReason);
       phpRuntimeLock();
       root.find('#ach-php-discovery-status').text(
         r.versions.length + ' PHP version(s) observed; ' + selectable +
@@ -6397,10 +6667,9 @@
     ++fpmPolicyLoadTicket;
     resetFpmRecheck('PHP version changed; recheck this service against saved intent.');
     resetFpmAuto('PHP version changed; inspect automatic repair state for this service.');
-    root.find('#ach-fpm-policy-load').prop('disabled',
-      !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+    setActionDisabled('#ach-fpm-policy-load', fpmPolicyBusy || !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, fpmPolicyBusy ? pendingActionReason : phpSelectionReason);
     invalidatePhpRuntime('PHP version changed. Inspect the selected version again.');
-    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    fpmFormGeneration++;
     invalidatePhpPreview('PHP version changed: run a fresh read-only preview.');
     resetRecovery();
     root.find('#ach-fpm-recovery-status').text('PHP version changed. Inspect this version’s recovery before restoring.');
@@ -6551,6 +6820,7 @@
       'using the selected task\'s source Recheck. Apply and Restore remain unavailable.';
     root.find('#ach-status-branding-guidance').prop('hidden',brandingReady)
       .text(brandingReady ? '' : guidance);
+    positionDisabledHelp();
   }
   function renderOperationalStages() {
     var cacheVisible = activeDestination === 'websites' && activeTask === 'cache';
@@ -6566,6 +6836,7 @@
     root.find('[data-php-task="'+activePhpStage+'"]').attr('aria-current','page');
     root.find('#ach-cache-task-effect').text(cacheStageEffects[activeCacheStage]);
     root.find('#ach-php-task-effect').text(phpStageEffects[activePhpStage]);
+    positionDisabledHelp();
   }
   function renderNavigationScope() {
     var siteSelected = !!hostsSiteId();
@@ -6620,6 +6891,7 @@
     var key = destination + (task ? ':' + task : '');
     var switching = key !== activeNavKey;
     var content = root[0] && root[0].querySelector('#ach-content');
+    if (switching) hideDisabledHelp();
     if (switching && content) taskScroll[activeNavKey] = content.scrollTop;
     activeDestination = destination;
     activeTask = task;
@@ -6833,22 +7105,19 @@
     fpmAutoStatus = null;
     fpmAutoReview = null;
     root.find('#ach-fpm-auto-reviewed').prop('checked', false);
-    root.find('#ach-fpm-auto-reviewed,#ach-fpm-auto-enable,#ach-fpm-auto-disable')
-      .prop('disabled', true);
-    root.find('#ach-fpm-auto-refresh').prop('disabled',
-      !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+    setActionDisabled('#ach-fpm-auto-reviewed,#ach-fpm-auto-enable,#ach-fpm-auto-disable', true, 'Inspect automatic repair for the selected PHP service.');
+    setActionDisabled('#ach-fpm-auto-refresh', !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, phpSelectionReason);
     if (note) root.find('#ach-fpm-auto-status').text(note);
   }
   function renderFpmAutoControls() {
     var r = fpmAutoStatus, version = String(root.find('#ach-php-version').val() || '');
     var same = r && r.version === version;
-    root.find('#ach-fpm-auto-reviewed').prop('disabled',
-      !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy);
-    root.find('#ach-fpm-auto-enable').prop('disabled',
-      !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy ||
-      !root.find('#ach-fpm-auto-reviewed').prop('checked'));
-    root.find('#ach-fpm-auto-disable').prop('disabled',
-      !same || !r.enabled || r.pending_disable || fpmAutoBusy);
+    setActionDisabled('#ach-fpm-auto-refresh', fpmAutoBusy || !phpInventory.get(version)?.preview_candidate, fpmAutoBusy ? pendingActionReason : phpSelectionReason);
+    var enableWhy = fpmAutoBusy ? pendingActionReason : !same ? 'Inspect automatic repair for the selected PHP service.' : r.pending_disable ? 'Emergency revocation is pending. Inspect the watcher and wait for completion.' : r.enabled ? 'Automatic repair is already enabled.' : !fpmAutoReview ? 'Recheck the saved desired policy and verify the affected shared sites before enabling.' : 'Review the shared-service scope and tick the Enable approval.';
+    setActionDisabled('#ach-fpm-auto-reviewed', !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy, enableWhy);
+    setActionDisabled('#ach-fpm-auto-enable', !same || r.enabled || r.pending_disable || !fpmAutoReview || fpmAutoBusy ||
+      !root.find('#ach-fpm-auto-reviewed').prop('checked'), enableWhy);
+    setActionDisabled('#ach-fpm-auto-disable', !same || !r.enabled || r.pending_disable || fpmAutoBusy, fpmAutoBusy ? pendingActionReason : !same ? 'Inspect automatic repair for the selected PHP service.' : r.pending_disable ? 'Emergency revocation is already pending. Inspect its status.' : 'Automatic repair is not enabled for this service.');
   }
   function refreshFpmAuto() {
     var version = String(root.find('#ach-php-version').val() || '');
@@ -6948,9 +7217,8 @@
     root.find('#ach-fpm-policy-impact').text('No verified saved-policy site-file mapping.');
     root.find('#ach-fpm-policy-recheck-status').text(note ||
       'Recheck saved desired policy against native source and impacted site files.');
-    root.find('#ach-fpm-policy-recheck').prop('disabled',
-      phpInventoryBusy || fpmPolicyBusy ||
-      !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
+    setActionDisabled('#ach-fpm-policy-recheck', phpInventoryBusy || fpmPolicyBusy ||
+      !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, phpInventoryBusy || fpmPolicyBusy || fpmRecheckBusy ? pendingActionReason : phpSelectionReason);
   }
   function validFpmRecheck(r, version) {
     if (!r || r.status !== true || r.schema !== 1 || r.version !== version ||
@@ -6988,12 +7256,12 @@
     resetFpmRecheck('Checking saved desired policy against native PHP and site files...');
     var ticket = ++fpmRecheckTicket;
     fpmRecheckBusy = true;
-    root.find('#ach-fpm-policy-recheck').prop('disabled',true);
+    setActionDisabled('#ach-fpm-policy-recheck', true, pendingActionReason);
     request('fpm_policy_recheck', {php_version:version}, function (r,failure) {
       if (ticket !== fpmRecheckTicket ||
           version !== String(root.find('#ach-php-version').val() || '')) return;
       fpmRecheckBusy = false;
-      root.find('#ach-fpm-policy-recheck').prop('disabled',false);
+      setActionDisabled('#ach-fpm-policy-recheck', false, '');
       if (!validFpmRecheck(r,version)) {
         root.find('#ach-fpm-policy-recheck-status').text(fpmPolicyFailure(
           'read', failure, 'Saved policy recheck unavailable or incompatible. No source or site match inferred.'));
@@ -7080,23 +7348,24 @@
         '\nReload saved policy state before another save; PHP service/configuration is unchanged.' :
         '\nNo desired values were loaded or changed.');
   }
-  function resetFpmPolicyEvidence(note) {
+  function resetFpmPolicyEvidence(note, settledWhy) {
     fpmPolicyEvidence = null;
-    root.find('#ach-fpm-policy-save').prop('disabled', true);
+    setActionDisabled('#ach-fpm-policy-save', true, '#ach-fpm-policy-why');
     if (note) root.find('#ach-fpm-policy-status').text(note);
     explainGate('ach-fpm-policy-why', 'blocked',
-      'Locked: the five values need a new valid PHP file preview. This approval saves desired Monitor values only, not PHP-FPM configuration.');
+      fpmPolicyBusy ? 'Saving desired Monitor settings. Wait for the verified result before another Save.' :
+      settledWhy || 'Locked: the five values need a new valid PHP file preview. This approval saves desired Monitor values only, not PHP-FPM configuration.');
   }
   root.find('#ach-fpm-policy-load').on('click', function () {
     var version = String(root.find('#ach-php-version').val() || '');
     if (fpmPolicyBusy || !phpInventory.get(version)?.preview_candidate) return;
     var generation = fpmFormGeneration, ticket = ++fpmPolicyLoadTicket;
-    root.find('#ach-fpm-policy-load').prop('disabled', true);
+    setActionDisabled('#ach-fpm-policy-load', true, pendingActionReason);
     root.find('#ach-fpm-policy-status').text('Reading saved shared PHP policy...');
     request('fpm_policy_get', {php_version:version}, function (r, failure) {
       if (ticket !== fpmPolicyLoadTicket || generation !== fpmFormGeneration ||
           version !== String(root.find('#ach-php-version').val() || '')) return;
-      root.find('#ach-fpm-policy-load').prop('disabled', false);
+      setActionDisabled('#ach-fpm-policy-load', false, '');
       if (!validSavedFpmPolicy(r, version)) {
         root.find('#ach-fpm-policy-status').text(fpmPolicyFailure(
           'read', failure, 'Saved policy unavailable or incompatible. No values have been changed.'));
@@ -7130,8 +7399,11 @@
         JSON.stringify(data) !== evidence.form ||
         data.php_version !== evidence.version) return;
     fpmPolicyBusy = true;
+    ++fpmPolicyLoadTicket;
+    setActionDisabled('#ach-fpm-policy-load', true, pendingActionReason);
     resetFpmRecheck('Saved policy write attempted; recheck to compare latest desired values.');
-    resetFpmPolicyEvidence('Saving desired PHP policy; host PHP files are not changed...');
+    invalidatePhpPreview('Desired policy Save pending; a new Preview is needed after completion.',
+      'Saving desired PHP policy; host PHP files are not changed...');
     var generation = fpmFormGeneration;
     request('fpm_policy_save', Object.assign({}, data, {
       reviewed:'true',
@@ -7140,33 +7412,49 @@
       expected_observation_sha256:evidence.digest
     }), function (r, failure) {
       fpmPolicyBusy = false;
-      root.find('#ach-fpm-policy-recheck').prop('disabled',
-        phpInventoryBusy || !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
-      if (generation !== fpmFormGeneration ||
-          data.php_version !== String(root.find('#ach-php-version').val() || '')) return;
-      if (!r || r.schema !== 1 || r.version !== data.php_version ||
-          (r.state !== 'Policy Saved' && r.state !== 'Policy Unchanged') ||
-          r.auto_enforce !== false || r.runtime_verified !== false ||
-          r.scope !== 'shared_service' ||
-          !Number.isSafeInteger(r.policy_revision)) {
-        root.find('#ach-fpm-policy-status').text(fpmPolicyFailure(
-          'save', failure,
-          'Policy save outcome unconfirmed. Use Load saved desired values to reconcile before trying again.'));
-      } else {
-        invalidatePhpPreview('Saved desired shared PHP policy; run a fresh file preview before Prepare/Apply.');
-        root.find('#ach-fpm-policy-status').text(
-          r.state + ' (revision ' + r.policy_revision + '). No PHP file, service or website changed.');
+      // Settlement invalidates every outstanding Preview/Prepare, including
+      // reads started during Save and results from a superseded form/version.
+      // No receipt from the former policy revision can grant new approval.
+      var sameForm = generation === fpmFormGeneration &&
+        data.php_version === String(root.find('#ach-php-version').val() || '');
+      var confirmed = r && r.schema === 1 && r.version === data.php_version &&
+        ['Policy Saved','Policy Unchanged'].includes(r.state) &&
+        r.auto_enforce === false && r.runtime_verified === false &&
+        r.scope === 'shared_service' && Number.isSafeInteger(r.policy_revision);
+      var fallback = 'Policy save outcome unconfirmed. Use Load saved desired values to reconcile before trying again.';
+      var diagnostic = confirmed ? '' : fpmPolicyFailure('save', failure, fallback);
+      var next = confirmed ? 'Save completed. Run a fresh Preview for the current policy revision.' :
+        diagnostic !== fallback ? 'Save rejected. Review the failure and reload saved desired values, then run a fresh Preview.' :
+        'Save outcome unconfirmed. Reconcile saved desired values, then run a fresh Preview.';
+      var note = confirmed ?
+        (sameForm ? r.state : 'Previous PHP ' + data.php_version + ' desired-policy Save completed') +
+          ' (revision ' + r.policy_revision + '). No PHP file, service or website changed.' :
+        diagnostic;
+      if (!sameForm) {
+        next = 'Previous PHP ' + data.php_version + ' policy: ' + next;
+        if (!confirmed) note = 'Previous PHP ' + data.php_version + ' policy: ' + note;
+        note += ' Form or PHP selection changed during this operation; reconcile the submitted service, then Preview the current form.';
       }
+      invalidatePhpPreview('Policy Save settled; run a fresh file preview before Prepare/Apply.', note, next);
+      setActionDisabled('#ach-fpm-policy-load', phpInventoryBusy ||
+        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate,
+        phpInventoryBusy ? pendingActionReason : phpSelectionReason);
+      setActionDisabled('#ach-fpm-policy-recheck', phpInventoryBusy || fpmRecheckBusy ||
+        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate,
+        phpInventoryBusy || fpmRecheckBusy ? pendingActionReason : phpSelectionReason);
     });
   });
   function updateFpmPrepareWhy() {
     var version = String(root.find('#ach-php-version').val() || '');
     var ready = phpPreviewEligible && !fpmBusy;
     explainGate('ach-fpm-prepare-why', ready ? 'ready' : 'blocked',
+      fpmPolicyBusy ? 'Desired policy Save is in progress. Run a fresh Preview after it settles before Prepare.' :
       fpmBusy ? 'A PHP-FPM check or operation is running. Wait for its result.' :
       !version ? 'Choose an installed PHP version above, enter settings, then Preview before preparing a shared-service change.' :
       !phpPreviewEligible ?
-        'Locked: run Preview PHP-FPM settings first. If the result says unsupported or the shared-site mapping is incomplete, Prepare must remain unavailable.' :
+        (phpInventory.get(version)?.manual_apply_adapter === 'none' ?
+          'This discovered PHP service has no guarded Apply adapter. Read-only Preview and supported desired-policy inspection remain available; do not force a shared-service change.' :
+          'Locked: run Preview PHP-FPM settings first. If the result says unsupported or the shared-site mapping is incomplete, Prepare must remain unavailable.') :
         'Preview supports a guarded change for PHP ' + version +
         '. Prepare creates a review plan only; Apply still requires a separate explicit approval and may reload this shared PHP service.');
   }
@@ -7174,31 +7462,30 @@
     fpmPlan = null; fpmFields = null;
     root.find('#ach-fpm-review').prop('hidden', true);
     root.find('#ach-fpm-approval').prop('checked', false);
-    root.find('#ach-fpm-commit').prop('disabled', true);
-    root.find('#ach-fpm-prepare').prop('disabled', fpmBusy || !phpPreviewEligible);
+    setActionDisabled('#ach-fpm-commit', true, 'Prepare a current guarded plan from a valid Preview.');
+    setActionDisabled('#ach-fpm-prepare', fpmBusy || !phpPreviewEligible, '#ach-fpm-prepare-why');
     updateFpmPrepareWhy();
   }
   function resetRecovery() {
     fpmRecovery = null;
     root.find('#ach-fpm-rollback-controls').prop('hidden', true);
     root.find('#ach-fpm-rollback-approval').prop('checked', false);
-    root.find('#ach-fpm-rollback').prop('disabled', true);
+    setActionDisabled('#ach-fpm-rollback', true, 'Inspect the selected PHP service for a matching saved recovery.');
     root.find('#ach-fpm-restore-rows').empty();
     root.find('#ach-fpm-recovery-impact').text('Current affected sites not inspected.');
   }
   function fpmLock(value) {
     fpmBusy = value;
-    root.find('#ach-fpm-prepare').prop('disabled', value || !phpPreviewEligible);
-    root.find('#ach-fpm-commit').prop('disabled', value || !fpmPlan || root.find('#ach-fpm-approval').prop('checked') !== true);
+    setActionDisabled('#ach-fpm-prepare', value || !phpPreviewEligible, '#ach-fpm-prepare-why');
+    setActionDisabled('#ach-fpm-commit', value || !fpmPlan || root.find('#ach-fpm-approval').prop('checked') !== true, fpmBusy ? pendingActionReason : !fpmPlan ? 'Prepare a current guarded plan from a valid Preview.' : 'Review the prepared shared-service plan and tick the Apply approval.');
     // Recovery inspection is independent of native PHP inventory, including
     // after an aaPanel upgrade or a failed discovery call.
     var recoveryVersion = String(root.find('#ach-fpm-recovery-version').val() || '');
     root.find('#ach-fpm-recovery-version').prop('disabled', value);
-    root.find('#ach-fpm-check-recovery').prop('disabled',
-      value || !['81','85'].includes(recoveryVersion));
-    root.find('#ach-fpm-rollback').prop('disabled', value || !fpmRecovery ||
+    setActionDisabled('#ach-fpm-check-recovery', value || !['81','85'].includes(recoveryVersion), fpmBusy ? pendingActionReason : 'Select a supported saved recovery service.');
+    setActionDisabled('#ach-fpm-rollback', value || !fpmRecovery ||
       fpmRecovery.version !== recoveryVersion ||
-      root.find('#ach-fpm-rollback-approval').prop('checked') !== true);
+      root.find('#ach-fpm-rollback-approval').prop('checked') !== true, fpmBusy ? pendingActionReason : !fpmRecovery || fpmRecovery.version !== String(root.find('#ach-fpm-recovery-version').val() || '') ? 'Inspect the selected PHP service for a matching saved recovery.' : 'Review the current shared-site impact and tick the Restore approval.');
     updateFpmPrepareWhy();
   }
   function validFpmPlan(r, version) {
@@ -7215,8 +7502,10 @@
       return typeof r.plan[key] === 'string' && /^[0-9a-f]{64}$/.test(r.plan[key]);
     }) && typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256);
   }
-  function invalidatePhpPreview(reason) {
-    resetFpmPolicyEvidence('Current form/source preview expired. Run Preview to review and save desired values.');
+  function invalidatePhpPreview(reason, policyNote, policyWhy) {
+    ++fpmPreviewTicket;
+    ++fpmPrepareTicket;
+    resetFpmPolicyEvidence(policyNote || 'Current form/source preview expired. Run Preview to review and save desired values.', policyWhy);
     phpPreviewEligible = false;
     resetFpmPlan();
     root.find('#ach-diff-rows').empty();
@@ -7227,9 +7516,8 @@
   }
   root.find('#ach-php-form').on('input change', function () {
     ++fpmPolicyLoadTicket;
-    root.find('#ach-fpm-policy-load').prop('disabled',
-      !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate);
-    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    setActionDisabled('#ach-fpm-policy-load', fpmPolicyBusy || !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, fpmPolicyBusy ? pendingActionReason : phpSelectionReason);
+    fpmFormGeneration++;
     invalidatePhpPreview('Settings changed: run a fresh read-only preview.');
     if (fpmRecovery) {
       resetRecovery();
@@ -7404,7 +7692,6 @@
     event.preventDefault();
     // A newer Preview invalidates ALL prior Prepare results and approvals,
     // even if inputs are byte-for-byte identical.
-    fpmPrepareTicket++;
     invalidatePhpPreview('Checking current PHP-FPM settings and site impact...');
     var data = phpFields(), snapshot = JSON.stringify(data);
     if (!phpInventory.get(data.php_version)?.preview_candidate ||
@@ -7430,17 +7717,19 @@
           typeof r.fpm_observation_sha256 === 'string' &&
           /^[0-9a-f]{64}$/.test(r.fpm_observation_sha256) &&
           ['File Match','File Drift'].includes(r.state)) {
-        fpmPolicyEvidence = {
+        fpmPolicyEvidence = fpmPolicyBusy ? null : {
           version:data.php_version, form:snapshot, digest:r.fpm_observation_sha256,
           policy_revision:saved.policy_revision, monitor_revision:saved.monitor_revision
         };
-        root.find('#ach-fpm-policy-save').prop('disabled', false);
-        explainGate('ach-fpm-policy-why', 'ready',
+        setActionDisabled('#ach-fpm-policy-save', fpmPolicyBusy, '#ach-fpm-policy-why');
+        explainGate('ach-fpm-policy-why', fpmPolicyBusy ? 'blocked' : 'ready',
+          fpmPolicyBusy ? pendingActionReason :
           'Preview is current. Choose Save to store these desired Monitor settings; the PHP service and site files will not change.');
         var match = saved.saved && fpmPolicyKeys.every(function (key) {
           return Number(data[key.replace('pm.','')]) === saved.desired[key];
         });
-        root.find('#ach-fpm-policy-status').text(
+        root.find('#ach-fpm-policy-status').text(fpmPolicyBusy ?
+          'File observation only while desired policy Save is pending. Run a fresh Preview after it settles.' :
           (saved.saved ? match ? 'Saved desired values match this form. ' :
            'Saved desired values differ from this form. ' :
            'No saved policy for this PHP version. ') +
@@ -7483,15 +7772,16 @@
         tbody.append(tr);
       });
       if (r.state === 'File Match') root.find('#ach-fpm-result').text(r.state + ': ' + t.noDrift + '. ' + r.note);
-      phpPreviewEligible = (data.php_version === '85' ||
+      phpPreviewEligible = !fpmPolicyBusy && (data.php_version === '85' ||
         data.php_version === '81' &&
         phpInventory.get('81')?.manual_apply_adapter === 'guarded_php81') &&
         (r.state === 'File Drift' || r.state === 'File Match') &&
         validImpact(impact, data.php_version) && impact.state === 'File Mapping' &&
         impact.manual_apply_eligible === true && impact.matched_sites.length > 0;
-      root.find('#ach-fpm-prepare').prop('disabled', fpmBusy || !phpPreviewEligible);
+      setActionDisabled('#ach-fpm-prepare', fpmBusy || !phpPreviewEligible, '#ach-fpm-prepare-why');
       updateFpmPrepareWhy();
-      root.find('#ach-fpm-plan').text(phpPreviewEligible ?
+      root.find('#ach-fpm-plan').text(fpmPolicyBusy ?
+        'File observation only while policy Save is pending. Run a fresh Preview after it settles.' : phpPreviewEligible ?
         'File mapping available; prepare a guarded manual change if needed.' :
         validImpact(impact, data.php_version) && impact.state === 'File Mapping' &&
           impact.manual_apply_eligible === false ?
@@ -7502,16 +7792,16 @@
   var wpTerminalBusy = false, wpTerminalKnown = false;
   var wpTerminalHelperStale = false;
   function wpTerminalControl() {
-    root.find('#ach-wp-terminal-abandon').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
-      root.find('#ach-wp-terminal-abandon-reviewed').prop('checked') !== true);
-    root.find('#ach-wp-terminal-enable').prop('disabled', wpTerminalBusy || !wpTerminalKnown ||
-      root.find('#ach-wp-terminal-reviewed').prop('checked') !== true);
+    setActionDisabled('#ach-wp-terminal-abandon', wpTerminalBusy || !wpTerminalKnown ||
+      root.find('#ach-wp-terminal-abandon-reviewed').prop('checked') !== true, wpTerminalBusy ? pendingActionReason : wpTerminalHelperStale ? witnessStaleReason : !wpTerminalKnown ? witnessInspectionReason : 'Review the stale witness and tick the Discard approval.');
+    setActionDisabled('#ach-wp-terminal-enable', wpTerminalBusy || !wpTerminalKnown ||
+      root.find('#ach-wp-terminal-reviewed').prop('checked') !== true, wpTerminalBusy ? pendingActionReason : wpTerminalHelperStale ? witnessStaleReason : !wpTerminalKnown ? witnessInspectionReason : 'Review the failed-install witness and tick the Enable approval.');
     // Emergency disable is safe even when a verified resident helper mismatch
     // prevents ordinary policy inspection. Never enable in this state.
-    root.find('#ach-wp-terminal-disable').prop('disabled', wpTerminalBusy ||
-      (!wpTerminalKnown && !wpTerminalHelperStale));
-    root.find('#ach-wp-terminal-recheck').prop('disabled', wpTerminalBusy || !wpTerminalKnown);
-    root.find('#ach-wp-terminal-refresh').prop('disabled', wpTerminalBusy);
+    setActionDisabled('#ach-wp-terminal-disable', wpTerminalBusy ||
+      (!wpTerminalKnown && !wpTerminalHelperStale), wpTerminalBusy ? pendingActionReason : witnessInspectionReason);
+    setActionDisabled('#ach-wp-terminal-recheck', wpTerminalBusy || !wpTerminalKnown, wpTerminalBusy ? pendingActionReason : wpTerminalHelperStale ? witnessStaleReason : witnessInspectionReason);
+    setActionDisabled('#ach-wp-terminal-refresh', wpTerminalBusy, pendingActionReason);
   }
   function wpTerminalRender(r) {
     if (r && r.status === false && r.reason_code === 'resident_wp_helper_stale' &&
@@ -7636,6 +7926,7 @@
   root.find('#ach-wp-terminal-enable').on('click', function () { updateWpTerminal('enable'); });
   root.find('#ach-wp-terminal-disable').on('click', function () { updateWpTerminal('disable'); });
 
+  initializeDisabledHelp();
   navigateTask('overview',null,false);
 })();
 </script>

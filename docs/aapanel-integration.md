@@ -223,6 +223,7 @@ The same upstream file is available from
 ```bash
 node tests/manual/layout_browser.cjs
 node tests/manual/status_50x_browser.cjs
+node tests/manual/disabled_help_browser.cjs
 ```
 
 The layout runner follows real destination/task/stage controls at seven
