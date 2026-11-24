@@ -1551,6 +1551,25 @@ def _cache_observation(site, record, public, *, vhost_root=VHOST_ROOT,
     return response
 
 
+def _bridge_inspection(site, public, record, *, missing_lock=False):
+    from ach_customizer_cache_bridge import BridgeError, inspect as inspect_bridge
+    if public is None:
+        raise CacheManageError('compatibility', 'Native site inventory required')
+    if missing_lock and record is not None:
+        status = 'Needs Review: Existing recovery journal has no operation lock; manual review required.'
+    else:
+        try:
+            status = inspect_bridge(site, public, record)
+        except (BridgeError, OSError) as exc:
+            status = 'Needs Review: ' + str(exc)
+    return {'schema': 1, 'state': status, 'read_only': True,
+            'site_id': site['id'], 'site_key': site['name'],
+            'recovery_id': record['op'] if record else None,
+            'runtime_verified': False, 'purge_supported': False,
+            'note': 'WordPress-side registration, Nginx Helper options '
+                    'and live Nginx workers are not proven by this file check.'}
+
+
 def manage_cache(action, site, public=None, *, expected_source=None,
                  expected_proposal=None, recovery_id=None, approved=False,
                  data_dir=DATA_DIR, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
@@ -1578,34 +1597,34 @@ def manage_cache(action, site, public=None, *, expected_source=None,
             if action not in ('recheck', 'bridge_inspect'):
                 raise
             record = _record_read(statefd, site['id'])
-            if record is not None:
+            if action == 'bridge_inspect':
+                result = _bridge_inspection(site, public, record, missing_lock=True)
+                # A first writer may have created the lock during observation.
+                # In that case re-read under the now-existing lock. Never create
+                # a lock or journal merely to inspect an absent manifest.
+                try:
+                    lockfd = _exclusive_lock(statefd, create=False)
+                except FileNotFoundError:
+                    return result
+            elif record is not None:
                 return {'schema': 1, 'state': 'Needs Review', 'read_only': True,
                         'site_id': site['id'], 'recovery_id': record['op'],
                         'runtime_verified': False, 'purge_supported': False,
                         'note': 'Existing recovery journal has no operation lock; manual review required.'}
-            return {'schema': 1, 'state': 'Unmanaged', 'read_only': True,
-                    'site_id': site['id'], 'recovery_id': None,
-                    'runtime_verified': False, 'purge_supported': False}
+            else:
+                return {'schema': 1, 'state': 'Unmanaged', 'read_only': True,
+                        'site_id': site['id'], 'recovery_id': None,
+                        'runtime_verified': False, 'purge_supported': False}
         try:
             record = _record_read(statefd, site['id'])
             if action in ('bridge_enable', 'bridge_disable', 'bridge_inspect'):
                 from ach_customizer_cache_bridge import (
                     BridgeError, enable as enable_bridge, disable as disable_bridge,
-                    inspect as inspect_bridge,
                 )
                 if public is None:
                     raise CacheManageError('compatibility', 'Native site inventory required')
                 if action == 'bridge_inspect':
-                    try:
-                        status = inspect_bridge(site, public, record)
-                    except (BridgeError, OSError) as exc:
-                        status = 'Needs Review: ' + str(exc)
-                    return {'schema':1, 'state':status, 'read_only':True,
-                            'site_id':site['id'], 'site_key':site['name'],
-                            'recovery_id':record['op'] if record else None,
-                            'runtime_verified':False, 'purge_supported':False,
-                            'note':'WordPress-side registration, Nginx Helper options '
-                                   'and live Nginx workers are not proven by this file check.'}
+                    return _bridge_inspection(site, public, record)
                 if approved is not True:
                     raise CacheManageError('authorization',
                                            'Explicit WordPress Bridge approval required')

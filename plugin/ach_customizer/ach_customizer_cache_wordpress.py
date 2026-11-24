@@ -896,6 +896,15 @@ def inspect(site, public, *, data_dir=DATA_DIR):
     if journal is None:
         return {"schema": 1, "state": "Not Connected", "site_id": site["id"],
                 "site_key": site["name"], "read_only": True}
+    if journal["phase"] == "restored":
+        # Completed disconnection is independent of subsequent native Cache
+        # generations. Disconnect would be a no-op; native recovery belongs
+        # to Apply & restore, not a new WordPress connection.
+        return {"schema": 1, "state": "Not Connected",
+                "site_id": site["id"], "site_key": site["name"],
+                "read_only": True, "recovery_id": journal["recovery_id"],
+                "note": "WordPress Cache connection restored to its previous state. "
+                        "Inspect independent native Cache in Apply & restore if needed."}
     runtime = manage_cache("recheck", site, public)
     # A partial native generation is an expected read-only observation,
     # not a failed setup or a permission to restore. Keep the native
@@ -907,13 +916,6 @@ def inspect(site, public, *, data_dir=DATA_DIR):
                 "note": "Native Cache: " + runtime["state"] +
                         ". Open Apply & restore and Recheck the saved recovery. " +
                         (runtime.get("note") or "")}
-    if journal["phase"] == "restored" and (
-            runtime["state"] in ("Restored", "Unmanaged") or
-            runtime["state"] == "Applied" and not journal.get("cache_owned", True)):
-        return {"schema": 1, "state": "Not Connected",
-                "site_id": site["id"], "site_key": site["name"],
-                "read_only": True, "recovery_id": journal["recovery_id"],
-                "note": "WordPress Cache connection restored to its previous state."}
     state = "Needs Review"
     if (journal["phase"] == "connected" and runtime["state"] == "Applied"
             and runtime["runtime_verified"]

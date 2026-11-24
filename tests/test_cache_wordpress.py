@@ -482,6 +482,32 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), self.original_config)
         self.assertEqual(self.ini.read_bytes(), self.original_ini)
 
+    def test_restored_connection_is_independent_of_later_native_cache(self):
+        self.start()
+        self.setup_once()
+        wp.restore(self.site, object(), data_dir=str(self.root))
+        journal = self.root / "ach_customizer.nginx-helper.7.json"
+        before = (journal.read_bytes(), self.config.read_bytes(), self.ini.read_bytes())
+        for state in ("Applied", "Recovery Required", "Needs Review"):
+            with self.subTest(state=state), \
+                 patch.object(wp, "manage_cache", return_value={
+                     "state": state, "recovery_id": "a" * 32,
+                     "runtime_verified": state == "Applied"
+                 }) as native, patch.object(wp, "_php") as php, \
+                 patch.object(wp, "_save") as save:
+                observed = wp.inspect(self.site, object(), data_dir=str(self.root))
+                self.assertEqual(observed["state"], "Not Connected")
+                self.assertTrue(observed["read_only"])
+                self.assertEqual(observed["recovery_id"], self.native_id)
+                self.assertIn("independent native Cache", observed["note"])
+                self.assertFalse(wp.restore(self.site, object(),
+                                            data_dir=str(self.root))["changed"])
+                native.assert_not_called()
+                php.assert_not_called()
+                save.assert_not_called()
+                self.assertEqual((journal.read_bytes(), self.config.read_bytes(),
+                                  self.ini.read_bytes()), before)
+
     def test_check_reports_partial_native_recovery_without_a_write(self):
         self.start()
         self.setup_once()

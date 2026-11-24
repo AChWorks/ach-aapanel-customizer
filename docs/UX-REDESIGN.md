@@ -283,6 +283,18 @@ general privacy behavior. Every new request clears the previous result tone.
 | Error pages | Distinguish content/route evidence, saved-journal-only, stale selected branding and failed operations. Keep explicit scope Save/Reset (an inherited value match alone cannot prove the scope is stored). |
 | Activity and recovery | Severity remains distinct from operation success; unavailable data is red, retention/persistence warnings amber. Never infer a write or recovery authorization from a log. |
 
+Related positive evidence is invalidated on unconfirmed Clear or a
+conflicting manifest recovery identity, not on a verified Clear (including
+zero removed files). Zero-file Clear is neutral. Bridge inspection uses
+its own manifest contract even before the first native lock exists; a
+completed WordPress Disconnect stays disconnected independently of later
+native Cache generations. Explicitly contradictory action/read-only/runtime
+fields cannot establish Connected proof. PHP watcher readiness does not
+override its last repair outcome, and unresolved shared-site impact is
+review feedback. PHP recovery and Error Pages preflight output are marked
+historical when their owning evidence is superseded, even on failed or
+unconfirmed requests.
+
 This is a feedback and action-availability refinement, not a new required
 checklist or persistence layer. The API remains the authority; no action is
 authorized by a UI color or stale observation. The installed release,

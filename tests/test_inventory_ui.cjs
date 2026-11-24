@@ -9999,6 +9999,212 @@ test('Connected and provisioned observations cannot survive conflicting or unava
   assert.equal(ui.state().bridgeTone,'neutral');
 });
 
+test('R145-01/04 Clear preserves confirmed connection only on verified results and distinguishes zero-file no-op', () => {
+  const native={status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false};
+  const connected={status:true,schema:1,state:'Connected',site_id:7,site_key:'site.test',
+    read_only:true,recovery_id:'f'.repeat(32)};
+  for (const url of [false,true]) {
+    const pathFields=url?{cache_url_path:'/news/'}:{};
+    const success={...native,...pathFields,read_only:false,cache_files_removed:1,changed:true};
+    for (const [reply,tone,retains] of [
+      [success,'observed',true],
+      [{...success,cache_files_removed:0,changed:false},'neutral',true],
+      [{status:false,stage:'cache_manage',msg:'Site Cache is not verified Applied; reconcile and Recheck'},'error',false],
+      [{...success,recovery_id:'e'.repeat(32)},'error',false],
+      [{...success,runtime_verified:false},'error',false],
+      [{...success,read_only:true},'error',false],
+      [null,'error',false]
+    ]) {
+      const ui=loadUi();selectHostsSite(ui);
+      ui.statusClick('#ach-wp-cache-inspect').respond(connected);
+      ui.statusClick('#ach-cache-activation-recheck').respond(native);
+      if(url)ui.statusSetValue('#ach-cache-url-path','/news/','input');
+      ui.statusSetChecked(url?'#ach-cache-url-reviewed':'#ach-cache-clear-reviewed',true);
+      const clear=ui.statusClick(url?'#ach-cache-clear-url':'#ach-cache-clear-files');
+      if(reply)clear.respond(reply);else clear.reject(null,'timeout');
+      assert.equal(ui.state().cacheActivationTone,tone);
+      assert.equal(ui.state().wpCacheTone,retains?'observed':'neutral');
+      assert.equal(ui.state().bridgeTone,retains?'observed':'neutral');
+      assert.equal(ui.state().wpCacheSetupDisabled,retains);
+      assert.equal(ui.state().cacheClearDisabled,true);
+      assert.equal(ui.state().cacheUrlClearDisabled,true);
+      ui.statusClick('#ach-wp-cache-inspect').respond(connected);
+      ui.statusClick('#ach-cache-activation-recheck').respond(native);
+      assert.equal(ui.state().wpCacheSetupDisabled,true);
+      assert.equal(ui.state().cacheClearConsentDisabled,false);
+    }
+  }
+});
+
+test('R145-01 Bridge inspection reconciles a newer journal independently of WordPress proof', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const native={status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false};
+  const manifest={...native,state:'Provisioned',runtime_verified:false};
+  ui.statusClick('#ach-cache-activation-recheck').respond(native);
+  ui.statusClick('#ach-bridge-inspect').respond(manifest);
+  assert.equal(ui.state().cacheClearConsentDisabled,false);
+  assert.equal(ui.state().bridgeTone,'observed');
+  ui.statusSetChecked('#ach-cache-clear-reviewed',true);
+  ui.statusSetChecked('#ach-cache-restore-reviewed',true);
+  ui.statusClick('#ach-bridge-inspect').respond({...manifest,recovery_id:'e'.repeat(32)});
+  assert.equal(ui.state().cacheClearDisabled,true);
+  assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  assert.equal(ui.state().cacheActivationTone,'review');
+  assert.match(ui.state().cacheActivationResult,/different native recovery identity/);
+  assert.equal(ui.state().bridgeTone,'observed');
+  ui.statusClick('#ach-cache-activation-recheck').respond({...native,recovery_id:'e'.repeat(32)});
+  assert.equal(ui.state().cacheClearConsentDisabled,false);
+  assert.equal(ui.state().cacheClearDisabled,true,'Old consent must not carry forward');
+  ui.statusClick('#ach-bridge-inspect').respond({...manifest,state:'Not Provisioned',recovery_id:'e'.repeat(32)});
+  assert.equal(ui.state().bridgeTone,'neutral');
+  assert.equal(ui.state().bridgeDisableDisabled,true);
+  assert.equal(ui.state().cacheClearConsentDisabled,false,'Absent manifest does not invalidate matching native Cache');
+});
+
+test('R145-02/03 exact connection contract accepts genuine endpoint shapes and rejects contradictory proof', () => {
+  const base={status:true,schema:1,site_id:7,site_key:'site.test'};
+  const connected={...base,state:'Connected',recovery_id:'f'.repeat(32)};
+  for (const [action,body] of [
+    ['inspect',{...connected,read_only:true,changed:true}],
+    ['inspect',{...connected,read_only:true,runtime_verified:false}],
+    ['inspect',{...connected,read_only:true,runtime_verified:'true'}],
+    ['setup',{...connected,read_only:true,changed:true,runtime_verified:true}],
+    ['restore',{...base,state:'Restored',read_only:true,changed:true}],
+    ['restore',{...base,state:'Not Connected',changed:false,recovery_id:'f'.repeat(32)}]
+  ]) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-wp-cache-'+action).respond(body);
+    assert.equal(ui.state().wpCacheTone,'error',action);
+    assert.equal(ui.state().bridgeTone,'neutral');
+    assert.equal(ui.state().wpCacheSetupDisabled,false);
+  }
+  for(const [action,body,expected] of [
+    ['inspect',{...connected,read_only:true},'observed'],
+    ['setup',{...connected,changed:true,runtime_verified:true},'observed'],
+    ['restore',{...base,state:'Restored',changed:true,recovery_id:'f'.repeat(32)},'observed'],
+    ['restore',{...base,state:'Restored',changed:true},'observed'],
+    ['restore',{...base,state:'Not Connected',changed:false},'neutral'],
+    ['inspect',{...base,state:'Not Connected',read_only:true,recovery_id:'f'.repeat(32)},'neutral']
+  ]) {
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-wp-cache-'+action).respond(body);
+    assert.equal(ui.state().wpCacheTone,expected,action);
+    assert.equal(ui.state().wpCacheSetupDisabled,body.state==='Connected');
+    assert.equal(ui.state().wpCacheRestoreDisabled,body.state!=='Connected');
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-bridge-inspect').respond({...base,state:'Not Provisioned',
+    recovery_id:null,read_only:true,runtime_verified:false,purge_supported:false});
+  assert.equal(ui.state().bridgeTone,'neutral');
+  assert.equal(ui.state().bridgeDisableDisabled,true);
+});
+
+test('R145-04 automatic PHP watcher readiness cannot hide a refused or partial repair', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  ui.selectPhpVersion('85');
+  const base={status:true,schema:1,version:'85',state_revision:1,
+    enabled:true,pending_disable:false,watcher_ready:true};
+  for(const [change,tone] of [
+    [{last_state:'Armed'},'observed'],
+    [{last_state:'Applied'},'observed'],
+    [{last_state:'Needs Review: nonvendor PHP-FPM drift'},'review'],
+    [{last_state:'Repair refused at reload'},'review'],
+    [{last_state:'No Change'},'neutral'],
+    [{last_state:'No Native FPM Optimization'},'neutral'],
+    [{last_state:'Pending Disable',pending_disable:true},'review'],
+    [{last_state:'Armed',watcher_ready:false},'review'],
+    [{last_state:'Disabled',enabled:false,watcher_ready:false},'neutral']
+  ]) {
+    const inspect=ui.inspectFpmAuto();
+    assert.equal(ui.state().feedbackTone['#ach-fpm-auto-status'],'neutral');
+    inspect.respond({...base,...change});
+    assert.equal(ui.state().feedbackTone['#ach-fpm-auto-status'],tone,change.last_state);
+    if(change.enabled!==false && !change.pending_disable)
+      assert.equal(ui.state().fpmAutoDisableDisabled,false);
+  }
+  ui.inspectFpmAuto().respond({status:false});
+  assert.equal(ui.state().feedbackTone['#ach-fpm-auto-status'],'error');
+});
+
+test('R145-04 File Match requires resolved shared impact for positive combined feedback', () => {
+  const ui=loadUi();
+  for(const [impact,tone] of [
+    [phpImpact(),'observed'],
+    [phpImpact({state:'Needs Review',unresolved_sites:[{id:9,site_key:'uncertain',reason:'Indirect routing'}],site_count:4}),'review']
+  ]) {
+    ui.submitPhp().respond({...phpPreview(impact),state:'File Match',changes:[]});
+    assert.equal(ui.state().feedbackTone['#ach-fpm-result'],tone);
+  }
+});
+
+test('R145-05 PHP recovery feedback expires when its own evidence is reset', () => {
+  const ui=loadUi();
+  function restore(){
+    ui.inspectFpmRecovery().respond(recoveryPreview());
+    ui.approveFpmRollback(true);
+    const req=ui.rollbackFpm();
+    assert.equal(ui.state().feedbackTone['#ach-fpm-recovery-status'],'neutral');
+    req.respond(rolledBackResult());
+    assert.equal(ui.state().feedbackTone['#ach-fpm-recovery-status'],'observed');
+  }
+  restore();
+  const inspect=ui.inspectFpmRecovery();
+  assert.equal(ui.state().feedbackTone['#ach-fpm-recovery-status'],'neutral');
+  assert.doesNotMatch(ui.state().fpmRecovery,/Rolled Back/);
+  inspect.respond({status:true});
+  assert.equal(ui.state().feedbackTone['#ach-fpm-recovery-status'],'error');
+  restore();
+  ui.inspectFpmRecovery().reject(null,'timeout');
+  assert.equal(ui.state().feedbackTone['#ach-fpm-recovery-status'],'error');
+  restore();
+  ui.submitPhp().respond(phpPreview());
+  ui.prepareFpm().respond(guardedPlan());
+  ui.approveFpm(true);
+  const apply=ui.commitFpm();
+  assert.equal(ui.state().feedbackTone['#ach-fpm-recovery-status'],'neutral');
+  assert.doesNotMatch(ui.state().fpmRecovery,/Rolled Back/);
+  apply.reject(null,'timeout');
+  assert.equal(ui.state().feedbackTone['#ach-fpm-recovery-status'],'neutral');
+});
+
+test('R145-05 status operation supersedes the earlier HTTP observation before any reply', () => {
+  const ui=statusProbeUi();
+  const matching=statusProbe();
+  ui.statusClick('#ach-status-probe-button').respond(matching);
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'observed');
+  const check=ui.statusClick('#ach-status-manage-recheck');
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'neutral');
+  assert.match(ui.state().statusProbe,/historical/);
+  check.respond(manage404Response('recheck'));
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'neutral');
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  const restore=ui.statusClick('#ach-status-manage-restore');
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'neutral');
+  restore.reject(null,'timeout');
+  assert.equal(ui.state().feedbackTone['#ach-status-manage-result'],'error');
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'neutral');
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  ui.statusClick('#ach-status-probe-button').respond(matching);
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'observed');
+  ui.statusClick('#ach-status-manage-recheck').respond({status:true});
+  assert.equal(ui.state().feedbackTone['#ach-status-manage-result'],'error');
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'neutral');
+  ui.statusClick('#ach-status-manage-recheck').respond(manage404Response('recheck'));
+  assert.equal(ui.state().feedbackTone['#ach-status-manage-result'],'observed');
+  const freshProbe=ui.statusClick('#ach-status-probe-button');
+  assert.equal(ui.state().feedbackTone['#ach-status-manage-result'],'neutral');
+  assert.match(ui.state().statusManage,/historical/);
+  freshProbe.reject(null,'timeout');
+  assert.equal(ui.state().feedbackTone['#ach-status-probe-result'],'error');
+  assert.equal(ui.state().feedbackTone['#ach-status-manage-result'],'neutral');
+});
+
 test('Slow WordPress connection returns correlated server failure without an early client timeout', () => {
   const ui=loadUi();selectHostsSite(ui);
   const req=ui.statusClick('#ach-wp-cache-setup');

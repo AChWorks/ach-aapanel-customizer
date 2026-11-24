@@ -450,6 +450,28 @@ class CacheManageTests(unittest.TestCase):
         self.assertEqual(journal.read_bytes(), before_journal)
         self.assertEqual(self.commands, before_commands)
 
+    def test_bridge_inspection_with_missing_lock_and_journal_requires_review(self):
+        applied = self.apply()
+        lock = self.state/'ach_customizer.state.lock'
+        lock.unlink()
+        journal = self.state/cache._names(7)[2]
+        before = journal.read_bytes()
+        commands = list(self.commands)
+        with patch('ach_customizer_cache_bridge.inspect') as inspect:
+            result = cache.manage_cache('bridge_inspect', self.site, public=object(),
+                                        **self.kwargs())
+        self.assertTrue(result['state'].startswith('Needs Review:'))
+        self.assertIn('no operation lock', result['state'])
+        self.assertEqual(result['site_id'], 7)
+        self.assertEqual(result['site_key'], self.site['name'])
+        self.assertEqual(result['recovery_id'], applied['recovery_id'])
+        self.assertTrue(result['read_only'])
+        self.assertFalse(result['runtime_verified'])
+        self.assertFalse(lock.exists())
+        self.assertEqual(journal.read_bytes(), before)
+        self.assertEqual(self.commands, commands)
+        inspect.assert_not_called()
+
     def test_preflight_requires_healthy_php_route_before_operator_consent(self):
         def php_404(site, *, marker=None):
             raise cache.CacheManageError('probe','Registered PHP /index.php is not healthy')

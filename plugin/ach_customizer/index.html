@@ -1392,7 +1392,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.114'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.115'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -4576,10 +4576,20 @@
           'Review the selected site, Activity and saved Cache recovery before retrying.'),
         !known ? 'error' : r.state.startsWith('Needs Review') ? 'review' :
           managedFeedbackTone(r.state,true));
-      if (approval) {
+      var conflictingRecovery = known && !approval &&
+        ((cacheClearIdentity && r.recovery_id !== cacheClearIdentity) ||
+         (cacheRecoveryIdentity && r.recovery_id !== cacheRecoveryIdentity));
+      if (approval || conflictingRecovery) {
+        cacheActivationSnapshot = null;
         cacheClearIdentity = null;
         cacheRecoveryIdentity = null;
-        cacheActivationNotice('Bridge mapping changed or was refused. Recheck Cache before another operation.');
+        cacheUrlApprovedPath = null;
+        root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed,#ach-cache-url-reviewed')
+          .prop('checked', false);
+        cacheActivationNotice(conflictingRecovery ?
+          'Bridge inspection observed a different native recovery identity. Recheck Cache before another operation.' :
+          'Bridge mapping changed or was refused. Recheck Cache before another operation.',
+          conflictingRecovery ? 'review' : 'neutral');
       }
       cacheActivationLock();
     });
@@ -4589,15 +4599,22 @@
     if (!r || r.status !== true || r.schema !== 1 || !site ||
         id !== hostsSiteId() || r.site_id !== Number(id) || r.site_key !== site.name ||
         (r.recovery_id != null && (typeof r.recovery_id !== 'string' || !token.test(r.recovery_id)))) return false;
+    // Optional fields must agree with the actual current endpoint contract.
+    // Inspection does not perform a write; a restored pre-Apply journal can
+    // legitimately have no native recovery ID.
+    if (r.runtime_verified !== undefined && typeof r.runtime_verified !== 'boolean') return false;
     if (action === 'inspect')
       return r.read_only === true &&
+        (r.changed === undefined || r.changed === false) &&
         ['Connected','Not Connected','Needs Review'].includes(r.state) &&
-        (r.state !== 'Connected' || token.test(r.recovery_id || ''));
+        (r.state !== 'Connected' ||
+          (r.runtime_verified !== false && token.test(r.recovery_id || '')));
+    if (r.read_only !== undefined && r.read_only !== false) return false;
     if (action === 'setup')
       return r.state === 'Connected' && r.runtime_verified === true &&
         typeof r.changed === 'boolean' && token.test(r.recovery_id || '');
     return r.state === 'Restored' && r.changed === true ||
-      r.state === 'Not Connected' && r.changed === false;
+      r.state === 'Not Connected' && r.changed === false && r.recovery_id == null;
   }
   bindAction('#ach-wp-cache-inspect,#ach-wp-cache-setup,#ach-wp-cache-restore','click', function () {
     var id = hostsSiteId();
@@ -4806,7 +4823,8 @@
       r.state === 'Applied' && r.site_id === Number(id) &&
       r.site_key === site.name && r.recovery_id === recovery &&
       r.journal_phase === 'applied' && r.runtime_verified === true &&
-      r.purge_supported === false && Number.isSafeInteger(r.cache_files_removed) &&
+      r.purge_supported === false && (r.read_only === undefined || r.read_only === false) &&
+      Number.isSafeInteger(r.cache_files_removed) &&
       r.cache_files_removed >= 0 && r.changed === (r.cache_files_removed > 0));
   }
   root.find('#ach-cache-url-path').on('input', function () {
@@ -4844,6 +4862,10 @@
       cacheActivationBusy = false;
       var ok = id === hostsSiteId() && validCacheClearReply(r,id,recovery) &&
         r.cache_url_path === path && r.cache_files_removed <= 4;
+      // Verified Clear does not alter the connection or manifest. A refusal
+      // or uncertain outcome no longer confirms their required native proof.
+      if (!ok && (wpConnection?.state === 'Connected' || bridgeManifest?.state === 'Provisioned'))
+        invalidateCacheConnectionEvidence('Cache Clear was not confirmed. Check WordPress connection and Bridge again.');
       cacheActivationNotice(ok ?
         'Selected URL Cache clear completed for '+path+'.'+
         '\nExact current-generation entries removed: '+r.cache_files_removed+
@@ -4851,7 +4873,7 @@
         '\nRecovery ID: '+recovery+' (Recheck before another operation).' :
         'URL Cache clear NOT CONFIRMED. Recheck before any retry. '+
         (cacheBackendFailure(failure,'cache_manage') ||
-          'Inspect Activity and saved Cache recovery.'), ok ? 'observed' : 'error');
+          'Inspect Activity and saved Cache recovery.'), ok ? (r.changed ? 'observed' : 'neutral') : 'error');
       cacheActivationLock();
     });
   });
@@ -4876,6 +4898,10 @@
       if (ticket !== cacheActivationTicket) return;
       cacheActivationBusy = false;
       var ok = id === hostsSiteId() && validCacheClearReply(r,id,recovery);
+      // Verified Clear does not alter the connection or manifest. A refusal
+      // or uncertain outcome no longer confirms their required native proof.
+      if (!ok && (wpConnection?.state === 'Connected' || bridgeManifest?.state === 'Provisioned'))
+        invalidateCacheConnectionEvidence('Cache Clear was not confirmed. Check WordPress connection and Bridge again.');
       cacheActivationNotice(ok ?
         'Native selected-site full-tree Cache file clear completed.'+
         '\nVerified files removed: '+r.cache_files_removed+
@@ -4883,7 +4909,7 @@
         '\nAll verified file generations in this site directory were eligible; no Nginx reload, shared cache or Nginx Helper purge. Traffic may refill this site.' :
         'Site Cache file clear NOT CONFIRMED. Do not repeat before fresh Recheck. '+
         (cacheBackendFailure(failure,'cache_manage') ||
-          'Inspect Activity and saved Cache recovery.'), ok ? 'observed' : 'error');
+          'Inspect Activity and saved Cache recovery.'), ok ? (r.changed ? 'observed' : 'neutral') : 'error');
       cacheActivationLock();
     });
   });
@@ -5776,6 +5802,7 @@
     var ticket = statusTicket, submittedBrand = statusFields();
     statusProbeEvidence = null;
     statusManageEvidence = null;
+    taskFeedback('#ach-status-manage-result','Previous managed recovery observation is historical. Recheck saved recovery before Restore.');
     root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
       .prop('checked', false);
     taskFeedback('#ach-status-probe-result',template === '404' ?
@@ -5959,6 +5986,8 @@
     var locale = root.find('#ach-status-locale').val();
     statusProbeEvidence = null;
     statusManageEvidence = null;
+    taskFeedback('#ach-status-probe-result','Previous source/HTTP preflight is historical. Recheck current evidence before another Apply.');
+    taskFeedback('#ach-status-adoption-result','Previous read-only preflight invalidated.');
     root.find('#ach-status-manage-apply-approve, #ach-status-manage-restore-approve')
       .prop('checked', false);
     taskFeedback('#ach-status-manage-result',
@@ -6052,11 +6081,6 @@
             '\nOnly this selected website\'s existing status HTML was targeted. Original bytes are journal-backed. No Nginx reload was requested; verify non-target health.' :
             '\nOnly this selected site\'s plugin-owned status extension was targeted. Nginx is shared; the guarded Apply/Restore performs a service reload. Independently validate non-target health.' +
             (template === '50x' ? '\nGeneric 50x only covers Nginx-generated 500/502/503/504; PHP/WordPress responses are not forcibly intercepted.' : '')), action === 'recheck' && r.state === 'Applied' && r.rendered_sha256 !== r.after_sha256 ? 'review' : managedFeedbackTone(r.state,r.verification_scope !== 'saved_journal_only'));
-        if (action !== 'recheck') {
-          taskFeedback('#ach-status-probe-result',
-            'Prior source/HTTP preflight invalidated by the write. Recheck before any new Apply.');
-          taskFeedback('#ach-status-adoption-result','Previous read-only preflight invalidated.');
-        }
       }
       statusLock(false);
     });
@@ -7453,7 +7477,11 @@
                ' Emergency revocation is durably queued; worker/timer readiness must be checked.') :
             r.enabled ? 'Emergency disable remains available.' :
              'To enable, inspect a saved policy and its affected shared sites first.')+
-          (r.last_operation ? ' Last Operation ID: '+r.last_operation : ''), r.pending_disable || r.enabled && !r.watcher_ready ? 'review' : r.enabled && r.watcher_ready ? 'observed' : 'neutral');
+          (r.last_operation ? ' Last Operation ID: '+r.last_operation : ''),
+          r.pending_disable || r.enabled && !r.watcher_ready ? 'review' :
+          !r.enabled ? 'neutral' :
+          ['Armed','Witness Armed','Applied'].includes(r.last_state) ? 'observed' :
+          ['No Change','No Native FPM Optimization'].includes(r.last_state) ? 'neutral' : 'review');
       }
       renderFpmAutoControls();
     }, function () { return ticket === fpmAutoTicket; });
@@ -7767,8 +7795,9 @@
     setActionDisabled('#ach-fpm-prepare', fpmBusy || !phpPreviewEligible, '#ach-fpm-prepare-why');
     updateFpmPrepareWhy();
   }
-  function resetRecovery() {
+  function resetRecovery(note) {
     fpmRecovery = null;
+    taskFeedback('#ach-fpm-recovery-status',note || 'Previous recovery observation is historical. Inspect the selected PHP service again.');
     root.find('#ach-fpm-rollback-controls').prop('hidden', true);
     root.find('#ach-fpm-rollback-approval').prop('checked', false);
     setActionDisabled('#ach-fpm-rollback', true, 'Inspect the selected PHP service for a matching saved recovery.');
@@ -7885,7 +7914,7 @@
     };
     phpPreviewEligible = false;
     resetFpmPlan();
-    resetRecovery();
+    resetRecovery('Apply requested; previous recovery evidence is historical. Inspect saved recovery after Apply settles.');
     invalidatePhpRuntime('PHP-FPM Apply attempt invalidated prior master/socket and site source evidence. Inspect again.');
     fpmLock(true);
     markFpmOperationPending('Apply');
@@ -7908,12 +7937,13 @@
   bindAction('#ach-fpm-check-recovery','click', function () {
     var version = String(root.find('#ach-fpm-recovery-version').val() || '');
     if (fpmBusy || !['81','85'].includes(version)) return;
-    resetRecovery(); fpmLock(true);
+    resetRecovery('Inspecting saved recovery and current PHP source...'); fpmLock(true);
     request('fpm_recovery', {php_version:version}, function (r) {
       fpmLock(false);
       if (version !== String(root.find('#ach-fpm-recovery-version').val() || '')) return;
-      if (!r) {
-        taskFeedback('#ach-fpm-recovery-status','Recovery unavailable; investigate the error before any further Apply.','error');
+      if (!r || typeof r.state !== 'string' || !r.state ||
+          (r.version !== undefined && r.version !== version)) {
+        taskFeedback('#ach-fpm-recovery-status','Recovery unavailable or incompatible; investigate the error before any further Apply.','error');
         return;
       }
       var policyKeys = ['pm.max_children', 'pm.start_servers', 'pm.min_spare_servers',
@@ -7975,7 +8005,7 @@
       resetRecovery();
       return;
     }
-    resetRecovery();
+    resetRecovery('Restoring saved PHP-FPM recovery; wait for the confirmed result...');
     invalidatePhpRuntime('PHP-FPM Restore attempt invalidated prior master/socket and site source evidence. Inspect again.');
     fpmLock(true);
     markFpmOperationPending('Restore');
@@ -8072,7 +8102,8 @@
         $('<td>').text(diff.actual).appendTo(tr);
         tbody.append(tr);
       });
-      if (r.state === 'File Match') taskFeedback('#ach-fpm-result',r.state + ': ' + t.noDrift + '. ' + r.note, validImpact(impact,data.php_version) ? 'observed' : 'neutral');
+      if (r.state === 'File Match') taskFeedback('#ach-fpm-result',r.state + ': ' + t.noDrift + '. ' + r.note, validImpact(impact,data.php_version) ?
+        (impact.state === 'File Mapping' ? 'observed' : 'review') : 'neutral');
       phpPreviewEligible = !fpmPolicyBusy && (data.php_version === '85' ||
         data.php_version === '81' &&
         phpInventory.get('81')?.manual_apply_adapter === 'guarded_php81') &&
