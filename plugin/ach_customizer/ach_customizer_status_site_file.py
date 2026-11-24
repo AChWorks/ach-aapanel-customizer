@@ -20,7 +20,7 @@ from ach_customizer_status_inspect import _directory, _selected_error_page
 from ach_customizer_status_extension import (
     CODES, DOMAIN, HASH, TOKEN, MAX_HTML, MAX_VHOST, ExtensionError,
     VHOST_ROOT, _bounded_file, _nginx, _owned_dir, _probe, _sha,
-    _write_exclusive,
+    _write_exclusive, _server_directives,
 )
 
 MAX_RECORD = 4096
@@ -33,82 +33,6 @@ STAT_FIELDS = ("st_dev", "st_ino", "st_size", "st_mtime_ns",
 def _supported_mode(mode):
     """One permission contract shared by file eligibility and saved recovery."""
     return type(mode) is int and 0o400 <= mode <= 0o755 and not mode & 0o022
-
-
-def _server_directives(source):
-    """Extract only direct directives from one bounded native server block.
-
-    This is intentionally NOT an effective Nginx parser: unrelated nested
-    location/if directives are skipped, while unknown block layouts and
-    ambiguous delimiters fail closed. Quotes, escapes and comments must not
-    be mistaken for context boundaries.
-    """
-    depth = 0
-    servers = 0
-    statement = []
-    direct = []
-    quote = None
-    escaped = False
-    comment = False
-    if "\x00" in source:
-        raise ExtensionError("source", "Native site VHost contains invalid text")
-    for char in source:
-        if comment:
-            if char == "\n":
-                comment = False
-                statement.append("\n")
-            continue
-        if escaped:
-            statement.append(char)
-            escaped = False
-            continue
-        if char == "\\":
-            statement.append(char)
-            escaped = True
-            continue
-        if quote:
-            statement.append(char)
-            if char == quote:
-                quote = None
-            continue
-        if char in ("'", '"'):
-            quote = char
-            statement.append(char)
-            continue
-        if char == "#":
-            comment = True
-            continue
-        if char == "{":
-            header = "".join(statement).strip()
-            if depth == 0:
-                if header != "server" or servers != 0:
-                    raise ExtensionError("source", "Native VHost is not one top-level server block")
-                servers += 1
-            elif not re.match(r"^(?:location\s+|if\s*\(|limit_except\s+)", header):
-                raise ExtensionError("source", "Unsupported nested native Nginx context")
-            depth += 1
-            if depth > 8:
-                raise ExtensionError("source", "Native VHost nesting is too deep")
-            statement.clear()
-            continue
-        if char == "}":
-            if depth == 0 or "".join(statement).strip():
-                raise ExtensionError("source", "Unbalanced or ambiguous native VHost context")
-            depth -= 1
-            statement.clear()
-            continue
-        if char == ";":
-            directive = " ".join("".join(statement).split())
-            if depth == 0 or not directive:
-                raise ExtensionError("source", "Unexpected native VHost directive")
-            if depth == 1:
-                direct.append(directive)
-            statement.clear()
-            continue
-        statement.append(char)
-    if quote or escaped or depth != 0 or servers != 1 or "".join(statement).strip():
-        raise ExtensionError("source", "Incomplete or ambiguous native VHost context")
-    return direct
 
 
 def _record_name(site_id, code):

@@ -808,6 +808,10 @@ class WordpressConnectionTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("<?php\n")
         (root / "wp-load.php").write_text("""<?php
+// Model the enabled login-URL protection observed on an actual site:
+// a fake admin HTTP context exits before the connector can inspect.
+if (defined('WP_ADMIN') && WP_ADMIN) exit(0);
+if (defined('WP_CLI') && WP_CLI) exit(91);
 define('ABSPATH', __DIR__ . '/');
 define('WP_PLUGIN_DIR', __DIR__ . '/wp-content/plugins');
 define('RT_WP_NGINX_HELPER_CACHE_PATH', '/www/server/fastcgi_cache');
@@ -840,6 +844,13 @@ function update_site_option($key, $value) {
             [shutil.which("php"), "-r", wp.PHP_BRIDGE], cwd=root,
             input=json.dumps({"action": "connect", "expected_cache_path": self.cache}),
             capture_output=True, text=True, check=False, timeout=15)
+        # Prove the prior incorrect bootstrap really terminates this fixture.
+        old = subprocess.run([shutil.which("php"), "-r", "define('WP_ADMIN', true);" + wp.PHP_BRIDGE],
+                             cwd=root, input=json.dumps({"action":"inspect"}),
+                             capture_output=True, text=True, timeout=15)
+        self.assertEqual(old.returncode, 0)
+        self.assertNotIn("ACH_WORDPRESS_CACHE_RESULT=", old.stdout)
+        self.assertIn('"phase":"bootstrap"', old.stderr)
         self.assertEqual(result.returncode, 15, result.stderr)
         self.assertIn("Effective WordPress", result.stderr)
         self.assertFalse((root / "vendor-actions").exists())
@@ -851,6 +862,26 @@ function update_site_option($key, $value) {
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("activate:nginx-helper", (root / "vendor-actions").read_text())
         self.assertIn("update", (root / "vendor-actions").read_text())
+
+    @unittest.skipUnless(shutil.which("php"), "PHP CLI unavailable")
+    def test_php_reports_safe_early_exit_and_fatal_bootstrap_diagnostics(self):
+        real_run = subprocess.run
+        def native_run(args, **kwargs):
+            return real_run([shutil.which("php"), *args[5:]], **kwargs)
+        # Exercise the real Python parser and PHP shutdown reporter. Replace
+        # only the production runuser/bin path with this test's actual PHP.
+        with patch.object(wp.Path, "is_file", return_value=True), \
+             patch.object(wp.subprocess, "run", side_effect=native_run):
+            (self.site_dir / "wp-load.php").write_text(
+                '<?php echo "private-output"; exit(0);')
+            with self.assertRaisesRegex(wp.WordpressCacheError, "bootstrap: Missing result marker .*PHP exit 0") as early:
+                wp._php(self.site, "85", "inspect")
+            self.assertNotIn("private-output", str(early.exception))
+            (self.site_dir / "wp-load.php").write_text(
+                '<?php trigger_error("private-secret", E_USER_ERROR);')
+            with self.assertRaisesRegex(wp.WordpressCacheError, "bootstrap:.*fatal type 256 at wp-load.php:1") as fatal:
+                wp._php(self.site, "85", "inspect")
+            self.assertNotIn("private-secret", str(fatal.exception))
 
     def test_custom_cache_path_must_not_be_overwritten(self):
         self.config.write_bytes(self.original_config.replace(

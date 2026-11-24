@@ -71,6 +71,36 @@ HSTS_DIRECTIVE = re.compile(
     r'add_header[ \t]+Strict-Transport-Security[ \t]+"max-age=[0-9]{1,10}'
     r'(?:; includeSubDomains)?(?:; preload)?"(?:[ \t]+always)?;'
 )
+# Exactly one Nginx add_header statement; quoted values may contain
+# semicolons, braces and variables. The source scope is verified by the
+# caller. Never allow a source header to impersonate our runtime markers.
+HEADER_DIRECTIVE = re.compile(
+    r"""add_header[ \t]+([A-Za-z0-9!#$%&'*+.^_`|~-]+)[ \t]+"""
+    r"""(?:"(?:[^"\\\r\n]|\\[^\r\n])*"|'(?:[^'\\\r\n]|\\[^\r\n])*'|"""
+    r"""[^\s;{}'"\\]+)(?:[ \t]+always)?[ \t]*;"""
+)
+
+
+def valid_response_header(header):
+    return (isinstance(header, str)
+            and not any(ord(ch) < 32 and ch != "\t" for ch in header)
+            and (match := HEADER_DIRECTIVE.fullmatch(header)) is not None
+            and match.group(1).lower() not in ("x-ach-cache", "x-ach-cache-site"))
+
+
+def valid_inherited_headers(headers):
+    # Nginx-added privacy headers occur after the upstream cache decision.
+    # Unlike upstream response fields, they are not covered by our
+    # fastcgi_no_cache predicates. Do not newly cache such a response based
+    # solely on copying the downstream header.
+    cache_sensitive = {"cache-control", "expires", "set-cookie", "set-cookie2",
+                       "vary", "www-authenticate", "x-accel-expires"}
+    return (isinstance(headers, list) and bool(headers)
+            and all(valid_response_header(header)
+                    and HEADER_DIRECTIVE.fullmatch(header).group(1).lower()
+                    not in cache_sensitive for header in headers))
+
+
 NOTE = (
     "Reference config for isolated review only: not installed, not syntax-"
     "checked on this host, not loaded, not an Apply permission or purge API. "
@@ -82,7 +112,8 @@ NOTE = (
 
 
 def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
-                       cache_generation=None, inherited_hsts=None, native_handler="stock"):
+                       cache_generation=None, inherited_hsts=None, inherited_headers=None,
+                       native_handler="stock"):
     """Render reviewable http/server fragments with no side effects.
 
     Only a caller that has independently established a native website, PHP
@@ -95,8 +126,8 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         raise CachePolicyError("PHP adapter has no verified FastCGI cache reference")
     if native_handler not in ("stock", "wpfastcgi") or type(native_handler) is not str:
         raise CachePolicyError("Unsupported native PHP Cache handler")
-    if native_handler == "wpfastcgi" and inherited_hsts is not None:
-        raise CachePolicyError("Native WordPress PHP headers must not inherit server HSTS")
+    if native_handler == "wpfastcgi" and (inherited_hsts is not None or inherited_headers is not None):
+        raise CachePolicyError("Native WordPress PHP headers must not inherit server headers")
     if (type(cache_root) is not str or
             not re.fullmatch(r"/[A-Za-z0-9_./-]{2,220}", cache_root) or
             re.search(r"//|/\./|/\.\./|/$", cache_root) or
@@ -111,6 +142,9 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
             type(inherited_hsts) is not str or
             not HSTS_DIRECTIVE.fullmatch(inherited_hsts)):
         raise CachePolicyError("Unverified native HSTS response header")
+    if inherited_headers is not None and (
+            inherited_hsts is not None or not valid_inherited_headers(inherited_headers)):
+        raise CachePolicyError("Unverified inherited native response headers")
     zone = "ACHFC_%d" % site_id
     var = "achfc_%d" % site_id
     directory = "%s/site-%d" % (cache_root, site_id)
@@ -171,6 +205,7 @@ def generate_reference(site_id, php_version, *, cache_root=CACHE_ROOT,
         + "    add_header X-ACh-Cache $upstream_cache_status always;\n"
         + "    add_header X-ACh-Cache-Site %d always;\n" % site_id
         + (("    " + inherited_hsts + "\n") if inherited_hsts else "")
+        + "".join("    " + header + "\n" for header in (inherited_headers or []))
         + ("".join("    " + directive + "\n" for directive in WP_PHP_RESPONSE_DIRECTIVES)
            if native_handler == "wpfastcgi" else "")
         + "}\n"

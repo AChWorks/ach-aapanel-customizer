@@ -11,6 +11,12 @@ A native aaPanel plugin for **inspect → preview → explicit apply → recheck
 3. In the task-first interface, choose **Manage a website** or **Websites → Summary & changes**, select the exact native website, and start with a read-only inspection of its task. Use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation. In the earlier interface use **Website list** and the shared website selector.
 4. **Optional:** install the separately versioned `ach-aapanel-bridge-vX.Y.Z.zip` through **WordPress → Plugins → Add New → Upload Plugin** only for supported WordPress Cache integration. The Bridge is not embedded in or required by the native ZIP.
 
+The WordPress Bridge 0.1.11 source includes Persian (`fa_IR`) and uses
+WordPress's current administration locale, with English fallback. Its
+product name and technical identifiers remain unchanged; the native
+aaPanel interface is independent. Obtain the actual published Bridge
+version from Releases.
+
 The first Stable release was **Native 0.1.98** with optional **WordPress Bridge 0.1.9**. Later native and Bridge package versions advance independently. Earlier development previews are historical, not mandatory compatibility/migration targets. Always obtain the **latest published** assets and SHA256 checksums from Releases rather than assuming the source tree is a Release.
 
 A successful import does **not** prove that aaPanel's resident Python helpers were refreshed. If the installed files and observed behavior disagree, consult the [native ZIP upgrade and resident-worker recovery runbook](docs/aapanel-upgrade-recovery.md); preserve the saved Recovery ID and recheck before retrying. Neither ZIP performs a Production deployment or enables optional enforcement on its own.
@@ -47,6 +53,7 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 - **External aaPanel changes can invalidate an earlier approval.** After domain, VHost, PHP or WordPress regeneration, inspect and Recheck; Restore the exact saved recovery if needed, then perform one fresh approved Apply. There is no catch-all automatic site-repair watcher.
 - A site-scoped Fail2ban scanner can ban access to the **entire origin**, not merely its selected website. On an untrusted writable log or unclear proxy real-client IP, it refuses or needs operator review; never assume a check proves CDN attribution.
 - WordPress/WooCommerce *files detected* does not prove application activation. Source and local probes do not prove private-customer Cache safety or external HTTPS. Do not run vendor **Purge All** on shared/ambiguous physical Cache roots.
+- Server-scoped Guard and Status Pages extensions recognize canonical native public/run subdirectories. Extension 404 uses the observed HTTP baseline; 502/50x uses the actual served source. Existing-file replacement remains separately ownership-checked.
 - The Nginx TLS default policy leaves existing named HTTPS sites and certificates alone, and refuses unsupported listener/default-server conflicts. Status Pages HTTP/80, HTTPS/443, and application-layer pages have different delivery and recovery scopes.
 
 **Verified reference, not a universal support promise:** non-production **aaPanel 8.0.7**, Nginx, PHP-FPM **8.1/8.5** on representative sites. Other aaPanel/Nginx/PHP writer layouts are inspected by capability, not arbitrarily rejected by version, but a write requires a supported real source/ownership contract. See [installed-native QA evidence, exact candidate and remaining coverage](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), [feature/compatibility backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [TLS/Status Pages scope](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). **Publishing a Stable Release is not a claim of comprehensive Production certification or permission to deploy to Production.**

@@ -1,7 +1,7 @@
 === ACh aaPanel Bridge ===
 Tags: aapanel, nginx, cache, wordpress, diagnostics
 Tested up to: 7.1
-Stable tag: 0.1.10
+Stable tag: 0.1.11
 License: MPL-2.0
 License URI: https://www.mozilla.org/en-US/MPL/2.0/
 
@@ -17,6 +17,9 @@ through the native aaPanel plugin.
 After activation, visit **Tools > ACh aaPanel Bridge** to inspect the observed
 Nginx Helper activation, purge settings, cache path and integration readiness.
 The page is available to WordPress administrators with manage_options.
+It follows the WordPress administration locale (including the administrator's
+optional profile language). Persian (fa_IR) is bundled; English remains the
+fallback. The name ACh aaPanel Bridge and technical identifiers stay unchanged.
 
 **Disconnected by default.** Installing this plugin does not install or
 configure Nginx Helper, create a cache, enable purging, alter WordPress
@@ -115,6 +118,13 @@ WordPress.org Directory submission and its requirements are separate
 decisions; the MPL-2.0 license and this readme.txt do not imply a listing.
 
 == Changelog ==
+
+= 0.1.11 =
+
+* Add standard WordPress internationalization and bundled Persian (fa_IR)
+  translations of the diagnostics interface and plugin description.
+* Preserve the product name, raw technical values and cache behavior; use
+  WordPress-native RTL tables and left-to-right isolation for paths/modes.
 
 = 0.1.10 =
 

@@ -157,6 +157,51 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         selected_dir.unlink()
         self.assertEqual(self.inspect()["state"], "Source Observed")
 
+    def test_native_ssl_well_known_source_is_verified_for_every_peer(self):
+        self.global_cache_fixture()
+        template = (ROOT / "tests/fixtures/native-well-known.conf").read_bytes()
+        helper_dir = self.vhost / "well-known"
+        helper_dir.mkdir()
+        for name in ("wp.test", "shop.test"):
+            helper = helper_dir / (name + ".conf")
+            helper.write_bytes(template)
+            host = self.vhost / (name + ".conf")
+            host.write_text(host.read_text().replace(
+                " include enable-php-", " include " + str(helper) + ";\n include enable-php-"))
+        good = self.inspect()
+        self.assertEqual(good["state"], "Source Observed", good)
+        self.assertEqual(good["unresolved_other_sites"], 0)
+        self.assertEqual(good["purge_scope"], "Shared Registered Directory")
+        self.assertFalse(good["purge_supported"])
+        peer = helper_dir / "shop.test.conf"
+        peer.write_bytes(template.replace(b"return 200", b"return 403"))
+        bad = self.inspect()
+        self.assertEqual(bad["state"], "Partial", bad)
+        self.assertIn("shop.test", bad["reason"])
+        self.assertIn("well-known", bad["reason"])
+        self.assertFalse(bad["purge_supported"])
+        peer.write_bytes(template.replace(b"\n", b"\r\n"))
+        restored = self.inspect()
+        self.assertEqual(restored["state"], "Source Observed")
+        self.assertNotEqual(good["source_sha256"], restored["source_sha256"])
+        peer.unlink()
+        peer.symlink_to(helper_dir / "wp.test.conf")
+        self.assertEqual(self.inspect()["state"], "Partial")
+        peer.unlink()
+        peer.write_bytes(template)
+        selected = self.vhost / "wp.test.conf"
+        original = selected.read_text()
+        selected.write_text(original.replace(
+            str(helper_dir / "wp.test.conf"), str(helper_dir / "shop.test.conf")))
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+        selected.write_text(original.replace(
+            " include " + str(helper_dir / "wp.test.conf") + ";",
+            " location /other {\n include " + str(helper_dir / "wp.test.conf") + ";\n }"))
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+        selected.write_text(original)
+        (helper_dir / "wp.test.conf").write_bytes(template + b"\ninclude foreign.conf;\n")
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+
     def test_global_aaPanel_cache_include_is_fingerprinted_and_flags_shared_physical_purge(self):
         cache = self.global_cache_fixture()
         result = self.inspect()
@@ -633,6 +678,60 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         self.assertEqual(self.inspect()["state"], "Needs Review")
         (extension_dir / "custom.conf").write_text("access_log off;\n")
         self.assertEqual(self.inspect()["state"], "Source Observed")
+
+    def test_foreign_application_peer_routes_are_scoped_and_fingerprinted(self):
+        self.global_cache_fixture()
+        self.make_vhost("shop.test", "enable-php-85.conf")
+        (self.nginx / "enable-php-85.conf").write_text(r"""location ~ \.php$ {
+ include fastcgi.conf;
+ fastcgi_pass unix:/tmp/php-cgi-85.sock;
+}
+""")
+        (self.nginx / "pathinfo.conf").write_text(r"""set $real_script_name $fastcgi_script_name;
+if ($fastcgi_script_name ~ "^(.+?\.php)(/.+)$") {
+ set $real_script_name $1;
+ set $path_info $2;
+}
+fastcgi_param SCRIPT_FILENAME $document_root$real_script_name;
+fastcgi_param SCRIPT_NAME $real_script_name;
+fastcgi_param PATH_INFO $path_info;
+""")
+        path = self.vhost / "extension" / "shop.test"
+        path.mkdir(parents=True)
+        peer = self.vhost / "shop.test.conf"
+        peer.write_text(peer.read_text().replace("}\n",
+            " include " + str(path / "*.conf") + ";\n}\n"))
+        route = path / "app.conf"
+        good_source = """location = /app/health.php {
+    try_files $uri =404;
+    fastcgi_pass unix:/tmp/php-cgi-85.sock;
+    fastcgi_index index.php;
+    include fastcgi.conf;
+    include pathinfo.conf;
+}
+location = /app/old { return 307 https://shop.test/app/new$is_args$args; }
+location ^~ /app/retired/ { return 410; }
+"""
+        route.write_text(good_source)
+        result = self.inspect()
+        self.assertEqual(result["state"], "Source Observed", result)
+        self.assertEqual(result["unresolved_other_sites"], 0)
+        self.assertFalse(result["purge_supported"])
+        for bad in (
+            good_source.replace("fastcgi_index index.php;", "fastcgi_cache WORDPRESS;"),
+            good_source.replace("include pathinfo.conf;", "include foreign.conf;"),
+            good_source.replace("return 410;", "content_by_lua_block { return 1; }"),
+            good_source.replace("unix:/tmp/php-cgi-85.sock", "$foreign_upstream"),
+        ):
+            with self.subTest(source=bad):
+                route.write_text(bad)
+                result = self.inspect()
+                self.assertEqual(result["state"], "Partial", result)
+                self.assertEqual(result["unresolved_other_sites"], 1)
+        route.write_text(good_source)
+        params = self.nginx / "pathinfo.conf"
+        params.write_text(params.read_text() + "\ninclude unknown.conf;\n")
+        self.assertEqual(self.inspect()["state"], "Partial")
 
     def test_source_change_during_scan_rejects_all_positive_claims(self):
         original = audit._site_source

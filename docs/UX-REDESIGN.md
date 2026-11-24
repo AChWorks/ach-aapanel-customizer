@@ -233,6 +233,20 @@ Save/Preview and repeated Preview settlement; all transport is mocked.
 
 Retain #128 and #21 for exact candidate and native QA evidence.
 
+### Wrapped content and approval spacing (Issue #138)
+
+Vertical view/workflow stacks preserve the intrinsic height of each child;
+the containing main pane scrolls rather than compressing labels. The
+full-width availability flex basis belongs only to horizontal control rows.
+Do not use per-button margins to compensate for overflowing text. Checkbox
+copy remains inside its padded label, including wrapped and disabled
+states. Place approval-following actions in the standard controls row,
+including the expanded stale-witness discard action. The layout regression
+measures actual text containment, vertical sibling gaps and an 8px minimum
+copy-to-action gap, not only border-box alignment. Exercise all native
+checkbox controls, including populated PHP Prepare/Recovery and approved/
+unapproved transitions, without invoking shared-service writes.
+
 ## Protect sensitive files — reference interaction states
 
 The image concept previously generated is **not runtime proof** and its compulsory acknowledgement checkbox is **not mandatory** in this contract.

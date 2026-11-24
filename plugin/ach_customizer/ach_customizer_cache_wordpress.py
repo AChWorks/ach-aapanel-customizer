@@ -36,19 +36,53 @@ WP_BOOTSTRAP = re.compile(
     rb"['\"]wp-settings\.php['\"][ \t]*;[ \t]*(?:\r?\n|$)")
 # The site path and cache path are not user-supplied filesystem authorities.
 PHP_BRIDGE = r'''
-define('WP_ADMIN', true);
+// This is a native site-user CLI operation, not an authenticated HTTP admin
+// request. WP_ADMIN=true can cause login protection to redirect and exit
+// during wp_loaded. Do not spoof a logged-in user or the WP-CLI application.
+$ach_cache_phase = 'bootstrap';
+$ach_cache_finished = false;
+$ach_cache_reason = '';
+$ach_cache_detail = '';
+register_shutdown_function(static function () use (
+    &$ach_cache_phase, &$ach_cache_finished, &$ach_cache_reason, &$ach_cache_detail
+) {
+    if ($ach_cache_finished) return;
+    $last = error_get_last();
+    $fatal = $last && in_array($last['type'], [E_ERROR,E_PARSE,E_CORE_ERROR,E_COMPILE_ERROR,E_USER_ERROR,E_RECOVERABLE_ERROR], true);
+    // Never echo arbitrary plugin output or a stack trace containing secrets.
+    // Preserve the actual PHP phase, fatal class, component and source line.
+    $source = '';
+    if ($fatal) {
+        $source = basename($last['file']);
+        if (preg_match('~wp-content/(?:mu-plugins|plugins|themes)/([^/]+)/~', $last['file'], $m)) {
+            $source = $m[1].'/'.$source;
+        }
+    }
+    fwrite(STDERR, "\nACH_WORDPRESS_CACHE_DIAGNOSTIC=".json_encode([
+        'phase'=>$ach_cache_phase, 'reason'=>$ach_cache_reason,
+        'detail'=>$ach_cache_detail, 'fatal'=>$fatal ? $last['type'] : null,
+        'file'=>$source, 'line'=>$fatal ? $last['line'] : null
+    ], JSON_INVALID_UTF8_SUBSTITUTE)."\n");
+});
+$ach_cache_fail = static function ($code, $reason, $detail = '') use (&$ach_cache_reason, &$ach_cache_detail) {
+    $ach_cache_reason = $reason;
+    $ach_cache_detail = $detail;
+    exit($code);
+};
 require 'wp-load.php';
+$ach_cache_phase = 'plugin_api';
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
+$ach_cache_phase = 'inspect';
 $input = json_decode(stream_get_contents(STDIN), true);
 if (!is_array($input) || !in_array($input['action'] ?? null,
         ['inspect','connect','suspend','restore'], true)) {
-    fwrite(STDERR, "Invalid native WordPress integration command\n"); exit(10);
+    $ach_cache_fail(10, "invalid_command");
 }
 $helper = 'nginx-helper/nginx-helper.php';
 $bridge = 'ach-aapanel-bridge/ach-aapanel-bridge.php';
 foreach ([$helper, $bridge] as $plugin) {
     if (!is_file(WP_PLUGIN_DIR . '/' . $plugin)) {
-        fwrite(STDERR, "Required WordPress plugin missing: ".$plugin."\n"); exit(11);
+        $ach_cache_fail(11, "missing_plugin", $plugin);
     }
 }
 $existing = get_site_option('rt_wp_nginx_helper_options', []);
@@ -71,8 +105,7 @@ foreach ($vendor_caps as $cap) {
     // Preserve absent vs explicitly denied vs granted role entries.
     $value = array_key_exists($cap, $stored_caps) ? $stored_caps[$cap] : null;
     if ($value !== null && !is_bool($value)) {
-        fwrite(STDERR, "WordPress administrator capability entry is not boolean\n");
-        exit(19);
+        $ach_cache_fail(19, "invalid_capability");
     }
     $original_caps_stored[$cap] = $value;
     $effective_caps[$cap] = $administrator ? (bool)$administrator->has_cap($cap) : false;
@@ -88,24 +121,23 @@ $present = [
         ? RT_WP_NGINX_HELPER_CACHE_PATH : null,
 ];
 if ($input['action'] === 'connect') {
+    $ach_cache_phase = 'connect';
     // A source-text match is not proof of the value WordPress actually uses.
     // Refuse BEFORE activating plugins or enabling the vendor's Purge All.
     $expected = $input['expected_cache_path'] ?? null;
     if (!is_string($expected) || $expected === '' ||
         !is_string($present['constant']) || $present['constant'] !== $expected) {
         fwrite(STDERR, "Effective WordPress Nginx Helper Cache path is not the selected private site Cache\n");
-        exit(15);
+        $ach_cache_fail(15, "cache_path_mismatch");
     }
     if (!$administrator) {
-        fwrite(STDERR, "WordPress administrator role is unavailable for Nginx Helper\n");
-        exit(16);
+        $ach_cache_fail(16, "missing_role");
     }
     foreach ([$helper,$bridge] as $plugin) {
         if (!is_plugin_active($plugin)) {
             $error = activate_plugin($plugin);
             if (is_wp_error($error)) {
-                fwrite(STDERR, "WordPress activation failed for ".$plugin.": ".
-                    $error->get_error_message()."\n"); exit(12);
+                $ach_cache_fail(12, "activation_failed", $plugin.": ".$error->get_error_code());
             }
         }
     }
@@ -115,8 +147,7 @@ if ($input['action'] === 'connect') {
         if ($original_caps_stored[$cap] !== true) $administrator->add_cap($cap);
         if (($administrator->capabilities[$cap] ?? null) !== true
             || !$administrator->has_cap($cap)) {
-            fwrite(STDERR, "WordPress Nginx Helper admin capability setup failed\n");
-            exit(17);
+            $ach_cache_fail(17, "capability_setup_failed");
         }
     }
     // A separate PHP process MUST re-read stored role entries after exit;
@@ -127,14 +158,16 @@ if ($input['action'] === 'connect') {
     update_site_option('rt_wp_nginx_helper_options', $existing);
 }
 if ($input['action'] === 'suspend') {
+    $ach_cache_phase = 'suspend';
     $existing['enable_purge'] = 0;
     update_site_option('rt_wp_nginx_helper_options', $existing);
 }
 if ($input['action'] === 'restore') {
+    $ach_cache_phase = 'restore';
     $saved = $input['previous'] ?? null;
-    if (!is_array($saved) || !is_array($saved['options'] ?? null)) exit(13);
+    if (!is_array($saved) || !is_array($saved['options'] ?? null)) $ach_cache_fail(13, "invalid_saved_options");
     foreach ($keys as $key) {
-        if (!array_key_exists($key, $saved['options'])) exit(14);
+        if (!array_key_exists($key, $saved['options'])) $ach_cache_fail(14, "missing_saved_option");
         if ($saved['options'][$key] === null) unset($existing[$key]);
         else $existing[$key] = $saved['options'][$key];
     }
@@ -151,11 +184,11 @@ if ($input['action'] === 'restore') {
     }
     // A current-generation journal must contain the exact persisted
     // administrator role baseline; filtered booleans are not a replacement.
-    if (!$administrator || !is_array($saved['admin_caps_stored'] ?? null)) exit(18);
+    if (!$administrator || !is_array($saved['admin_caps_stored'] ?? null)) $ach_cache_fail(18, "invalid_saved_role");
     foreach ($vendor_caps as $cap) {
-        if (!array_key_exists($cap, $saved['admin_caps_stored'])) exit(18);
+        if (!array_key_exists($cap, $saved['admin_caps_stored'])) $ach_cache_fail(18, "invalid_saved_role");
         $baseline = $saved['admin_caps_stored'][$cap];
-        if ($baseline !== null && !is_bool($baseline)) exit(18);
+        if ($baseline !== null && !is_bool($baseline)) $ach_cache_fail(18, "invalid_saved_role");
     }
     foreach ($vendor_caps as $cap) {
         $baseline = $saved['admin_caps_stored'][$cap];
@@ -176,7 +209,10 @@ $result = [
                                           array_flip($keys)),
     'previous' => $present,
 ];
-echo "ACH_WORDPRESS_CACHE_RESULT=", json_encode($result, JSON_UNESCAPED_SLASHES), "\n";
+$ach_cache_phase = 'encode';
+$ach_cache_json = json_encode($result, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+echo "\nACH_WORDPRESS_CACHE_RESULT=", $ach_cache_json, "\n";
+$ach_cache_finished = true;
 '''
 
 
@@ -204,21 +240,62 @@ def _php(site, php_version, command, *, previous=None, expected_cache_path=None)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise WordpressCacheError("wordpress", "WordPress CLI setup unavailable: " +
                                   type(exc).__name__) from exc
-    if result.returncode:
-        # The names of missing plugins and WP errors are actionable; the
-        # complete wp-config and DB credentials are never logged.
-        message = (result.stderr or "").strip().splitlines()
+    prefix = "ACH_WORDPRESS_CACHE_RESULT="
+    lines = [line[len(prefix):] for line in result.stdout.splitlines()
+             if line.startswith(prefix)]
+    data = None
+    if len(lines) == 1:
+        try:
+            data = json.loads(lines[0])
+        except ValueError:
+            pass
+    if result.returncode or not isinstance(data, dict):
+        marker = "ACH_WORDPRESS_CACHE_DIAGNOSTIC="
+        diagnostics = [line[len(marker):] for line in result.stderr.splitlines()
+                       if line.startswith(marker)]
+        diag = {}
+        if len(diagnostics) == 1:
+            try:
+                parsed = json.loads(diagnostics[0])
+                if isinstance(parsed, dict):
+                    diag = parsed
+            except ValueError:
+                pass
+        phase = diag.get("phase")
+        if phase not in ("bootstrap", "plugin_api", "inspect", "connect", "suspend", "restore", "encode"):
+            phase = "unknown phase"
+        reasons = {
+            "invalid_command": "Invalid native WordPress integration command",
+            "missing_plugin": "Required WordPress plugin missing",
+            "invalid_capability": "WordPress administrator capability entry is not boolean",
+            "cache_path_mismatch": "Effective WordPress Nginx Helper Cache path is not the selected private site Cache",
+            "missing_role": "WordPress administrator role is unavailable for Nginx Helper",
+            "activation_failed": "WordPress plugin activation failed",
+            "capability_setup_failed": "WordPress Nginx Helper admin capability setup failed",
+            "invalid_saved_options": "Invalid saved WordPress options",
+            "missing_saved_option": "Missing saved WordPress option",
+            "invalid_saved_role": "Invalid saved administrator role baseline",
+        }
+        reason_code = diag.get("reason")
+        reason = reasons.get(reason_code) if isinstance(reason_code, str) else None
+        if reason is None:
+            reason = ("Missing result marker" if not lines else
+                      "Multiple result markers" if len(lines) > 1 else
+                      "Malformed or unsuccessful result")
+        detail = diag.get("detail")
+        if reason_code in ("missing_plugin", "activation_failed") and isinstance(detail, str):
+            # Only the two known plugin identifiers and a WP_Error code.
+            if re.fullmatch(r"(?:nginx-helper/nginx-helper\.php|ach-aapanel-bridge/ach-aapanel-bridge\.php)(?:: [A-Za-z0-9_.-]{1,80})?", detail):
+                reason += ": " + detail
+        fatal = diag.get("fatal")
+        if type(fatal) is int and fatal in (1, 4, 16, 64, 256, 4096):
+            reason += "; PHP fatal type " + str(fatal)
+            file, line = diag.get("file"), diag.get("line")
+            if isinstance(file, str) and re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?", file) and type(line) is int and line > 0:
+                reason += " at " + file[:100] + ":" + str(line)
         raise WordpressCacheError(
-            "wordpress", "WordPress " + command + " failed: " +
-            (message[-1][:350] if message else "PHP exit " + str(result.returncode)))
-    try:
-        lines = [line[len("ACH_WORDPRESS_CACHE_RESULT="):] for line in result.stdout.splitlines()
-                 if line.startswith("ACH_WORDPRESS_CACHE_RESULT=")]
-        data = json.loads(lines[-1]) if len(lines) == 1 else None
-    except ValueError as exc:
-        raise WordpressCacheError("wordpress", "WordPress did not return setup status") from exc
-    if not isinstance(data, dict):
-        raise WordpressCacheError("wordpress", "Unexpected WordPress setup response")
+            "wordpress", f"WordPress {command} failed during {phase}: {reason} (PHP exit {result.returncode})")
+
     return data
 
 

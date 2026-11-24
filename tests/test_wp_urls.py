@@ -1,6 +1,8 @@
 """One-time native WordPress canonical HTTPS URL fixes and partial recovery."""
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -219,6 +221,48 @@ class URLsTests(unittest.TestCase):
         self.restore()
         second = self.apply()
         self.assertNotEqual(first["recovery_id"], second["recovery_id"])
+
+    @unittest.skipUnless(shutil.which("php"), "PHP CLI not installed")
+    def test_real_php_cli_bootstrap_guard_and_option_cycle(self):
+        # Execute the actual connector PHP against a minimal WordPress API
+        # fixture. The conditional early exit reproduces login protection.
+        loader = self.root / "wp-load.php"
+        loader.write_text(r"""<?php
+if (defined('WP_ADMIN') && WP_ADMIN) exit(0);
+if (defined('WP_CLI') && WP_CLI) exit(93);
+function is_multisite(){return false;}
+class FixtureDB {
+ public $options='wp_options';
+ function prepare($sql,$key){return $key;}
+ function get_var($key){return get_option($key);}
+}
+$wpdb=new FixtureDB();
+function get_option($key,$default=null){return json_decode(file_get_contents(__DIR__.'/options.json'),true)[$key]??$default;}
+function update_option($key,$value){
+ $file=__DIR__.'/options.json';
+ $all=json_decode(file_get_contents($file),true);
+ $all[$key]=$value;
+ return file_put_contents($file,json_encode($all))!==false;
+}
+""")
+        options = self.root / "options.json"
+        options.write_text(json.dumps(self.original))
+        def runner(args, **kwargs):
+            return subprocess.run([shutil.which("php"), *args[5:]], **kwargs)
+        php = shutil.which("php")
+        before = urls._php(self.site, php, "inspect", runner=runner)
+        target = {k: v.replace("http:", "https:") for k, v in before.items()}
+        self.assertEqual(urls._php(self.site, php, "set", before=before, after=target, runner=runner), target)
+        self.assertEqual(urls._php(self.site, php, "set", before=target, after=before, runner=runner), before)
+        old = subprocess.run([php, "-r", "define('WP_ADMIN', true);" + urls.PHP],
+            cwd=self.root, input=json.dumps({"action":"inspect"}), capture_output=True, text=True)
+        self.assertEqual(old.returncode, 0)
+        self.assertNotIn(urls.PREFIX, old.stdout)
+        loader.write_text('<?php echo "private-output"; exit(0);')
+        with self.assertRaisesRegex(urls.WPSettingsError, "bootstrap: Missing result marker") as err:
+            urls._php(self.site, php, "inspect", runner=runner)
+        self.assertNotIn("private-output", str(err.exception))
+        self.assertEqual(json.loads(options.read_text()), self.original)
 
     def test_php_bridge_never_targets_nondatabase_site_files(self):
         self.assertIn("require 'wp-load.php';", urls.PHP)

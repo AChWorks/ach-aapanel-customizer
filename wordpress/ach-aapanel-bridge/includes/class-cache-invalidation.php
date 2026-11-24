@@ -162,17 +162,17 @@ final class CacheInvalidation
             'site_key' => $manifest['site_key'] ?? null,
             'generation' => $manifest['cache_generation'] ?? null,
             'url_filter_ready' => $ready,
-            'reason' => !$manifest ? 'No verified native-managed site manifest' :
-                ($helper['activation'] !== 'active' ? 'Nginx Helper is not active' :
+            'reason' => !$manifest ? __('No verified native-managed site manifest', 'ach-aapanel-bridge') :
+                ($helper['activation'] !== 'active' ? __('Nginx Helper is not active', 'ach-aapanel-bridge') :
                 ($helper['purge_method'] !== 'unlink_files' ?
-                'Nginx Helper is not in unlink_files mode' :
+                __('Nginx Helper is not in unlink_files mode', 'ach-aapanel-bridge') :
                 ($helper['effective_cache_path'] !== $manifest['cache_directory'] ?
-                'Nginx Helper cache path is not the verified site-owned directory' :
+                __('Nginx Helper cache path is not the verified site-owned directory', 'ach-aapanel-bridge') :
                 ($helper['automatic_purge_enabled'] !== true ?
-                'Nginx Helper automatic purge is disabled' :
+                __('Nginx Helper automatic purge is disabled', 'ach-aapanel-bridge') :
                 (!$cacheAccess ?
-                'Site PHP-FPM cannot access its own Cache directory. Check the per-site open_basedir and filesystem permissions; never include a shared cache directory.' :
-                'URL remapping is provisioned; effective Nginx workers not independently certified'))))),
+                __('Site PHP-FPM cannot access its own Cache directory. Check the per-site open_basedir and filesystem permissions; never include a shared cache directory.', 'ach-aapanel-bridge') :
+                __('URL remapping is provisioned; effective Nginx workers not independently certified', 'ach-aapanel-bridge')))))),
             'safe_purge_all_verified' => false,
         ];
     }

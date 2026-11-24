@@ -20,8 +20,8 @@ final class Plugin
     public static function registerAdminPage(): void
     {
         \add_management_page(
-            __('ACh aaPanel Bridge', 'ach-aapanel-bridge'),
-            __('ACh aaPanel Bridge', 'ach-aapanel-bridge'),
+            'ACh aaPanel Bridge',
+            'ACh aaPanel Bridge',
             'manage_options',
             'ach-aapanel-bridge',
             [__CLASS__, 'renderAdminPage']
@@ -52,7 +52,7 @@ final class Plugin
         };
 
         echo '<div class="wrap">';
-        echo '<h1>' . \esc_html__('ACh aaPanel Bridge', 'ach-aapanel-bridge') . '</h1>';
+        echo '<h1><bdi>ACh aaPanel Bridge</bdi></h1>';
         echo '<p>' . \esc_html__(
             'Optional WordPress companion for ACh aaPanel Customizer.',
             'ach-aapanel-bridge'
@@ -64,11 +64,27 @@ final class Plugin
         ) . '</p>';
         $connection = CacheInvalidation::inspect();
         echo '<h2>' . \esc_html__('Site cache URL mapping', 'ach-aapanel-bridge') . '</h2>';
-        self::tableRow(__('Manifest', 'ach-aapanel-bridge'), $connection['manifest_verified'] ? 'Native manifest verified' : 'Not connected');
-        self::tableRow(__('URL-file mapping', 'ach-aapanel-bridge'), $connection['url_filter_ready'] ? 'Provisioned (worker state unverified)' : 'Unavailable');
-        self::tableRow(__('Site Cache filesystem access', 'ach-aapanel-bridge'),
-            $connection['cache_access_verified'] ? 'Readable and writable by this PHP process' : 'Not verified / blocked');
+        echo '<table class="widefat striped" style="max-width:900px"><tbody>';
+        self::tableRow(
+            __('Manifest', 'ach-aapanel-bridge'),
+            $connection['manifest_verified']
+                ? __('Native manifest verified', 'ach-aapanel-bridge')
+                : __('Not connected', 'ach-aapanel-bridge')
+        );
+        self::tableRow(
+            __('URL-file mapping', 'ach-aapanel-bridge'),
+            $connection['url_filter_ready']
+                ? __('Provisioned (worker state unverified)', 'ach-aapanel-bridge')
+                : __('Unavailable', 'ach-aapanel-bridge')
+        );
+        self::tableRow(
+            __('Site Cache filesystem access', 'ach-aapanel-bridge'),
+            $connection['cache_access_verified']
+                ? __('Readable and writable by this PHP process', 'ach-aapanel-bridge')
+                : __('Not verified / blocked', 'ach-aapanel-bridge')
+        );
         self::tableRow(__('Readiness', 'ach-aapanel-bridge'), $connection['reason']);
+        echo '</tbody></table>';
         echo '<h2>' . \esc_html__('Nginx Helper observations', 'ach-aapanel-bridge') . '</h2>';
         echo '<table class="widefat striped" style="max-width:900px"><tbody>';
         self::tableRow(
@@ -77,7 +93,8 @@ final class Plugin
         );
         self::tableRow(
             __('Purge method', 'ach-aapanel-bridge'),
-            $value($status['purge_method'])
+            $value($status['purge_method']),
+            $status['purge_method'] !== null
         );
         $automatic = $status['automatic_purge_enabled'] === null
             ? __('Not available', 'ach-aapanel-bridge')
@@ -87,7 +104,8 @@ final class Plugin
         self::tableRow(__('Automatic purge setting', 'ach-aapanel-bridge'), $automatic);
         self::tableRow(
             __('Configured cache path', 'ach-aapanel-bridge'),
-            $value($status['effective_cache_path'])
+            $value($status['effective_cache_path']),
+            $status['effective_cache_path'] !== null
         );
         echo '</tbody></table>';
         if ($status['purge_method'] === 'get_request') {
@@ -109,9 +127,15 @@ final class Plugin
         echo '</div>';
     }
 
-    private static function tableRow(string $label, string $value): void
+    private static function tableRow(string $label, string $value, bool $technical = false): void
     {
-        echo '<tr><th scope="row">' . \esc_html($label)
-            . '</th><td><code>' . \esc_html($value) . '</code></td></tr>';
+        echo '<tr><th scope="row">' . \esc_html($label) . '</th><td>';
+        // Paths and mode identifiers are data, never translated. Isolate
+        // their direction in RTL admin pages; human explanations inherit
+        // WordPress's locale and ordinary typography.
+        echo $technical
+            ? '<code dir="ltr" style="overflow-wrap:anywhere">' . \esc_html($value) . '</code>'
+            : \esc_html($value);
+        echo '</td></tr>';
     }
 }

@@ -1064,8 +1064,80 @@ def _native_unused_subdir(vhost_root, site_key):
     return _native_extension_fingerprint(directory, allowed_conf_names=frozenset())
 
 
+# An independently scoped native application route may be irrelevant to
+# another site's *physical Cache* ownership. Prove the entire source has
+# only literal locations, local FastCGI and terminal redirects/returns.
+# This is not permission to alter the selected VHost or its PHP routing.
+_PEER_LOCATION = re.compile(r"\s*location\s+(?:(?:=|\^~)\s+)?/[A-Za-z0-9_./~-]*\s*\{([^{}]*)\}", re.S)
+_PEER_STATEMENT = re.compile(r"\s*([a-z_]+)\s+([^;{}\r\n]+);")
+_LOCAL_SOCKET = re.compile(r"unix:/tmp/php-cgi-[1-9][0-9]{1,2}\.sock")
+
+
+def _native_local_route_dependencies(source, nginx_root):
+    dependencies = []
+    sockets = []
+    offset = 0
+    count = 0
+    while source[offset:].strip():
+        route = _PEER_LOCATION.match(source, offset)
+        if route is None:
+            raise MonitorInputError("Peer extension contains unverified location/routing")
+        count += 1
+        offset = route.end()
+        body = route.group(1)
+        pos = 0
+        commands = {}
+        while body[pos:].strip():
+            statement = _PEER_STATEMENT.match(body, pos)
+            if statement is None:
+                raise MonitorInputError("Peer extension contains unverified directive syntax")
+            pos = statement.end()
+            name, value = statement.group(1), statement.group(2).strip()
+            commands.setdefault(name, []).append(value)
+        if set(commands) == {"return"} and len(commands["return"]) == 1:
+            # Nginx return has no upstream or cache read/write. Permit a
+            # literal HTTP status and an optional simple redirect target.
+            if not re.fullmatch(r"[2-5][0-9]{2}(?:[ \t]+https?://[^\s;{}\"'\\]+)?",
+                                commands["return"][0]):
+                raise MonitorInputError("Peer extension return syntax needs review")
+            continue
+        if (set(commands) != {"try_files", "fastcgi_pass", "fastcgi_index", "include"}
+                or commands["try_files"] != ["$uri =404"]
+                or commands["fastcgi_index"] != ["index.php"]
+                or len(commands["fastcgi_pass"]) != 1
+                or not _LOCAL_SOCKET.fullmatch(commands["fastcgi_pass"][0])
+                or commands["include"] not in (["fastcgi.conf"], ["fastcgi.conf", "pathinfo.conf"])):
+            raise MonitorInputError("Peer extension has unverified Cache-affecting directives")
+        sockets.append(commands["fastcgi_pass"][0][len("unix:"):])
+        for name in commands["include"]:
+            raw, sig = _bounded_file_text(Path(nginx_root) / name, MAX_NGINX_SITE_BYTES, with_fingerprint=True)
+            text = _active_nginx_text(raw)
+            # No arbitrary nested source. The native parameter-only file
+            # and PATH_INFO rewrite are recognized by their actual complete
+            # grammar, not merely their conventional filenames.
+            if name == "fastcgi.conf":
+                if re.sub(r"(?m)^[ \t]*fastcgi_param[ \t]+[A-Za-z0-9_]+[ \t]+[^;{}\r\n]+;[ \t]*$", "", text).strip():
+                    raise MonitorInputError("Peer FastCGI parameters contain unverified directives")
+            else:
+                canonical = r"""set $real_script_name $fastcgi_script_name;
+if ($fastcgi_script_name ~ "^(.+?\.php)(/.+)$") {
+set $real_script_name $1;
+set $path_info $2;
+}
+fastcgi_param SCRIPT_FILENAME $document_root$real_script_name;
+fastcgi_param SCRIPT_NAME $real_script_name;
+fastcgi_param PATH_INFO $path_info;"""
+                if re.sub(r"\s+", " ", text).strip() != re.sub(r"\s+", " ", canonical).strip():
+                    raise MonitorInputError("Peer PATH_INFO source contains unverified directives")
+            dependencies.append((name, sig))
+    if not count:
+        raise MonitorInputError("Peer extension has no verified routing")
+    return {"includes": dependencies, "sockets": sorted(set(sockets))}
+
+
 def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
-                                  allowed_conf_names=None, cache_state_dir=None):
+                                  allowed_conf_names=None, cache_state_dir=None,
+                                  inspect_foreign=None):
     """Read a single native per-site '*.conf' glob without following links.
 
     Accept inert native logging overlays or the exact verified, plugin-owned
@@ -1133,11 +1205,15 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
                                   "status_journal": journal})
                 else:
                     active = _active_nginx_text(text)
-                    for line in active.splitlines():
-                        if (line.strip() and not re.fullmatch(
-                                r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)):
+                    inert = all(not line.strip() or re.fullmatch(
+                        r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)
+                        for line in active.splitlines())
+                    observed = {"name": name, "signature": signature}
+                    if not inert:
+                        if inspect_foreign is None or name == "site_total.conf":
                             raise MonitorInputError("Native extension has unverified routing or directives")
-                    files.append({"name": name, "signature": signature})
+                        observed["operation_dependencies"] = inspect_foreign(active)
+                    files.append(observed)
             after = os.fstat(fd)
             if any(getattr(before, field) != getattr(after, field) for field in identities):
                 raise MonitorInputError("Native extension changed during inspection")
@@ -1167,9 +1243,40 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
     ).encode("utf-8")).hexdigest()
 
 
+def _native_well_known_fingerprint(active_vhost, path):
+    """Recognize the exact native per-site SSL challenge helper.
+
+    The observed aaPanel helper reads the challenge body with Lua and
+    returns it; it does not select a PHP/cache upstream. Arbitrary Lua
+    cannot be classified as inert routing. Match the complete template,
+    not its filename or panel version. Other templates need verification.
+    """
+    expected = str(path)
+    refs = re.findall(r"\binclude\s+[^;\n]*/well-known/[^;\n]*;", active_vhost)
+    if not refs:
+        return None
+    if (len(refs) != 1 or not re.fullmatch(
+            r"include[ \t]+" + re.escape(expected) + r"[ \t]*;", refs[0])
+            or not _native_server_direct_include(active_vhost, expected)):
+        raise MonitorInputError("Unverified native SSL well-known include scope or site identity")
+    try:
+        raw, signature = _bounded_file_text(
+            Path(path), MAX_NGINX_SITE_BYTES, with_fingerprint=True)
+    except (OSError, UnicodeError) as exc:
+        raise MonitorInputError("Native SSL well-known source unavailable or untrusted") from exc
+    # Only outer/line-end whitespace and CRLF may differ. Observed identical
+    # complete source on two registered sites; fixture tests bind the hash.
+    canonical = "\n".join(line.rstrip(" \t") for line in raw.replace("\r\n", "\n").split("\n")).strip()
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if digest != "a9133e7ee4b5adff671827baf815e6cab3118aa2688612ef8e11af14d30bc8c1":
+        raise MonitorInputError("Native SSL well-known helper content needs review")
+    return signature
+
+
 def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
-                              native_extension=None, native_subdir=None):
-    """Accept exact aaPanel PHP/rewrite/extension and optional unused sub_dir."""
+                              native_extension=None, native_subdir=None,
+                              native_well_known=None):
+    """Accept verified native PHP/rewrite/extension/sub_dir and SSL helper."""
     active = _active_nginx_text(vhost_text)
     includes = re.findall(
         r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$", active,
@@ -1184,15 +1291,19 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
     if len(php) != 1:
         raise MonitorInputError("No unique native Nginx PHP include")
     extras = [name for name in includes if name != php[0][1]]
-    if (len(extras) > 3 or any(
-            name not in (native_rewrite, native_extension, native_subdir)
-            or name is None for name in extras)):
+    if any(
+            name not in (native_rewrite, native_extension, native_subdir, native_well_known)
+            or name is None for name in extras):
         raise MonitorInputError("Additional or unverified Nginx include/routing needs review")
     if native_subdir in extras and native_subdir is not None:
         if not _native_server_direct_include(active, native_subdir):
             raise MonitorInputError("Native subdirectory include is not server-scoped")
+    well_known = (_native_well_known_fingerprint(active, native_well_known)
+                  if native_well_known in extras else None)
+    if native_well_known in extras and not well_known:
+        raise MonitorInputError("Unverified native SSL well-known include")
     return (php[0][0], php[0][1], native_rewrite in extras,
-            native_extension in extras, native_subdir in extras)
+            native_extension in extras, native_subdir in extras, well_known)
 
 
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
@@ -1222,7 +1333,7 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         "other_php_sites_count": 0,
         **({"other_sites": []} if include_other_sites else {}),
         "reason": "",
-        "note": ("Verified native Nginx VHost/PHP includes, inert or owned Status Pages site extensions and [www] Unix-socket FILE attribution only; "
+        "note": ("Verified native Nginx VHost/PHP includes, verified site extensions and [www] Unix-socket FILE attribution only; "
                  "not proof of effective routing, PHP worker state, or a complete impact boundary for Apply."),
     }
     try:
@@ -1264,11 +1375,15 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 )
                 rewrite = rewrite_dir / (name + ".conf")
                 extension = vhost_dir / "extension" / name
-                assigned, php_name, has_rewrite, has_extension, has_subdir = _native_nginx_php_version(
+                assigned, php_name, has_rewrite, has_extension, has_subdir, well_known = _native_nginx_php_version(
                     vhost, native_rewrite=str(rewrite),
                     native_extension=str(extension / "*.conf"),
                     native_subdir=str(vhost_dir / "sub_dir" / name / "*.conf"),
+                    native_well_known=str(vhost_dir / "well-known" / (name + ".conf")),
                 )
+                if well_known:
+                    dependencies.append({"kind": "native_ssl_well_known", "id": site_id,
+                                         "signature": well_known})
                 if has_subdir:
                     dependencies.append({
                         "kind": "native_unused_subdir", "id": site_id,
@@ -1285,9 +1400,24 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     dependencies.append({"kind": "native_rewrite", "id": site_id,
                                          "signature": rewrite_signature})
                 if has_extension:
+                    inspect_foreign = None
+                    if _native_server_direct_include(vhost, str(extension / "*.conf")):
+                        # A literal application FastCGI route can be attributed
+                        # to the same pool as this site's native assignment.
+                        # A real mixed-pool route remains unresolved rather than
+                        # being silently counted as only the native PHP version.
+                        assigned_socket = (None if assigned == "00" else socket if assigned == version else
+                            (other_socket_resolver(assigned) if other_socket_resolver else
+                             "/tmp/php-cgi-" + assigned + ".sock"))
+                        def inspect_foreign(active):
+                            evidence = _native_local_route_dependencies(active, nginx_dir)
+                            if any(dest != assigned_socket for dest in evidence["sockets"]):
+                                raise MonitorInputError("Native application route uses a different PHP pool")
+                            return evidence
                     dependencies.append({"kind": "native_extension", "id": site_id,
                                          "signature": _native_extension_fingerprint(
-                                             extension, site_id=site_id, site_key=name)})
+                                             extension, site_id=site_id, site_key=name,
+                                             inspect_foreign=inspect_foreign)})
                 if php_name not in checked_snippets:
                     if assigned == "00":
                         if php_name != "enable-php-00.conf":
@@ -1317,8 +1447,9 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     checked_snippets.add(php_name)
                 dependencies.append({"kind": "vhost", "id": site_id,
                                      "signature": vhost_signature})
-            except (OSError, UnicodeError, MonitorInputError):
-                result["unresolved_sites"].append({**site_key, "reason": "VHost PHP assignment needs review"})
+            except (OSError, UnicodeError, MonitorInputError) as exc:
+                reason = str(exc)[:180] if isinstance(exc, MonitorInputError) else type(exc).__name__
+                result["unresolved_sites"].append({**site_key, "reason": "VHost PHP assignment needs review: " + reason})
                 continue
             if assigned == version:
                 result["matched_sites"].append(site_key)

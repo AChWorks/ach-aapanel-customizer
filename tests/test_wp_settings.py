@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1] / "plugin" / "ach_customizer"
 sys.path.insert(0, str(ROOT))
 
 import ach_customizer_wp_settings as settings
+REAL_SITE_SOURCE = settings._site_source
 from ach_customizer_cache_wordpress import _read_file
 from ach_customizer_state import _open_state_dir
 
@@ -82,6 +83,28 @@ class WPSettingsTests(unittest.TestCase):
         return self.call("restore", kind, desired=value, interval=interval,
                          expected_source=info["source_sha256"],
                          expected_recovery=info["recovery_id"])
+
+    def test_native_assignment_supports_both_handlers_and_rejects_ambiguity(self):
+        # Exercise the actual shared source reader, not the operation mock.
+        for filename in ("wp-settings.php", "wp-cron.php"):
+            (self.root / filename).write_text("<?php /* synthetic core */")
+        vhost = self.vhost / "example.test.conf"
+        with patch.object(settings, "_docroot", side_effect=lambda *a: os.open(self.root, os.O_RDONLY)), \
+             patch.object(settings.os.path, "isfile", return_value=True), \
+             patch.object(settings.os.path, "islink", return_value=False), \
+             patch.object(settings.os, "access", return_value=True):
+            for handler in ("enable-php-85.conf", "enable-php-85-wpfastcgi.conf", "enable-php-83.conf"):
+                vhost.write_text("server {\n # include enable-php-81.conf;\n include " + handler + ";\n}\n")
+                _, php, version = REAL_SITE_SOURCE(
+                    self.site, self.public, vhost_root=str(self.vhost))
+                self.assertEqual(php, "/www/server/php/" + version + "/bin/php")
+                self.assertEqual(version, handler.split("-")[2].split(".")[0])
+            for text in ("server { location /app { include enable-php-85.conf; } }",
+                         "server { include enable-php-85.conf; include enable-php-81.conf; }",
+                         "server { include enable-php-85-other.conf; }"):
+                vhost.write_text(text)
+                with self.assertRaisesRegex(settings.WPSettingsError, "assignment"):
+                    REAL_SITE_SOURCE(self.site, self.public, vhost_root=str(self.vhost))
 
     def test_debug_apply_recheck_restore_exact_source_permissions(self):
         a = self.apply("debug")

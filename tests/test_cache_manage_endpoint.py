@@ -287,6 +287,13 @@ class CacheEndpointTests(unittest.TestCase):
             self.assertEqual(response["stage"], "wordpress_cache_setup")
             self.assertIn("Site .user.ini", response["msg"])
             self.assertEqual(response["recovery_id"], "f" * 32)
+            from ach_customizer_activity import read_activity
+            entry = read_activity(main._STATE_DIR, module="websites")[0]
+            self.assertEqual(entry["operation_id"], response["operation_id"])
+            self.assertEqual(entry["recovery_id"], "f" * 32)
+            self.assertEqual(entry["stage"], "setup:wordpress")
+            self.assertEqual(entry["target"], "7")
+            self.assertIn("Site .user.ini", entry["detail"])
 
 if __name__=='__main__':
     unittest.main()

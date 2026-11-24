@@ -19,6 +19,9 @@ FILES = (
     "includes/class-cache-invalidation.php",
     "includes/class-plugin.php",
     "readme.txt",
+    "languages/ach-aapanel-bridge.pot",
+    "languages/ach-aapanel-bridge-fa_IR.po",
+    "languages/ach-aapanel-bridge-fa_IR.mo",
     "LICENSE",
 )
 
@@ -55,6 +58,7 @@ def build(output: str | Path) -> dict[str, str]:
             _header(header, "License") != "MPL-2.0" or
             _header(header, "License URI") != "https://www.mozilla.org/en-US/MPL/2.0/" or
             _header(header, "Text Domain") != SLUG or
+            _header(header, "Domain Path") != "/languages" or
             _header(header, "Update URI") !=
             "https://github.com/AChWorks/ach-aapanel-customizer/tree/main/wordpress/ach-aapanel-bridge"):
         raise ValueError("Unexpected WordPress companion identity")

@@ -83,6 +83,56 @@ the target service/configuration before writing.
 Earlier checklists and proposed complexity must be re-evaluated against this
 principle. Recording it does not imply other runtime controls have changed.
 
+### Owner-wide compatibility principle: heterogeneous sites and operation-local capabilities (2026-11-24)
+
+**Applies to all current and future modules, not only WordPress/Cache.**
+A single aaPanel host can contain static sites, WordPress/WooCommerce,
+other CMSs, custom applications, subdirectory/public-root layouts, reverse
+proxies and different native PHP/service assignments at the same time.
+Generic site and panel capabilities must not require WordPress, a particular
+application, an example domain, a fixed document-root prefix, or a pristine
+QA-generated VHost. Discover the actual native identity, effective served
+root, application capability, service assignment, active includes,
+bindings and relevant ownership as needed for the operation. Do not
+auto-correct a legitimate deployment's settings merely to fit a fixture.
+
+Determine compatibility **per operation, per target and per affected
+shared resource**. Separate basic identity/discovery and read-only
+inspection from the dependency analysis needed for each writer. A foreign
+route or source format is not by itself evidence that it affects every
+module or every peer site. Inspect its relevant scope and actual
+dependencies; an unrelated application or unknown integration must not
+unnecessarily block a supported operation. If an unknown source can affect
+the particular routing, shared pool, physical Cache directory, log trust,
+default listener or other resource being changed, retain the necessary
+ownership/effect checks and diagnose the exact conflict. Do not treat
+unknown executable configuration as inert, relax a real peer-isolation
+check, or overwrite a foreign writer.
+
+Use existing native capabilities and small reusable source/identity readers.
+Distinguish the common environment facts from operation-specific
+interpretation; do not make one module's strict compatibility predicate a
+global admission gate. Prefer discovery and semantic validation over
+hardcoded version lists, exact historical fixture layouts and per-domain
+exceptions, while retaining required protocol/source/recovery invariants.
+Provide truthful partial observations and usable independent tasks when a
+specific capability is unavailable; report the target, source, actual
+condition and next action. Revalidate relevant dependencies, not unrelated
+changes. Maintain supported Stable state as required by section 8.
+
+Test representative mixed-site environments rather than one uniform
+WordPress or stock-PHP fixture. Derive representative variations from
+actual deployments (normal and custom roots, aliases, native SSL/ACME,
+HTTP/2 or HTTP/3, PHP handlers, safe foreign extensions and conflicting
+ones, application integration/CLI contexts and relevant shared resources).
+For each changed operation, prove supported success and exact recovery,
+unaffected-site preservation and meaningful rejection of a genuinely
+conflicting source. Distinguish real native acceptance from source-only
+observations and isolated fixtures. An untested application or topology is
+not automatically unsupported, and this principle is not a claim of
+universal support for arbitrary Nginx/PHP writers or a mandate to implement
+unrelated new web-server/framework adapters. Use the retained QA guest and
+scoped fixtures; Production remains read-only unless separately approved.
 
 ### Owner decision: manual-first site reconciliation (2026-11-22)
 
@@ -133,6 +183,13 @@ version). The longer repository-only Markdown guide must not replace
 do not authorize a WordPress.org Plugin Directory listing or override
 the project's selected [MPL-2.0 license](../LICENSE).
 
+The WordPress companion uses standard WordPress localization, with a bundled
+`fa_IR` catalog and English fallback, following the active administration
+locale (site language or administrator profile preference). Keep the
+product name **ACh aaPanel Bridge** and technical identifiers unchanged.
+Use WordPress-native RTL presentation; no second language configuration is
+needed. This does not localize or otherwise change the native aaPanel UI.
+
 The companion is **opt-in**, disconnected by default and never required
 for native aaPanel functions. After the native and both WordPress plugins are installed, an administrator may run **Connect WordPress Cache (once)** for a selected native WordPress site. This one authorized action configures its private physical Nginx Cache, WordPress Nginx Helper constant, selected PHP open_basedir, Helper unlink_files options and generation-aware Bridge mapping. Ordinary WordPress content changes and repeated use of the vendor's page/site purge buttons need no per-site manual path edits or continuous watcher; site sources that materially change must be reported and rechecked. The corresponding **Disconnect and restore** action recovers the managed site configuration and disables vendor purge before returning to a potentially shared aaPanel path. This one-click path does not install third-party WordPress plugins, support unverified PHP/Nginx layouts, or authorize an arbitrary shared Cache root. The normal native manual Cache Apply remains independently available. Its currently implemented capability is
 native-generation-bound, owner-verified per-URL invalidation via the
@@ -162,10 +219,11 @@ for the feature-to-task crosswalk, view and status patterns, visual rules, and
 acceptance scenarios. Do not publish a renamed seven-tab interface as the
 completed redesign or drop advanced features to make screens look simpler.
 
-No previous Customizer version has Production users, so backward compatibility
-with historical Customizer UI routes/state shims is **not** required. This does
-not waive real aaPanel/vendor/WordPress integrations, current target/peer
-ownership, authorization, write verification, or Recovery correctness.
+Historical experimental pre-Stable Customizer UI routes/state shims need
+not be revived. The Stable-version boundary in section 8 governs supported
+published state and recovery. This does not waive real aaPanel/vendor/WordPress
+integrations, current target/peer ownership, authorization, write verification,
+or Recovery correctness.
 The existing sole QA VM remains preserved during development. Merge, public
 Release, and Production installation retain separate Owner approval gates.
 
@@ -203,14 +261,14 @@ stale previews, cache manifests and recoveries; never silently replace it
 with a default path. Certify each module with representative real custom-root
 behavior rather than inferring compatibility from inventory alone.
 
-**Pre-stable internal compatibility policy:** No official production
-installation of ACh aaPanel Customizer exists. **Apply this decision across
-all Customizer subsystems** (Status Pages, Nginx Guard, PHP-FPM, Cache,
-WordPress operations, website management, UI and recovery): remove previous
-Customizer version/schema/ruleset recovery shims, historic automatic Hosts
-Restore paths, and old role/profiles baseline guesses. Only preserve current
-capabilities and the durability/Restore guarantees for operations created
-by the current candidate. Names such as aaPanel's `class_v2` and native
+**Historical pre-Stable internal compatibility policy:** Before the first
+published Stable, experimental Customizer installations did not impose
+production compatibility obligations. Across all subsystems, do not revive
+retired experimental version/schema/ruleset shims, automatic Hosts Restore
+paths, or old role/profile baseline guesses. The published Stable boundary
+in section 8 now governs supported state, active contracts and durable
+Recovery. Never discard supported Stable recovery because a newer
+candidate exists. Names such as aaPanel's `class_v2` and native
 Nginx Helper's older cache paths are **external vendor/source contracts**,
 not old Customizer adapters; assess them by real active use.
 Real aaPanel vendor sources, supported PHP/WordPress versions,
@@ -437,7 +495,7 @@ A customization must identify what it governs. At minimum the domain model must 
 
 The engine distinguishes desired configuration, generated files, current runtime values, and observed behavior. A change may need to reconcile more than one of these layers. Ownership, scope, and policy precedence must be explicit, deterministic, and inspectable. Existing manual settings are not silently adopted or replaced.
 
-A policy must not assume that changing shared PHP-FPM settings is the same as changing one website. Ambiguous ownership, conflicting policies, and unknown versions require review rather than destructive guesses.
+A policy must not assume that changing shared PHP-FPM settings is the same as changing one website. Ambiguous ownership, conflicting policies, and unverified writer semantics require operation-specific review rather than destructive guesses. An unfamiliar version string alone is not incompatibility.
 
 For shared PHP-FPM, the operator's **desired** `[www]` settings are a service/version-scoped policy, independently durable from the aaPanel-managed configuration file. A Monitor save only records intent after reviewing a current file/default comparison; it does not mean the effective worker state matches, nor constitute authorization for Manual Apply or Auto-enforce. Reconciliation should compare the saved desired values against refreshed generated/source evidence and separately verified runtime/service/affected-site behavior when available; the operator must retain control of approval and recovery.
 
@@ -562,7 +620,7 @@ Acceptance requires practical test evidence, not just source files or a mock UI.
 - correct discovery of several sites with different application types and a newly created site;
 - differentiation of a shared PHP pool setting from a per-site virtual-host setting;
 - no unauthorized mutation in Monitor mode;
-- compatibility rejection/Needs Review for an unsupported aaPanel version or unknown config shape;
+- operation-local capability handling across mixed site types and source shapes, with truthful partial inspection and Needs Review only for an actual unresolved dependency or unsupported writer, not a version label or unrelated peer variation;
 - preflight/backup, idempotence, duplicate/conflict resistance, real validation, recoverable failure and rollback on representative supported operations;
 - preservation of unrelated host configuration and functioning websites across all lifecycle tests;
 - clear diagnostic evidence and low bounded monitoring overhead.

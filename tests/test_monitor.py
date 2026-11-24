@@ -803,6 +803,26 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         include.write_text(include.read_text() + '# in-place include change\n')
         self.assertNotEqual(updated['dependency_sha256'], self.inspect()['dependency_sha256'])
 
+    def test_native_ssl_challenge_helper_preserves_php_impact(self):
+        template = (Path(__file__).resolve().parent / "fixtures/native-well-known.conf").read_bytes()
+        helper = self.vhosts / "well-known" / "site-b.example.test.conf"
+        helper.parent.mkdir()
+        helper.write_bytes(template)
+        host = self.vhost("site-b.example.test")
+        original = host.read_text()
+        host.write_text(original.replace("  include enable-php-", "  include " + str(helper) + ";\n  include enable-php-"))
+        good = self.inspect()
+        self.assertEqual(good["state"], "File Mapping", good)
+        self.assertTrue(good["manual_apply_eligible"])
+        helper.write_bytes(template + b"\nset $unexpected 1;\n")
+        bad = self.inspect()
+        self.assertEqual(bad["state"], "Needs Review", bad)
+        self.assertEqual([site["id"] for site in bad["unresolved_sites"]], [6])
+        self.assertFalse(bad["manual_apply_eligible"])
+        helper.write_bytes(template)
+        helper.chmod(0o666)
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+
     def test_native_fastcgi_parameter_dependency_is_bounded_and_fingerprinted(self):
         include = self.nginx / 'enable-php-85.conf'
         include.write_text(
@@ -1308,6 +1328,27 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         accepted = self.inspect()
         self.assertEqual(accepted["state"], "File Mapping", accepted)
         self.assertTrue(accepted["manual_apply_eligible"])
+
+    def test_scoped_application_route_same_pool_is_attributed_not_globally_blocked(self):
+        self._native_qa_shapes()
+        extension = self.vhosts / 'extension' / 'site-a.example.test'
+        route = extension / 'application.conf'
+        route.write_text("""location = /health.php {
+    try_files $uri =404;
+    fastcgi_pass unix:/tmp/php-cgi-85.sock;
+    fastcgi_index index.php;
+    include fastcgi.conf;
+}
+location ^~ /retired/ { return 410; }
+""")
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping', good)
+        self.assertEqual([s['id'] for s in good['matched_sites']], [3, 6])
+        route.write_text(route.read_text().replace('php-cgi-85.sock','php-cgi-81.sock'))
+        bad = self.inspect()
+        self.assertEqual(bad['state'], 'Needs Review', bad)
+        self.assertIn('different PHP pool', bad['unresolved_sites'][0]['reason'])
+        self.assertFalse(bad['manual_apply_eligible'])
 
     def test_native_extension_changes_invalidate_approval_identity(self):
         self._native_qa_shapes()

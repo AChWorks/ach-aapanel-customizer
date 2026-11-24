@@ -16,7 +16,7 @@ from pathlib import Path
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
     _native_nginx_php_version, _native_extension_fingerprint,
-    _native_unused_subdir, _native_server_direct_include,
+    _native_unused_subdir, _native_server_direct_include, _native_local_route_dependencies,
     _unsupported_nginx_upstream, MAX_NGINX_SITE_BYTES,
     iter_native_site_rows,
 )
@@ -109,23 +109,26 @@ def _merge_directives(*sources):
     return result
 
 
-def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
+def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root, *, peer=False):
     if not isinstance(site_key, str) or not SITE_KEY.fullmatch(site_key):
         raise CacheAuditError("Unsupported native website VHost key")
     vhost_path = Path(vhost_root) / (site_key + ".conf")
     vhost, vhost_sig = _text_and_signature(vhost_path)
     rewrite = Path(rewrite_root) / (site_key + ".conf")
     extension = Path(vhost_root) / "extension" / site_key
-    version, snippet, has_rewrite, has_extension, has_subdir = _native_nginx_php_version(
+    version, snippet, has_rewrite, has_extension, has_subdir, well_known = _native_nginx_php_version(
         vhost, native_rewrite=str(rewrite),
         native_extension=str(extension / "*.conf"),
         native_subdir=str(Path(vhost_root) / "sub_dir" / site_key / "*.conf"),
+        native_well_known=str(Path(vhost_root) / "well-known" / (site_key + ".conf")),
     )
     # Cache Clear's all-site source graph must include native subdirectory
     # routing, even on a peer site, before asserting cache file isolation.
     extra_files = ([("native-unused-subdir", site_key,
                      _native_unused_subdir(vhost_root, site_key))]
                    if has_subdir else [])
+    if well_known:
+        extra_files.append(("native-ssl-well-known", site_key, well_known))
     snippet_source, snippet_sig = _text_and_signature(Path(nginx_root) / snippet)
     if version == "00":
         # Inert native Static sites must not block an unrelated PHP site's
@@ -192,8 +195,16 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
         sources.append(text)
         fingerprints.append(("rewrite", site_key, sig))
     if has_extension:
+        # A selected writer remains strict; an independently registered
+        # peer may have a fully inspected, Cache-irrelevant application route.
+        owned = extension / ("ach_customizer_cache_%d.conf" % site_id)
+        inspect_foreign = None
+        if (peer and not owned.exists() and not owned.is_symlink()
+                and _native_server_direct_include(vhost, str(extension / "*.conf"))):
+            inspect_foreign = lambda active: _native_local_route_dependencies(active, nginx_root)
         sig = _native_extension_fingerprint(
-            extension, site_id=site_id, site_key=site_key)
+            extension, site_id=site_id, site_key=site_key,
+            inspect_foreign=inspect_foreign)
         fingerprints.append(("extension", site_key, sig))
         # The native scanner verified the exact journal-owned Cache source.
         # Audit its real directives too: otherwise a successfully activated
@@ -558,6 +569,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             different_directory_peer = False
             physical_peer_paths = []
             unresolved = 0
+            first_unresolved = ""
             selected_directory = (
                 globals_["paths"].get(zone, (None, None))[0]
                 if zone is not None else None
@@ -568,10 +580,13 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                     continue
                 try:
                     peer_directives, files, _, _ = _site_source(
-                        ident, key, vhost_root, nginx_root, rewrite_root)
+                        ident, key, vhost_root, nginx_root, rewrite_root, peer=True)
                     _, peer_zone = _cache_zone(peer_directives)
-                except (CacheAuditError, MonitorInputError, OSError, UnicodeError, ValueError):
+                except (CacheAuditError, MonitorInputError, OSError, UnicodeError, ValueError) as exc:
                     unresolved += 1
+                    if not first_unresolved:
+                        detail = str(exc) if isinstance(exc, MonitorInputError) else type(exc).__name__
+                        first_unresolved = key + ": " + detail
                     continue
                 fingerprints.extend(files)
                 if zone is not None and peer_zone == zone:
@@ -592,7 +607,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                         different_directory_peer = True
             return (sites, globals_, selected_directives, version, managed_handler, zone_state,
                     zone, peers, directory_peers, different_directory_peer,
-                    physical_peer_paths, unresolved, fingerprints)
+                    physical_peer_paths, unresolved, fingerprints, first_unresolved)
 
         first = scan()
         if first != scan():
@@ -602,7 +617,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             raise CacheAuditError("Native web engine or panel version changed during audit")
         (sites, globals_, directives, php_version, managed_handler, zone_state, zone, peers,
          directory_peers, different_directory_peer, physical_peer_paths,
-         unresolved, fingerprints) = first
+         unresolved, fingerprints, first_unresolved) = first
         findings, ignored = _analyze_selected(
             directives, zone_state, zone, globals_, peers, directory_peers)
         observed_key = (directives["fastcgi_cache_key"][0]
@@ -642,8 +657,8 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
             ignore_headers=ignored, findings=findings,
             other_sites_same_zone=peers, unresolved_other_sites=unresolved,
             inspected_sites=len(sites), source_sha256=source_sha,
-            reason=("Some native websites have uninspected cache source; "
-                    "shared-zone use may be incomplete" if unresolved else ""),
+            reason=(("Peer Cache source incomplete (%d); %s" % (unresolved, first_unresolved))[:250]
+                    if unresolved else ""),
         )
     except (OSError, UnicodeError, ValueError, RuntimeError, TypeError) as exc:
         result["reason"] = str(exc)[:250]
