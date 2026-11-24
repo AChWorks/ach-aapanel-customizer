@@ -155,12 +155,15 @@ def process(conf, directory, callback):
         child = subprocess.Popen(argv, stdout=output, stderr=output)
         try:
             deadline = time.monotonic() + 8
-            while not (directory / "fixture.pid").is_file():
+            while True:
+                pidfile = directory / "fixture.pid"
+                pid = pidfile.read_text().strip() if pidfile.is_file() else ""
+                if pid == str(child.pid):
+                    break
                 if child.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError("Isolated Nginx did not start: " +
                                        (directory / "error.log").read_text(errors="replace")[-1500:])
                 time.sleep(.1)
-            assert int((directory / "fixture.pid").read_text()) == child.pid
             return callback()
         finally:
             if child.poll() is None:
