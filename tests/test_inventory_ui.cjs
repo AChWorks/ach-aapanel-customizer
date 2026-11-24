@@ -504,6 +504,14 @@ function loadUi() {
       bridgeEnableDisabled: elements.get('#ach-bridge-enable').props.disabled,
       bridgeDisableDisabled: elements.get('#ach-bridge-disable').props.disabled,
       wpCacheResult: elements.get('#ach-wp-cache-result').textContent,
+      wpCacheTone: elements.get('#ach-wp-cache-result').attributes['data-tone'],
+      wpCacheInspectDisabled: elements.get('#ach-wp-cache-inspect').props.disabled,
+      wpCacheSetupReason: elements.get('#ach-wp-cache-setup').attributes['data-ach-disabled-help'],
+      wpCacheRestoreReason: elements.get('#ach-wp-cache-restore').attributes['data-ach-disabled-help'],
+      bridgeTone: elements.get('#ach-bridge-result').attributes['data-tone'],
+      cacheActivationTone: elements.get('#ach-cache-activation-result').attributes['data-tone'],
+      feedbackTone: Object.fromEntries([...elements].filter(([key,node]) =>
+        node.attributes['data-tone']).map(([key,node]) => [key,node.attributes['data-tone']])),
       wpCacheSetupDisabled: elements.get('#ach-wp-cache-setup').props.disabled,
       wpCacheRestoreDisabled: elements.get('#ach-wp-cache-restore').props.disabled,
       vhostResult: elements.get('#ach-vhost-result').textContent,
@@ -6139,6 +6147,7 @@ test('Confirmed Apply warnings stay in PHP panel despite unrelated Activity traf
   activity.respond({status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
   assert.match(ui.state().fpmPlan,/Apply result: Applied/);
   assert.match(ui.state().fpmOperationNotice,/Native audit unavailable/);
+  assert.equal(ui.state().feedbackTone['#ach-fpm-operation-notice'],'review');
   assert.match(ui.state().fpmOperationNotice,/Plugin log unavailable/);
 });
 
@@ -7896,6 +7905,7 @@ test('Activity loading, empty/error and retry states maintain truthful loading f
   assert.equal(ui.state().activitySkeletonHidden,true);
   assert.equal(ui.state().activityTableRowsHidden,false);
   assert.match(ui.activityMessage(),/unavailable/i);
+  assert.equal(ui.state().feedbackTone['#ach-activity-result'],'error');
 });
 
 test('Changing Activity filter keeps only newest pending request visible', () => {
@@ -8155,6 +8165,7 @@ test('Confirmed baseline Save keeps a dominant Saved state until a new compariso
   ui.siteChangesSave().respond({status:true,schema:1,state:'Baseline Saved',changed:true,
     baseline_revision:1,source_sha256:'a'.repeat(64)});
   assert.match(ui.state().siteChangesSummary,/All reviewed website records saved.*revision 1/);
+  assert.equal(ui.state().feedbackTone['#ach-site-changes-summary'],'observed');
   assert.doesNotMatch(ui.state().siteChangesSummary,/Comparison not current/);
   assert.equal(ui.state().siteChangesSaveDisabled,true);
   ui.siteChangesCompare().respond(siteChangesPayload({
@@ -9841,7 +9852,14 @@ test('One-click WordPress setup uses one authenticated site-scoped action and su
   });
   assert.match(ui.state().wpCacheResult,/Connected/);
   assert.match(ui.state().wpCacheResult,/WordPress Helper connected/);
-  assert.equal(ui.state().wpCacheSetupDisabled,false);
+  assert.equal(ui.state().wpCacheSetupDisabled,true);
+  assert.equal(ui.state().wpCacheTone,'observed');
+  assert.match(ui.state().wpCacheSetupReason,/already Connected/);
+  assert.equal(ui.state().wpCacheInspectDisabled,false);
+  assert.equal(ui.state().wpCacheRestoreDisabled,false);
+  const settled=ui.requests.length;
+  ui.statusClick('#ach-wp-cache-setup');
+  assert.equal(ui.requests.length,settled,'No redundant Connect after verified success');
   const restore=ui.statusClick('#ach-wp-cache-restore');
   assert.equal(restore.options.data.wordpress_cache_action,'restore');
   assert.equal(restore.options.timeout,0);
@@ -9853,6 +9871,9 @@ test('One-click WordPress setup uses one authenticated site-scoped action and su
     recovery_id:'f'.repeat(32),changed:true
   });
   assert.match(ui.state().wpCacheResult,/Restored/);
+  assert.equal(ui.state().wpCacheTone,'observed');
+  assert.equal(ui.state().wpCacheRestoreDisabled,true);
+  assert.equal(ui.state().wpCacheSetupDisabled,false);
   const inspect=ui.statusClick('#ach-wp-cache-inspect');
   assert.equal(inspect.options.data.wordpress_cache_action,'inspect');
   assert.equal(inspect.options.timeout,0);
@@ -9864,6 +9885,118 @@ test('One-click WordPress setup uses one authenticated site-scoped action and su
     read_only:true
   });
   assert.match(ui.state().wpCacheResult,/Not Connected/);
+});
+
+test('WordPress Check distinguishes disconnected, connected, needs review and failed states', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const reply=(state,extra={})=>({status:true,schema:1,state,site_id:7,site_key:'site.test',
+    read_only:true,recovery_id:state==='Not Connected'?null:'f'.repeat(32),...extra});
+  ui.statusClick('#ach-wp-cache-inspect').respond(reply('Not Connected'));
+  assert.equal(ui.state().wpCacheTone,'neutral');
+  assert.equal(ui.state().wpCacheRestoreDisabled,true);
+  assert.match(ui.state().wpCacheRestoreReason,/No saved connection needs Disconnect/);
+  assert.equal(ui.state().wpCacheSetupDisabled,false);
+  ui.statusClick('#ach-wp-cache-inspect').respond(reply('Connected'));
+  assert.equal(ui.state().wpCacheTone,'observed');
+  assert.equal(ui.state().wpCacheSetupDisabled,true);
+  assert.equal(ui.state().wpCacheRestoreDisabled,false);
+  const pending=ui.statusClick('#ach-wp-cache-inspect');
+  assert.equal(ui.state().wpCacheTone,'neutral');
+  assert.equal(ui.state().wpCacheSetupDisabled,true);
+  pending.respond(reply('Needs Review',{note:'Native Cache: Recovery Required. Recheck saved recovery.'}));
+  assert.equal(ui.state().wpCacheTone,'review');
+  assert.match(ui.state().wpCacheResult,/Recovery Required/);
+  assert.equal(ui.state().wpCacheSetupDisabled,false,'Legitimate repair remains available');
+  assert.equal(ui.state().wpCacheRestoreDisabled,false);
+  ui.statusClick('#ach-wp-cache-inspect').respond({status:false,stage:'wordpress_cache_inspect',
+    msg:'Native source could not be inspected',operation_id:'a'.repeat(32),recovery_id:'b'.repeat(32)});
+  assert.equal(ui.state().wpCacheTone,'error');
+  assert.match(ui.state().wpCacheResult,/check failed. No change requested/);
+  assert.match(ui.state().wpCacheResult,/Native source could not be inspected/);
+  assert.match(ui.state().wpCacheResult,/Operation ID: a{32}/);
+  assert.match(ui.state().wpCacheResult,/Possible recovery ID: b{32}/);
+  assert.equal(ui.state().wpCacheInspectDisabled,false);
+});
+
+test('WordPress success requires action-specific verified response and current site', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const base={status:true,schema:1,state:'Connected',site_id:7,site_key:'site.test',
+    recovery_id:'f'.repeat(32)};
+  for(const wrong of [
+    {...base,changed:true,runtime_verified:false},
+    {...base,changed:true,runtime_verified:true,recovery_id:'invalid'},
+    {...base,state:'Not Connected',changed:false}
+  ]) {
+    ui.statusClick('#ach-wp-cache-setup').respond(wrong);
+    assert.equal(ui.state().wpCacheTone,'error');
+    assert.equal(ui.state().wpCacheSetupDisabled,false);
+  }
+  ui.statusClick('#ach-wp-cache-inspect').respond({...base,read_only:false});
+  assert.equal(ui.state().wpCacheTone,'error');
+  ui.statusClick('#ach-wp-cache-inspect').respond({...base,read_only:true});
+  assert.equal(ui.state().wpCacheTone,'observed');
+  assert.equal(ui.state().wpCacheSetupDisabled,true);
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  assert.equal(ui.state().wpCacheTone,'neutral');
+  assert.doesNotMatch(ui.state().wpCacheResult,/WordPress Cache: Connected/);
+});
+
+test('Native Bridge and WordPress states invalidate across related changes', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const conn={status:true,schema:1,state:'Connected',site_id:7,site_key:'site.test',
+    recovery_id:'f'.repeat(32),read_only:true};
+  const native={status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false};
+  ui.statusClick('#ach-wp-cache-inspect').respond(conn);
+  assert.equal(ui.state().bridgeTone,'observed');
+  ui.statusClick('#ach-cache-activation-recheck').respond(native);
+  assert.equal(ui.state().bridgeEnableDisabled,true,'Already-provisioned mapping needs no Provision');
+  const count=ui.requests.length;
+  ui.statusClick('#ach-bridge-enable');
+  assert.equal(ui.requests.length,count);
+  const disable=ui.statusClick('#ach-bridge-disable');
+  assert.equal(ui.state().wpCacheTone,'neutral');
+  disable.respond({status:true,schema:1,state:'Not Provisioned',site_id:7,site_key:'site.test',
+    changed:true,read_only:false,runtime_verified:false,purge_supported:false});
+  assert.equal(ui.state().bridgeTone,'neutral');
+  assert.equal(ui.state().bridgeDisableDisabled,true);
+  assert.equal(ui.state().wpCacheSetupDisabled,false);
+  ui.statusClick('#ach-wp-cache-inspect').respond(conn);
+  ui.statusClick('#ach-cache-activation-recheck').respond({...native,state:'Recovery Required',
+    journal_phase:'prepared',runtime_verified:false});
+  assert.equal(ui.state().cacheActivationTone,'review');
+  assert.equal(ui.state().wpCacheTone,'neutral');
+  assert.equal(ui.state().wpCacheSetupDisabled,false);
+});
+
+test('Connected and provisioned observations cannot survive conflicting or unavailable native identity', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const conn={status:true,schema:1,state:'Connected',site_id:7,site_key:'site.test',
+    recovery_id:'f'.repeat(32),read_only:true};
+  const native={status:true,schema:1,state:'Applied',site_id:7,site_key:'site.test',
+    journal_phase:'applied',recovery_id:'f'.repeat(32),read_only:true,
+    runtime_verified:true,purge_supported:false};
+  for(const response of [{...native,recovery_id:'e'.repeat(32)}, {status:false}]) {
+    ui.statusClick('#ach-wp-cache-inspect').respond(conn);
+    ui.statusClick('#ach-cache-activation-recheck').respond(response);
+    assert.equal(ui.state().wpCacheTone,'neutral');
+    assert.equal(ui.state().bridgeTone,'neutral');
+    assert.equal(ui.state().wpCacheSetupDisabled,false);
+  }
+  for(const malformed of [{state:{}},{state:'Provisioned',read_only:false},
+    {state:'Provisioned',recovery_id:['f'.repeat(32)]}]) {
+    ui.statusClick('#ach-wp-cache-inspect').respond(conn);
+    ui.statusClick('#ach-bridge-inspect').respond({status:true,schema:1,
+      state:'Provisioned',site_id:7,site_key:'site.test',recovery_id:'f'.repeat(32),
+      read_only:true,runtime_verified:false,purge_supported:false,...malformed});
+    assert.equal(ui.state().bridgeTone,'error');
+    assert.equal(ui.state().wpCacheTone,'neutral');
+  }
+  ui.statusClick('#ach-wp-cache-inspect').respond(conn);
+  ui.statusClick('#ach-wp-cache-inspect').respond({...conn,state:'Needs Review'});
+  assert.equal(ui.state().wpCacheTone,'review');
+  assert.equal(ui.state().bridgeTone,'neutral');
 });
 
 test('Slow WordPress connection returns correlated server failure without an early client timeout', () => {
@@ -10331,6 +10464,7 @@ test('Guard and scanner disabled reasons describe verified existing state and ma
         recovery_id:f.id,journal_phase:'prepared',runtime_verified:false
       }:{})});
       ui.statusClick('#ach-'+f.key+'-preview').respond(report);
+      assert.equal(ui.state().feedbackTone['#ach-'+f.key+'-summary'], state==='Unmanaged'?'neutral':['Applied','Restored'].includes(state)?'observed':'review',f.key+state);
       const a=ui.actionReason(apply),r=ui.actionReason(restore);
       assert.equal(ui.state()[f.key+'ApplyDisabled'],!['Unmanaged','Restored'].includes(state),f.key+state);
       assert.equal(ui.state()[f.key+'RestoreDisabled'],true,f.key+state);
@@ -10510,6 +10644,24 @@ test('Native WP observer stays disabled until a reviewed enable, and has emergen
   assert.equal(disable.options.data.reviewed,undefined);
   disable.respond(nativeWpPolicy({enabled:false,revision:2}));
   assert.match(ui.state().wpTerminalStatus,/Disabled/);
+});
+
+test('Healthy native WP observer blocks repeat enable but retains repair and emergency Disable',()=>{
+  const ui=loadUi();
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    enabled:true,watcher_ready:true,watcher_source_verified:true}));
+  ui.statusSetChecked('#ach-wp-terminal-reviewed',true);
+  assert.equal(ui.state().wpTerminalEnableDisabled,true);
+  assert.equal(ui.state().wpTerminalDisableDisabled,false);
+  assert.equal(ui.state().feedbackTone['#ach-wp-terminal-status'],'observed');
+  const before=ui.requests.length;
+  ui.statusClick('#ach-wp-terminal-enable');
+  assert.equal(ui.requests.length,before);
+  ui.statusClick('#ach-wp-terminal-refresh').respond(nativeWpPolicy({
+    enabled:true,watcher_ready:false,watcher_source_verified:true}));
+  ui.statusSetChecked('#ach-wp-terminal-reviewed',true);
+  assert.equal(ui.state().wpTerminalEnableDisabled,false);
+  assert.equal(ui.state().feedbackTone['#ach-wp-terminal-status'],'review');
 });
 
 test('Native WP durable manual-review identity survives Activity failure and old last_worker',()=>{

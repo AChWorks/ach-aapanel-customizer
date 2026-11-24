@@ -295,5 +295,48 @@ class CacheEndpointTests(unittest.TestCase):
             self.assertEqual(entry["target"], "7")
             self.assertIn("Site .user.ini", entry["detail"])
 
+    def test_wordpress_check_and_disconnect_failure_names_match_requested_action(self):
+        import ach_customizer_cache_wordpress as bridge
+        from ach_customizer_activity import read_activity
+        for action in ("inspect", "restore"):
+            with self.subTest(action=action), \
+                 patch.dict(sys.modules, {"flask": self.flask()}), \
+                 patch.object(self.plugin, "_require_enabled"), \
+                 patch.object(self.plugin, "_selected_native_website", side_effect=self.selected), \
+                 patch.object(bridge, action, side_effect=bridge.WordpressCacheError(
+                     "cache", "Native Cache source changed", recovery_id="f" * 32)):
+                response = self.plugin.manage_wordpress_cache({
+                    **self.args(), "wordpress_cache_action": action,
+                    "approved": "false" if action == "inspect" else "true"})
+                self.assertFalse(response["status"])
+                self.assertEqual(response["stage"], "wordpress_cache_" + action)
+                self.assertEqual(response["recovery_id"], "f" * 32)
+                self.assertIn("Native Cache source changed", response["msg"])
+                entry = read_activity(main._STATE_DIR, module="websites")[0]
+                self.assertEqual(entry["action"], "wordpress_cache_" + action)
+                self.assertEqual(entry["stage"], action + ":cache")
+                self.assertEqual(entry["recovery_id"], "f" * 32)
+                self.assertEqual(entry["operation_id"], response["operation_id"])
+
+    def test_wordpress_inactive_and_partial_states_have_truthful_activity_levels(self):
+        import ach_customizer_cache_wordpress as bridge
+        from ach_customizer_activity import read_activity
+        for state, level in (("Not Connected", "INFO"), ("Needs Review", "WARNING"),
+                             ("Connected", "INFO")):
+            with self.subTest(state=state), \
+                 patch.dict(sys.modules, {"flask": self.flask()}), \
+                 patch.object(self.plugin, "_require_enabled"), \
+                 patch.object(self.plugin, "_selected_native_website", side_effect=self.selected), \
+                 patch.object(bridge, "inspect", return_value={
+                     "schema": 1, "state": state, "site_id": 7, "site_key": "qa.test",
+                     "read_only": True, "recovery_id": None if state == "Not Connected" else "f"*32}):
+                response = self.plugin.manage_wordpress_cache({
+                    **self.args(), "wordpress_cache_action": "inspect", "approved": "false"})
+                self.assertTrue(response["status"])
+                self.assertEqual(response["state"], state)
+                entry = read_activity(main._STATE_DIR, module="websites")[0]
+                self.assertEqual(entry["level"], level)
+                self.assertEqual(entry["outcome"], state)
+
 if __name__=='__main__':
     unittest.main()

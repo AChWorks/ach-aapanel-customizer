@@ -606,7 +606,7 @@ def _save(site, record, data_dir):
 def _native_record(site, public):
     current = manage_cache("recheck", site, public)
     if current["state"] not in ("Applied", "Unmanaged", "Restored"):
-        raise WordpressCacheError("cache", "Native Cache recovery needs review before WordPress setup",
+        raise WordpressCacheError("cache", "Native Cache recovery needs review. Open Apply & restore and Recheck the saved recovery.",
                                   current.get("recovery_id"))
     return current
 
@@ -896,9 +896,19 @@ def inspect(site, public, *, data_dir=DATA_DIR):
     if journal is None:
         return {"schema": 1, "state": "Not Connected", "site_id": site["id"],
                 "site_key": site["name"], "read_only": True}
-    runtime = _native_record(site, public)
+    runtime = manage_cache("recheck", site, public)
+    # A partial native generation is an expected read-only observation,
+    # not a failed setup or a permission to restore. Keep the native
+    # recovery identity and the reason visible without advancing a journal.
+    if runtime["state"] not in ("Applied", "Unmanaged", "Restored"):
+        return {"schema": 1, "state": "Needs Review", "site_id": site["id"],
+                "site_key": site["name"], "read_only": True,
+                "recovery_id": runtime.get("recovery_id"),
+                "note": "Native Cache: " + runtime["state"] +
+                        ". Open Apply & restore and Recheck the saved recovery. " +
+                        (runtime.get("note") or "")}
     if journal["phase"] == "restored" and (
-            runtime["state"] == "Restored" or
+            runtime["state"] in ("Restored", "Unmanaged") or
             runtime["state"] == "Applied" and not journal.get("cache_owned", True)):
         return {"schema": 1, "state": "Not Connected",
                 "site_id": site["id"], "site_key": site["name"],

@@ -261,6 +261,34 @@ The image concept previously generated is **not runtime proof** and its compulso
 | Error/partial | Could not prove completion → `Recheck` + exact outcome | rollback only when verified, no blind repeat |
 | Recovery | Exact owned journal and changed-source guard → `Restore` | recheck stale data; no universal undo |
 
+## Semantic feedback and repeat-action audit (#144)
+
+The same state semantics apply to every native task. Use the common inline
+feedback helper and existing summary palette: verified, explicitly scoped
+success is green; a partial or conflicting result needing review is amber;
+failed/unconfirmed execution is red; pending, inactive, unknown-before-check,
+and no-op are neutral. Color is supplementary to the written state and
+actionable explanation. File or synthetic evidence is not proof of live or
+general privacy behavior. Every new request clears the previous result tone.
+
+| Area | Audited decision |
+| --- | --- |
+| Home and Monitor | Keep explicit Refresh and revision-aware switches; an unavailable observation is not success. |
+| Website baseline | Saved/verified success is visible; unchanged baseline needs no Save; Compare remains available. |
+| Protection and Fail2ban | Unmanaged is neutral; verified Applied/Restored is green, recovery/unsupported is review; existing state gates and orphan Restore remain. |
+| Routing and Hosts | Preserve read-only VHost checks and origin-local scope; alias removal success is confirmed by refreshed inventory; preserve witness repair and emergency Disable even when watcher health is uncertain. |
+| WordPress settings | Reflect verified per-setting outcome, actual recovery ownership and request failure; retain independent inspection. |
+| Cache and WordPress Connect | Connected disables repeated Connect; Not Connected/Restored disables redundant Disconnect. Check remains available; Needs Review permits repair/recovery. Bridge Provision/Disable observes the exact manifest state. Selection changes and related writes or conflicting recovery identities clear stale proof. Cache Clear is repeatable. |
+| PHP services | Separate saved policy, source mapping and runtime results; pending/no change is neutral, persistence warnings are amber, confirmed operation is green. Existing automatic repair state gates and independent emergency Disable remain. |
+| Error pages | Distinguish content/route evidence, saved-journal-only, stale selected branding and failed operations. Keep explicit scope Save/Reset (an inherited value match alone cannot prove the scope is stored). |
+| Activity and recovery | Severity remains distinct from operation success; unavailable data is red, retention/persistence warnings amber. Never infer a write or recovery authorization from a log. |
+
+This is a feedback and action-availability refinement, not a new required
+checklist or persistence layer. The API remains the authority; no action is
+authorized by a UI color or stale observation. The installed release,
+independent review, actual native acceptance and exact test receipts are
+tracked separately in #144 and #21.
+
 ## Current source implementation and acceptance boundary
 
 S1–S5 are merged into `main` through PRs #129–#133, with Owner refinements
