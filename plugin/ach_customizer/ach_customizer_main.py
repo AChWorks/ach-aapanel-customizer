@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.102'
+WORKER_SOURCE_VERSION = '0.1.103'
 
 _STATE_DIR = DATA_DIR
 
@@ -164,6 +164,11 @@ class ach_customizer_main:
             try:
                 from ach_customizer_nginx_security import GuardError
                 trusted_hosts_recovery = isinstance(error, GuardError)
+                if trusted_hosts_recovery and error.stage == "unsupported_ruleset":
+                    # A diagnostic only: the retained record is not verified
+                    # recovery evidence and provides no Restore authorization.
+                    response["reason_code"] = "unsupported_guard_ruleset"
+                    actual_recovery = None
             except ImportError:
                 trusted_hosts_recovery = False
         if stage == "abusive_scan_manage":

@@ -359,8 +359,28 @@ class EntrypointTests(unittest.TestCase):
                 self.assertEqual(activity["error_class"], "GuardError")
                 self.assertNotEqual(response["operation_id"], response["recovery_id"])
 
+            for action in ("preview", "recheck", "apply", "restore"):
+                response, activity = assert_failure(
+                    action, GuardError("unsupported_ruleset",
+                                       "Unsupported native security recovery ruleset. "
+                                       "Saved journal preserved; administrator investigation required.",
+                                       recovery_id="d" * 32),
+                    "9", "nginx_guard_unsupported_ruleset")
+                self.assertEqual(response.get("reason_code"), "unsupported_guard_ruleset")
+                self.assertIn("administrator investigation", response["msg"])
+                self.assertNotIn("recovery_id", response)
+                self.assertEqual(activity["recovery_id"], "")
+                self.assertIn("administrator investigation", activity["detail"])
+            # The generic helper or an arbitrary exception cannot advertise
+            # this typed Guard-only diagnosis.
+            response, _ = assert_failure("preview",
+                                          ExtensionError("unsupported_ruleset", "Other helper"),
+                                          "9", "nginx_guard_unsupported_ruleset")
+            self.assertNotIn("reason_code", response)
+
             class Unexpected(RuntimeError):
                 recovery_id = "e" * 32
+                stage = "unsupported_ruleset"
 
             response, activity = assert_failure(
                 "recheck", Unexpected("PRIVATE INTERNAL ERROR"),
@@ -368,6 +388,7 @@ class EntrypointTests(unittest.TestCase):
             self.assertNotIn("PRIVATE", str(response))
             self.assertNotIn("PRIVATE", str(activity))
             self.assertEqual(activity["error_class"], "Unexpected")
+            self.assertNotIn("reason_code", response)
 
     def test_nginx_guard_real_publisher_failure_retains_endpoint_recovery(self):
         # Exercise the actual shared publisher through the native endpoint,

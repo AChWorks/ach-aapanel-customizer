@@ -18,7 +18,7 @@ A successful import does **not** prove that aaPanel's resident Python helpers we
 ## What you can do
 
 The task-first destinations below describe the redesigned source/package
-identity 0.1.101+, including the 0.1.102 visual refinement candidate. The authoritative published package and its actual availability
+identity 0.1.101+, including the 0.1.103 visual refinement candidate. The authoritative published package and its actual availability
 are recorded in GitHub Releases, not implied by this source guide.
 
 | Start here | Tasks and boundaries |

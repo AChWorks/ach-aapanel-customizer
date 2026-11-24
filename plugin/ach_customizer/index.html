@@ -588,8 +588,7 @@
         </div>
         <div id="ach-site-required" class="ach-task-empty" hidden>
           <strong id="ach-site-required-title">Choose a website to continue</strong>
-          <p id="ach-site-required-detail">Use the selector above or browse all website pages.</p>
-          <div class="ach-context-links"><button type="button" id="ach-choose-website">Browse websites</button></div>
+          <p id="ach-site-required-detail">Use the selector above or browse the inventory.</p>
         </div>
         <section class="ach-view" id="ach-panel-overview" aria-label="Home and monitoring" data-view="overview" role="region">
       <div class="ach-task-launch-grid" data-home-only aria-label="Common tasks">
@@ -1015,7 +1014,7 @@
           <div><label for="ach-max-spare">pm.max_spare_servers</label><input id="ach-max-spare" name="max_spare_servers" type="number" min="1" required /></div>
           <div><label for="ach-max-requests">pm.max_requests</label><input id="ach-max-requests" name="max_requests" type="number" min="0" required /></div>
         </div>
-        <button type="submit">Preview PHP-FPM settings (no changes)</button>
+        <button type="submit" class="ach-next">Preview PHP-FPM settings (no changes)</button>
       </form>
       <details class="ach-help">
         <summary>What do these PHP-FPM settings mean?</summary>
@@ -1037,12 +1036,12 @@
         <details class="ach-help"><summary>When does PHP-FPM automatic repair run?</summary>
           <p>The existing watcher handles verified WordPress Toolkit changes and later PHP-FPM regeneration matching the installed aaPanel writer, after rechecking site ownership. Unexpected manual changes become Needs Review and are never silently overwritten.</p><p>Only current lifecycle-bearing automatic profiles are supported. A separate explicit Enable requires fresh source and policy verification; retired pre-Stable WordPress-only formats have no automatic migration or fallback.</p>
         </details>
-        <div class="ach-controls">
-          <button id="ach-fpm-policy-recheck" type="button" disabled>Recheck saved policy (read-only)</button>
+        <div class="ach-controls ach-action-set">
+          <button id="ach-fpm-policy-recheck" type="button" class="ach-check" disabled>Recheck saved policy (read-only)</button>
           <button id="ach-fpm-policy-load" type="button" disabled>Load saved desired values</button>
           <p id="ach-fpm-policy-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Select PHP, enter five settings, then run Preview PHP-FPM settings. A current valid preview enables Save; the PHP service remains unchanged.</p>
           <p class="ach-note">Saving records desired Monitor settings only; it does not reload PHP. Review the affected service and proposed values if useful, then choose Save.</p>
-          <button id="ach-fpm-policy-save" type="button" disabled>Save desired policy (Monitor)</button>
+          <button id="ach-fpm-policy-save" type="button" class="ach-commit" disabled>Save desired policy (Monitor)</button>
         </div>
         <p id="ach-fpm-policy-status" role="status" aria-live="polite">Select an installed version and Preview to compare or save an explicit policy.</p>
         <p id="ach-fpm-policy-recheck-status" class="ach-status-metadata" role="status" aria-live="polite">Select a version and recheck saved policy against current PHP files.</p>
@@ -1092,7 +1091,7 @@
               <option value="81">PHP 8.1</option>
             </select></div>
         </div>
-        <button id="ach-fpm-check-recovery" type="button">Inspect selected PHP recovery</button>
+        <button id="ach-fpm-check-recovery" type="button" class="ach-next">Inspect selected PHP recovery</button>
         <p id="ach-fpm-recovery-status" role="status" aria-live="polite">Recovery status not loaded.</p>
         <p id="ach-fpm-recovery-impact" role="status" aria-live="polite">Current affected sites not inspected.</p>
         <div class="ach-scroll"><table><thead><tr><th>PHP-FPM setting</th><th>Current</th><th>Restore baseline</th></tr></thead><tbody id="ach-fpm-restore-rows"></tbody></table></div>
@@ -1169,7 +1168,7 @@
       <p id="ach-status-workflow-note" class="ach-note" role="status" hidden>Preview only for this template and scope. No live Apply is supported.</p>
       <div id="ach-status-preview-surface" class="ach-note" aria-label="Offline status page preview" hidden>
         <strong>Offline preview — not installed on any website</strong>
-        <div class="ach-preview-viewport" tabindex="0" aria-label="Offline preview, scroll horizontally if needed">
+        <div class="ach-preview-viewport" role="region" tabindex="0" aria-label="Offline preview, scroll horizontally if needed">
           <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
         </div>
         <details class="ach-technical-report"><summary>Preview source hashes</summary><p id="ach-status-sha" class="ach-status-metadata" role="status"></p></details>
@@ -1204,7 +1203,7 @@
           <p>On supported aaPanel 8.0.7 Nginx sites, extension mode preserves native HTML and installs an owned route with a checked shared-service reload. Site-file mode requires proven native 404.html/502.html routing, no competing extension, and a durable byte-exact backup; it does not edit the VHost. Extension-only 50x covers Nginx-generated 500/502/503/504. HTTP 404 and body hash are verified for 404; 502 remains source-only. Each mode requires a matching Recovery ID. Stopped or incompatible sites allow saved-state Recheck only, not Apply or Restore.</p>
         </details>
         <div class="ach-controls">
-          <button id="ach-status-manage-recheck" type="button" disabled>Recheck selected site status</button>
+          <button id="ach-status-manage-recheck" type="button" class="ach-next" disabled>Recheck selected site status</button>
         </div>
         <p id="ach-status-site-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a running website, a current source check and explicit approval.</p>
         <label><input id="ach-status-manage-apply-approve" type="checkbox" aria-describedby="ach-status-site-apply-why" /><span class="ach-option-copy">I approve the selected site's exact delivery: extension mode reloads shared Nginx; native-file mode backs up and replaces the site's existing 404.html/502.html without reload.</span></label>
@@ -1220,7 +1219,7 @@
       <div class="ach-note" id="ach-status-default-section" aria-label="aaPanel new-site source defaults">
         <strong>Panel default templates for future newly created sites</strong>
         <p>Global branding scope only. Choose <code>new-site</code>, <code>404</code> or <code>502</code> above. aaPanel copies <code>defaultDoc.html</code>, <code>404.html</code> or <code>502.html</code> when creating a new site. Changing these sources <strong>does not change existing sites or active HTTP/Nginx routing</strong>, and does not reload Nginx. Recheck first, then approve the exact source replacement; Restore uses the saved original bytes and recovery ID.</p>
-        <div class="ach-controls"><button id="ach-status-default-recheck" type="button" disabled>Recheck new-site default source</button></div>
+        <div class="ach-controls"><button id="ach-status-default-recheck" type="button" class="ach-next" disabled>Recheck new-site default source</button></div>
         <p id="ach-status-default-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires Recheck new-site default source to confirm a current, different proposed template.</p>
         <label><input id="ach-status-default-apply-approve" type="checkbox" aria-describedby="ach-status-default-apply-why" /><span class="ach-option-copy">I approve replacing this exact aaPanel new-site default source for future sites only.</span></label>
         <div class="ach-controls"><button id="ach-status-default-apply" type="button" aria-describedby="ach-status-default-apply-why" class="btn btn-danger" disabled>Apply future-site default template</button></div>
@@ -1238,7 +1237,7 @@
         <details class="ach-help"><summary>Supported listeners and conflicts</summary>
           <p>On supported aaPanel 8.0.7 Nginx sources, choose the <code>unbound</code> template and global branding. An owned <code>default_server</code> serves static HTTP 404 on currently configured IPv4/IPv6 wildcard listeners, without adding an IP family. It does not change HTTPS/443, stopped-site pages or new-site templates. Recheck first; conflicting default servers are not overwritten.</p>
         </details>
-        <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" disabled>Recheck HTTP unbound routing</button></div>
+        <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" class="ach-next" disabled>Recheck HTTP unbound routing</button></div>
         <p id="ach-status-unbound-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a fresh valid global HTTP/80 Recheck and explicit approval.</p>
         <label><input id="ach-status-unbound-apply-approve" type="checkbox" aria-describedby="ach-status-unbound-apply-why" /><span class="ach-option-copy">I approve the exact global HTTP/80 default-server and shared Nginx reload.</span></label>
         <div class="ach-controls"><button id="ach-status-unbound-apply" type="button" aria-describedby="ach-status-unbound-apply-why" class="btn btn-danger" disabled>Apply unbound HTTP 404</button></div>
@@ -1254,7 +1253,7 @@
           <p>Option A rejects TLS handshakes with unknown or absent SNI on compatible native TCP/443 wildcard listeners. Named HTTPS websites must still work, and HTTP/80 Status Pages are separate. Existing foreign defaults, address-specific listeners, or unsupported QUIC/stream setups are reported as incompatible; no website, certificate, listener or IP family is created or overwritten.</p>
         </details>
         <p>This is a separately opted-in <strong>shared Nginx reload</strong>. Preview the current TLS listeners and Recovery state first. After Apply or Restore, compare the actual TLS handshake of unknown SNI with a known configured HTTPS hostname. A failed or interrupted operation retains a Recovery ID for Recheck.</p>
-        <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" disabled>Recheck HTTPS unknown-SNI policy</button></div>
+        <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" class="ach-next" disabled>Recheck HTTPS unknown-SNI policy</button></div>
         <p id="ach-status-tls-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a compatible configured HTTPS/443 listener and a fresh Recheck.</p>
         <label><input id="ach-status-tls-apply-approve" type="checkbox" /><span class="ach-option-copy">I approve a plugin-owned unknown-SNI TLS default server on already configured HTTPS listeners and the shared Nginx reload.</span></label>
         <div class="ach-controls"><button id="ach-status-tls-apply" type="button" class="btn btn-warning" disabled>Reject unknown TLS handshakes</button></div>
@@ -1272,7 +1271,7 @@
         <details class="ach-help"><summary>How stopped-site pages work</summary>
           <p>On supported aaPanel 8.0.7 Nginx sources, select the running website and <code>stopped</code> template first. The recoverable site-owned rule returns HTTP 503 with the selected HTML after aaPanel SiteStop. Refresh the native site after Stop/Start before Recheck or Restore. Unknown-domain HTTPS is unchanged, and Restore removes only the verified owned rule.</p>
         </details>
-        <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" disabled>Recheck native stopped-site route</button></div>
+        <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" class="ach-next" disabled>Recheck native stopped-site route</button></div>
         <p id="ach-status-stopped-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Arm requires a running native site and a successful saved-rule Recheck.</p>
         <label><input id="ach-status-stopped-apply-approve" type="checkbox" aria-describedby="ach-status-stopped-apply-why" /><span class="ach-option-copy">I approve adding this website's exact native 503 rule and reloading shared Nginx.</span></label>
         <div class="ach-controls"><button id="ach-status-stopped-apply" type="button" aria-describedby="ach-status-stopped-apply-why" class="btn btn-danger" disabled>Arm HTTP 503 for SiteStop</button></div>
@@ -1307,7 +1306,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.102'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.103'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -3215,12 +3214,14 @@
     });
   });
   var guardBusy = false, guardTicket = 0, guardReady = null, guardRecovery = null;
+  var guardUnsupported = false;
   function guardReset() {
     scanReset();
     ++guardTicket;
     guardBusy = false;
     guardReady = null;
     guardRecovery = null;
+    guardUnsupported = false;
     root.find('#ach-guard-block-xmlrpc').prop('checked',false);
     root.find('#ach-guard-result').text('Website selection or source changed; run a fresh protection check.');
     inspectionSummary('guard', 'Select a website and inspect its current Nginx security source.');
@@ -3238,9 +3239,11 @@
     root.find('#ach-guard-apply').prop('disabled',!applyAllowed);
     root.find('#ach-guard-restore').prop('disabled',!restoreAllowed);
     explainGate('ach-guard-apply-why',applyAllowed?'ready':'blocked',
+      guardUnsupported ? 'Locked: the saved ruleset cannot be verified by this version.' :
       !applyAllowed ? 'Locked: select a native website and run a fresh Unmanaged/Restored readiness check.' :
       'Ready: enabling protection changes this selected site and reloads shared Nginx.');
     explainGate('ach-guard-restore-why',restoreAllowed?'ready':'blocked',
+      guardUnsupported ? 'Locked: this version cannot restore the retained journal.' :
       !restoreAllowed ? 'Locked: run a fresh Recheck of this site with an Applied or Recovery Required saved operation.' :
       'Ready: Restore retires this exact owned protection and reloads shared Nginx.');
   }
@@ -3330,15 +3333,33 @@
       guardBusy = false;
       guardReady = null;
       guardRecovery = null;
-      guardLock();
-      if (id !== hostsSiteId()) return;
-      if (!r || !validGuardReport(r,id,action) ||
-          ((isApply || isRestore) && r.vhost_sha256 !== selected.vhost)) {
-        inspectionSummary('guard','Protection result was refused or could not be verified; Recheck before another action.','review');
-        root.find('#ach-guard-result').text(cacheBackendFailure(failure,'nginx_guard_manage') ||
-          'Unconfirmed native Nginx protection result; inspect saved recovery and Activity before retry.');
+      if (id !== hostsSiteId()) {
+        guardUnsupported = false;
+        guardLock();
         return;
       }
+      if (!r || !validGuardReport(r,id,action) ||
+          ((isApply || isRestore) && r.vhost_sha256 !== selected.vhost)) {
+        var diagnostic = cacheBackendFailure(failure,'nginx_guard_manage');
+        // This is a failed operation, never a verified recovery identity.
+        // Keep the diagnosis local to this site and do not infer it from
+        // free-form error text or an unconfirmed transport outcome.
+        if (diagnostic && failure.reason_code === 'unsupported_guard_ruleset') {
+          guardUnsupported = true;
+          inspectionSummary('guard',
+            'Unsupported saved protection ruleset. This version cannot verify or restore the retained journal. ' +
+            'Ask a server administrator to investigate the original rule and journal separately before further changes.',
+            'review');
+        } else {
+          guardUnsupported = false;
+          inspectionSummary('guard','Protection result was refused or could not be verified; Recheck before another action.','review');
+        }
+        root.find('#ach-guard-result').text(diagnostic ||
+          'Unconfirmed native Nginx protection result; inspect saved recovery and Activity before retry.');
+        guardLock();
+        return;
+      }
+      guardUnsupported = false;
       if ((action === 'preview' && ['Unmanaged','Restored'].includes(r.state)) &&
           r.vhost_sha256 && r.proposal_sha256) {
         guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256,
@@ -3366,7 +3387,7 @@
           'Runtime verification: Not confirmed') +
         '\nAutomatic enforcement: No\n' + r.reason +
         '\nAfter changes, run Recheck. HTTPS, WAF and custom application exceptions require independent QA.');
-    });
+    }, function () { return ticket === guardTicket && id === hostsSiteId(); });
   }
   root.find('#ach-guard-preview').on('click',function () {guardRequest('preview');});
   root.find('#ach-guard-recheck').on('click',function () {guardRequest('recheck');});
@@ -3374,7 +3395,8 @@
   root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
   root.find('#ach-guard-block-xmlrpc').on('change',function () {
     guardReady=null;
-    root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
+    if (!guardUnsupported)
+      root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
     guardLock();
   });
   var scanBusy = false, scanTicket = 0, scanReady = null, scanRecovery = null;
@@ -6661,7 +6683,7 @@
     else if (section === 'activity') openTaskRoute(['activity',null]);
   }
   function browseWebsites() { openNativeTask('websites'); }
-  root.find('#ach-website-browse, #ach-choose-website').on('click', browseWebsites);
+  root.find('#ach-website-browse').on('click', browseWebsites);
   root.find('#ach-website-error-pages').on('click', function () {
     // The Error pages editor owns a separate explicit site/global scope.
     // Never silently assume a website selection implies live site delivery.

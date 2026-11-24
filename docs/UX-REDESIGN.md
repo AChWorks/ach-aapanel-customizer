@@ -91,7 +91,7 @@ One dominant action per local decision; neutral read-only links, red destructive
 
 [Measured installed 0.1.101 audit and accepted correction plan](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7126797508)
 establish the baseline; [Owner acceptance receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7127490129)
-records the authorization to implement. Native 0.1.102 candidate uses the
+records the authorization to implement. Native 0.1.103 candidate uses the
 existing five destinations and one canonical operation owner, not a new framework.
 
 - Compact selected-site context: exact native selector, short state feedback,
@@ -118,8 +118,15 @@ existing five destinations and one canonical operation owner, not a new framewor
   native disclosure. No diagnostic fields removed or mutator cloned.
 - The installed-audit legacy Guard journal is not established as tampered.
   A structurally parseable but unsupported ruleset returns an explicit
-  unsupported-family error and remains blocked. Keep all original journal
-  bytes and native files; this is not a legacy recovery migration.
+  unsupported-family error and remains blocked. The Protection summary
+  explains that the current version cannot verify/restore it and requires
+  separate administrator investigation; the technical report retains the
+  read-only journal filename and request Operation ID, never a fabricated
+  Recovery ID. Preserve the diagnosis on policy option edits, and clear it
+  when selecting a different site or superseding the result with a new check. Keep
+  all original journal bytes and native files; this is not a legacy recovery
+  migration. First-use Protection and Attack retain exactly one Browse
+  websites control, with independently accessible orphan-jail recovery.
 
 For acceptance, run real Chromium route/width regression plus composition
 checks (compact site context, first action visible on desktop, checkbox
@@ -145,7 +152,7 @@ The image concept previously generated is **not runtime proof** and its compulso
 ## Current source implementation and acceptance boundary
 
 S1–S5 are merged into `main` through PRs #129–#133. Native source
-0.1.101 established the task-first redesign; 0.1.102 is the visual refinement candidate; the earlier
+0.1.101 established the task-first redesign; 0.1.103 is the review-remediated visual refinement candidate; the earlier
 published 0.1.100 package uses the seven-tab interface. A source ZIP is not
 a published Release asset. Current release availability belongs to GitHub
 Releases; exact installed QA and human acceptance belong to Issues #21 and

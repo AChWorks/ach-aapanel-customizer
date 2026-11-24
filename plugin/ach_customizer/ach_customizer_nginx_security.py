@@ -188,9 +188,11 @@ def _read_journal(data_fd, site_id):
         # An older/unrecognized rule family cannot be verified by the current
         # generator. Preserve the journal and refuse all writes; incompatibility
         # alone does not establish tampering.
-        raise GuardError("recovery", "Unsupported native security recovery ruleset; "
-                         "saved journal preserved. Review the original rule and Recovery ID "
-                         "before any change")
+        raise GuardError("unsupported_ruleset",
+                         "Unsupported native security recovery ruleset. Saved journal "
+                         + _journal(site_id) + " preserved. This version cannot verify "
+                         "or restore it; a server administrator must investigate the "
+                         "original rule and journal separately before further changes.")
     if _sha(_include(record["op"], record["ruleset"])) != record["include_sha"]:
         raise GuardError("recovery", "Invalid or altered native security recovery journal")
     return record

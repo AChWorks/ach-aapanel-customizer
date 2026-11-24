@@ -100,7 +100,7 @@ function loadUi() {
     '#ach-website-error-pages',
     '#ach-task-title', '#ach-task-intro', '#ach-breadcrumb',
     '#ach-site-required', '#ach-site-required-title', '#ach-site-required-detail',
-    '#ach-choose-website', '#ach-website-tasks', '#ach-server-tasks',
+    '#ach-website-tasks', '#ach-server-tasks',
     '#ach-menu-toggle', '#ach-primary-nav', '#ach-hosts-summary',
     '#ach-routing-workflows', '#ach-routing-task-effect',
     '#ach-wordpress-workflows', '#ach-wp-task-effect', '#ach-wordpress-installer-route',
@@ -500,6 +500,9 @@ function loadUi() {
       vhostResult: elements.get('#ach-vhost-result').textContent,
       nginxCandidateResult: elements.get('#ach-nginx-candidate-result').textContent,
       guardResult: elements.get('#ach-guard-result').textContent,
+      guardSummary: elements.get('#ach-guard-summary').textContent,
+      guardApplyWhy: elements.get('#ach-guard-apply-why').textContent,
+      guardRestoreWhy: elements.get('#ach-guard-restore-why').textContent,
       scanResult: elements.get('#ach-scan-result').textContent,
       scannerOrphanResult: elements.get('#ach-scan-orphan-result').textContent,
       scannerOrphanRestoreDisabled: elements.get('#ach-scan-orphan-restore').props.disabled,
@@ -9990,6 +9993,55 @@ test('Sensitive-file Guard rejects Restore receipt for unreviewed source',()=>{
   assert.match(ui.state().guardResult,/unconfirmed|inspect saved recovery/i);
   assert.doesNotMatch(ui.state().guardResult,/Protection: Restored/);
   assert.equal(ui.state().guardRestoreDisabled,true);
+});
+
+const unsupportedGuardFailure = {
+  status:false, stage:'nginx_guard_manage', reason_code:'unsupported_guard_ruleset',
+  msg:'Unsupported native security recovery ruleset. Saved journal ach_customizer.nginx_security.7.json preserved. This version cannot verify or restore it; a server administrator must investigate the original rule and journal separately before further changes.',
+  operation_id:'d'.repeat(32)
+};
+
+test('Guard unsupported ruleset has persistent site-specific guidance, not a retry or false recovery ID',()=>{
+  for(const action of ['preview','recheck','apply','restore']){
+    const ui=loadUi();selectHostsSite(ui);
+    if(action==='apply') ui.statusClick('#ach-guard-preview').respond(sensitiveGuardResponse());
+    if(action==='restore') ui.statusClick('#ach-guard-recheck').respond(sensitiveGuardResponse('Applied'));
+    ui.statusClick('#ach-guard-'+action).respond(unsupportedGuardFailure);
+    const s=ui.state();
+    assert.match(s.guardSummary,/Unsupported saved protection ruleset.*cannot verify or restore.*server administrator.*investigate/);
+    assert.doesNotMatch(s.guardSummary,/Recheck/i);
+    assert.match(s.guardApplyWhy,/cannot be verified/);
+    assert.match(s.guardRestoreWhy,/cannot restore/);
+    assert.ok(s.guardApplyDisabled && s.guardRestoreDisabled);
+    assert.match(s.guardResult,/ach_customizer.nginx_security.7.json/);
+    assert.match(s.guardResult,/Operation ID: d{32}/);
+    assert.doesNotMatch(s.guardResult,/Recovery ID:/i);
+    ui.statusSetChecked('#ach-guard-block-xmlrpc',true);
+    assert.equal(ui.state().guardResult,s.guardResult,'Option change must not erase diagnosis');
+    assert.equal(ui.state().guardSummary,s.guardSummary);
+    const count=ui.requests.length;
+    ui.statusClick('#ach-guard-apply');ui.statusClick('#ach-guard-restore');
+    assert.equal(ui.requests.length,count,'Refusal revokes prior write evidence');
+    ui.statusSetValue('#ach-hosts-site-id','8','input change');
+    assert.doesNotMatch(ui.state().guardSummary,/Unsupported/);
+    assert.ok(ui.state().guardApplyDisabled && ui.state().guardRestoreDisabled);
+  }
+  const ui=loadUi();selectHostsSite(ui);
+  const pending=ui.statusClick('#ach-guard-preview');
+  ui.statusSetValue('#ach-hosts-site-id','8','input change');
+  pending.respond(unsupportedGuardFailure);
+  assert.doesNotMatch(ui.state().guardSummary,/Unsupported/);
+  assert.doesNotMatch(ui.state().guardResult,/nginx_security.7.json/);
+  const fresh=loadUi();selectHostsSite(fresh);
+  fresh.statusClick('#ach-guard-recheck').respond(unsupportedGuardFailure);
+  fresh.statusClick('#ach-guard-preview').respond(sensitiveGuardResponse());
+  assert.equal(fresh.state().guardApplyDisabled,false,'Verified new source can recover normal workflow');
+  assert.doesNotMatch(fresh.state().guardSummary,/Unsupported/);
+  assert.match(fresh.state().guardApplyWhy,/Ready:/);
+  const generic=loadUi();selectHostsSite(generic);
+  generic.statusClick('#ach-guard-recheck').respond({...unsupportedGuardFailure,reason_code:undefined});
+  assert.match(generic.state().guardSummary,/Recheck/,'Do not classify from error text alone');
+  assert.ok(generic.state().guardApplyDisabled && generic.state().guardRestoreDisabled);
 });
 
 test('Sensitive-file Nginx guard rejects malformed optimistic success and stale selection',()=>{

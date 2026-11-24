@@ -758,13 +758,22 @@ class NativeSecurityTests(unittest.TestCase):
         journal.write_text(json.dumps(record))
         original = journal.read_bytes()
         fragment = self.fragment.read_bytes()
+        vhost = self.vhost.read_bytes()
+        nginx = self.nginx_conf.read_bytes()
         commands = list(self.commands)
         for action in ("preview", "recheck", "apply", "restore"):
             with self.subTest(action=action), self.assertRaisesRegex(
-                    guard.GuardError, "Unsupported native security recovery ruleset"):
+                    guard.GuardError, "Unsupported native security recovery ruleset") as error:
                 self.operate(action, recovery=applied["recovery_id"])
+            self.assertEqual(error.exception.stage, "unsupported_ruleset")
+            self.assertIsNone(error.exception.recovery_id)
+            self.assertIn(journal.name, str(error.exception))
+            self.assertIn("cannot verify or restore", str(error.exception))
+            self.assertNotIn("Recovery ID", str(error.exception))
             self.assertEqual(journal.read_bytes(), original)
             self.assertEqual(self.fragment.read_bytes(), fragment)
+            self.assertEqual(self.vhost.read_bytes(), vhost)
+            self.assertEqual(self.nginx_conf.read_bytes(), nginx)
             self.assertEqual(self.commands, commands)
         record["ruleset"] = guard.RULESET
         record["include_sha"] = "0" * 64
