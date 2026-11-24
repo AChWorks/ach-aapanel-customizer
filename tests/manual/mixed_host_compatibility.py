@@ -161,8 +161,10 @@ def process(conf, directory, callback):
                 if pid == str(child.pid):
                     break
                 if child.poll() is not None or time.monotonic() > deadline:
-                    raise RuntimeError("Isolated Nginx did not start: " +
-                                       (directory / "error.log").read_text(errors="replace")[-1500:])
+                    raise RuntimeError("Isolated Nginx did not start: exit=%s pidfile=%r stderr=%s log=%s" % (
+                        child.poll(), pid,
+                        (directory / "worker-output.log").read_text(errors="replace")[-2000:],
+                        (directory / "error.log").read_text(errors="replace")[-2000:]))
                 time.sleep(.1)
             return callback()
         finally:
@@ -178,6 +180,7 @@ def process(conf, directory, callback):
 def profile(base, label, wp_count, php_count):
     directory = base / label
     directory.mkdir()
+    (directory / "logs").mkdir()
     confdir = directory / "native"
     vhosts = directory / "vhost"
     rewrite = directory / "rewrite"
@@ -249,8 +252,8 @@ def profile(base, label, wp_count, php_count):
     extra = "".join(f" {part}_temp_path {directory}/{part}-temp;\n"
                     for part in ("client_body", "proxy", "fastcgi", "uwsgi", "scgi"))
     write(main, f"user www www;\nworker_processes 1;\npid {directory}/fixture.pid;\n"
-          f"error_log {directory}/error.log notice;\nevents {{ worker_connections 128; }}\n"
-          f"http {{\n access_log off;\n{extra} include {vhosts}/*.conf;\n}}\n")
+          f"lock_file {directory}/fixture.lock;\nerror_log {directory}/error.log notice;\nevents {{ worker_connections 128; }}\n"
+          f'http {{\n access_log off;\n lua_package_path "/www/server/nginx/lib/lua/?.lua;;";\n{extra} include {vhosts}/*.conf;\n}}\n')
     panel = Panel(rows)
     kw = {"vhost_root": str(vhosts), "nginx_root": str(confdir)}
     result = {"profile": label, "registered": len(rows), "wordpress": wp_count,
