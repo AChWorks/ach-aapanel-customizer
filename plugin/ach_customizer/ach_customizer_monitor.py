@@ -1141,7 +1141,8 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
     """Read a single native per-site '*.conf' glob without following links.
 
     Accept inert native logging overlays or the exact verified, plugin-owned
-    Status Pages 404/502 source. All other routing remains unresolved. Two
+    Status Pages 404/502, Cache and Protection source. Other routing is
+    classified only through the operation-specific inspector. Two
     anchored snapshots include file identities, bytes and recovery ownership.
     The digest is rechecked before an approved FPM Apply/Rollback.
     A scoped caller may restrict the exact live .conf filenames without
@@ -1198,6 +1199,26 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
                         raise MonitorInputError("Native Cache extension ownership needs review") from exc
                     files.append({"name": name, "signature": signature,
                                   "cache_journal": journal})
+                elif re.fullmatch(r"ach_customizer_sensitive_[1-9][0-9]*\.conf", name):
+                    from ach_customizer_nginx_security import verified_guard_extension
+                    try:
+                        # A canonical Guard is only valid at the native site's
+                        # server-scoped extension edge, not in another location.
+                        if (type(site_id) is not int or not isinstance(site_key, str)
+                                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}", site_key)
+                                or directory.name != site_key):
+                            raise MonitorInputError("Native Protection site identity needs review")
+                        vhost = _bounded_file_text(
+                            directory.parent.parent / (site_key + ".conf"), MAX_NGINX_SITE_BYTES)
+                        if not _native_server_direct_include(vhost, str(directory / "*.conf")):
+                            raise MonitorInputError("Native Protection include is not server-scoped")
+                        journal = verified_guard_extension(
+                            directory, site_id, site_key, name, text,
+                            state_dir=cache_state_dir)
+                    except (ValueError, OSError) as exc:
+                        raise MonitorInputError("Native Protection extension ownership needs review: " + str(exc)) from exc
+                    files.append({"name": name, "signature": signature,
+                                  "guard_journal": journal})
                 elif name.startswith("ach_customizer_"):
                     journal = _verified_owned_status_extension(
                         directory, site_id, site_key, name, text)

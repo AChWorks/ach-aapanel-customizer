@@ -933,9 +933,19 @@ starts a fixed observation window; reaching the threshold establishes a
 temporary block; subsequent requests on that site return HTTP 429 until
 expiry. Safe allocation does not evict another active block. On exhausted
 memory or recoverable Lua evaluation error, static Guard denial remains;
-the temporary block may not be established. A complete Nginx restart
+the temporary block may not be established. Recheck samples fresh counter
+and ban allocations matching the IPv4/IPv6 tracking sizes, using reserved
+non-client keys without evicting active entries. An allocation failure is
+reported as unconfirmed scanner runtime with independent exact Restore;
+repeat Recheck after capacity recovers. A successful sample is not a
+guarantee of future capacity. A complete Nginx restart
 clears ephemeral state; ordinary reload preserves the shared memory.
 The declaration itself contains no site identity and may remain idle.
+Native Cache and PHP-FPM dependency inspection recognizes only the exact
+current Guard generation and its owned journal. A verified independent
+Cache fragment does not invalidate Guard readiness or saved recovery;
+foreign/altered siblings and actual source drift remain reviewable.
+Either policy can be restored without removing the other.
 Restore removes the selected rule, without touching a peer or a system
 Fail2ban jail. Effective loopback addresses are not counted so that local
 Guard verification cannot create a block. Local reverse proxies must resolve

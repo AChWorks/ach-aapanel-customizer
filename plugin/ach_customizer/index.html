@@ -865,7 +865,7 @@
           <div class="ach-inline-field"><label for="ach-guard-bantime">Block seconds</label>
             <input id="ach-guard-bantime" type="number" min="1" step="1" value="600" /></div>
         </div>
-        <p class="ach-muted" id="ach-guard-scan-help" hidden>Temporary blocks return HTTP 429 and expire automatically. A full Nginx restart clears the counters. If the optional scanner cannot track a request, the sensitive-path Guard still denies that path. Loopback clients are not counted. To change an active policy, Recheck and Restore it before enabling a new selection.</p>
+        <p class="ach-muted" id="ach-guard-scan-help" hidden>Temporary blocks return HTTP 429 and expire automatically. A full Nginx restart clears the counters. If the optional scanner cannot track a request, the sensitive-path Guard still denies that path. Recheck samples new tracking allocations; availability can change. Loopback clients are not counted. To change an active policy, Recheck and Restore it before enabling a new selection.</p>
         <div class="ach-controls">
           <button id="ach-guard-preview" type="button" data-ach-disabled-help="Select a verified website." disabled class="ach-check">Check protection readiness</button>
           <button id="ach-guard-recheck" type="button" data-ach-disabled-help="Select a verified website." disabled>Recheck current protection</button>
@@ -3801,7 +3801,7 @@
           ((isApply || isRestore) && r.vhost_sha256 !== selected.vhost) ||
           (isApply && (!sameScan(r.scan_policy,selected.scan) || r.block_xmlrpc !== selected.xmlrpc ||
             r.proposal_sha256 !== selected.proposal)) ||
-          (isRestore && r.scan_policy !== null) ||
+          (isRestore && (r.scan_policy !== null || r.recovery_id !== selected.recovery)) ||
           (action==='preview' && ['Unmanaged','Restored'].includes(r.state) &&
             (!sameScan(r.scan_policy,requestedScan) || r.block_xmlrpc !== (payload.guard_block_xmlrpc==='true')))) {
         var diagnostic = cacheBackendFailure(failure,'nginx_guard_manage');
@@ -3843,7 +3843,7 @@
       }
       guardLock();
       inspectionSummary('guard',r.state + ': ' + r.reason +
-        (r.state==='Applied' ? (r.scan_policy === null ? ' Temporary IP blocking is off.' : ' Temporary IP blocking is on for this site.') : ''),
+        (r.state==='Applied' ? (r.scan_policy === null ? ' Temporary IP blocking is off.' : ' Temporary IP blocking is enabled for this site; tracking capacity was sampled, not guaranteed.') : ''),
         managedFeedbackTone(r.state,r.runtime_verified === true));
       root.find('#ach-guard-result').text(
         'Native site: ' + r.site_key + ' (#' + r.site_id + ')' +

@@ -196,13 +196,27 @@ def _scan_lines(proof, patterns, xmlrpc, policy, site_id):
         "        if not d then return [[fallback]] end",
         "        local ip = ngx.var.binary_remote_addr",
         "        if not ip then return [[fallback]] end",
+        "        local namespace = [[" + str(site_id) + ":" + proof + ":]]",
         "        local addr = ngx.var.remote_addr",
         "        if addr == [[127.0.0.1]] or addr == [[::1]] then",
-        "            local ok, err = d:safe_add([[health]], true, 1)",
-        "            if not ok and err ~= [[exists]] then return [[fallback]] end",
+        # Sample fresh counter AND ban allocations of the same key/value
+        # sizes as real IPv4/IPv6 tracking. Separate prefixes and per-request
+        # IDs never collide with client state or another verification.
+        "            if ngx.var." + hit[1:] + " ~= [[1]] then return [[ready]] end",
+        "            local id = ngx.var.request_id",
+        "            if not id then return [[fallback]] end",
+        "            for _, size in ipairs({4, 16}) do",
+        "                local sample = id .. string.rep([[x]], string.len(namespace) + size - string.len(id))",
+        "                local counter, ban = [[p:]] .. sample, [[q:]] .. sample",
+        "                if not d:safe_add(counter, 1, 1) then return [[fallback]] end",
+        "                local ok = d:safe_add(ban, true, 1)",
+        "                d:delete(counter)",
+        "                if not ok then return [[fallback]] end",
+        "                d:delete(ban)",
+        "            end",
         "            return [[ready]]",
         "        end",
-        "        local key = [[" + str(site_id) + ":" + proof + ":]] .. ip",
+        "        local key = namespace .. ip",
         "        local ban = [[b:]] .. key",
         "        if d:get(ban) then return [[blocked]] end",
         "        if ngx.var." + hit[1:] + " ~= [[1]] then return [[ready]] end",
@@ -344,6 +358,44 @@ def _read_journal(data_fd, site_id):
     return record
 
 
+def verified_guard_extension(directory, site_id, site_key, name, text, *, state_dir=None):
+    """Classify only exact live Guard source for native dependency inspection.
+
+    No arbitrary Lua or filename alone establishes ownership. The current
+    generator/journal defines a terminal pre-location policy, never a
+    Cache/PHP upstream. Runtime health is deliberately a separate concern.
+    """
+    from pathlib import Path
+    from ach_customizer_state import DATA_DIR, StateError, _open_state_dir
+
+    if name != _file(site_id) or Path(directory).name != site_key:
+        raise GuardError("ownership", "Native Protection extension identity needs review")
+    try:
+        fd = _open_state_dir(state_dir if state_dir is not None else DATA_DIR)
+        try:
+            record = _read_journal(fd, site_id)
+        finally:
+            os.close(fd)
+    except StateError as exc:
+        raise GuardError("ownership", "Native Protection recovery directory is untrusted") from exc
+    if (not record or record["site_key"] != site_key
+            or record["phase"] not in ("prepared", "applied")):
+        raise GuardError("ownership", "Native Protection recovery ownership needs review")
+    expected = _include(record["op"], record["ruleset"], record.get("scan_policy"), site_id)
+    if text.encode("utf8") != expected:
+        raise GuardError("ownership", "Native Protection source differs from owned policy")
+    fd = _directory(str(directory))
+    try:
+        _owned_dir(fd)
+        if (_bounded_file(fd, name, limit=MAX_INCLUDE, permissions=0o600) != expected
+                or _bounded_file(fd, _retained(site_id, record["op"]),
+                                 limit=MAX_INCLUDE, permissions=0o600) is not None):
+            raise GuardError("ownership", "Native Protection live/retained ownership needs review")
+    finally:
+        os.close(fd)
+    return record
+
+
 def _save_journal(data_fd, record):
     raw = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
     if not 0 < len(raw) <= MAX_JOURNAL:
@@ -447,7 +499,7 @@ def _verified(site, op, *, present, probe=None, ruleset=RULESET):
         time.sleep(0.2)
 
 
-def _source_safe(site, *, vhost_root, nginx_conf):
+def _source_safe(site, *, vhost_root, nginx_conf, data_fd=None):
     """Native VHost security preflight independent of Status Pages mapping.
 
     A selected sensitive-path policy must work even when the native /404.html
@@ -533,6 +585,19 @@ def _source_safe(site, *, vhost_root, nginx_conf):
             fragment = _bounded_file(ext_fd, filename, limit=64 * 1024)
             if fragment is None:
                 raise GuardError("concurrency", "Native Nginx extension disappeared")
+            if data_fd is not None and filename == "ach_customizer_cache_" + str(site["id"]) + ".conf":
+                # An exact independent Cache generation does not change the
+                # pre-location policy. Unknown/altered siblings still bind
+                # the optimistic snapshot and trigger normal drift recovery.
+                from ach_customizer_cache_manage import verified_cache_extension
+                from ach_customizer_state import StateError
+                try:
+                    verified_cache_extension(ext_path, site["id"], name, filename,
+                                             fragment.decode("utf8"), state_fd=data_fd)
+                except (ValueError, OSError, StateError):
+                    pass
+                else:
+                    continue
             digest.update(filename.encode("utf8") + b"\0" + hashlib.sha256(fragment).digest())
         return digest.hexdigest(), ext_path
     finally:
@@ -592,7 +657,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
                        ruleset=selected_ruleset)
     try:
         source_sha, extension_dir = _source_safe(
-            site, vhost_root=vhost_root, nginx_conf=nginx_conf)
+            site, vhost_root=vhost_root, nginx_conf=nginx_conf, data_fd=data_fd)
     except (ExtensionError, OSError):
         if action in ("apply", "restore") or record is None:
             raise
@@ -720,8 +785,9 @@ def manage_guard(action, site, *, data_fd, approved=False,
             if state == "Recovery Required" and record["phase"] == "applied":
                 reason = ("Interrupted Restore retained the exact owned Guard file; "
                           "explicitly Restore the saved Recovery ID" if retained_owned else
-                          "Temporary scanner runtime is unconfirmed; Restore the exact owned "
-                          "Guard before reapplying or using static protection only")
+                          "Temporary scanner allocation or runtime proof is unconfirmed; "
+                          "static protection may still deny sensitive paths. Recheck after memory "
+                          "recovers or Restore the exact owned Guard")
             response = report(state=state, source_sha=source_sha,
                              journal=record, runtime_verified=state in ("Applied", "Restored"),
                              reason=reason, ruleset=selected_ruleset)
@@ -782,7 +848,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
             # and retained asset for explicit Recheck/Restore.
             try:
                 if _source_safe(site, vhost_root=vhost_root,
-                                nginx_conf=nginx_conf)[0] != source_sha:
+                                nginx_conf=nginx_conf, data_fd=data_fd)[0] != source_sha:
                     raise GuardError("concurrency", "Native VHost changed before activation")
                 if selected_scan is not None and not _scan_zone(vhost_root):
                     raise GuardError("scan_source", "Shared scanner declaration disappeared before activation")
@@ -806,7 +872,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 if selected_scan is not None and not _scan_zone(vhost_root):
                     raise GuardError("scan_source", "Shared scanner declaration disappeared")
                 if _source_safe(site, vhost_root=vhost_root,
-                                nginx_conf=nginx_conf)[0] != source_sha:
+                                nginx_conf=nginx_conf, data_fd=data_fd)[0] != source_sha:
                     raise GuardError("concurrency", "Native include source changed during guard activation")
             except Exception as exc:
                 raise GuardError(
@@ -834,7 +900,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
         # reviewed VHost/sibling sources and the exact Guard filenames again
         # after the initial syntax test, before any rename or service reload.
         if _source_safe(site, vhost_root=vhost_root,
-                        nginx_conf=nginx_conf)[0] != expected_vhost:
+                        nginx_conf=nginx_conf, data_fd=data_fd)[0] != expected_vhost:
             raise GuardError(
                 "concurrency", "Native Nginx source changed after Recheck; "
                 "Recheck this site before Restore")
@@ -943,7 +1009,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
         check_before_reload()
         try:
             final_source_sha = _source_safe(
-                site, vhost_root=vhost_root, nginx_conf=nginx_conf)[0]
+                site, vhost_root=vhost_root, nginx_conf=nginx_conf, data_fd=data_fd)[0]
         except (ExtensionError, OSError) as exc:
             raise GuardError(
                 "uncertain", "Native Nginx source became unreadable after Guard retirement; "
@@ -959,7 +1025,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
             _verified(site, record["op"], present=False, probe=probe,
                       ruleset=record["ruleset"])
             if _source_safe(site, vhost_root=vhost_root,
-                            nginx_conf=nginx_conf)[0] != source_sha:
+                            nginx_conf=nginx_conf, data_fd=data_fd)[0] != source_sha:
                 raise GuardError("concurrency", "Native source drifted during security Restore")
             confirm_retirement()
         except Exception as exc:

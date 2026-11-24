@@ -300,7 +300,11 @@ only the selected site. XML-RPC blocking alone does not count as a scan.
 Default 6 attempts / 120 seconds / 600 seconds, operator-configurable.
 No log permission rewrite, firewall action, extra daemon, persistent ban
 database or legacy scanner/orphan writer. Native Lua capability is checked
-on activation; static protection remains available independently. Verify
+on activation; Recheck samples representative tracking allocations rather
+than promising future availability. Static protection remains available
+independently. Native Cache and PHP-FPM dependency inspection must accept
+exact current Guard ownership without accepting arbitrary Lua or bypassing
+other routing/physical-isolation checks. Verify
 proxy real-client attribution rather than trusting arbitrary request headers.
 Current Guard-owned recovery is preserved. After native
 aaPanel regenerates a selected-site source, **manual Recheck followed by

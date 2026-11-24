@@ -11042,3 +11042,21 @@ test('Temporary scanner rejects incorrect or malformed policy evidence',()=>{
     assert.equal(ui.state().guardApplyDisabled,true);
   }
 });
+
+test('Protection Restore accepts only the exact requested recovery identity',()=>{
+  for(const returned of ['c'.repeat(32),'d'.repeat(32),null,'invalid',undefined]){
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusClick('#ach-guard-recheck').respond(sensitiveGuardResponse('Recovery Required',{
+      recovery_id:'c'.repeat(32),journal_phase:'applied',
+      recovery_scope:'scanner_runtime_unverified',runtime_verified:false,
+      scan_policy:{maxretry:6,findtime:120,bantime:600}
+    }));
+    assert.equal(ui.state().guardRestoreDisabled,false);
+    const request=ui.statusClick('#ach-guard-restore');
+    assert.equal(request.options.data.recovery_id,'c'.repeat(32));
+    request.respond(sensitiveGuardResponse('Restored',{read_only:false,changed:true,recovery_id:returned}));
+    assert.equal(ui.state().guardRestoreDisabled,true);
+    if(returned==='c'.repeat(32)) assert.match(ui.state().guardResult,/Protection: Restored/);
+    else assert.doesNotMatch(ui.state().guardResult,/Protection: Restored/);
+  }
+});

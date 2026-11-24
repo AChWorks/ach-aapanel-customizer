@@ -115,6 +115,43 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertFalse(self.fragment.exists())
         self.assertEqual(zone.read_bytes(), guard.SCAN_ZONE_BYTES)
 
+    def test_dependency_inspector_only_accepts_exact_live_guard_owner(self):
+        from ach_customizer_monitor import _native_extension_fingerprint, MonitorInputError
+        def fingerprint():
+            return _native_extension_fingerprint(
+                self.ext, site_id=self.site["id"], site_key=self.site["name"],
+                cache_state_dir=str(self.state))
+        for policy in (None, guard.SCAN_DEFAULTS):
+            with self.subTest(policy=policy):
+                applied = self.operate("apply", scan=policy)
+                original = self.fragment.read_bytes()
+                self.assertEqual(len(fingerprint()), 64)
+                journal = self.state / guard._journal(self.site["id"])
+                saved = journal.read_bytes()
+                self.fragment.write_bytes(original + b"# foreign edit\n")
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                self.fragment.write_bytes(original)
+                journal.unlink()
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                journal.write_bytes(saved)
+                journal.chmod(0o600)
+                wrong = self.ext / guard._file(self.site["id"] + 1)
+                wrong.write_bytes(original)
+                wrong.chmod(0o600)
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                wrong.unlink()
+                retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+                retained.write_bytes(original)
+                retained.chmod(0o600)
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                retained.unlink()
+                self.assertEqual(len(fingerprint()), 64)
+                self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])["state"], "Restored")
+
     def test_guard_exact_filename_cannot_be_imported_by_peer(self):
         result = self.operate("apply", scan=guard.SCAN_DEFAULTS)
         peer = self.vhost_root / "peer.invalid.conf"

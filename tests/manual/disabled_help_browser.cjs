@@ -230,7 +230,7 @@ async function walk(browser,width,height,touch){
     }));
     assert.equal(await button('ach-guard-maxretry').inputValue(),'4');
     assert.equal(await button('ach-guard-findtime').inputValue(),'60');
-    assert.match(await button('ach-guard-summary').innerText(),/Temporary IP blocking is on/);
+    assert.match(await button('ach-guard-summary').innerText(),/Temporary IP blocking is enabled/);
     await button('ach-guard-maxretry').fill('0');
     assert.equal(await button('ach-guard-restore').isEnabled(),true);
     await button('ach-guard-restore').click();
