@@ -1545,16 +1545,20 @@
     });
     // Layout changes can synthesize pointer-enter without physical movement.
     // Keep Escape dismissal until an actual pointer move or explicit focus/tap.
-    root[0].addEventListener('pointermove',function(event) {
-      var moved = !lastPointer || lastPointer.x !== event.clientX || lastPointer.y !== event.clientY;
-      lastPointer = {x:event.clientX,y:event.clientY};
-      if (dismissedPointer && moved && event.pointerType !== 'touch') {
+    // Track movement across the host document, not just the dialog. Leaving
+    // the dialog and returning to the same coordinates must also clear Escape.
+    $(doc).off('pointermove.achDisabledHelp').on('pointermove.achDisabledHelp',function(event) {
+      if (!root[0].isConnected) { $(doc).off('pointermove.achDisabledHelp'); return; }
+      var pointer = event.originalEvent || event;
+      var moved = !lastPointer || lastPointer.x !== pointer.clientX || lastPointer.y !== pointer.clientY;
+      lastPointer = {x:pointer.clientX,y:pointer.clientY};
+      if (dismissedPointer && moved && pointer.pointerType !== 'touch') {
         dismissedPointer = false;
-        var anchor = event.target.closest('.ach-disabled-anchor');
-        var control = anchor && anchor.querySelector('button:disabled,input:disabled');
+        var anchor = event.target.closest && event.target.closest('.ach-disabled-anchor');
+        var control = anchor && root[0].contains(anchor) && anchor.querySelector('button:disabled,input:disabled');
         if (control && helpAnchors.has(control)) showDisabledHelp(helpAnchors.get(control));
       }
-    },true);
+    });
     root[0].addEventListener('pointerdown',function(event) {
       if (activeHelp && !activeHelp.anchor.contains(event.target) &&
           !disabledBubble.contains(event.target)) hideDisabledHelp();

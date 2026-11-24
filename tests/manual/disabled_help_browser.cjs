@@ -57,6 +57,16 @@ async function walk(browser,width,height,touch){
     assert.equal(await count(),before,'disabled help must not dispatch any request');
     await page.keyboard.press('Escape');
     assert.equal(await bubble.isVisible(),false);
+    // Leaving the native dialog and returning to the very same coordinates
+    // is physical pointer movement, not a synthetic layout re-entry.
+    if(!touch){
+      await button(read).focus();
+      await page.mouse.move(2,2);
+      await anchor(apply).hover();
+      assert.equal(await bubble.isVisible(),true,'hover re-entry after Escape outside dialog');
+      await page.keyboard.press('Escape');
+      assert.equal(await bubble.isVisible(),false);
+    }
     await explain(restore,/matching saved Applied or Recovery Required/,'focus');
     await page.keyboard.press('Escape');
     assert.equal(await bubble.isVisible(),false);
