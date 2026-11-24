@@ -1381,7 +1381,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.112'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.113'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1964,7 +1964,20 @@
     if (/^(set_control|save_site_baseline|status_(save|reset|manage|defaults|unbound|tls|stopped)|wp_settings_manage|fpm_(apply|rollback|policy_save)|manage_cache_policy|manage_nginx_protection)$/.test(method)) {
       msg(t.loading, false);
     }
-    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method), data:data || {}, timeout:/^fpm_(apply|rollback)$/.test(method) ? 120000 : method === 'probe_private_cache' ? 45000 : (method === 'status_manage' || method === 'status_defaults' || method === 'status_unbound' || method === 'status_tls' || method === 'status_stopped' || method === 'wp_settings_manage' || method === 'manage_cache_policy') ? 45000 : 20000, dataType:'json' })
+    // Cache observations may perform two origin hops per scenario, multiple
+    // worker observations after one reload, and several PHP subprocesses for
+    // WordPress Connect/Disconnect. Their existing server-side timeouts and
+    // retry limits govern the work. Do not abandon a valid result (including
+    // recovery diagnostics) on an unrelated, shorter jQuery timer.
+    // 0 disables only jQuery's independent timer, not network/proxy errors.
+    var awaitCacheServer = ['probe_private_cache','preview_cache_activation',
+      'manage_cache_policy','manage_wordpress_cache'].includes(method);
+    var requestTimeout = awaitCacheServer ? 0 :
+      /^fpm_(apply|rollback)$/.test(method) ? 120000 :
+      ['status_manage','status_defaults','status_unbound','status_tls',
+        'status_stopped','wp_settings_manage'].includes(method) ? 45000 : 20000;
+    $.ajax({ type:'POST', url:'/plugin?action=a&name=ach_customizer&s=' + encodeURIComponent(method),
+      data:data || {}, timeout:requestTimeout, dataType:'json' })
       .done(function (response) {
         var mutating = /^fpm_(apply|rollback)$/.test(method);
         var outcome = mutating ? fpmOutcome(method, response, data, expectedRestoreSha) : null;
@@ -2010,7 +2023,9 @@
                method === 'status_tls' && data.tls_action !== 'recheck' ||
                method === 'wp_settings_manage' && data.settings_action !== 'recheck' ||
                method === 'status_stopped' && data.stopped_action !== 'recheck' ||
-               method === 'fpm_policy_save' || method === 'fpm_auto_manage')) ?
+               method === 'fpm_policy_save' || method === 'fpm_auto_manage' ||
+               method === 'manage_cache_policy' && !['recheck','bridge_inspect'].includes(data.cache_action) ||
+               method === 'manage_wordpress_cache' && data.wordpress_cache_action !== 'inspect')) ?
               (method === 'fpm_policy_save' ?
                 '. Save outcome unknown: read the saved policy before trying again.' :
                 method === 'fpm_auto_manage' ?

@@ -1038,6 +1038,9 @@ def _probe_response(connection, hostname, scheme):
     except ssl.SSLCertVerificationError as exc:
         raise CacheManageError('probe',
             'Local HTTPS certificate verification failed for the selected hostname') from exc
+    except TimeoutError as exc:
+        raise CacheManageError('probe',
+            'Registered local ' + scheme + ' PHP handler request timed out') from exc
     except (OSError, http.client.HTTPException) as exc:
         raise CacheManageError('probe',
             'Registered local ' + scheme + ' PHP handler request failed') from exc
@@ -1101,7 +1104,11 @@ def _saved_probe_status(record):
 
 
 def _await_php_route(site, *, marker, expected_status, probe=None):
-    """Wait boundedly for a single reload's new workers; only read-only HEAD."""
+    """Observe at most nine times after one reload; only read-only HEAD.
+
+    Each hop retains its socket timeout. The caller waits for the server
+    result rather than racing a separate wall-clock browser timer.
+    """
     last = None
     for attempt in range(9):
         try:
@@ -1116,7 +1123,7 @@ def _await_php_route(site, *, marker, expected_status, probe=None):
             time.sleep(0.3)
     detail = str(last) if isinstance(last, CacheManageError) else type(last).__name__
     raise CacheManageError('probe',
-        'Nginx route did not match its approved post-reload state: ' + detail) from last
+        'Nginx route did not match its approved post-reload state after 9 observations: ' + detail) from last
 
 
 def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,

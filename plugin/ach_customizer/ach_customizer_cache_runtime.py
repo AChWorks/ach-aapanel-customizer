@@ -140,6 +140,9 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
         scheme = "HTTP"
         try:
             conn = connection_factory()
+        except TimeoutError:
+            result["reason"] = "Origin-local HTTP connection timed out"
+            break
         except (OSError, http.client.HTTPException):
             result["reason"] = "Origin-local HTTP connection failed"
             break
@@ -172,6 +175,9 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
                          managed_cache if marker == str(identity) else "")
         except ssl.SSLCertVerificationError:
             result["reason"] = "Origin-local HTTPS certificate verification failed"
+            break
+        except TimeoutError:
+            result["reason"] = "Origin-local " + scheme + " request timed out"
             break
         except (OSError, http.client.HTTPException):
             result["reason"] = "Origin-local " + scheme + " request failed"

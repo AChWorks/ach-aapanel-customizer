@@ -1264,6 +1264,22 @@ exact same-host HTTPS upgrade criterion and SNI transport, report the
 actual observed protocol per request, and never accept an application
 redirect as a successful 200/BYPASS private-route observation.
 
+**Request timing:** Cache readiness, management, private-route diagnostics
+and WordPress Connect/Disconnect/Inspect await the native server result
+without a separate jQuery timeout. A diagnostic can require up to 18 origin
+HEAD requests; a lifecycle can include up to nine worker observations after
+one reload, and the WordPress connector also invokes several independently
+timed PHP subprocesses. The existing 4-second diagnostic / 5-second worker
+socket timeouts, nine-observation limit, PHP command and Nginx operation
+timeouts remain in force. Socket timeouts are per blocking network operation,
+not a promise of a fixed total wall-clock duration. The native panel transport
+and normal browser/network failure handling still apply. On a transport
+failure the outcome is unconfirmed: use Activity and Recheck before retrying;
+a returned server failure retains its stage and recovery correlation. No
+automatic configuration-write retry or additional site-response limit is
+introduced.
+
+
 A safe per-site Nginx Cache needs an owned, separate physical tree and key
 zone, exact site/VHost/native PHP include ordering, syntax and runtime
 checks. An IP/Host-partitioned key within a **shared filesystem** does
