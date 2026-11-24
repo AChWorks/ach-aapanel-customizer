@@ -1330,7 +1330,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.104'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.105'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -3460,6 +3460,25 @@
     inspectionSummary('guard', 'Select a website and inspect its current Nginx security source.');
     guardLock();
   }
+  function protectionBlockedReason(report, action, noun, check, recoverableStates) {
+    if (!report) return '';
+    var state = report.state;
+    var detail = state + (report.reason ? ': ' + report.reason : '') + '. ';
+    if (action === 'apply') {
+      if (state === 'Applied') return noun + ' is already Applied. No Enable is needed. Review the saved recovery before replacing the managed policy.';
+      if (state === 'Recovery Required') return detail + 'Resolve the saved recovery before enabling again. If Restore is unavailable, use ' + check + ' to verify its Recovery ID.';
+      if (['Needs Review','Suspended','Dependency Missing'].includes(state))
+        return detail + 'Investigate the reported cause before checking readiness again.';
+    } else {
+      if (state === 'Unmanaged' || state === 'Restored')
+        return state + ': no active saved ' + noun + ' operation needs Restore.';
+      if (report.recovery && recoverableStates.includes(state))
+        return detail + 'Run ' + check + ' to verify the saved Recovery ID before Restore.';
+      if (['Needs Review','Suspended','Dependency Missing'].includes(state))
+        return detail + 'No eligible matching recovery is verified. Investigate the reported cause.';
+    }
+    return '';
+  }
   function guardLock() {
     var id = hostsSiteId();
     var blocked = guardBusy || !id || hostsBusy || siteBusy ||
@@ -3473,13 +3492,13 @@
     setActionDisabled('#ach-guard-restore', !restoreAllowed, '#ach-guard-restore-why');
     explainGate('ach-guard-apply-why',applyAllowed?'ready':'blocked',
       siteActionReason(guardBusy) || (guardUnsupported ? 'Locked: the saved ruleset cannot be verified by this version. Ask a server administrator to investigate the retained journal.' :
-      !applyAllowed && guardReport && ['Needs Review','Suspended'].includes(guardReport.state) ? guardReport.state + ': ' + guardReport.reason + ' Review the reported cause before another check.' :
-      !applyAllowed ? 'Locked: select a native website and run a fresh Unmanaged/Restored readiness check.' :
+      !applyAllowed ? protectionBlockedReason(guardReport, 'apply', 'Guard protection', 'Recheck current protection', ['Applied','Recovery Required']) ||
+        'Locked: select a native website and run a fresh Unmanaged/Restored readiness check.' :
       'Ready: enabling protection changes this selected site and reloads shared Nginx.'));
     explainGate('ach-guard-restore-why',restoreAllowed?'ready':'blocked',
       siteActionReason(guardBusy) || (guardUnsupported ? 'Locked: this version cannot restore the retained journal. Ask a server administrator to investigate it separately.' :
-      !restoreAllowed && guardReport && ['Needs Review','Suspended'].includes(guardReport.state) ? guardReport.state + ': ' + guardReport.reason + ' No eligible matching recovery is verified; investigate the reported cause.' :
-      !restoreAllowed ? 'Locked: run a fresh Recheck of this site with an Applied or Recovery Required saved operation.' :
+      !restoreAllowed ? protectionBlockedReason(guardReport, 'restore', 'Guard protection', 'Recheck current protection', ['Applied','Recovery Required']) ||
+        'Locked: run a fresh Recheck of this site with an Applied or Recovery Required saved operation.' :
       'Ready: Restore retires this exact owned protection and reloads shared Nginx.'));
   }
   function validGuardReport(r,id,action) {
@@ -3596,7 +3615,7 @@
         return;
       }
       guardUnsupported = false;
-      guardReport = {state:r.state,reason:r.reason};
+      guardReport = {state:r.state,reason:r.reason,recovery:r.recovery_id};
       if ((action === 'preview' && ['Unmanaged','Restored'].includes(r.state)) &&
           r.vhost_sha256 && r.proposal_sha256) {
         guardReady = {siteId:id,vhost:r.vhost_sha256,proposal:r.proposal_sha256,
@@ -3632,8 +3651,9 @@
   root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
   root.find('#ach-guard-block-xmlrpc').on('change',function () {
     guardReady=null;
-    guardReport=null;
-    if (!guardUnsupported)
+    // Option edits invalidate readiness, not the verified existing journal state.
+    if (guardReport && !['Applied','Recovery Required'].includes(guardReport.state)) guardReport=null;
+    if (!guardUnsupported && !guardReport)
       root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
     guardLock();
   });
@@ -3660,10 +3680,16 @@
     var blocked = scanBusy || !id || hostsBusy || siteBusy || websitePolicyState !== 'stable';
     setActionDisabled('#ach-scan-preview,#ach-scan-recheck', blocked, siteActionReason(scanBusy));
     var current = JSON.stringify(scanParameters());
+    var common = siteActionReason(scanBusy);
+    var recoverable = ['Applied','Recovery Required','Needs Review'];
     setActionDisabled('#ach-scan-apply', blocked || !scanReady ||
-      scanReady.siteId !== id || scanReady.params !== current, siteActionReason(scanBusy) || (scanReport && ['Needs Review','Dependency Missing'].includes(scanReport.state) ? scanReport.state + ': ' + scanReport.reason + ' Resolve the reported issue before checking readiness again.' : 'Check Fail2ban readiness for the current site and scanner settings; Apply needs a fresh Unmanaged or Restored plan.'));
+      scanReady.siteId !== id || scanReady.params !== current,
+      common || protectionBlockedReason(scanReport, 'apply', 'Fail2ban scanner', 'Recheck jail / recovery', recoverable) ||
+        'Check Fail2ban readiness for the current site and scanner settings; Apply needs a fresh Unmanaged or Restored plan.');
     setActionDisabled('#ach-scan-restore', blocked || !scanRecovery ||
-      scanRecovery.siteId !== id, siteActionReason(scanBusy) || (scanReport && ['Needs Review','Dependency Missing'].includes(scanReport.state) ? scanReport.state + ': ' + scanReport.reason + ' No eligible recovery is verified. Investigate the reported cause before Recheck.' : 'Recheck this website for a verified saved Fail2ban recovery. No matching recoverable journal is currently confirmed.'));
+      scanRecovery.siteId !== id,
+      common || protectionBlockedReason(scanReport, 'restore', 'Fail2ban scanner', 'Recheck jail / recovery', recoverable) ||
+        'Recheck this website for a verified saved Fail2ban recovery. No matching recoverable journal is currently confirmed.');
   }
   function validScanReport(r,id,action) {
     var site = hostsPageSites.get(id);
@@ -3731,7 +3757,7 @@
           'Unable to confirm selected site Fail2ban outcome; inspect Activity / Recovery ID.');
         return;
       }
-      scanReport = {state:r.state,reason:r.reason};
+      scanReport = {state:r.state,reason:r.reason,recovery:r.recovery_id};
       if (action === 'preview' && ['Unmanaged','Restored'].includes(r.state) &&
           /^[a-f0-9]{64}$/.test(r.plan_sha256 || '')) {
         scanReady = {siteId:id,plan:r.plan_sha256,params:JSON.stringify(params)};
@@ -3761,7 +3787,11 @@
   root.find('#ach-scan-apply').on('click',function () {scanRequest('apply');});
   root.find('#ach-scan-restore').on('click',function () {scanRequest('restore');});
   root.find('#ach-scan-maxretry,#ach-scan-findtime,#ach-scan-bantime')
-    .on('input change',function () {scanReady = null; scanReport = null; scanLock();});
+    .on('input change',function () {
+      scanReady = null;
+      if (scanReport && !['Applied','Recovery Required'].includes(scanReport.state)) scanReport = null;
+      scanLock();
+    });
   var orphanTicket = 0, orphanBusy = false, orphanEntries = new Map();
   function orphanLock() {
     var choice = root.find('#ach-scan-orphan-choice').val();
@@ -4917,14 +4947,24 @@
     var unboundRestore = !!(unboundMatches &&
       ['Applied','Needs Review','Recovery Required'].includes(statusUnboundEvidence.state) &&
       !!statusUnboundEvidence.recovery);
+    var unboundWhy = unboundMatches ? ({
+      'Applied':'The managed HTTP/80 fallback is already Applied; no Apply is needed.',
+      'Recovery Required':'Recovery Required: the saved HTTP/80 operation needs recovery before a new Apply.',
+      'Needs Review':'Needs Review: current HTTP/80 runtime could not be verified against the saved operation. Investigate the runtime and saved recovery.',
+      'Conflict':'Conflict: existing HTTP/80 route or HTML assets have no matching owned journal. Ask a server administrator to investigate ownership; do not overwrite them.',
+      'Drift':'Drift: assets remain after the saved HTTP/80 operation was restored. Investigate the retained or foreign source before making changes.'
+    })[statusUnboundEvidence.state] : '';
     explainGate('ach-status-unbound-apply-why', unboundApply && !busy ? 'ready' : 'blocked',
       pending || (!unboundApply ?
-        'Choose global / unbound, load branding and Recheck HTTP routing. Apply is unavailable without a compatible source.' :
+        unboundWhy || (unboundReady ? 'Run Recheck HTTP unbound routing to verify the current source before Apply.' :
+          'Choose global / unbound and load saved branding before Recheck HTTP routing.') :
         root.find('#ach-status-unbound-apply-approve').prop('checked') ?
         'Approval selected for global unmatched-host HTTP/80 and the shared Nginx reload. Apply unbound HTTP 404 is enabled.' :
         'Current HTTP/80 source ready. Review the impact on unmatched hosts and shared Nginx reload, then tick to enable Apply.'));
     explainGate('ach-status-unbound-restore-why', unboundRestore && !busy ? 'ready' : 'blocked',
       pending || (!unboundRestore ?
+        unboundMatches ? (unboundWhy ? unboundWhy + ' No eligible saved HTTP/80 recovery is verified for Restore.' :
+          statusUnboundEvidence.state + ': no active saved HTTP/80 operation needs Restore.') :
         'Restore requires a verified saved global HTTP/80 recovery from Recheck. It does not change HTTPS/443.' :
         root.find('#ach-status-unbound-restore-approve').prop('checked') ?
         'Restore approval selected for the verified HTTP/80 recovery. Restore previous HTTP default routing is enabled.' :
@@ -6584,7 +6624,7 @@
     $('<option>').val('').text('Select installed PHP').appendTo(root.find('#ach-php-version'));
     setActionDisabled('#ach-php-discover', true, pendingActionReason);
     root.find('#ach-php-discovery-status').text('Discovering native PHP versioned files...');
-    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    fpmFormGeneration++;
     invalidatePhpPreview('PHP inventory refreshed: run a new Preview for the selected version.');
     resetRecovery();
     root.find('#ach-fpm-recovery-status').text('PHP inventory refreshed. Select a version and inspect recovery again.');
@@ -6629,7 +6669,7 @@
     resetFpmAuto('PHP version changed; inspect automatic repair state for this service.');
     setActionDisabled('#ach-fpm-policy-load', fpmPolicyBusy || !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, fpmPolicyBusy ? pendingActionReason : phpSelectionReason);
     invalidatePhpRuntime('PHP version changed. Inspect the selected version again.');
-    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    fpmFormGeneration++;
     invalidatePhpPreview('PHP version changed: run a fresh read-only preview.');
     resetRecovery();
     root.find('#ach-fpm-recovery-status').text('PHP version changed. Inspect this version’s recovery before restoring.');
@@ -7308,13 +7348,13 @@
         '\nReload saved policy state before another save; PHP service/configuration is unchanged.' :
         '\nNo desired values were loaded or changed.');
   }
-  function resetFpmPolicyEvidence(note) {
+  function resetFpmPolicyEvidence(note, settledWhy) {
     fpmPolicyEvidence = null;
     setActionDisabled('#ach-fpm-policy-save', true, '#ach-fpm-policy-why');
     if (note) root.find('#ach-fpm-policy-status').text(note);
     explainGate('ach-fpm-policy-why', 'blocked',
       fpmPolicyBusy ? 'Saving desired Monitor settings. Wait for the verified result before another Save.' :
-      'Locked: the five values need a new valid PHP file preview. This approval saves desired Monitor values only, not PHP-FPM configuration.');
+      settledWhy || 'Locked: the five values need a new valid PHP file preview. This approval saves desired Monitor values only, not PHP-FPM configuration.');
   }
   root.find('#ach-fpm-policy-load').on('click', function () {
     var version = String(root.find('#ach-php-version').val() || '');
@@ -7362,7 +7402,8 @@
     ++fpmPolicyLoadTicket;
     setActionDisabled('#ach-fpm-policy-load', true, pendingActionReason);
     resetFpmRecheck('Saved policy write attempted; recheck to compare latest desired values.');
-    resetFpmPolicyEvidence('Saving desired PHP policy; host PHP files are not changed...');
+    invalidatePhpPreview('Desired policy Save pending; a new Preview is needed after completion.',
+      'Saving desired PHP policy; host PHP files are not changed...');
     var generation = fpmFormGeneration;
     request('fpm_policy_save', Object.assign({}, data, {
       reviewed:'true',
@@ -7371,31 +7412,43 @@
       expected_observation_sha256:evidence.digest
     }), function (r, failure) {
       fpmPolicyBusy = false;
-      // A preview read during the pending write is not evidence for its new revision.
-      if (fpmPolicyEvidence) resetFpmPolicyEvidence('Saved policy operation completed; run a fresh Preview for the current revision.');
-      setActionDisabled('#ach-fpm-policy-load', !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, phpSelectionReason);
-      setActionDisabled('#ach-fpm-policy-recheck', phpInventoryBusy || !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, phpInventoryBusy || fpmPolicyBusy || fpmRecheckBusy ? pendingActionReason : phpSelectionReason);
-      if (generation !== fpmFormGeneration ||
-          data.php_version !== String(root.find('#ach-php-version').val() || '')) return;
-      if (!r || r.schema !== 1 || r.version !== data.php_version ||
-          (r.state !== 'Policy Saved' && r.state !== 'Policy Unchanged') ||
-          r.auto_enforce !== false || r.runtime_verified !== false ||
-          r.scope !== 'shared_service' ||
-          !Number.isSafeInteger(r.policy_revision)) {
-        root.find('#ach-fpm-policy-status').text(fpmPolicyFailure(
-          'save', failure,
-          'Policy save outcome unconfirmed. Use Load saved desired values to reconcile before trying again.'));
-      } else {
-        invalidatePhpPreview('Saved desired shared PHP policy; run a fresh file preview before Prepare/Apply.');
-        root.find('#ach-fpm-policy-status').text(
-          r.state + ' (revision ' + r.policy_revision + '). No PHP file, service or website changed.');
+      // Settlement invalidates every outstanding Preview/Prepare, including
+      // reads started during Save and results from a superseded form/version.
+      // No receipt from the former policy revision can grant new approval.
+      var sameForm = generation === fpmFormGeneration &&
+        data.php_version === String(root.find('#ach-php-version').val() || '');
+      var confirmed = r && r.schema === 1 && r.version === data.php_version &&
+        ['Policy Saved','Policy Unchanged'].includes(r.state) &&
+        r.auto_enforce === false && r.runtime_verified === false &&
+        r.scope === 'shared_service' && Number.isSafeInteger(r.policy_revision);
+      var fallback = 'Policy save outcome unconfirmed. Use Load saved desired values to reconcile before trying again.';
+      var diagnostic = confirmed ? '' : fpmPolicyFailure('save', failure, fallback);
+      var next = confirmed ? 'Save completed. Run a fresh Preview for the current policy revision.' :
+        diagnostic !== fallback ? 'Save rejected. Review the failure and reload saved desired values, then run a fresh Preview.' :
+        'Save outcome unconfirmed. Reconcile saved desired values, then run a fresh Preview.';
+      var note = confirmed ?
+        (sameForm ? r.state : 'Previous PHP ' + data.php_version + ' desired-policy Save completed') +
+          ' (revision ' + r.policy_revision + '). No PHP file, service or website changed.' :
+        diagnostic;
+      if (!sameForm) {
+        next = 'Previous PHP ' + data.php_version + ' policy: ' + next;
+        if (!confirmed) note = 'Previous PHP ' + data.php_version + ' policy: ' + note;
+        note += ' Form or PHP selection changed during this operation; reconcile the submitted service, then Preview the current form.';
       }
+      invalidatePhpPreview('Policy Save settled; run a fresh file preview before Prepare/Apply.', note, next);
+      setActionDisabled('#ach-fpm-policy-load', phpInventoryBusy ||
+        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate,
+        phpInventoryBusy ? pendingActionReason : phpSelectionReason);
+      setActionDisabled('#ach-fpm-policy-recheck', phpInventoryBusy || fpmRecheckBusy ||
+        !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate,
+        phpInventoryBusy || fpmRecheckBusy ? pendingActionReason : phpSelectionReason);
     });
   });
   function updateFpmPrepareWhy() {
     var version = String(root.find('#ach-php-version').val() || '');
     var ready = phpPreviewEligible && !fpmBusy;
     explainGate('ach-fpm-prepare-why', ready ? 'ready' : 'blocked',
+      fpmPolicyBusy ? 'Desired policy Save is in progress. Run a fresh Preview after it settles before Prepare.' :
       fpmBusy ? 'A PHP-FPM check or operation is running. Wait for its result.' :
       !version ? 'Choose an installed PHP version above, enter settings, then Preview before preparing a shared-service change.' :
       !phpPreviewEligible ?
@@ -7449,8 +7502,10 @@
       return typeof r.plan[key] === 'string' && /^[0-9a-f]{64}$/.test(r.plan[key]);
     }) && typeof r.impact_sha256 === 'string' && /^[0-9a-f]{64}$/.test(r.impact_sha256);
   }
-  function invalidatePhpPreview(reason) {
-    resetFpmPolicyEvidence('Current form/source preview expired. Run Preview to review and save desired values.');
+  function invalidatePhpPreview(reason, policyNote, policyWhy) {
+    ++fpmPreviewTicket;
+    ++fpmPrepareTicket;
+    resetFpmPolicyEvidence(policyNote || 'Current form/source preview expired. Run Preview to review and save desired values.', policyWhy);
     phpPreviewEligible = false;
     resetFpmPlan();
     root.find('#ach-diff-rows').empty();
@@ -7462,7 +7517,7 @@
   root.find('#ach-php-form').on('input change', function () {
     ++fpmPolicyLoadTicket;
     setActionDisabled('#ach-fpm-policy-load', fpmPolicyBusy || !phpInventory.get(String(root.find('#ach-php-version').val() || ''))?.preview_candidate, fpmPolicyBusy ? pendingActionReason : phpSelectionReason);
-    fpmFormGeneration++; fpmPreviewTicket++; fpmPrepareTicket++;
+    fpmFormGeneration++;
     invalidatePhpPreview('Settings changed: run a fresh read-only preview.');
     if (fpmRecovery) {
       resetRecovery();
@@ -7637,7 +7692,6 @@
     event.preventDefault();
     // A newer Preview invalidates ALL prior Prepare results and approvals,
     // even if inputs are byte-for-byte identical.
-    fpmPrepareTicket++;
     invalidatePhpPreview('Checking current PHP-FPM settings and site impact...');
     var data = phpFields(), snapshot = JSON.stringify(data);
     if (!phpInventory.get(data.php_version)?.preview_candidate ||
@@ -7663,7 +7717,7 @@
           typeof r.fpm_observation_sha256 === 'string' &&
           /^[0-9a-f]{64}$/.test(r.fpm_observation_sha256) &&
           ['File Match','File Drift'].includes(r.state)) {
-        fpmPolicyEvidence = {
+        fpmPolicyEvidence = fpmPolicyBusy ? null : {
           version:data.php_version, form:snapshot, digest:r.fpm_observation_sha256,
           policy_revision:saved.policy_revision, monitor_revision:saved.monitor_revision
         };
@@ -7674,7 +7728,8 @@
         var match = saved.saved && fpmPolicyKeys.every(function (key) {
           return Number(data[key.replace('pm.','')]) === saved.desired[key];
         });
-        root.find('#ach-fpm-policy-status').text(
+        root.find('#ach-fpm-policy-status').text(fpmPolicyBusy ?
+          'File observation only while desired policy Save is pending. Run a fresh Preview after it settles.' :
           (saved.saved ? match ? 'Saved desired values match this form. ' :
            'Saved desired values differ from this form. ' :
            'No saved policy for this PHP version. ') +
@@ -7717,7 +7772,7 @@
         tbody.append(tr);
       });
       if (r.state === 'File Match') root.find('#ach-fpm-result').text(r.state + ': ' + t.noDrift + '. ' + r.note);
-      phpPreviewEligible = (data.php_version === '85' ||
+      phpPreviewEligible = !fpmPolicyBusy && (data.php_version === '85' ||
         data.php_version === '81' &&
         phpInventory.get('81')?.manual_apply_adapter === 'guarded_php81') &&
         (r.state === 'File Drift' || r.state === 'File Match') &&
@@ -7725,7 +7780,8 @@
         impact.manual_apply_eligible === true && impact.matched_sites.length > 0;
       setActionDisabled('#ach-fpm-prepare', fpmBusy || !phpPreviewEligible, '#ach-fpm-prepare-why');
       updateFpmPrepareWhy();
-      root.find('#ach-fpm-plan').text(phpPreviewEligible ?
+      root.find('#ach-fpm-plan').text(fpmPolicyBusy ?
+        'File observation only while policy Save is pending. Run a fresh Preview after it settles.' : phpPreviewEligible ?
         'File mapping available; prepare a guarded manual change if needed.' :
         validImpact(impact, data.php_version) && impact.state === 'File Mapping' &&
           impact.manual_apply_eligible === false ?

@@ -138,7 +138,7 @@ screen-reader acceptance, or production writer qualification from geometry.
 ## Owner follow-up: secondary actions and disabled-action guidance
 
 [Accepted OF-01/OF-02 contract](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7130362918).
-Native 0.1.104 candidate uses the shared secondary-button primitive for
+Native 0.1.105 review-remediated candidate uses the shared secondary-button primitive for
 Browse websites and Error pages. Error pages retains a distinct scope and
 does not inherit the Website selector. No second Browse action.
 
@@ -176,6 +176,25 @@ viewport containment, pending/Already Configured/Needs Review/malformed
 evidence, enabling, stale input, unsupported Guard journal and the exact
 allowed WP request contract. This is not live mutation or screen-reader
 certification. The installed HTTPS no-op observation is version-bound.
+R135 remediation: policy Save invalidates Preview/Prepare tickets both
+when the write starts and when it settles, including failure and changed
+form/service. Read-only file observations can still run during Save but
+cannot authorize Save or Prepare; only a new post-settlement Preview can
+grant evidence for the current revision. The existing inline Save status
+retains the failure stage/Operation ID and distinguishes confirmed,
+rejected and unconfirmed outcomes. The associated help updates with it.
+
+The focused contract matrix covers both callback orders plus no parallel
+Preview, across success/refusal/malformed/transport failure and unchanged
+form/changed values/changed service. It asserts actual outgoing revision
+and observation identity after a fresh Preview. The real DOM suite also
+checks the already-open help on settlement and late responses; semantic
+reason cases for Guard/Fail2ban cover Applied, Recovery Required, no
+active saved recovery and actual source/dependency refusal, while global
+HTTP unbound distinguishes Conflict/Drift from missing inspection and
+uses the existing explicit approvals. These are mocked native responses;
+they are not live writer certification.
+
 Retain #128 and #21 for exact candidate and native QA evidence.
 
 ## Protect sensitive files — reference interaction states
@@ -195,7 +214,7 @@ The image concept previously generated is **not runtime proof** and its compulso
 ## Current source implementation and acceptance boundary
 
 S1–S5 are merged into `main` through PRs #129–#133. Native source
-0.1.101 established the task-first redesign; 0.1.103 is the integrated review-remediated visual refinement; 0.1.104 is the Owner follow-up candidate; the earlier
+0.1.101 established the task-first redesign; 0.1.103 is the integrated review-remediated visual refinement; 0.1.104 was the first Owner follow-up candidate; 0.1.105 is the R135 remediation candidate; the earlier
 published 0.1.100 package uses the seven-tab interface. A source ZIP is not
 a published Release asset. Current release availability belongs to GitHub
 Releases; exact installed QA and human acceptance belong to Issues #21 and

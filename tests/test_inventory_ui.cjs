@@ -734,6 +734,10 @@ function loadUi() {
     subStageVisible:(attr,name) => taskNodes[attr].find(node => node.attributes['data-'+attr] === name)?.props.hidden === false,
     navElementHidden:selector => elements.get(selector).props.hidden,
     elementText:selector => elements.get(selector)?.textContent,
+    actionReason:selector => {
+      const reason=elements.get(selector)?.attributes['data-ach-disabled-help'];
+      return reason?.startsWith('#') ? elements.get(reason)?.textContent : reason;
+    },
     elementValue:selector => elements.get(selector)?.props.value,
     followActivity:index => {
       const tr=elements.get('#ach-activity-rows').children[index];
@@ -1539,6 +1543,78 @@ test('Pending PHP policy save disables load, recheck and any parallel preview ap
   const before=ui.requests.length;
   ui.saveFpmPolicy();
   assert.equal(ui.requests.length,before);
+});
+
+test('PHP policy Save settlement invalidates both response orderings and updates canonical help', () => {
+  const outcomes = {
+    success: req=>req.respond({status:true,schema:1,state:'Policy Saved',version:'85',
+      scope:'shared_service',auto_enforce:false,runtime_verified:false,
+      policy_revision:1,changed:true}),
+    refusal: req=>req.respond({status:false,stage:'fpm_policy_save',
+      msg:'Saved PHP policy changed',operation_id:'a'.repeat(32)}),
+    malformed: req=>req.respond({status:true,schema:99}),
+    timeout: req=>req.reject(null,'timeout')
+  };
+  for (const [outcome,settle] of Object.entries(outcomes)) {
+    for (const change of ['same','form','version']) {
+      for (const order of ['preview-first','save-first','no-preview']) {
+        const ui=loadUi(), label=outcome+'/'+change+'/'+order;
+        ui.submitPhp().respond(fpmPolicyPreview());
+        const save=ui.saveFpmPolicy();
+        assert.equal(save.options.data.expected_policy_revision,0,label);
+        assert.equal(save.options.data.expected_observation_sha256,'c'.repeat(64),label);
+        if(change==='form') ui.changePhp('max_children','101');
+        if(change==='version') ui.selectPhpVersion('84');
+        const version=change==='version'?'84':'85';
+        const oldPreview=fpmPolicyPreview({
+          version,shared_impact:phpImpact({version,manual_apply_eligible:version==='85'}),
+          fpm_saved_policy:{...fpmPolicyPreview().fpm_saved_policy,version}
+        });
+        const previewCurrent=()=>change==='form' ?
+          ui.statusClick('#ach-php-form','submit') : ui.submitPhp(version,false);
+        const parallel=order==='no-preview'?null:previewCurrent();
+        if(parallel && change==='form')assert.equal(parallel.options.data.max_children,'101',label);
+        if(order==='preview-first') parallel.respond(oldPreview);
+        assert.equal(ui.state().fpmPolicySaveDisabled,true,label);
+        assert.equal(ui.state().fpmPrepareDisabled,true,label);
+        settle(save);
+        const why=ui.actionReason('#ach-fpm-policy-save');
+        assert.match(why,outcome==='success'?/fresh.*Preview/i:
+          outcome==='refusal'?/rejected.*saved.*Preview/i:/unconfirmed.*saved.*Preview/i,label);
+        assert.doesNotMatch(why,/saving|in progress|wait for/i,label);
+        if(outcome==='refusal') assert.match(ui.state().fpmPolicyStatus,/Operation ID: a{32}/,label);
+        if(order==='save-first') parallel.respond(oldPreview);
+        assert.equal(ui.state().fpmPolicySaveDisabled,true,label);
+        assert.equal(ui.state().fpmPrepareDisabled,true,label);
+        assert.equal(ui.actionReason('#ach-fpm-policy-save'),why,label);
+        const count=ui.requests.length;
+        ui.saveFpmPolicy();ui.prepareFpm();
+        assert.equal(ui.requests.length,count,label);
+        previewCurrent().respond({...oldPreview,
+          fpm_observation_sha256:'d'.repeat(64),
+          fpm_saved_policy:{...oldPreview.fpm_saved_policy,policy_revision:7,monitor_revision:3}});
+        assert.equal(ui.state().fpmPolicySaveDisabled,false,label);
+        assert.equal(ui.state().fpmPrepareDisabled,version!=='85',label);
+        const next=ui.saveFpmPolicy();
+        assert.equal(next.options.data.expected_policy_revision,7,label);
+        assert.equal(next.options.data.expected_monitor_revision,3,label);
+        assert.equal(next.options.data.expected_observation_sha256,'d'.repeat(64),label);
+        assert.equal(next.options.data.php_version,version,label);
+        if(change==='form')assert.equal(next.options.data.max_children,'101',label);
+      }
+    }
+  }
+});
+
+test('A Prepare response issued before policy Save cannot restore stale approval',()=>{
+  const ui=loadUi();ui.submitPhp().respond(fpmPolicyPreview());
+  const prep=ui.prepareFpm();
+  const save=ui.saveFpmPolicy();
+  save.reject(null,'timeout');
+  prep.respond(guardedPlan());
+  assert.equal(ui.state().fpmPrepareDisabled,true);
+  assert.equal(ui.state().fpmReviewHidden,true);
+  assert.equal(ui.state().fpmCommitDisabled,true);
 });
 
 test('Changing PHP values or missing a trusted source token revokes policy-save authorization', () => {
@@ -10039,6 +10115,100 @@ const unsupportedGuardFailure = {
   msg:'Unsupported native security recovery ruleset. Saved journal ach_customizer.nginx_security.7.json preserved. This version cannot verify or restore it; a server administrator must investigate the original rule and journal separately before further changes.',
   operation_id:'d'.repeat(32)
 };
+
+test('Guard and scanner disabled reasons describe verified existing state and matching recovery',()=>{
+  const families=[
+    {key:'guard',method:'manage_nginx_protection',reply:sensitiveGuardResponse, noun:/Guard protection/,check:/Recheck current protection/,id:'c'.repeat(32)},
+    {key:'scan',method:'manage_abusive_scan',reply:scannerReport,noun:/Fail2ban scanner/,check:/Recheck jail \/ recovery/,id:'a'.repeat(32)}
+  ];
+  for(const f of families){
+    const apply='#ach-'+f.key+'-apply',restore='#ach-'+f.key+'-restore';
+    for(const state of ['Unmanaged','Restored','Applied','Recovery Required','Needs Review',...(f.key==='scan'?['Dependency Missing']:['Suspended'])]){
+      const ui=loadUi();selectHostsSite(ui);
+      const reason=state==='Dependency Missing'?'Fail2ban missing':
+        state==='Needs Review'?'Native source ownership not verified':
+        state==='Suspended'?'Monitor disabled':'Interrupted managed operation';
+      const report=f.reply(state,{reason,...(state==='Recovery Required'?{
+        recovery_id:f.id,journal_phase:'prepared',runtime_verified:false
+      }:{})});
+      ui.statusClick('#ach-'+f.key+'-preview').respond(report);
+      const a=ui.actionReason(apply),r=ui.actionReason(restore);
+      assert.equal(ui.state()[f.key+'ApplyDisabled'],!['Unmanaged','Restored'].includes(state),f.key+state);
+      assert.equal(ui.state()[f.key+'RestoreDisabled'],true,f.key+state);
+      if(['Unmanaged','Restored'].includes(state)) assert.match(r,/no active saved.*operation needs Restore/);
+      else if(state==='Applied'){
+        assert.match(a,/already Applied.*No Enable/);
+        assert.match(r,f.check);
+        assert.match(r,/Recovery ID/);
+      }else if(state==='Recovery Required'){
+        assert.match(a,/Recovery Required.*Resolve the saved recovery/);
+        assert.match(r,f.check);
+      }else{
+        assert.ok(a.includes(reason),f.key+state+': '+a);
+        assert.match(a,/Investigate the reported cause/);
+        assert.match(r,/No eligible matching recovery/);
+      }
+      if(!['Unmanaged','Restored'].includes(state)){
+        const count=ui.requests.length;
+        ui.statusClick(apply);ui.statusClick(restore);
+        assert.equal(ui.requests.length,count,f.key+state);
+      }
+      if(['Applied','Recovery Required'].includes(state)){
+        ui.statusClick('#ach-'+f.key+'-recheck').respond(report);
+        assert.equal(ui.state()[f.key+'RestoreDisabled'],false);
+        assert.equal(ui.state()[f.key+'ApplyDisabled'],true);
+        if(f.key==='guard')ui.statusSetChecked('#ach-guard-block-xmlrpc',true);
+        else ui.statusSetValue('#ach-scan-maxretry','9','input change');
+        assert.match(ui.actionReason(apply),state==='Applied'?/already Applied/:/Recovery Required/);
+        const req=ui.statusClick(restore);
+        assert.match(req.options.url,new RegExp('s='+f.method+'$'));
+        assert.equal(req.options.data.recovery_id,f.id);
+        assert.equal(req.options.data.approved,'true');
+      }
+    }
+  }
+});
+
+test('Global HTTP unbound guidance distinguishes every verified blocked state without enabling a write',()=>{
+  for(const state of ['Conflict','Drift','Applied','Needs Review','Recovery Required','Source Ready','Restored']){
+    const ui=loadUi();ui.openStatus().respond(statusPrefs());
+    ui.statusSetValue('#ach-status-template','unbound','change');
+    const hasRecovery=['Applied','Needs Review','Recovery Required','Restored','Drift'].includes(state);
+    const reply=unboundReply('recheck',state,{recovery_id:hasRecovery?'c'.repeat(32):null,
+      ...(state==='Conflict'?{before_ipv4_status:null,before_ipv6_status:null}:{})});
+    ui.statusClick('#ach-status-unbound-recheck').respond(reply);
+    const apply='#ach-status-unbound-apply',restore='#ach-status-unbound-restore';
+    assert.equal(ui.state().unboundApplyDisabled,true);
+    assert.equal(ui.state().unboundRestoreDisabled,true);
+    const a=ui.actionReason(apply),r=ui.actionReason(restore);
+    const patterns={
+      Conflict:/Conflict:.*ownership.*do not overwrite/,
+      Drift:/Drift:.*assets remain.*Investigate/,
+      Applied:/already Applied.*no Apply/,
+      'Needs Review':/Needs Review:.*runtime.*saved operation/,
+      'Recovery Required':/Recovery Required:.*saved.*recovery/,
+      'Source Ready':/Current HTTP\/80 source ready.*tick/,
+      Restored:/Current HTTP\/80 source ready.*tick/
+    };
+    assert.match(a,patterns[state],state);
+    if(['Conflict','Drift'].includes(state))assert.match(r,/No eligible saved HTTP\/80 recovery/);
+    else if(['Source Ready','Restored'].includes(state))assert.match(r,/no active saved HTTP\/80 operation needs Restore/);
+    else assert.match(r,/Saved HTTP\/80 recovery confirmed/);
+    ui.statusSetChecked('#ach-status-unbound-apply-approve',true);
+    ui.statusSetChecked('#ach-status-unbound-restore-approve',true);
+    assert.equal(ui.state().unboundApplyDisabled,!['Source Ready','Restored'].includes(state),state);
+    assert.equal(ui.state().unboundRestoreDisabled,!['Applied','Needs Review','Recovery Required'].includes(state),state);
+    if(['Conflict','Drift'].includes(state)){
+      const before=ui.requests.length;
+      ui.statusClick(apply);ui.statusClick(restore);
+      assert.equal(ui.requests.length,before,state);
+    }
+    ui.statusSetValue('#ach-status-locale','fa','change');
+    assert.equal(ui.state().unboundApplyDisabled,true);
+    assert.equal(ui.state().unboundRestoreDisabled,true);
+    assert.match(ui.actionReason(apply),/Run Recheck HTTP unbound routing/);
+  }
+});
 
 test('Guard unsupported ruleset has persistent site-specific guidance, not a retry or false recovery ID',()=>{
   for(const action of ['preview','recheck','apply','restore']){

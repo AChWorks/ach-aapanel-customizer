@@ -43,6 +43,10 @@ window.jQuery.ajax = window.$.ajax = function(options) {
     resolve(response){
       if (!this.doneHandler) throw Error('AJAX .done callback not installed');
       this.doneHandler(response);
+    },
+    reject(status){
+      if (!this.failHandler) throw Error('AJAX .fail callback not installed');
+      this.failHandler(null,status);
     }
   };
   window.__qaRequests.push(entry);
