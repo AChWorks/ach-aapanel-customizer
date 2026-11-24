@@ -779,6 +779,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 if _source_safe(site, vhost_root=vhost_root,
                                 nginx_conf=nginx_conf)[0] != source_sha:
                     raise GuardError("concurrency", "Native VHost changed before activation")
+                if selected_scan is not None and not _scan_zone(vhost_root):
+                    raise GuardError("scan_source", "Shared scanner declaration disappeared before activation")
                 _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
             except Exception as exc:
                 try:

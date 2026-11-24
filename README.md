@@ -38,7 +38,7 @@ Releases, not implied by this source guide.
 | **Websites → Routing & diagnostics** | Nginx/VHost observations, selected-site local Hosts and drift/Recovery evidence; no public DNS change. |
 | **Websites → Cache & performance** | Inspect, Connect WordPress, Apply/restore, Clear Cache, and Advanced URL mapping. Exact site-owned cache operations and HTTP/HTTPS origin verification; vendor Purge All remains separate. |
 | **Server → PHP services** | Inspect service/sites, desired policy, explicit shared Apply, independently available saved-service Recovery and separately opted-in automatic repair of witnessed regeneration. |
-| **Server → Local hostnames / Default HTTP/TLS** | Remove an exact chosen origin-local loopback alias without touching the system hostname; Unknown HTTP/80 and eligible TLS/443 fallback are separate. |
+| **Server → Local hostnames / Default HTTP/TLS** | Remove an exact chosen origin-local loopback alias without touching the system hostname. Unknown HTTP/80 and eligible TLS/443 fallback are separate. |
 | **Error pages** | Design/preview 11 EN/LTR + 11 FA/RTL templates; explicitly choose website delivery, future-site defaults, stopped-site 503 or server fallback. TLS handshake rejection does not create certificates/listeners. |
 | **Activity & recovery** | Read exact operation stage, result, time and Operation/Recovery IDs in Operation details; open the owning task then Recheck without inferring a site or authorizing Restore. |
 

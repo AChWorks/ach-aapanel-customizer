@@ -39,7 +39,7 @@ Error pages
   Server fallback          cross-link to Server routing, no duplicate writer
 Activity & recovery
   Understand event, identify exact target, follow link to owning workflow,
-  Recheck before Restore; advanced IDs, and raw logs
+  Recheck before Restore; advanced IDs and raw logs
 ```
 
 An operation has **one canonical owner view**. A relevant shortcut may open that same view with an explicit target; it must not duplicate privileged Apply, persistence or Recovery code. A site selection never falsely changes the scope of server-wide work. Advanced source/path/hash evidence is expandable and reachable, not deleted.

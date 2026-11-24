@@ -3868,14 +3868,16 @@
   bindAction('#ach-guard-recheck','click', function () {guardRequest('recheck');});
   bindAction('#ach-guard-apply','click', function () {guardRequest('apply');});
   bindAction('#ach-guard-restore','click', function () {guardRequest('restore');});
-  root.find('#ach-guard-block-xmlrpc,#ach-guard-scan,#ach-guard-maxretry,#ach-guard-findtime,#ach-guard-bantime').on('input change',function () {
+  function guardSelectionChanged() {
     guardReady=null;
     // Option edits invalidate readiness, not the verified existing journal state.
     if (guardReport && !['Applied','Recovery Required'].includes(guardReport.state)) guardReport=null;
     if (!guardUnsupported && !guardReport)
       root.find('#ach-guard-result').text('Nginx policy option changed; Preview again before Apply.');
     guardLock();
-  });
+  }
+  root.find('#ach-guard-block-xmlrpc,#ach-guard-scan').on('change',guardSelectionChanged);
+  root.find('#ach-guard-maxretry,#ach-guard-findtime,#ach-guard-bantime').on('input change',guardSelectionChanged);
   function validNginxHelperAudit(h) {
     if (!h || h.schema !== 1 ||
         h.active_verified !== false || h.purge_method_verified !== false ||
