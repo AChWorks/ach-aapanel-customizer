@@ -80,12 +80,23 @@ async function walk(browser,width,height,touch){
     const state=await holder.evaluate(el=>{
       const desc=document.getElementById(el.getAttribute('aria-describedby'));
       const b=document.querySelector('.ach-disabled-bubble'),r=document.getElementById('ach-customizer');
-      const bb=b.getBoundingClientRect(),rr=r.getBoundingClientRect();
+      const bb=b.getBoundingClientRect(),rr=r.getBoundingClientRect(),
+        control=el.querySelector('button')||el, cr=control.getBoundingClientRect(),
+        pane=el.closest('.ach-main').getBoundingClientRect(),style=getComputedStyle(b);
+      const visibleTop=Math.max(cr.top,pane.top),visibleBottom=Math.min(cr.bottom,pane.bottom);
+      const gap=b.dataset.placement==='below'?bb.top-visibleBottom:visibleTop-bb.bottom;
       return {description:desc?.textContent,tooltip:b.textContent,
-        fits:bb.left>=rr.left&&bb.right<=rr.right+1&&bb.top>=rr.top&&bb.bottom<=rr.bottom+1};
+        fits:bb.left>=pane.left+8&&bb.right<=pane.right-8&&bb.top>=rr.top+8&&bb.bottom<=rr.bottom-8,
+        gap,arrow:bb.left+parseFloat(b.style.getPropertyValue('--ach-help-arrow')),
+        targetLeft:Math.max(cr.left,pane.left),targetRight:Math.min(cr.right,pane.right),
+        background:style.backgroundColor,weight:style.fontWeight,placement:b.dataset.placement};
     });
     assert.equal(state.description,state.tooltip);
     assert.ok(state.fits,JSON.stringify(state));
+    assert.ok(Math.abs(state.gap-8)<=1,JSON.stringify(state));
+    assert.ok(state.arrow>=state.targetLeft-1&&state.arrow<=state.targetRight+1,JSON.stringify(state));
+    assert.equal(state.background,'rgb(255, 255, 255)');
+    assert.equal(state.weight,'400');
   }
   const method=touch?'touch':'hover';
   const count=()=>page.evaluate(()=>window.__qaRequests.length);
@@ -121,12 +132,19 @@ async function walk(browser,width,height,touch){
     await page.keyboard.press('Escape');
     assert.equal(await bubble.isVisible(),false);
     await button(read).click();
+    assert.equal(await bubble.isVisible(),false,'clicking enabled Recheck must not show help');
+    assert.equal(await button(read).getAttribute('aria-busy'),'true');
+    assert.equal(await button(read).getAttribute('data-ach-action-pending'),'');
+    assert.equal(await button(apply).getAttribute('aria-busy'),null,'only initiating action is busy');
+    await anchor(read).focus();
+    assert.equal(await bubble.isVisible(),false,'busy control cannot show eligibility help even on explicit focus');
     await explain(apply,/in progress/,method);
     await resolveLatest(page,'wp_settings_manage',reply('Already Configured',{
       reason:'WordPress URLs already use HTTPS',
       urls_before:{home:'https://demo.test',siteurl:'https://demo.test'}
     }));
     assert.match(await bubble.innerText(),/already has the requested value/);
+    assert.equal(await button(read).getAttribute('aria-busy'),null);
     await explain(restore,/No matching recoverable saved change/,method);
     await button(read).click();
     await resolveLatest(page,'wp_settings_manage',reply('Needs Review',{reason:'Native source is not verifiable'}));
@@ -142,6 +160,8 @@ async function walk(browser,width,height,touch){
     assert.equal(await bubble.isVisible(),false);
     const original=await count();
     await button(apply).click();
+    assert.equal(await bubble.isVisible(),false,'click-induced Apply disable must not open help');
+    assert.equal(await button(apply).getAttribute('aria-busy'),'true');
     assert.equal(await count(),original+1);
     const req=await lastRequest(page,'wp_settings_manage');
     assert.equal(req.data.settings_action,'apply');
@@ -149,6 +169,8 @@ async function walk(browser,width,height,touch){
     assert.equal(req.data.approved,'true');
     // The intercepted mock reports a failed write; never retry without Recheck.
     await resolveLatest(page,'wp_settings_manage',{status:false,stage:'wp_settings_manage',msg:'fixture refusal',operation_id:'e'.repeat(32)});
+    assert.equal(await bubble.isVisible(),false,'failed Apply settling under stationary pointer stays quiet');
+    assert.equal(await button(apply).getAttribute('aria-busy'),null);
     await explain(apply,/previous operation was not confirmed/,method);
     await button(read).click();
     await resolveLatest(page,'wp_settings_manage',reply('Applied'));
@@ -249,7 +271,10 @@ async function walk(browser,width,height,touch){
       if(v!=='85')await selectVersion(v);
       await preview.click();
       if(outcome==='refusal')await resolveLatest(page,'preview_php_fpm',phpPreview(v));
-      await explain(save,/Saving desired Monitor settings|in progress/,'focus');
+      assert.equal(await button(save).getAttribute('aria-busy'),'true');
+      await anchor(save).focus();
+      assert.equal(await bubble.isVisible(),false,'pending Save uses progress, not disabled help');
+      assert.match(await anchor(save).evaluate(el=>document.getElementById(el.getAttribute('aria-describedby')).textContent),/Operation in progress/);
       const expected=outcome==='success'||outcome==='selection'?/Save completed.*fresh Preview/:
         outcome==='refusal'?/Save rejected.*reload saved desired values.*fresh Preview/:
         /Save outcome unconfirmed.*Reconcile saved desired values.*fresh Preview/;
@@ -261,11 +286,19 @@ async function walk(browser,width,height,touch){
         auto_enforce:false,runtime_verified:false,policy_revision:1,changed:true
       });
       assert.ok(await button(save).isDisabled());
-      assert.ok(await bubble.isVisible(),'settlement updates already-open help');
+      assert.equal(await button(save).getAttribute('aria-busy'),null);
+      assert.equal(await bubble.isVisible(),false,'settlement does not open disabled help');
+      // A subsequent deliberate keyboard action reveals the current reason.
+      await anchor(save).press('Enter');
+      assert.ok(await bubble.isVisible());
       assert.match(await bubble.innerText(),expected);
       assert.equal(await bubble.innerText(),await anchor(save).evaluate(el=>
         document.getElementById(el.getAttribute('aria-describedby')).textContent));
-      if(outcome!=='refusal')await resolveLatest(page,'preview_php_fpm',phpPreview(v));
+      if(outcome!=='refusal') {
+        assert.equal(await preview.getAttribute('aria-busy'),'true','independent Preview still running after Save settles');
+        await resolveLatest(page,'preview_php_fpm',phpPreview(v));
+        assert.equal(await preview.getAttribute('aria-busy'),null);
+      }
       assert.ok(await button(save).isDisabled());
       assert.match(await bubble.innerText(),expected);
       assert.ok(await button('ach-fpm-prepare').isDisabled());
@@ -288,11 +321,167 @@ async function walk(browser,width,height,touch){
     console.log('R135_SEMANTIC_HELP_PASS',width,height,cases.join(','));
   }finally{await page.close();}
 }
+// Exercise the actual shared request bindings beyond the detailed semantic
+// cases above. All responses here are intercepted; no backend writer runs.
+async function progressWalk(browser,width,height,touch){
+  const {page,pageErrors}=await realPage(browser,width,height,touch?{hasTouch:true,isMobile:true}:{});
+  const q=id=>page.locator('#'+id), bubble=page.locator('.ach-disabled-bubble');
+  const route=selector=>page.locator(selector).click();
+  const emptyActivity={status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]};
+  const aliases={status:true,schema:1,read_only:true,state:'Aliases Found',hosts_sha256:'a'.repeat(64),
+    entries:[{domain:'demo.test',address:'127.0.0.1',line:7}]};
+  const checks=[];
+  async function run(id,method,response,options={}){
+    const control=q(id);
+    await control.scrollIntoViewIfNeeded();
+    assert.ok(await control.isEnabled(),id+' precondition');
+    const label=await control.innerText();
+    const before=await page.evaluate(()=>window.__qaRequests.length);
+    if(options.keyboard)await control.press('Enter');
+    else if(touch)await control.tap();
+    else await control.click();
+    assert.equal(await page.evaluate(()=>window.__qaRequests.length),before+1,id+' exact dispatch');
+    assert.equal(await control.getAttribute('aria-busy'),'true',id);
+    assert.equal(await control.innerText(),label,id+' stable label');
+    assert.equal(await bubble.isVisible(),false,id+' no unsolicited help');
+    assert.equal(await page.locator('button[data-ach-action-pending],input[data-ach-action-pending]').count(),1,id);
+    const pending=await control.evaluate(el=>{
+      const style=getComputedStyle(el,'::before'),rect=el.getBoundingClientRect(),
+        pane=el.closest('.ach-main').getBoundingClientRect();
+      return {spinner:style.content==='""'&&style.animationName==='ach-action-spin',
+        fits:rect.left>=pane.left-1&&rect.right<=pane.right+1};
+    });
+    assert.ok(pending.spinner&&pending.fits,id+' '+JSON.stringify(pending));
+    if(response===undefined)await rejectLatest(page,method,'timeout');
+    else await resolveLatest(page,method,response);
+    assert.equal(await control.getAttribute('aria-busy'),null,id+' settled');
+    assert.equal(await bubble.isVisible(),false,id+' no settlement popup');
+    checks.push(id);
+  }
+  try{
+    await resolveLatest(page,'get_overview',monitor);
+    await run('ach-overview-refresh','get_overview',monitor,{keyboard:!touch});
+    await page.locator('.ach-home-advanced summary').click();
+    const checkbox=q('ach-fpm-enabled');
+    await checkbox.click();
+    assert.equal(await checkbox.getAttribute('aria-busy'),'true');
+    assert.equal(await q('ach-monitor-enabled').getAttribute('aria-busy'),null);
+    assert.equal(await bubble.isVisible(),false);
+    assert.equal(await checkbox.locator('..').evaluate(el=>getComputedStyle(el,'::after').animationName),'ach-action-spin');
+    const off={...monitor,state_revision:1,changed:true,modules_enabled:{...monitor.modules_enabled,php_fpm_file_preview:false}};
+    await resolveLatest(page,'set_control',off);
+    assert.equal(await checkbox.getAttribute('aria-busy'),null);
+    await checkbox.click();
+    await resolveLatest(page,'set_control',{...monitor,state_revision:2,changed:true});
+    assert.equal(await bubble.isVisible(),false);
+    checks.push('ach-fpm-enabled');
+    await openDestination(page,'websites');
+    assert.equal(await page.locator('[data-ach-action-pending]').count(),0,'automatic route loading is not a clicked action');
+    await resolveLatest(page,'get_sites',inventory);
+    await q('ach-hosts-site-id').selectOption('7');
+    // Reproduce the Owner's exact screenshot context, including hover transfer
+    // across the gap, above/below choice, and keyboard dismissal.
+    const disabled=q('ach-site-changes-save-selected'),anchor=disabled.locator('..');
+    await anchor.scrollIntoViewIfNeeded();
+    if(touch)await anchor.tap();else{
+      await page.mouse.move(2,2);
+      await anchor.hover();
+    }
+    assert.equal(await bubble.isVisible(),true);
+    if(!touch){
+      const r=await bubble.boundingBox();
+      await page.mouse.move(r.x+r.width/2,r.y+r.height/2,{steps:12});
+      assert.equal(await bubble.isVisible(),true,'hover bridge is traversable');
+    }
+    await page.keyboard.press('Escape');
+    assert.equal(await bubble.isVisible(),false);
+    await run('ach-site-changes-compare','compare_site_changes',undefined,{keyboard:!touch});
+    await run('ach-sites-refresh','get_sites',inventory);
+    await q('ach-hosts-site-id').selectOption('7');
+    await route('[data-task=protection]');
+    await run('ach-guard-preview','manage_nginx_protection',protection('guard','Unmanaged'));
+    await route('[data-task=cache]');
+    await route('[data-cache-task=inspect]');
+    await run('ach-cache-inspect-button','inspect_fastcgi_cache');
+    await page.getByText('Advanced: privacy probes and policy reference',{exact:true}).click();
+    await run('ach-cache-private-probe-button','probe_private_cache');
+    await run('ach-cache-woo-probe-button','probe_private_cache');
+    await run('ach-cache-plan-button','preview_cache_safety');
+    await route('[data-cache-task=connect]');
+    await run('ach-wp-cache-inspect','manage_wordpress_cache');
+    await route('[data-cache-task=configure]');
+    await run('ach-cache-activation-preview','preview_cache_activation');
+    await run('ach-cache-activation-recheck','manage_cache_policy');
+    await route('[data-cache-task=bridge]');
+    await run('ach-bridge-inspect','manage_cache_policy');
+    await route('[data-task=wordpress]');
+    await route('[data-wp-task=https]');
+    await run('ach-wp-settings-recheck','wp_settings_manage',reply('Already Configured'));
+    await route('[data-task=routing]');
+    await route('[data-routing-detail=diagnostics]');
+    await run('ach-vhost-inspect-button','inspect_native_vhost');
+    await run('ach-nginx-candidate-button','inspect_nginx_candidate');
+    await route('[data-routing-detail=hosts]');
+    await run('ach-hosts-inspect-button','inspect_local_hosts');
+    await route('[data-routing-detail=reconcile]');
+    await run('ach-reconcile-button','inspect_site_reconciliation');
+    await openDestination(page,'server');
+    await resolveLatest(page,'get_php_versions',phpInventory);
+    await run('ach-php-discover','get_php_versions',phpInventory);
+    await q('ach-php-version').selectOption('85');
+    await run('ach-php-runtime-check','inspect_php_runtime');
+    await route('[data-php-task=policy]');
+    await run('ach-fpm-policy-load','fpm_policy_get');
+    await run('ach-fpm-policy-recheck','fpm_policy_recheck');
+    for(const [id,value] of [['ach-max-children','50'],['ach-start-servers','5'],
+      ['ach-min-spare','5'],['ach-max-spare','20'],['ach-max-requests','0']])await q(id).fill(value);
+    const preview=page.locator('#ach-php-form button[type=submit]');
+    // Two intentionally repeatable read-only Previews, settled out of order.
+    await preview.click();await preview.click();
+    assert.ok(await preview.isEnabled());
+    assert.equal(await preview.getAttribute('aria-busy'),'true');
+    assert.equal(await bubble.isVisible(),false);
+    await resolveLatest(page,'preview_php_fpm',phpPreview('85'));
+    assert.equal(await preview.getAttribute('aria-busy'),'true','first outstanding read still pending');
+    await page.evaluate(body=>{
+      const reqs=window.__qaRequests.filter(r=>new URL(r.options.url,location.href).searchParams.get('s')==='preview_php_fpm');
+      reqs.at(-2).resolve(body);
+    },phpPreview('85'));
+    assert.equal(await preview.getAttribute('aria-busy'),null);
+    checks.push('PHP repeatable Preview');
+    await route('[data-server-task=hosts]');
+    await resolveLatest(page,'inspect_hosts_aliases',aliases);
+    await run('ach-hosts-alias-refresh','inspect_hosts_aliases',aliases);
+    await route('[data-server-task=attack]');
+    await q('ach-hosts-site-id').selectOption('7');
+    await run('ach-scan-preview','manage_abusive_scan',protection('scan','Unmanaged'));
+    await run('ach-scan-orphan-list','manage_abusive_scan');
+    await route('[data-server-task=http]');
+    await resolveLatest(page,'status_preferences',prefs);
+    await q('ach-status-template').selectOption('unbound');
+    await run('ach-status-unbound-recheck','status_unbound',unbound('Restored'));
+    await run('ach-status-tls-recheck','status_tls');
+    await openDestination(page,'status');
+    await route('[data-status-mode=design]');
+    await run('ach-status-load','status_preferences',prefs);
+    await run('ach-status-preview-button','status_preview');
+    await openDestination(page,'activity');
+    await resolveLatest(page,'get_activity',emptyActivity);
+    await run('ach-activity-refresh','get_activity',emptyActivity);
+    assert.deepEqual(pageErrors,[]);
+    assert.equal(await page.locator('[data-ach-action-pending]').count(),0);
+    console.log('OF34_PROGRESS_PASS',width,height,checks.length,checks.join(','));
+  }finally{await page.close();}
+}
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE||chromium.executablePath(),args:['--no-sandbox','--disable-dev-shm-usage']});
   try{
-    await walk(browser,1280,720,false);
-    await walk(browser,320,480,false);
-    await walk(browser,390,844,true);
+    if (!process.env.ACH_PROGRESS_ONLY) {
+      await walk(browser,1280,720,false);
+      await walk(browser,320,480,false);
+      await walk(browser,390,844,true);
+    }
+    await progressWalk(browser,1280,720,false);
+    await progressWalk(browser,390,844,true);
   }finally{await browser.close();}
 })().catch(e=>{console.error(e.stack||e);process.exitCode=1;});
