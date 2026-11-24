@@ -1381,7 +1381,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.110'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.111'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -4930,6 +4930,13 @@
       evidence.delivery === root.find('#ach-status-delivery').val() &&
       evidence.brand === JSON.stringify(statusFields());
   }
+  function statusAlreadyCurrent(evidence) {
+    return sameStatusSelection(evidence) && evidence.template === '404' &&
+      evidence.current === evidence.proposed;
+  }
+  function statusApplyReady(evidence) {
+    return sameStatusSelection(evidence) && !statusAlreadyCurrent(evidence);
+  }
   function sameDefaultSelection(evidence) {
     var scope = statusScope();
     return !!evidence && !!scope && scope.scope === 'global' &&
@@ -4995,7 +5002,7 @@
     setActionDisabled('#ach-status-probe-button', !siteRunning, statusScopeReason(busy, scope, actionable) || (!selectedReady ? 'Choose a website and supported 404/502 or extension 50x delivery.' : 'The selected site is stopped. Start it before checking the live HTTP source.'));
     // A stopped site must retain a read-only recovery inspection path.
     setActionDisabled('#ach-status-manage-recheck', !selectedReady, statusScopeReason(busy, scope, actionable) || 'Choose a website and supported 404/502 or extension 50x delivery.');
-    setActionDisabled('#ach-status-manage-apply', !siteRunning || !sameStatusSelection(statusProbeEvidence) ||
+    setActionDisabled('#ach-status-manage-apply', !siteRunning || !statusApplyReady(statusProbeEvidence) ||
       root.find('#ach-status-manage-apply-approve').prop('checked') !== true, '#ach-status-site-apply-why');
     setActionDisabled('#ach-status-manage-restore', !siteRunning || !sameStatusSelection(statusManageEvidence) ||
       !['Applied','Recovery Required'].includes(statusManageEvidence.state) ||
@@ -5042,11 +5049,13 @@
     explainGate('ach-status-reset-why', actionable && !busy ? 'ready' : 'blocked',
       pending || (!actionable ? scopeHint :
         'Saved branding loaded. Choose Reset to revert this scope to inherited/default preferences; no live pages are changed.'));
-    var siteApply = !!(siteRunning && sameStatusSelection(statusProbeEvidence));
+    var siteApply = !!(siteRunning && statusApplyReady(statusProbeEvidence));
     var siteRestore = !!(siteRunning && sameStatusSelection(statusManageEvidence) &&
       ['Applied','Recovery Required'].includes(statusManageEvidence.state));
     explainGate('ach-status-site-apply-why', siteApply && !busy ? 'ready' : 'blocked',
       pending || (!siteRunning ? 'Select a running website and supported status template; load branding before attempting Apply.' :
+        statusAlreadyCurrent(statusProbeEvidence) ?
+        'No change needed: the native HTTP 404 already serves the selected render. Matching content does not establish a managed extension or Restore permission.' :
         !siteApply ? 'First Check selected site source (read-only). Then inspect the result; only fresh matching evidence permits Apply.' :
         root.find('#ach-status-manage-apply-approve').prop('checked') ?
         'Approval selected for the inspected website and delivery mode. Apply selected status page is enabled for this exact evidence.' :
@@ -5570,7 +5579,8 @@
           r.scope === 'native_vhost_source_only' && r.http_status === null &&
           r.body_sha256 === null && hash(r.page_file_sha256)) &&
         r.read_only === true && r.apply_supported === false &&
-        r.nginx_runtime_verified === false && !r.body_matches_file && !r.body_matches_render &&
+        r.nginx_runtime_verified === false && r.body_matches_file === false &&
+        r.body_matches_render === (extension404 && r.body_sha256 === r.rendered_sha256) &&
         r.site_id === Number(scope.site_id) && selectedSite &&
         r.site_key === selectedSite.name && r.verified_site_snapshot === selectedSnapshot &&
         r.locale === locale && r.revision === statusRevision &&
@@ -5667,15 +5677,17 @@
           '\nCurrent source page SHA-256: ' + (r.page_file_sha256 || 'Unavailable') +
           '\nObserved HTTP body SHA-256: ' + (r.body_sha256 || 'Unavailable') +
           '\nSelected render SHA-256: ' + r.rendered_sha256 +
-          '\nHTTP body matches site file: ' + (r.body_matches_file ? 'Yes' : 'No') +
-          '\nHTTP body matches selected render: ' + (r.body_matches_render ? 'Yes' : 'No') +
+          '\nHTTP body matches site file: ' + (r.scope === 'native_vhost_http404' ?
+            'Not applicable' : r.http_status === null ? 'Not observed' : r.body_matches_file ? 'Yes' : 'No') +
+          '\nHTTP body matches selected render: ' + (r.http_status === null ?
+            'Not observed' : r.body_matches_render ? 'Yes' : 'No') +
           '\n' + r.note);
         var adoption = r.adoption_preview;
         if (((template === '404' && delivery === 'file' && r.state === 'HTTP Match' &&
                r.page_file_sha256 !== r.rendered_sha256) ||
               ((['502','50x'].includes(template) ||
                 (template === '404' && delivery === 'extension' &&
-                 r.scope === 'native_vhost_http404' && r.body_sha256 !== r.rendered_sha256)) &&
+                 r.scope === 'native_vhost_http404')) &&
                r.state === 'Source Ready')) &&
             adoption && adoption.route_source_state === 'Native VHost' &&
             /^[0-9a-f]{64}$/.test(adoption.vhost_sha256 || '')) {
@@ -5694,9 +5706,11 @@
             'Existing file SHA-256: ') + (adoption.current_sha256 || 'Unavailable') +
           '\nProposed SHA-256: ' + adoption.proposed_sha256 +
           '\nExplicit adoption and backup required: ' + (adoption.requires_backup ? 'Yes' : 'Not inferred') +
-          '\nNo write is authorized by this preview. Explicit approval triggers ' +
-          (delivery === 'file' ? 'a guarded native-site HTML backup and replacement without Nginx reload.' :
-             'a guarded extension update and shared Nginx reload.') :
+          (statusAlreadyCurrent(statusProbeEvidence) ?
+            '\nNo change needed. No write or Restore is authorized by matching HTTP content.' :
+            '\nNo write is authorized by this preview. Explicit approval triggers ' +
+            (delivery === 'file' ? 'a guarded native-site HTML backup and replacement without Nginx reload.' :
+               'a guarded extension update and shared Nginx reload.')) :
           'This backend supplied no adoption preflight. No Apply/Restore permission.');
       }
       statusLock(false);
@@ -5758,6 +5772,8 @@
             r.before_sha256 : r.after_sha256);
       }
       if (r.state === 'Unmanaged') {
+        if (['502','50x'].includes(r.template) &&
+            (r.verification_scope !== 'source_only' || r.runtime_verified !== false)) return false;
         return r.recovery_id === null && r.before_sha256 === null &&
           r.after_sha256 === null;
       }
@@ -5795,7 +5811,7 @@
         (action !== 'recheck' && String(site.panel_status) !== '1')) return;
     var proposal = statusProbeEvidence, recovery = statusManageEvidence;
     if (action === 'apply' &&
-        (!sameStatusSelection(proposal) ||
+        (!statusApplyReady(proposal) ||
          root.find('#ach-status-manage-apply-approve').prop('checked') !== true)) return;
     if (action === 'restore' &&
         (!sameStatusSelection(recovery) ||
@@ -5884,6 +5900,8 @@
             'Saved ' + template + ' journal SHA-256 (NOT current HTTP): ' :
             ['502','50x'].includes(template) && r.state === 'Source Restored' ?
               'Current restored 502.html SOURCE SHA-256: ' :
+            ['502','50x'].includes(template) && r.state === 'Unmanaged' ?
+              'Current served 502.html SOURCE SHA-256 (not observed HTTP 502): ' :
               'Current ' + template + ' status SHA-256: ') + r.page_file_sha256 +
           (r.verification_scope === 'saved_journal_only' ?
             '\nSaved phase: ' + r.journal_phase + '\n' + r.note : '') +

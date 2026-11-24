@@ -4441,6 +4441,58 @@ test('Native extension 404 uses live body baseline without an existing site file
   assert.equal(bad.state().statusManageApplyDisabled,true);
 });
 
+test('Matching native extension 404 is truthful, non-authorizing, and selection-bound', () => {
+  const proposal=native404Proposal();
+  const matching={...proposal,body_sha256:managed404Render,body_matches_render:true,
+    adoption_preview:{...proposal.adoption_preview,current_sha256:managed404Render}};
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-delivery','extension','change');
+  ui.statusClick('#ach-status-probe-button').respond(matching);
+  assert.match(ui.state().statusProbe,/HTTP body matches selected render: Yes/);
+  assert.match(ui.state().statusAdoption,/No change needed/);
+  assert.match(ui.gate('ach-status-site-apply-why').text,/already serves the selected render/);
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  ui.statusSetChecked('#ach-status-manage-restore-approve',true);
+  assert.equal(ui.state().statusManageApplyDisabled,true);
+  assert.equal(ui.state().statusManageRestoreDisabled,true);
+  const count=ui.requests.length;
+  ui.statusClick('#ach-status-manage-apply');
+  ui.statusClick('#ach-status-manage-restore');
+  assert.equal(ui.requests.length,count);
+  ui.statusSetValue('#ach-status-locale','fa','change');
+  assert.doesNotMatch(ui.gate('ach-status-site-apply-why').text,/already serves/);
+  for (const bad of [{...matching,body_matches_render:false},
+                     {...proposal,body_matches_render:true},
+                     {...matching,body_matches_render:1}]) {
+    const invalid=statusProbeUi();
+    invalid.statusClick('#ach-status-probe-button').respond(bad);
+    assert.match(invalid.state().statusProbe,/incompatible/);
+    invalid.statusSetChecked('#ach-status-manage-apply-approve',true);
+    assert.equal(invalid.state().statusManageApplyDisabled,true);
+  }
+});
+
+test('Unmanaged 502 and 50x Recheck explicitly identifies served source, not HTTP', () => {
+  for (const template of ['502','50x']) {
+    const ui=statusProbeUi();
+    ui.statusSetValue('#ach-status-template',template,'change');
+    const response=manage404Response('recheck',{
+      template,state:'Unmanaged',changed:false,page_file_sha256:managed404Original,
+      before_sha256:null,after_sha256:null,recovery_id:null,
+      runtime_verified:false,verification_scope:'source_only'
+    });
+    ui.statusClick('#ach-status-manage-recheck').respond(response);
+    assert.match(ui.state().statusManage,/Current served 502.html SOURCE SHA-256 \(not observed HTTP 502\):/);
+    assert.match(ui.state().statusManage,new RegExp(managed404Original));
+    assert.equal(ui.state().statusManageRestoreDisabled,true);
+    for (const invalid of [{...response,runtime_verified:true},
+                           {...response,verification_scope:'http50x_body'}]) {
+      ui.statusClick('#ach-status-manage-recheck').respond(invalid);
+      assert.match(ui.state().statusManage,/incomplete or incompatible/);
+    }
+  }
+});
+
 test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and snapshot-bound', () => {
   const ui=statusProbeUi();
   assert.equal(ui.state().statusManageRecheckDisabled,false);

@@ -1088,10 +1088,14 @@ file is needed. The nested-root source fingerprint includes the registered
 parent, while existing exact-root recovery fingerprints remain unchanged.
 
 Extension 404 preflight observes the real local HTTP 404 body and binds
-Apply/Restore to that baseline. It does **not** require an existing
+Apply/Restore to that baseline. If the actual HTTP body already matches the
+render, no content Apply is needed; matching bytes do not establish extension
+ownership or a saved recovery. It does **not** require an existing
 `404.html` or adopt the parent directory's HTML. For 502/50x the
 source-only baseline is the actual served directory's `502.html`
-(including verified absence); Apply still proves the real generated error
+(including verified absence). Both source preflight and unmanaged Recheck use
+that same baseline, never the body of an unrelated ordinary request or the
+proposed render; uninspectable source is refused. Apply still proves the real generated error
 statuses and operation nonce. A physical site-file replacement retains its
 separate exact-root/existing-file/route ownership and recoverable backup
 requirements. Missing or unserved files are not silently created/adopted.

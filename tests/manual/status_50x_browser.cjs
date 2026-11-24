@@ -180,6 +180,57 @@ async function negativeAndAdjacentFlows(browser) {
   } finally {await page.close();}
 }
 
+async function statusEvidenceRemediation(browser, width) {
+  const {page,pageErrors}=await realPage(browser,width);
+  try {
+    await completeSiteSelection(page);
+    await page.locator('#ach-status-template').selectOption('404');
+    const original=sourceReady();
+    const same={...original,template:'404',scope:'native_vhost_http404',
+      http_status:404,http_404_observed:true,body_sha256:renderedHash,
+      page_file_sha256:null,body_matches_render:true,
+      adoption_preview:{...original.adoption_preview,current_sha256:renderedHash}};
+    await page.locator('#ach-status-probe-button').click();
+    await resolveLatest(page,'status_probe',same);
+    assert.match(await page.locator('#ach-status-probe-result').innerText(),
+      /HTTP body matches selected render: Yes/);
+    assert.match(await page.locator('#ach-status-site-apply-why').innerText(),/already serves/);
+    await page.locator('#ach-status-manage-apply-approve').check();
+    await page.locator('#ach-status-manage-restore-approve').check();
+    assert.equal(await page.locator('#ach-status-manage-apply').isEnabled(),false);
+    assert.equal(await page.locator('#ach-status-manage-restore').isEnabled(),false);
+    await page.evaluate(() => {
+      window.jQuery('#ach-status-manage-apply').trigger('click');
+      window.jQuery('#ach-status-manage-restore').trigger('click');
+    });
+    assert.equal(await lastRequest(page,'status_manage'),null);
+    await page.locator('#ach-status-probe-button').click();
+    await resolveLatest(page,'status_probe',{...same,body_matches_render:false});
+    assert.match(await page.locator('#ach-status-probe-result').innerText(),/incompatible/);
+    for (const template of ['502','50x']) {
+      await page.locator('#ach-status-template').selectOption(template);
+      await page.locator('#ach-status-manage-recheck').click();
+      await resolveLatest(page,'status_manage',{
+        status:true,schema:1,site_id:7,site_action:'recheck',
+        verified_site_snapshot:snapshot,locale:'en',template,revision:2,
+        mode:'native_status_extension',request_id:'d'.repeat(32),
+        operation_id:'d'.repeat(32),read_only:true,changed:false,state:'Unmanaged',
+        page_file_sha256:sourceHash,rendered_sha256:renderedHash,
+        before_sha256:null,after_sha256:null,recovery_id:null,
+        runtime_verified:false,verification_scope:'source_only'
+      });
+      assert.match(await page.locator('#ach-status-manage-result').innerText(),
+        /Current served 502.html SOURCE SHA-256/);
+      assert.match(await page.locator('#ach-status-manage-result').innerText(),
+        /not observed HTTP 502/);
+      assert.equal(await page.locator('#ach-status-manage-restore').isEnabled(),false);
+    }
+    assert.deepEqual(pageErrors,[]);
+    console.log('BROWSER_STATUS_REMEDIATION_PASS',JSON.stringify({width,matching404:true,
+      noWrite:true,contradictoryProofRefused:true,sourceOnly502And50x:true}));
+  } finally {await page.close();}
+}
+
 (async () => {
   const browser=await chromium.launch({
     headless:true,
@@ -187,7 +238,10 @@ async function negativeAndAdjacentFlows(browser) {
     args:['--no-sandbox','--disable-dev-shm-usage']
   });
   try {
-    for(const width of [1280,375]) await fullApplyJourney(browser,width);
+    for(const width of [1280,375]) {
+      await fullApplyJourney(browser,width);
+      await statusEvidenceRemediation(browser,width);
+    }
     await negativeAndAdjacentFlows(browser);
     console.log('BROWSER_50X_REAL_DOM_TOTAL_PASS');
   } finally {

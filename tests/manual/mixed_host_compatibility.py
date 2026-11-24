@@ -23,6 +23,7 @@ import time
 PARSER = argparse.ArgumentParser(description=__doc__)
 PARSER.add_argument("--plugin-root", type=Path, default=Path(__file__).resolve().parents[2] / "plugin/ach_customizer")
 PARSER.add_argument("--well-known", type=Path, default=Path(__file__).resolve().parents[1] / "fixtures/native-well-known.conf")
+PARSER.add_argument("--status-only", action="store_true", help="Run the nested NL status evidence/lifecycle without repeating Guard or Cache writes")
 ARGS = PARSER.parse_args()
 sys.path.insert(0, str(ARGS.plugin_root))
 import ach_customizer_cache_audit as audit
@@ -365,24 +366,41 @@ def profile(base, label, wp_count, php_count):
             native_before = guard._source_safe(target,vhost_root=str(vhosts),nginx_conf=str(main))[0]
             fd=os.open(state,os.O_RDONLY|os.O_DIRECTORY)
             try:
-                gkw=dict(data_fd=fd,approved=True,vhost_root=str(vhosts),
-                    nginx_conf=str(main),nginx=NGINX,runner=scoped_runner,probe=guard_probe)
-                preview=guard.manage_guard("preview",target,**gkw)
-                applied=guard.manage_guard("apply",target,expected_vhost=native_before,
-                    expected_proposal=preview["proposal_sha256"],**gkw)
-                assert applied["state"] == "Applied", applied
-                assert request(target["name"],http_port,"/index.php")["status"] == 200
-                assert peer_requests()==peer_before
-                rechecked=guard.manage_guard("recheck",target,**gkw)
-                assert rechecked["state"]=="Applied",rechecked
-                restored=guard.manage_guard("restore",target,
-                    expected_vhost=rechecked["vhost_sha256"],
-                    expected_recovery=applied["recovery_id"],**gkw)
-                assert restored["state"] == "Restored", restored
+                if not ARGS.status_only:
+                    gkw=dict(data_fd=fd,approved=True,vhost_root=str(vhosts),
+                        nginx_conf=str(main),nginx=NGINX,runner=scoped_runner,probe=guard_probe)
+                    preview=guard.manage_guard("preview",target,**gkw)
+                    applied=guard.manage_guard("apply",target,expected_vhost=native_before,
+                        expected_proposal=preview["proposal_sha256"],**gkw)
+                    assert applied["state"] == "Applied", applied
+                    assert request(target["name"],http_port,"/index.php")["status"] == 200
+                    assert peer_requests()==peer_before
+                    rechecked=guard.manage_guard("recheck",target,**gkw)
+                    assert rechecked["state"]=="Applied",rechecked
+                    restored=guard.manage_guard("restore",target,
+                        expected_vhost=rechecked["vhost_sha256"],
+                        expected_recovery=applied["recovery_id"],**gkw)
+                    assert restored["state"] == "Restored", restored
                 skw=dict(html=html,data_fd=fd,vhost_root=str(vhosts),nginx_conf=str(main),
                     public_root=str(directory/"status-assets"),nginx=NGINX,
                     runner=scoped_runner,probe=status_probe)
-                for code in ("404", "50x"):
+                # R139-01: an ordinary real 404 body identical to the
+                # render is a read-only match, not an owned generation.
+                served404 = parent / "public" / "404.html"
+                write(served404, html)
+                try:
+                    same=status.preview_site_404_extension(target,locale="en",
+                        rendered_sha256=rendered,vhost_root=str(vhosts),
+                        nginx_conf=str(main),probe=status_probe)
+                    assert same["body_sha256"]==rendered and same["body_matches_render"],same
+                    assert not same["adoption_preview"]["ownership_verified"]
+                    assert not same["adoption_preview"]["recovery_verified"]
+                    assert not list(state.glob("*status*"))
+                finally:
+                    served404.unlink()
+                assert status_probe(target,"404",None)==old_404
+                served502=parent/"public"/"502.html"
+                for code in ("404", "502", "50x"):
                     vhost_sha,_,served,raw_sha=status._source(target,code,str(vhosts),str(main))
                     assert served==str(parent/"public")
                     if code=="404":
@@ -391,9 +409,47 @@ def profile(base, label, wp_count, php_count):
                             nginx_conf=str(main),probe=status_probe)
                         current=pre["body_sha256"]
                         assert current==old_404[1] and pre["page_file_sha256"] is None
+                        assert not pre["body_matches_render"]
                     else:
-                        current=status._previous_502_source(target,str(vhosts),html,served,raw_sha)
-                        assert current==hashlib.sha256(b"").hexdigest()
+                        def forbidden_probe(*args):
+                            raise AssertionError("Unmanaged 502/50x must not request HTTP")
+                        def observe():
+                            plan=status.preview_site_502(target,locale="en",
+                                rendered_sha256=rendered,rendered_html=html,
+                                vhost_root=str(vhosts),nginx_conf=str(main),template=code)
+                            checked=status.manage_site_extension("recheck",target,code=code,
+                                expected_current=None,expected_vhost=None,expected_render=None,
+                                expected_recovery=None,**{**skw,"probe":forbidden_probe})
+                            assert checked["state"]=="Unmanaged" and not checked["runtime_verified"]
+                            assert checked["verification_scope"]=="source_only"
+                            assert checked["page_file_sha256"]==plan["page_file_sha256"]
+                            return checked["page_file_sha256"]
+                        assert observe()==hashlib.sha256(b"").hexdigest()
+                        write(served502,"actual served 502")
+                        current=hashlib.sha256(b"actual served 502").hexdigest()
+                        assert observe()==current
+                        served502.unlink()
+                        served502.symlink_to(parent/"502.html")
+                        try:
+                            for read in (
+                                lambda: status.preview_site_502(target,locale="en",
+                                    rendered_sha256=rendered,rendered_html=html,
+                                    vhost_root=str(vhosts),nginx_conf=str(main),template=code),
+                                lambda: status.manage_site_extension("recheck",target,code=code,
+                                    expected_current=None,expected_vhost=None,expected_render=None,
+                                    expected_recovery=None,**{**skw,"probe":forbidden_probe})):
+                                try:
+                                    read()
+                                except status.ExtensionError as exc:
+                                    assert exc.stage=="source",exc
+                                else:
+                                    raise AssertionError("Uninspectable served 502 accepted")
+                        finally:
+                            served502.unlink()
+                        if code=="502":
+                            write(served502,"actual served 502")
+                        else:
+                            current=hashlib.sha256(b"").hexdigest()
                     params=dict(code=code,expected_current=current,
                         expected_vhost=vhost_sha,expected_render=rendered,expected_recovery=None)
                     applied=status.manage_site_extension("apply",target,**params,**skw)
@@ -409,13 +465,22 @@ def profile(base, label, wp_count, php_count):
                     assert (parent/"404.html").read_text()=="unserved parent 404"
                     assert (parent/"502.html").read_text()=="unserved parent 502"
                     assert not (parent/"public"/"404.html").exists()
-                    assert not (parent/"public"/"502.html").exists()
-                return {"guard":"Applied/Restored","404":"Applied/Restored; real missing CSS",
+                    if code=="502":
+                        assert served502.read_text()=="actual served 502"
+                        served502.unlink()
+                    assert not served502.exists()
+                return {"guard":"not repeated" if ARGS.status_only else "Applied/Restored",
+                    "404":"matching and differing native HTTP; Applied/Restored; real missing CSS",
+                    "502":"present/absent/uninspectable; source-only Recheck; Applied/Source Restored",
+                    "502_50x_recheck":"source preflight agrees; no ordinary HTTP used",
                     "50x":"Applied/Source Restored; all four proof statuses",
                     "unserved_parent":"unchanged","file_writer":"refused","peer_routes":"unchanged"}
             finally:
                 os.close(fd)
         result["nested_root_runtime"] = process(main,directory,lifecycle)
+        if ARGS.status_only:
+            print(json.dumps(result),flush=True)
+            return result
     old_headers, old_peer = process(main,directory,baseline)
     owned = directory / "private-cache"
     owned.mkdir()
@@ -467,5 +532,6 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="achqa-mixed-hosts-",dir="/www") as folder:
         base = Path(folder)
         base.chmod(0o755)
-        results = [profile(base,"ir",6,2),profile(base,"nl",1,5)]
+        results = ([profile(base,"nl",1,5)] if ARGS.status_only else
+                   [profile(base,"ir",6,2),profile(base,"nl",1,5)])
         print(json.dumps({"profiles":results,"fixture_cleanup":"automatic on exit"}),flush=True)

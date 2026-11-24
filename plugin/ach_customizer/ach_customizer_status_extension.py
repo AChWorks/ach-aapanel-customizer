@@ -844,7 +844,7 @@ def preview_site_404_extension(site, *, locale, rendered_sha256, rendered_html=N
         "http_status": 404, "http_404_observed": True, "body_sha256": body_sha,
         "body_bytes": None, "page_file_sha256": None,
         "rendered_sha256": rendered_sha256, "body_matches_file": False,
-        "body_matches_render": False,
+        "body_matches_render": body_sha == rendered_sha256,
         "note": "The live HTTP body is the Restore baseline; no existing site file is required or changed. Apply rechecks ownership and actual worker proof.",
         "adoption_preview": {
             "schema": 1, "state": "Source Ready", "route_source_state": "Native VHost",
@@ -852,40 +852,28 @@ def preview_site_404_extension(site, *, locale, rendered_sha256, rendered_html=N
             "vhost_sha256": before[0], "requires_adoption": False,
             "requires_backup": False, "ownership_verified": False,
             "recovery_verified": False, "apply_supported": False,
-            "reason": "Explicit plugin-owned extension and global Nginx reload approval required",
+            "reason": ("Selected render is already served; no managed extension or recovery is established by matching content"
+                       if body_sha == rendered_sha256 else
+                       "Explicit plugin-owned extension and global Nginx reload approval required"),
         },
     }
 
 
 def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
-                     vhost_root=VHOST_ROOT, template="502"):
+                     vhost_root=VHOST_ROOT, template="502", nginx_conf=NGINX_CONF):
     """Read-only native 502 source preview; NOT a synthetic live 502 claim.
 
     The subsequently authorized Apply must prove an actual 502 response with
     the chosen immutable HTML and a fresh operation nonce before success.
     """
-    from ach_customizer_status_inspect import inspect_site_files
     if template not in ("502", "50x"):
         raise ExtensionError("input", "Unsupported Nginx source preview")
-    source_sha, _, served_root, raw_sha = _source(site, template, vhost_root)
-    inspected = inspect_site_files(
-        {**site, "path": served_root}, locale=locale, template="502",
-        rendered_sha256=rendered_sha256, rendered_html=rendered_html,
-        vhost_root=vhost_root, source_fingerprint=True)
-    if inspected.get("page_file_state") not in ("Absent", "Same bytes", "Different bytes"):
-        raise ExtensionError("source", "Site 502.html is uninspectable; source-only approval is unsafe")
-    if inspected.get("vhost_sha256") != raw_sha:
-        raise ExtensionError("concurrency", "Native VHost changed during served-root inspection")
-    current = inspected.get("page_file_sha256")
-    if inspected.get("page_file_state") == "Absent":
-        current = _sha(b"")
-        note = "Site 502.html is absent. No previous HTTP 502 response was induced."
-    elif (inspected.get("page_file_state") in ("Same bytes", "Different bytes")
-          and isinstance(current, str) and HASH.fullmatch(current)):
-        note = "Existing site 502.html is read-only. No live 502 response was induced."
-    else:
-        raise ExtensionError(
-            "source", "Site 502.html is uninspectable; source-only approval is unsafe")
+    source_sha, _, served_root, raw_sha = _source(site, template, vhost_root, nginx_conf)
+    current, absent = _inspect_502_source(
+        site, vhost_root, served_root, raw_sha, locale=locale,
+        rendered_sha256=rendered_sha256, rendered_html=rendered_html)
+    note = ("Site 502.html is absent. No previous HTTP 502 response was induced." if absent
+            else "Existing site 502.html is read-only. No live 502 response was induced.")
     if template == "50x":
         note += " Generic 50x uses this 502 source as its Restore baseline; no 500/503/504 was induced."
     return {
@@ -920,24 +908,34 @@ def preview_site_50x(site, *, locale, rendered_sha256, rendered_html,
         rendered_html=rendered_html, vhost_root=vhost_root, template="50x")
 
 
-def _previous_502_source(site, vhost_root, html, served_root, raw_sha):
-    """Source fingerprint only: never infer a preexisting live HTTP 502."""
+def _inspect_502_source(site, vhost_root, served_root, raw_sha, *,
+                        locale, rendered_sha256, rendered_html):
+    """Shared served-root source observation, including verified absence."""
     from ach_customizer_status_inspect import inspect_site_files
     inspected = inspect_site_files(
-        {**site, "path": served_root}, locale="en", template="502", rendered_sha256=_sha(html.encode("utf8")),
-        rendered_html=html, vhost_root=vhost_root, source_fingerprint=True,
+        {**site, "path": served_root}, locale=locale, template="502",
+        rendered_sha256=rendered_sha256, rendered_html=rendered_html,
+        vhost_root=vhost_root, source_fingerprint=True,
     )
-    if inspected.get("page_file_state") not in ("Absent", "Same bytes", "Different bytes"):
+    state = inspected.get("page_file_state")
+    if state not in ("Absent", "Same bytes", "Different bytes"):
         raise ExtensionError("source", "Site 502.html is uninspectable; source-only approval is unsafe")
     if inspected.get("vhost_sha256") != raw_sha:
         raise ExtensionError("concurrency", "Native VHost changed during served-root inspection")
     current = inspected.get("page_file_sha256")
-    if inspected.get("page_file_state") == "Absent":
-        return _sha(b"")
-    if (inspected.get("page_file_state") in ("Same bytes", "Different bytes")
-            and isinstance(current, str) and HASH.fullmatch(current)):
-        return current
+    if state == "Absent":
+        return _sha(b""), True
+    if isinstance(current, str) and HASH.fullmatch(current):
+        return current, False
     raise ExtensionError("source", "Previous site 502.html could not be inspected safely")
+
+
+def _previous_502_source(site, vhost_root, html, served_root, raw_sha):
+    """Source fingerprint only: never infer a preexisting live HTTP 502."""
+    current, _absent = _inspect_502_source(
+        site, vhost_root, served_root, raw_sha, locale="en",
+        rendered_sha256=_sha(html.encode("utf8")), rendered_html=html)
+    return current
 
 
 def _saved_recovery_unavailable(site, code, html_bytes, data_fd, *, stopped):
@@ -1061,7 +1059,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 except (ExtensionError, OSError, StatusPageError):
                     state = "Needs Review"
             if record is None and current_config is None:
-                if code == "50x":
+                if code in ("502", "50x"):
                     current_sha = _previous_502_source(site, vhost_root, html, served_root, raw_sha)
                 else:
                     try:
@@ -1080,6 +1078,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                     "recovery_id": record["op"] if record else None,
                     "read_only": True, "mode": "native_status_extension",
                     "verification_scope": ("http50x_body" if code == "50x" and state == "Applied"
+                                           else "source_only" if code in ("502", "50x") and state == "Unmanaged"
                                            else "source_and_nonce_only" if code != "404"
                                            else "http404_body"),
                     "runtime_verified": state == "Applied" if code == "50x" else state == "Restored" and code == "404"}
