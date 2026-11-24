@@ -937,7 +937,9 @@ the temporary block may not be established. A complete Nginx restart
 clears ephemeral state; ordinary reload preserves the shared memory.
 The declaration itself contains no site identity and may remain idle.
 Restore removes the selected rule, without touching a peer or a system
-Fail2ban jail. Local loopback verification is not counted.
+Fail2ban jail. Effective loopback addresses are not counted so that local
+Guard verification cannot create a block. Local reverse proxies must resolve
+the actual client address for counting to work.
 
 No aaPanel access log is trusted for firewall authority. Validate actual
 effective client-IP configuration behind a CDN or reverse proxy; an

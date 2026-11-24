@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import http.client
 import os
+import pwd
 from pathlib import Path
 import socket
 import subprocess
@@ -65,9 +66,48 @@ def run():
         upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
         t = threading.Thread(target=upstream.serve_forever, daemon=True)
         t.start()
+        # Use the already-running native PHP-FPM socket only for synthetic
+        # files under this fixture. No service/pool or native site is edited.
+        php_socket = Path("/tmp/php-cgi-85.sock")
+        assert php_socket.is_socket(), "Native PHP 8.5 socket is unavailable"
+        php_marker = d / "php-calls"
+        php_marker.touch()
+        www = pwd.getpwnam("www")
+        os.chown(php_marker, www.pw_uid, www.pw_gid)
+        php_marker.chmod(0o600)
         def native_site(site_id, name):
             root = d / name; root.mkdir()
             ext = vhosts / "extension" / name; ext.mkdir(parents=True)
+            (root / "backups").mkdir()
+            php = ('<?php file_put_contents(' + repr(str(php_marker))
+                   + ', "called\\n", FILE_APPEND | LOCK_EX); echo "fixture-php";')
+            for path in (root / "health.php", root / "backups/proof.php"):
+                path.write_text(php)
+            if site_id == 102:
+                # Task-only deterministic allocation, not a traffic flood.
+                # Fill the slab class used by IPv4 keys, then release only
+                # the synthetic keys (never flush a real ban or counter).
+                (ext / "fixture-capacity.conf").write_text("""
+location = /fixture-fill {
+    content_by_lua_block {
+        local d = ngx.shared.ach_customizer_scan_state
+        for i=1,100000 do
+            local ok, err = d:safe_add(string.format("fixture:%050d", i), 1, 60)
+            if not ok then ngx.say(i-1, ":", err); return end
+        end
+        ngx.say("not-full")
+    }
+}
+location = /fixture-release {
+    content_by_lua_block {
+        local d = ngx.shared.ach_customizer_scan_state
+        for i=1,tonumber(ngx.var.arg_count) do
+            d:delete(string.format("fixture:%050d", i))
+        end
+        ngx.say("released")
+    }
+}
+""")
             # Representative native extension appears before location selection.
             # Only the test loopback addresses may present a real-IP header.
             (vhosts / (name + ".conf")).write_text(
@@ -84,6 +124,8 @@ def run():
                 "set_real_ip_from 127.0.0.1;\nset_real_ip_from ::1;\n"
                 "real_ip_header X-Real-IP;\n"
                 "location ^~ /uploads/ { return 200 'location'; }\n"
+                "location ~ [.]php$ { include /www/server/nginx/conf/fastcgi.conf; "
+                "fastcgi_pass unix:/tmp/php-cgi-85.sock; }\n"
                 + (f"location / {{ proxy_pass http://127.0.0.1:{upstream.server_port}; "
                    "proxy_cache fixture_cache; proxy_cache_valid 200 1m; "
                    "add_header X-Fixture-Cache $upstream_cache_status; }\n"
@@ -98,7 +140,9 @@ def run():
                         "events { worker_connections 128; }\nhttp {\n"
                         f' lua_package_path "{LUA_PATH}";\n'
                         " access_log off;\n"
-                        f" proxy_cache_path {d}/cache keys_zone=fixture_cache:1m inactive=1m;\n"
+                        + "".join(f" {part}_temp_path {d}/{part}-temp;\n"
+                                  for part in ("client_body", "proxy", "fastcgi", "uwsgi", "scgi"))
+                        + f" proxy_cache_path {d}/cache keys_zone=fixture_cache:1m inactive=1m;\n"
                         f" include {vhosts}/*.conf;\n}}\n")
         args = [NGINX, "-p", raw + "/", "-e", str(startup_log), "-c", str(conf)]
         def runner(argv, **kwargs):
@@ -152,6 +196,9 @@ def run():
                 except OSError: time.sleep(.1)
             else: raise RuntimeError("Isolated Nginx not ready")
             check("baseline origin", status(), 200)
+            check("native PHP baseline", request("/health.php")[1], b"fixture-php")
+            check("sensitive PHP baseline before Guard", request("/backups/proof.php")[1], b"fixture-php")
+            check("PHP actually executed twice", php_marker.read_text().splitlines(), ["called", "called"])
             result=enable(scan_policy=POLICY,block_xmlrpc=True)
             check("real Apply",result["state"],"Applied")
             check("verified active policy",operate("recheck")["scan_policy"],POLICY)
@@ -166,6 +213,11 @@ def run():
                 check("pre-location sensitive path",status(path),403)
             check("blocked before cached response",status("/cached"),429)
             check("no upstream call",Upstream.calls,calls)
+            before_php = php_marker.read_bytes()
+            check("sensitive denied before FastCGI",status("/backups/proof.php",ip="198.51.100.20"),403)
+            check("blocked before FastCGI",status("/health.php"),429)
+            check("no PHP execution after denial",php_marker.read_bytes(),before_php)
+            check("other client can execute PHP",request("/health.php",ip="198.51.100.21")[1],b"fixture-php")
             check("peer unaffected",status(host=PEER),200)
             check("other IP unaffected",status(ip="198.51.100.2"),200)
             for _ in range(3):check("IPv6 attack",status("/.env",ip="2001:db8::1",dest="::1"),403)
@@ -204,10 +256,28 @@ def run():
             check("peer Restore",restore(peer)["state"],"Restored")
             # Reapply creates a new generation. Missing shared zone is a
             # runtime failure; static protection and exact Restore remain.
-            p=operate("preview",scan_policy=POLICY)
-            r=operate("apply",approved=True,scan_policy=POLICY,
+            capacity_policy = dict(POLICY, bantime=60)
+            p=operate("preview",scan_policy=capacity_policy)
+            r=operate("apply",approved=True,scan_policy=capacity_policy,
                       expected_vhost=p["vhost_sha256"],expected_proposal=p["proposal_sha256"])
             check("new generation",r["recovery_id"] != result["recovery_id"],True)
+            for _ in range(3):check("capacity fixture establishes ban",status("/.env",ip="198.51.100.30"),403)
+            check("ban before saturation",status(ip="198.51.100.30"),429)
+            filled = request("/fixture-fill",host=PEER)[1].decode().strip()
+            amount, why = filled.split(":",1)
+            check("bounded shared zone reaches capacity",why,"no memory")
+            assert 0 < int(amount) < 100000, filled
+            print("PASS synthetic shared allocations", amount, flush=True)
+            check("active ban survives safe allocation pressure",status(ip="198.51.100.30"),429)
+            denied = request("/.env",ip="198.51.100.31")
+            check("capacity fallback static 403",denied[0],403)
+            check("capacity fallback proof",denied[1].endswith(guard.SCAN_FALLBACK.encode()),True)
+            check("unblocked ordinary request under pressure",status(ip="198.51.100.31"),200)
+            check("peer ordinary request under pressure",status(host=PEER),200)
+            check("release only synthetic capacity keys",request("/fixture-release?count="+amount,host=PEER)[1].strip(),b"released")
+            check("active ban survives fixture release",status(ip="198.51.100.30"),429)
+            for _ in range(3):check("counter recovers after capacity release",status("/.env",ip="198.51.100.31"),403)
+            check("new block after capacity release",status(ip="198.51.100.31"),429)
             (vhosts/guard.SCAN_ZONE_FILE).unlink()
             subprocess.run(args+["-t"],check=True)
             subprocess.run(args+["-s","reload"],check=True)
@@ -236,4 +306,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-

@@ -202,16 +202,19 @@ async function walk(page, width, record) {
   assert.equal(await page.locator('#ach-guard-preview').isEnabled(),true);
   assert.equal(await page.locator('#ach-guard-apply').isEnabled(),false);
   await sample('protection');
-  const checkboxGeometry=await page.locator('.ach-guard-option').evaluate(label=>{
+  const checkboxGeometries=await page.locator('.ach-guard-option').evaluateAll(labels=>labels.map(label=>{
     const input=label.querySelector('input'),copy=label.querySelector('.ach-option-copy');
     const a=input.getBoundingClientRect(),b=copy.getBoundingClientRect();
     return {columns:getComputedStyle(label).display, gap:b.left-a.right,
       yDelta:a.top-b.top,labelHeight:label.getBoundingClientRect().height};
-  });
-  assert.equal(checkboxGeometry.columns,'grid');
-  assert.ok(checkboxGeometry.gap>=6&&checkboxGeometry.gap<=12&&
-    Math.abs(checkboxGeometry.yDelta)<=5&&checkboxGeometry.labelHeight>=28,
-    JSON.stringify(checkboxGeometry));
+  }));
+  assert.equal(checkboxGeometries.length,2);
+  for(const checkboxGeometry of checkboxGeometries){
+    assert.equal(checkboxGeometry.columns,'grid');
+    assert.ok(checkboxGeometry.gap>=6&&checkboxGeometry.gap<=12&&
+      Math.abs(checkboxGeometry.yDelta)<=5&&checkboxGeometry.labelHeight>=28,
+      JSON.stringify(checkboxGeometry));
+  }
   await page.locator('#ach-guard-preview').click();
   const refusal={status:false,stage:'nginx_guard_manage',reason_code:'unsupported_guard_ruleset',
     msg:'Unsupported native security recovery ruleset. Saved journal ach_customizer.nginx_security.7.json preserved. This version cannot verify or restore it; a server administrator must investigate the original rule and journal separately before further changes.',

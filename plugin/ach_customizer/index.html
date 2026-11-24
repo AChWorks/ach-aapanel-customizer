@@ -865,7 +865,7 @@
           <div class="ach-inline-field"><label for="ach-guard-bantime">Block seconds</label>
             <input id="ach-guard-bantime" type="number" min="1" step="1" value="600" /></div>
         </div>
-        <p class="ach-muted" id="ach-guard-scan-help" hidden>Temporary blocks return HTTP 429 and expire automatically. A full Nginx restart clears the counters. If the optional scanner cannot track a request, the sensitive-path Guard still denies that path.</p>
+        <p class="ach-muted" id="ach-guard-scan-help" hidden>Temporary blocks return HTTP 429 and expire automatically. A full Nginx restart clears the counters. If the optional scanner cannot track a request, the sensitive-path Guard still denies that path. Loopback clients are not counted. To change an active policy, Recheck and Restore it before enabling a new selection.</p>
         <div class="ach-controls">
           <button id="ach-guard-preview" type="button" data-ach-disabled-help="Select a verified website." disabled class="ach-check">Check protection readiness</button>
           <button id="ach-guard-recheck" type="button" data-ach-disabled-help="Select a verified website." disabled>Recheck current protection</button>

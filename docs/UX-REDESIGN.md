@@ -123,8 +123,9 @@ existing five destinations and one canonical operation owner, not a new framewor
   Recovery ID. Preserve the diagnosis on policy option edits, and clear it
   when selecting a different site or superseding the result with a new check. Keep
   all original journal bytes and native files; this is not a legacy recovery
-  migration. First-use Protection and Attack retain exactly one Browse
-  websites control, with independently accessible orphan-jail recovery.
+  migration. First-use Protection retains exactly one Browse websites control.
+  Optional temporary blocking is part of the selected website’s Guard;
+  Recheck and Restore are independent of new policy options.
 
 For acceptance, run real Chromium route/width regression plus composition
 checks (compact site context, first action visible on desktop, checkbox

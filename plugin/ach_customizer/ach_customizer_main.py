@@ -871,9 +871,8 @@ class ach_customizer_main:
             if action not in ("preview", "apply", "recheck", "restore"):
                 raise MonitorInputError("Unsupported Nginx security operation")
             import public
-            if (public.get_webserver() != "nginx" or
-                    str(public.get_panel_version()).strip() != "8.0.7"):
-                raise MonitorInputError("Nginx security adapter requires aaPanel 8.0.7 Nginx")
+            if public.get_webserver() != "nginx":
+                raise MonitorInputError("Native website protection requires Nginx")
             from ach_customizer_nginx_security import (
                 manage_guard, GuardError, ExtensionError,
             )
@@ -885,15 +884,19 @@ class ach_customizer_main:
             # Browser-provided IDs are never trusted for failed pre-selection.
             trusted_site_id = str(before["id"])
             approved = self._argument(args, "approved") == "true"
-            xmlrpc_choice = self._argument(args, "guard_block_xmlrpc", "false")
-            if xmlrpc_choice not in ("true", "false"):
-                raise MonitorInputError("Choose an explicit XML-RPC Nginx guard option")
-            scan_choice = self._argument(args, "guard_scan", "false")
-            if scan_choice not in ("true", "false"):
-                raise MonitorInputError("Choose an explicit temporary IP blocking option")
-            scan_policy = ({name: self._argument(args, name)
-                            for name in ("maxretry", "findtime", "bantime")}
-                           if scan_choice == "true" and action in ("preview", "apply") else None)
+            # Only new proposals consume policy inputs. Recheck and Restore
+            # inspect the exact saved journal, even with unsaved/invalid edits.
+            xmlrpc_choice, scan_policy = "false", None
+            if action in ("preview", "apply"):
+                xmlrpc_choice = self._argument(args, "guard_block_xmlrpc", "false")
+                if xmlrpc_choice not in ("true", "false"):
+                    raise MonitorInputError("Choose an explicit XML-RPC Nginx guard option")
+                scan_choice = self._argument(args, "guard_scan", "false")
+                if scan_choice not in ("true", "false"):
+                    raise MonitorInputError("Choose an explicit temporary IP blocking option")
+                if scan_choice == "true":
+                    scan_policy = {name: self._argument(args, name)
+                                   for name in ("maxretry", "findtime", "bantime")}
             # A globally shared native document root cannot justify an
             # isolated per-site protection claim. Reject before any write.
             if action in ("apply", "restore"):

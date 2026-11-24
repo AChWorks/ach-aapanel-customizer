@@ -223,7 +223,7 @@ class PackageContractTests(unittest.TestCase):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
         for heading in (
             'What does each WordPress operation change?',
-            'How to complete orphan-jail recovery',
+            'What changes when I enable this?',
             'Which sources are compared?',
             'Supported source and exact Nginx changes',
             'What does the Cache audit check?',
@@ -233,8 +233,14 @@ class PackageContractTests(unittest.TestCase):
         ):
             self.assertIn('<summary>' + heading + '</summary>', html)
         self.assertIn('Before changing WordPress HTTPS URLs:', html)
-        self.assertIn('Firewall impact:', html)
-        self.assertIn('Existing bans are <strong>not yet verified removed</strong>', html)
+        protection = html.split('data-routing-group="protection"', 1)[1].split('data-routing-group="wordpress"', 1)[0]
+        for guidance in ('Blocks only this website', 'No firewall changes.',
+                         'verify the effective client IP when using a proxy or CDN',
+                         'HTTP 429 and expire automatically',
+                         'A full Nginx restart clears the counters',
+                         'the sensitive-path Guard still denies that path'):
+            self.assertIn(guidance, protection)
+        self.assertNotIn('orphan-jail', protection)
         self.assertIn('This is <strong>not</strong> Nginx Helper Purge All.', html)
 
     def test_installer_guards_cleanup_and_does_not_mutate_services(self):

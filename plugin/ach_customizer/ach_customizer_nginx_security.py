@@ -1,4 +1,4 @@
-"""Opt-in, site-specific Nginx pre-PHP sensitive-path protection for aaPanel 8.0.7.
+"""Opt-in, site-specific Nginx pre-PHP sensitive-path protection for native aaPanel Nginx.
 
 Native site identity, VHost, and exclusive extension inclusion are re-read on
 every operation. The managed policy is one exact site-owned *.conf file. Optional scan blocking
@@ -32,7 +32,7 @@ SCHEMA = 1
 MAX_JOURNAL = 4096
 MAX_INCLUDE = 8192
 PROOF_BODY = "ACh-Guard-Proof-"
-# Pre-stable current policy only; QA installations are reset between builds.
+# Current static and XML-RPC policy variants share the same Guard owner.
 RULESET = "site-sensitive-files-v1"
 RULESET_XMLRPC = "site-sensitive-files-xmlrpc-v1"
 RULESETS = (RULESET, RULESET_XMLRPC)
@@ -501,7 +501,7 @@ def _source_safe(site, *, vhost_root, nginx_conf):
             or len(set(observed_names)) != len(observed_names)
             or any(item not in native_domains for item in observed_names)):
         raise GuardError("source", "Generated VHost names do not match native bindings")
-    _include_graph_guard(site, "404", vhost_root, nginx_conf)
+    _include_graph_guard(site, _file(site["id"]), vhost_root, nginx_conf)
     vhost_fd = _directory(vhost_root)
     try:
         _owned_dir(vhost_fd)
@@ -572,7 +572,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
     if action not in ("preview", "apply", "recheck", "restore") or type(block_xmlrpc) is not bool:
         raise GuardError("input", "Unsupported native Nginx protection action/option")
     selected_ruleset = RULESET_XMLRPC if block_xmlrpc else RULESET
-    selected_scan = _scan_policy(scan_policy)
+    selected_scan = _scan_policy(scan_policy) if action in ("preview", "apply") else None
     bindings_sha = _site_identity(site)
     _owned_dir(data_fd)
     record = _read_journal(data_fd, site["id"])

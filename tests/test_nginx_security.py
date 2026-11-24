@@ -82,7 +82,8 @@ class NativeSecurityTests(unittest.TestCase):
     def operate(self, action="preview", **kwargs):
         source = guard._sha(self.vhost.read_bytes())
         variant = (guard.RULESET_XMLRPC if kwargs.get("xmlrpc", False) else guard.RULESET)
-        proposal = guard._proposal_sha(variant, kwargs.get("scan"), self.site["id"])
+        proposal = (guard._proposal_sha(variant, kwargs.get("scan"), self.site["id"])
+                    if action in ("preview", "apply") else None)
         return guard.manage_guard(
             action, self.site, data_fd=self.fd,
             approved=kwargs.get("approved", True),
@@ -107,12 +108,27 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertEqual(result["scan_policy"], policy)
         self.assertEqual(zone.read_bytes(), guard.SCAN_ZONE_BYTES)
         self.assertIn(b"set_by_lua_block", self.fragment.read_bytes())
-        self.assertEqual(self.operate("recheck")["scan_policy"], policy)
-        ret = self.operate("restore", recovery=result["recovery_id"])
+        self.assertEqual(self.operate("recheck", scan={})["scan_policy"], policy)
+        ret = self.operate("restore", recovery=result["recovery_id"], scan={})
         self.assertEqual(ret["state"], "Restored")
         self.assertIsNone(ret["scan_policy"])
         self.assertFalse(self.fragment.exists())
         self.assertEqual(zone.read_bytes(), guard.SCAN_ZONE_BYTES)
+
+    def test_guard_exact_filename_cannot_be_imported_by_peer(self):
+        result = self.operate("apply", scan=guard.SCAN_DEFAULTS)
+        peer = self.vhost_root / "peer.invalid.conf"
+        peer.write_text("server { server_name peer.invalid; include "
+                        + str(self.fragment) + "; }\n")
+        original = self.fragment.read_bytes()
+        self.assertEqual(self.operate("recheck")["state"], "Needs Review")
+        before = len(self.commands)
+        with self.assertRaisesRegex(guard.ExtensionError, "second Nginx source"):
+            self.operate("restore", recovery=result["recovery_id"])
+        self.assertEqual(len(self.commands), before)
+        self.assertEqual(self.fragment.read_bytes(), original)
+        peer.unlink()
+        self.assertEqual(self.operate("restore", recovery=result["recovery_id"])["state"], "Restored")
 
     def test_temporary_scanner_foreign_shared_declaration_not_adopted(self):
         zone = self.vhost_root / guard.SCAN_ZONE_FILE
