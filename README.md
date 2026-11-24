@@ -19,6 +19,8 @@ version from Releases.
 
 Native and Bridge versions advance independently. Until the Owner explicitly accepts a final named baseline, published development versions (including Stable labels) do not require backward-compatibility adapters or migrations. See [the compatibility policy](docs/PROJECT-SPEC.md#8-installation-enablement-update-and-uninstall-semantics). Existing operator data and applied settings are not silently deleted. Always obtain the **latest published** assets and SHA256 checksums from Releases rather than assuming the source tree is a Release.
 
+When upgrading from the retired log-driven scanner, reconcile any actual active Customizer-owned scanner jail using its owning release before importing the current Native package. Preserve unrelated jails and recovery history; see the [Protection upgrade guidance](docs/aapanel-integration.md#optional-temporary-ip-blocking--selected-website-146).
+
 A successful import does **not** prove that aaPanel's resident Python helpers were refreshed. If the installed files and observed behavior disagree, consult the [native ZIP upgrade and resident-worker recovery runbook](docs/aapanel-upgrade-recovery.md); preserve the saved Recovery ID and recheck before retrying. Neither ZIP performs a Production deployment or enables optional enforcement on its own.
 
 ## What you can do

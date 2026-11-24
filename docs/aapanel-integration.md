@@ -490,8 +490,8 @@ separate; inspect the current scope in Issue #21.
 
 ## Selected-site Nginx sensitive-path guard
 
-The full primary administrator may choose a **native website** in Routing &
-Nginx and review a fixed, opt-in, per-site protective source. Customizer reads
+The full primary administrator may choose a **native website** in
+**Websites → Protection** and review a fixed, opt-in, per-site protective source. Customizer reads
 the selected ID, domain bindings and current Document Root from aaPanel itself,
 then verifies the corresponding generated VHost and the **exclusive server-scoped
 native `extension/<site>/*.conf` include graph**; `/www/wwwroot` is never a
@@ -508,12 +508,13 @@ names, PHP/PHTML/PHAR requests below common uploads/media/tmp directories,
 and common **website-local files** such as `wp-content/debug.log`,
 `error_log`, `backup.sql`, `*.sql.gz` and `wp-config.php.bak`.
 Optional Nginx XML-RPC adds one fixed rule in the same policy. The
-pre-stable candidate uses only `site-sensitive-files-v1` or
+current implementation uses only `site-sensitive-files-v1` or
 `site-sensitive-files-xmlrpc-v1`; obsolete QA rulesets have no runtime
 adapters. These **server rewrite-phase** returns run before Nginx Location selection:
 native `location ^~ /wp-content/uploads/` cannot silently bypass the filter.
-Safe `if` usage is limited to static server-scope **return-only** directives;
-no rewrite or application PHP is executed. The response includes a
+Static Guard uses server-scope **return-only** checks; the optional scanner
+uses the same sensitive-path checks with server-rewrite Lua and terminal
+403/429 responses. Neither policy executes application PHP on a denied request. The response includes a
 per-generation proof in a short body on matched requests (not in benign
 response headers); exact HTTP/80 403+proof is observed on fourteen bounded
 paths (fifteen with XML-RPC) over three consecutive fresh request batches.
@@ -544,8 +545,9 @@ an explicit saved Recovery ID permits narrowly retiring the owned include,
 revalidating and reloading Nginx, and checking that its proof disappeared.
 A native site ID/key or Document Root change, foreign/tampered guard,
 invalid extension ownership/include, or an unresolved source conflict still
-blocks writes with `Needs Review`. A native domain/VHost/extension change
-always invalidates old **Apply** approval: the operator must Recheck. If the
+blocks writes with `Needs Review`. Relevant native domain/VHost/extension drift invalidates old **Apply**
+approval: the operator must Recheck. An exact independently verified Cache
+fragment does not change the Guard policy fingerprint. If the
 *same native site and root* still have an exclusively imported, byte-exact
 Customizer guard fragment (or its single exact retained file from an
 interrupted Restore), Recheck reports **Recovery Required**, including
@@ -554,7 +556,7 @@ a claim that the new native source or all aliases have been verified as
 protected. After reviewing the site, the administrator may explicitly
 Restore that one Recovery ID without undoing the foreign domain/VHost
 change. Restore requires the **exact Nginx source SHA returned by the last
-successful Recheck**; another VHost or sibling-extension edit rejects stale
+successful Recheck**; another relevant VHost or unverified sibling-extension edit rejects stale
 approval before retiring the owned file or reloading shared Nginx. Even without
 VHost drift, an `applied` journal with only its single byte-exact retained
 file reports **Recovery Required** (`interrupted_restore`) and enables manual
@@ -578,14 +580,17 @@ Other files, users and site configurations are not modified.
 After uninstall, saved policy/recovery may still be active: reinstall and
 use guarded Restore rather than delete Nginx files manually.
 
-**Evidence boundary:** QA source-only and real manager transaction tests were
-run on the **new** isolated aaPanel 8.0.7 machine, including
-`/www/acdomains/paths85.aitest.gotohell.top` and
-`/www/other-sites/paths81.aitest.gotohell.top`. Refer to Issue #21 for
-exact test identity, status, and future rechecks. PR #99 was independently
-approved and merged into main; no public Release or Production deployment is
-authorized. The QA-installed earlier 0.1.53 ZIP is not byte-identical to the
-final merged ZIP; see Issue #21 for exact evidence.
+**Evidence boundary:** The retained aaPanel 8.0.7 QA VM and isolated
+real Nginx fixtures exercise current Guard and optional scanner ownership,
+including mixed native site layouts, independent Cache recovery, shared
+PHP-FPM attribution, allocation pressure and HTTP/1.1, HTTP/2 and HTTP/3.
+See [PR #147](https://github.com/AChWorks/ach-aapanel-customizer/pull/147),
+[exact remediation evidence](https://github.com/AChWorks/ach-aapanel-customizer/issues/146#issuecomment-7144946501)
+and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)
+for package-specific acceptance, current installed QA and remaining scope.
+Historical PR #99/0.1.53 evidence is not current installed-version proof.
+Published assets belong to GitHub Releases; publication does not authorize
+Production deployment.
 
 ## Selected-site origin-local Hosts inspection (read-only)
 
