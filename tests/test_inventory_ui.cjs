@@ -377,8 +377,17 @@ function loadUi() {
   $.ajax = function (options) {
     const request = {
       options,
+      elapsed:0, expired:false,
       done(callback) { this.respond = callback; return this; },
-      fail(callback) { this.reject = callback; return this; }
+      fail(callback) { this.reject = callback; return this; },
+      advance(ms) {
+        this.elapsed += ms;
+        if (!this.expired && this.options.timeout > 0 &&
+            this.elapsed >= this.options.timeout) {
+          this.expired = true;
+          this.reject(null,'timeout');
+        }
+      }
     };
     requests.push(request);
     return request;
@@ -3221,6 +3230,7 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   const preflight=ui.statusClick('#ach-cache-activation-preview');
   assert.match(preflight.options.url,/s=preview_cache_activation$/);
   assert.equal(preflight.options.type,'POST');
+  assert.equal(preflight.options.timeout,0);
   assert.deepEqual(Object.keys(preflight.options.data).sort(),[
     'expected_site_key','expected_site_snapshot','site_id'
   ]);
@@ -3241,7 +3251,7 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   assert.equal(apply.options.data.expected_source_sha256,'a'.repeat(64));
   assert.equal(apply.options.data.expected_proposal_sha256,'b'.repeat(64));
   assert.equal(apply.options.data.cache_generation,'c'.repeat(32));
-  assert.equal(apply.options.timeout,45000);
+  assert.equal(apply.options.timeout,0);
   assert.equal(apply.options.data.approved,'true');
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
   apply.respond(cacheOperationApplied());
@@ -3249,6 +3259,7 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
   const recheck=ui.statusClick('#ach-cache-activation-recheck');
   assert.equal(recheck.options.data.cache_action,'recheck');
+  assert.equal(recheck.options.timeout,0);
   assert.equal(recheck.options.data.action,undefined);
   assert.equal(recheck.options.data.approved,undefined);
   recheck.respond({status:true,schema:1,state:'Applied',site_id:7,
@@ -3259,12 +3270,44 @@ test('Site Cache Apply and Restore require exact approval and recovery identity'
   assert.equal(ui.state().cacheActivationRestoreDisabled,false);
   const restore=ui.statusClick('#ach-cache-activation-restore');
   assert.equal(restore.options.data.cache_action,'restore');
+  assert.equal(restore.options.timeout,0);
   assert.equal(restore.options.data.action,undefined);
   assert.equal(restore.options.data.recovery_id,'f'.repeat(32));
   assert.equal(restore.options.data.approved,'true');
   restore.respond(cacheOperationRestored());
   assert.match(ui.state().cacheActivationResult,/Cache Restore observed/);
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+});
+
+test('Slow native Cache response retains server recovery evidence; network loss stays unconfirmed', () => {
+  for(const loseNetwork of [false,true]) {
+    const ui=loadUi();selectHostsSite(ui);
+    const preview=ui.statusClick('#ach-cache-activation-preview');
+    preview.respond(cacheActivationReady({php_probe_https_status:200}));
+    ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+    const apply=ui.statusClick('#ach-cache-activation-apply');
+    apply.advance(70000);
+    assert.equal(apply.expired,false);
+    assert.equal(ui.state().cacheActivationApplyDisabled,true);
+    const before=ui.requests.length;
+    ui.statusClick('#ach-cache-activation-apply');
+    assert.equal(ui.requests.length,before);
+    if(loseNetwork) apply.reject(null,'error');
+    else apply.respond({status:false,stage:'cache_manage',
+      msg:'Cache reload/worker observation unconfirmed: HTTPS PHP handler request timed out',
+      operation_id:'a'.repeat(32),recovery_id:'b'.repeat(32)});
+    assert.match(ui.state().cacheActivationResult,/NOT CONFIRMED/);
+    if(loseNetwork) {
+      assert.match(ui.state().cacheActivationResult,/Inspect Activity and Recheck/);
+      assert.match(ui.state().error,/Outcome unknown/);
+    } else {
+      assert.match(ui.state().cacheActivationResult,/HTTPS PHP handler request timed out/);
+      assert.match(ui.state().cacheActivationResult,/Operation ID: a{32}/);
+      assert.match(ui.state().cacheActivationResult,/Possible recovery ID: b{32}/);
+    }
+    assert.equal(ui.state().cacheActivationApplyDisabled,true);
+    assert.equal(ui.state().cacheActivationRestoreDisabled,true);
+  }
 });
 
 test('Cache Restore consent distinguishes conditional reload from no-op recovery', () => {
@@ -3483,6 +3526,16 @@ test('Native wpfastcgi Cache readiness names the exact PHP scope and preserves m
   assert.equal(ui.state().cacheActivationApplyDisabled,false);
 });
 
+test('Cache readiness distinguishes HTTPS PHP response from HTTP upgrade', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusClick('#ach-cache-activation-preview').respond(cacheActivationReady({
+    php_probe_status:301,php_probe_https_status:200
+  }));
+  assert.match(ui.state().cacheActivationResult,/HTTPS 200 \(HTTP redirect 301\)/);
+  ui.statusSetChecked('#ach-cache-activation-reviewed',true);
+  assert.equal(ui.state().cacheActivationApplyDisabled,false);
+});
+
 test('Forged Cache readiness never permits Apply, HTML text stays inert', () => {
   const ui=loadUi(); selectHostsSite(ui);
   for (const bad of [
@@ -3492,6 +3545,8 @@ test('Forged Cache readiness never permits Apply, HTML text stays inert', () => 
     {source_sha256:'broken'},{proposal_sha256:'broken'},
     {cache_generation:'bad'},{cache_generation:'d'.repeat(31)},
     {php_probe_status:404},{php_probe_status:599},
+    {php_probe_status:200,php_probe_https_status:200},
+    {php_probe_https_status:404},{php_probe_https_status:'200'},
     {state:'Needs Review'},{php_version:'86'},
     {native_handler:null},{native_handler:'unknown'},
     {native_handler:'wpfastcgi',preserved_server_hsts:true}
@@ -9491,13 +9546,13 @@ const privateCacheProbe = (overrides={}) => ({
   state:'Observed BYPASS',read_only:true,runtime_verified:false,
   cache_safe_verified:false,purge_supported:false,
   private_probe_bypass_observed:true,request_method:'HEAD',
-  origin:'127.0.0.1:80',reason:'',
+  origin:'127.0.0.1',reason:'',
   note:'Synthetic local HTTP/80 HEAD requests, no real user safety proof.',
   probes:[
-    {path:'/',route:'home',scenario:'authorization',http_status:200,cache:'BYPASS'},
-    {path:'/',route:'home',scenario:'cookie',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/',route:'rest',scenario:'authorization',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/',route:'rest',scenario:'cookie',http_status:200,cache:'BYPASS'}
+    {path:'/',route:'home',scenario:'authorization',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/',route:'home',scenario:'cookie',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/',route:'rest',scenario:'authorization',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/',route:'rest',scenario:'cookie',scheme:'HTTP',http_status:200,cache:'BYPASS'}
   ],
   ...overrides
 });
@@ -9517,6 +9572,13 @@ test('Native private Cache probe reports synthetic BYPASS without unsafe action'
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
   assert.equal(ui.state().cacheClearDisabled,true);
+});
+
+test('Private Cache probe reports the actual HTTPS origin scheme', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const probes=privateCacheProbe().probes.map(p=>({...p,scheme:'HTTPS'}));
+  ui.statusClick('#ach-cache-private-probe-button').respond(privateCacheProbe({probes}));
+  assert.match(ui.state().privateCacheProbeResult,/rest \/ authorization: HTTPS 200, Cache BYPASS/);
 });
 
 test('Private Cache probe refuses forged success and stale selection', () => {
@@ -9566,11 +9628,11 @@ const wooCacheProbe = (overrides={}) => ({
   note:'Default WooCommerce HTTP/80 HEAD only. Custom slugs, VHost and real sessions unverified.',
   probes:[
     ...privateCacheProbe().probes,
-    {path:'/cart/',route:'cart',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/checkout/',route:'checkout',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/my-account/',route:'account',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/wc/store/v1/cart/',route:'store-cart',scenario:'anonymous',http_status:200,cache:'BYPASS'},
-    {path:'/wp-json/wc/store/v1/checkout/',route:'store-checkout',scenario:'anonymous',http_status:200,cache:'BYPASS'}
+    {path:'/cart/',route:'cart',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/checkout/',route:'checkout',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/my-account/',route:'account',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/wc/store/v1/cart/',route:'store-cart',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'},
+    {path:'/wp-json/wc/store/v1/checkout/',route:'store-checkout',scenario:'anonymous',scheme:'HTTP',http_status:200,cache:'BYPASS'}
   ],
   ...overrides
 });
@@ -9582,7 +9644,7 @@ test('Default WooCommerce guest route cache probe executes 9 HEAD observations w
   assert.match(req.options.url,/s=probe_private_cache$/);
   assert.equal(req.options.data.site_id,'7');
   assert.equal(req.options.data.probe_profile,'woocommerce_default');
-  assert.equal(req.options.timeout,45000);
+  assert.equal(req.options.timeout,0);
   assert.equal(ui.state().wooCacheProbeDisabled,true);
   assert.equal(ui.state().privateCacheProbeDisabled,true);
   req.respond(wooCacheProbe());
@@ -9596,6 +9658,23 @@ test('Default WooCommerce guest route cache probe executes 9 HEAD observations w
   assert.equal(ui.state().cacheActivationApplyDisabled,true);
   assert.equal(ui.state().cacheActivationRestoreDisabled,true);
   assert.equal(ui.state().cacheClearDisabled,true);
+});
+
+test('HTTP and HTTPS WooCommerce results remain pending across the former client deadline', () => {
+  for (const scheme of ['HTTP','HTTPS']) {
+    const ui=loadUi();selectHostsSite(ui);
+    const req=ui.statusClick('#ach-cache-woo-probe-button');
+    req.advance(scheme==='HTTPS'?49500:18000);
+    assert.equal(req.expired,false);
+    assert.equal(ui.state().wooCacheProbeDisabled,true);
+    const before=ui.requests.length;
+    ui.statusClick('#ach-cache-woo-probe-button');
+    assert.equal(ui.requests.length,before);
+    req.respond(wooCacheProbe({probes:wooCacheProbe().probes.map(p=>({...p,scheme}))}));
+    assert.match(ui.state().wooCacheProbeResult,/Observed BYPASS/);
+    assert.match(ui.state().wooCacheProbeResult,new RegExp(scheme+' 200, Cache BYPASS'));
+    assert.equal(ui.state().wooCacheProbeDisabled,false);
+  }
 });
 
 test('WooCommerce guest route probe rejects forged success and wrong route data', () => {
@@ -9745,6 +9824,9 @@ test('One-click WordPress setup uses one authenticated site-scoped action and su
   assert.match(connect.options.url,/s=manage_wordpress_cache$/);
   assert.equal(connect.options.type,'POST');
   assert.equal(connect.options.data.wordpress_cache_action,'setup');
+  assert.equal(connect.options.timeout,0);
+  connect.advance(220000);
+  assert.equal(connect.expired,false);
   assert.equal(connect.options.data.approved,'true');
   assert.equal(connect.options.data.site_id,'7');
   assert.equal(connect.options.data.expected_site_key,'site.test');
@@ -9762,6 +9844,9 @@ test('One-click WordPress setup uses one authenticated site-scoped action and su
   assert.equal(ui.state().wpCacheSetupDisabled,false);
   const restore=ui.statusClick('#ach-wp-cache-restore');
   assert.equal(restore.options.data.wordpress_cache_action,'restore');
+  assert.equal(restore.options.timeout,0);
+  restore.advance(300000);
+  assert.equal(restore.expired,false);
   assert.equal(restore.options.data.approved,'true');
   restore.respond({
     status:true,schema:1,state:'Restored',site_id:7,site_key:'site.test',
@@ -9770,12 +9855,30 @@ test('One-click WordPress setup uses one authenticated site-scoped action and su
   assert.match(ui.state().wpCacheResult,/Restored/);
   const inspect=ui.statusClick('#ach-wp-cache-inspect');
   assert.equal(inspect.options.data.wordpress_cache_action,'inspect');
+  assert.equal(inspect.options.timeout,0);
+  inspect.advance(55000);
+  assert.equal(inspect.expired,false);
   assert.equal(inspect.options.data.approved,'false');
   inspect.respond({
     status:true,schema:1,state:'Not Connected',site_id:7,site_key:'site.test',
     read_only:true
   });
   assert.match(ui.state().wpCacheResult,/Not Connected/);
+});
+
+test('Slow WordPress connection returns correlated server failure without an early client timeout', () => {
+  const ui=loadUi();selectHostsSite(ui);
+  const req=ui.statusClick('#ach-wp-cache-setup');
+  req.advance(90000);
+  assert.equal(req.expired,false);
+  assert.equal(ui.state().wpCacheSetupDisabled,true);
+  req.respond({status:false,stage:'wordpress_cache_setup',
+    msg:'HTTPS PHP handler request timed out after native Cache reload',
+    operation_id:'a'.repeat(32),recovery_id:'b'.repeat(32)});
+  assert.match(ui.state().wpCacheResult,/operation unconfirmed/);
+  assert.match(ui.state().wpCacheResult,/HTTPS PHP handler request timed out/);
+  assert.match(ui.state().wpCacheResult,/Operation ID: a{32}/);
+  assert.match(ui.state().wpCacheResult,/Possible recovery ID: b{32}/);
 });
 
 test('One-click WordPress setup refuses stale cross-site backend replies', () => {

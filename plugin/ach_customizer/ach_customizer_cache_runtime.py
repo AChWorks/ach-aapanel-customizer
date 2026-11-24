@@ -1,6 +1,6 @@
-"""Bounded local HTTP/80 HEAD observations for native WP and default Woo routes.
+"""Bounded local HTTP(S) HEAD observations for native WP and default Woo routes.
 
-No real credentials, bodies, redirects, caller-provided URLs, purge or
+No real credentials, bodies, arbitrary redirects, caller-provided URLs, purge or
 configuration writes. These headers are not a session or VHost certification.
 A defective cache policy may warm an anonymous public entry.
 """
@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import http.client
 import re
+import ssl
 from pathlib import Path
 
+from ach_customizer_origin_http import https_connection, same_host_https_upgrade
 from ach_customizer_cache_policy import CACHE_ROOT
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
@@ -32,8 +34,8 @@ _EXPECTED = frozenset(("BYPASS", "HIT", "MISS", "EXPIRED", "STALE", "UPDATING", 
 
 
 def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vhost/nginx",
-                        connection_factory=None, profile="wordpress"):
-    """Observe only a registered native site on literal loopback port 80.
+                        connection_factory=None, https_factory=None, profile="wordpress"):
+    """Observe only the registered native site on loopback HTTP/HTTPS.
 
     Request headers cannot contain real user credentials. A positive result
     reports native X-Cache or journal-owned X-ACh-Cache headers for four
@@ -50,13 +52,13 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
         "site_key": name, "read_only": True,
         "cache_safe_verified": False, "purge_supported": False,
         "runtime_verified": False, "private_probe_bypass_observed": False,
-        "request_method": "HEAD", "origin": "127.0.0.1:80",
+        "request_method": "HEAD", "origin": "127.0.0.1",
         "probes": [], "reason": "",
-        "note": ("Local HTTP/80 HEAD default WooCommerce route headers only. "
+        "note": ("Local HTTP(S) HEAD default WooCommerce route headers only. "
                  "Page slugs can be customized; no Woo installation, actual GET, "
                  "guest/session privacy, HTTPS edge, responding VHost or safe "
                  "Purge All has been independently verified." if woo else
-                 "Synthetic local HTTP/80 HEAD header observations only. "
+                 "Synthetic local HTTP(S) HEAD header observations only. "
                  "They do not prove real authenticated sessions, WooCommerce "
                  "anonymous cart/checkout, responding VHost, running HTTPS "
                  "edge, or safe Purge All."),
@@ -135,29 +137,51 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
             headers["Authorization"] = "Bearer ach-customizer-invalid-synthetic-probe"
         elif scenario == "cookie":
             headers["Cookie"] = "ach_customizer_probe=synthetic"
+        scheme = "HTTP"
         try:
             conn = connection_factory()
+        except TimeoutError:
+            result["reason"] = "Origin-local HTTP connection timed out"
+            break
         except (OSError, http.client.HTTPException):
             result["reason"] = "Origin-local HTTP connection failed"
             break
         try:
-            conn.request("HEAD", path, headers=headers)
-            reply = conn.getresponse()
-            status = reply.status
-            if managed is None:
-                raw_cache = reply.getheader("X-Cache", "")
-            else:
-                # Both headers must identify the exact managed selected-site
-                # handler. Neither header authenticates a real user/VHost.
-                marker = reply.getheader("X-ACh-Cache-Site", "")
-                raw_cache = (reply.getheader("X-ACh-Cache", "")
-                             if marker == str(identity) else "")
-            reply.read(0)
-        except (OSError, http.client.HTTPException):
-            result["reason"] = "Origin-local HTTP request failed"
+            def observe(connection):
+                try:
+                    connection.request("HEAD", path, headers=headers)
+                    reply = connection.getresponse()
+                    status = reply.status
+                    native_cache = reply.getheader("X-Cache", "")
+                    marker = reply.getheader("X-ACh-Cache-Site", "")
+                    managed_cache = reply.getheader("X-ACh-Cache", "")
+                    location = reply.getheader("Location", "")
+                    reply.read(0)
+                    return status, native_cache, marker, managed_cache, location
+                finally:
+                    connection.close()
+
+            status, native_cache, marker, managed_cache, location = observe(conn)
+            # Only a redirect before any Cache evidence is an upgrade.
+            # Never discard a first-hop Cache observation or follow another
+            # hostname/path. The same synthetic headers stay on loopback.
+            if (not (native_cache or marker or managed_cache) and
+                    same_host_https_upgrade(name, path, status, location)):
+                scheme = "HTTPS"
+                tls = (https_factory() if https_factory is not None
+                       else https_connection(name, timeout=4))
+                status, native_cache, marker, managed_cache, _ = observe(tls)
+            raw_cache = (native_cache if managed is None else
+                         managed_cache if marker == str(identity) else "")
+        except ssl.SSLCertVerificationError:
+            result["reason"] = "Origin-local HTTPS certificate verification failed"
             break
-        finally:
-            conn.close()
+        except TimeoutError:
+            result["reason"] = "Origin-local " + scheme + " request timed out"
+            break
+        except (OSError, http.client.HTTPException):
+            result["reason"] = "Origin-local " + scheme + " request failed"
+            break
         if managed is None:
             match = re.fullmatch(
                 r"(BYPASS|HIT|MISS|EXPIRED|STALE|UPDATING|REVALIDATED) From " +
@@ -167,7 +191,7 @@ def probe_private_cache(site, source_audit, *, vhost_root="/www/server/panel/vho
             cache = raw_cache if raw_cache in _EXPECTED else "Not Observed"
         result["probes"].append({
             "path": path, "route": label, "scenario": scenario,
-            "http_status": status, "cache": cache,
+            "scheme": scheme, "http_status": status, "cache": cache,
         })
     if (len(result["probes"]) == len(requests) and
             all(p["http_status"] == 200 and p["cache"] == "BYPASS"

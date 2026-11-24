@@ -1243,6 +1243,43 @@ that tested HEAD/guest. Public Release and Production require separate Owner aut
 
 ## FastCGI Cache: privacy, ownership and recovery
 
+**Force HTTPS origin verification:** The Cache readiness/Apply/Recheck/Restore
+path observes a fixed local HEAD /index.php on the registered HTTP/80 Host.
+If it redirects to the exact same Host and path over HTTPS (standard 443),
+the probe makes one additional loopback request using the same Host and TLS
+SNI with normal certificate/hostname verification. No external DNS lookup
+or arbitrary Location is followed. The final managed observation still
+requires the selected-site Cache marker and FastCGI status. Both the HTTP
+redirect and HTTPS application status are saved and compared for an HTTPS
+activation; an HTTP-only site uses its direct HTTP status. A PHP canonical
+redirect may itself be a valid terminal 3xx response when the upstream
+evidence is present. Force HTTPS settings, certificates and native VHost
+source are unchanged. A missing/untrusted local certificate or unobserved
+upstream yields a specific failure, not repeated speculative configuration
+writes. This is local route evidence, not browser/CDN/TLS-edge or complete
+private-session certification.
+
+The synthetic WordPress and WooCommerce Cache diagnostics use the same
+exact same-host HTTPS upgrade criterion and SNI transport, report the
+actual observed protocol per request, and never accept an application
+redirect as a successful 200/BYPASS private-route observation.
+
+**Request timing:** Cache readiness, management, private-route diagnostics
+and WordPress Connect/Disconnect/Inspect await the native server result
+without a separate jQuery timeout. A diagnostic can require up to 18 origin
+HEAD requests; a lifecycle can include up to nine worker observations after
+one reload, and the WordPress connector also invokes several independently
+timed PHP subprocesses. The existing 4-second diagnostic / 5-second worker
+socket timeouts, nine-observation limit, PHP command and Nginx operation
+timeouts remain in force. Socket timeouts are per blocking network operation,
+not a promise of a fixed total wall-clock duration. The native panel transport
+and normal browser/network failure handling still apply. On a transport
+failure the outcome is unconfirmed: use Activity and Recheck before retrying;
+a returned server failure retains its stage and recovery correlation. No
+automatic configuration-write retry or additional site-response limit is
+introduced.
+
+
 A safe per-site Nginx Cache needs an owned, separate physical tree and key
 zone, exact site/VHost/native PHP include ordering, syntax and runtime
 checks. An IP/Host-partitioned key within a **shared filesystem** does
@@ -1318,8 +1355,9 @@ and source checks; it does not transfer old ownership blindly.
 
 
 **Native private-request Cache probe:** A twice-verified native PHP source
-with a direct Cache zone may be observed with four fixed origin-local HEAD
-requests (nine for default WooCommerce routes). The legacy native WordPress
+with a direct Cache zone may be observed with four fixed origin-local HEAD scenarios
+(nine for default WooCommerce routes; one additional exact HTTPS upgrade
+request per scenario when necessary). The legacy native WordPress
 handler is checked against `X-Cache: BYPASS From <site-host>`; an **Applied,
 exact journal-owned** Customizer Cache handler (stock or wpfastcgi) instead
 requires both `X-ACh-Cache: BYPASS` and `X-ACh-Cache-Site: <site-id>`.

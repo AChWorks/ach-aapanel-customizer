@@ -7,8 +7,8 @@ A native aaPanel plugin for **inspect → preview → explicit apply → recheck
 **Use the assets and checksums from [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases)**. GitHub source archives and locally built ZIPs are not substitutes for a published, checksum-verified package.
 
 1. Download the matching `ach-aapanel-customizer-vX.Y.Z.zip` and `SHA256SUMS.txt` from the **same Release**. Verify the native ZIP against the supplied SHA-256 manifest.
-2. In aaPanel open **App Store → Third-party Plug-ins → Import plugins** and import the native ZIP. For the task-first interface (source versions **0.1.101+**), open **ACh aaPanel Customizer → Home → Refresh observations**. If using the earlier v0.1.100 package, the equivalent is **Overview → Refresh state**.
-3. In the task-first interface, choose **Manage a website** or **Websites → Summary & changes**, select the exact native website, and start with a read-only inspection of its task. Use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation. In the earlier interface use **Website list** and the shared website selector.
+2. In aaPanel open **App Store → Third-party Plug-ins → Import plugins** and import the native ZIP. Open **ACh aaPanel Customizer → Home → Refresh observations**.
+3. Choose **Manage a website** or **Websites → Summary & changes**, select the exact native website, and start with a read-only inspection of its task. Use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation.
 4. **Optional:** install the separately versioned `ach-aapanel-bridge-vX.Y.Z.zip` through **WordPress → Plugins → Add New → Upload Plugin** only for supported WordPress Cache integration. The Bridge is not embedded in or required by the native ZIP.
 
 The WordPress Bridge 0.1.11 includes Persian (`fa_IR`) and uses
@@ -17,7 +17,7 @@ product name and technical identifiers remain unchanged; the native
 aaPanel interface is independent. Obtain the actual published Bridge
 version from Releases.
 
-The first Stable release was **Native 0.1.98** with optional **WordPress Bridge 0.1.9**. Later native and Bridge package versions advance independently. Earlier development previews are historical, not mandatory compatibility/migration targets. Always obtain the **latest published** assets and SHA256 checksums from Releases rather than assuming the source tree is a Release.
+Native and Bridge versions advance independently. Until the Owner explicitly accepts a final named baseline, published development versions (including Stable labels) do not require backward-compatibility adapters or migrations. See [the compatibility policy](docs/PROJECT-SPEC.md#8-installation-enablement-update-and-uninstall-semantics). Existing operator data and applied settings are not silently deleted. Always obtain the **latest published** assets and SHA256 checksums from Releases rather than assuming the source tree is a Release.
 
 A successful import does **not** prove that aaPanel's resident Python helpers were refreshed. If the installed files and observed behavior disagree, consult the [native ZIP upgrade and resident-worker recovery runbook](docs/aapanel-upgrade-recovery.md); preserve the saved Recovery ID and recheck before retrying. Neither ZIP performs a Production deployment or enables optional enforcement on its own.
 
@@ -36,14 +36,11 @@ Releases, not implied by this source guide.
 | **Websites → Protection** | Inspect and apply a selected-site recoverable sensitive-file Guard and optional pre-PHP XML-RPC protection. Shared Nginx reload is disclosed. |
 | **Websites → WordPress** | Debug, system WP-Cron, application XML-RPC and HTTPS URLs. Separate source checks and recovery; certificates are not installed. |
 | **Websites → Routing & diagnostics** | Nginx/VHost observations, selected-site local Hosts and drift/Recovery evidence; no public DNS change. |
-| **Websites → Cache & performance** | Inspect, Connect WordPress, Apply/restore, Clear Cache, and Advanced URL mapping. Exact site-owned cache operations only; vendor Purge All remains separate. |
+| **Websites → Cache & performance** | Inspect, Connect WordPress, Apply/restore, Clear Cache, and Advanced URL mapping. Exact site-owned cache operations and HTTP/HTTPS origin verification; vendor Purge All remains separate. |
 | **Server → PHP services** | Inspect service/sites, desired policy, explicit shared Apply, independently available saved-service Recovery and separately opted-in automatic repair of witnessed regeneration. |
 | **Server → Local hostnames / Attack protection / Default HTTP/TLS** | Remove an exact chosen origin-local loopback alias without touching the system hostname; site-log Fail2ban bans are origin-wide; orphan Recovery is site-selection-independent. Unknown HTTP/80 and eligible TLS/443 fallback are separate. |
 | **Error pages** | Design/preview 11 EN/LTR + 11 FA/RTL templates; explicitly choose website delivery, future-site defaults, stopped-site 503 or server fallback. TLS handshake rejection does not create certificates/listeners. |
 | **Activity & recovery** | Read exact operation stage, result, time and Operation/Recovery IDs in Operation details; open the owning task then Recheck without inferring a site or authorizing Restore. |
-
-For the older **v0.1.100** package, the equivalents are Overview, Website list,
-Routing & Nginx, FastCGI Cache, PHP-FPM, Status Pages and Activity & Logs.
 
 The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a separate WordPress plugin. It supports verified, generation-bound, eligible per-URL invalidation; it does **not** automatically install Nginx Helper, replace vendor Purge All or make a shared Cache directory safe.
 

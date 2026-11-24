@@ -2,6 +2,7 @@
 from pathlib import Path
 from unittest.mock import patch
 import sys
+import ssl
 import tempfile
 import unittest
 
@@ -87,6 +88,114 @@ class RuntimePrivateCacheTests(unittest.TestCase):
             self.assertEqual(sum(k in headers for k in ("Cookie", "Authorization")), 1)
             self.assertNotIn("Authorization", headers.get("Cookie", ""))
         self.assertTrue(all(c.closed for c in self.connections))
+
+    def test_force_https_private_probe_reports_terminal_scheme_and_bypass(self):
+        self.managed()
+        paths = ["/", "/", "/wp-json/", "/wp-json/"]
+        self.responses = [Response(301, {"Location":"https://" + self.name + path})
+                          for path in paths]
+        tls_connections = []
+        def tls():
+            c = Connection(Response(200, {"X-ACh-Cache":"BYPASS",
+                                           "X-ACh-Cache-Site":"9"}), self.calls)
+            tls_connections.append(c)
+            return c
+        got = runtime.probe_private_cache(
+            self.site, self.audit, vhost_root=str(self.root),
+            connection_factory=self.factory, https_factory=tls)
+        self.assertEqual(got["state"], "Observed BYPASS")
+        self.assertEqual(got["origin"], "127.0.0.1")
+        self.assertTrue(all(p["scheme"] == "HTTPS" for p in got["probes"]))
+        self.assertEqual(len(self.calls), 8)
+        for a, b in zip(self.calls[::2], self.calls[1::2]):
+            self.assertEqual(a,b)
+        self.assertTrue(all(c.closed for c in self.connections+tls_connections))
+        self.assertFalse(got["cache_safe_verified"])
+
+    def test_woo_http_and_force_https_complete_with_cumulative_latency(self):
+        for force_https in (False, True):
+            with self.subTest(force_https=force_https):
+                self.managed()
+                elapsed = [0]
+                connections = []
+                class TimedConnection(Connection):
+                    def __init__(self, tls):
+                        super().__init__(Response(200, {
+                            "X-ACh-Cache":"BYPASS","X-ACh-Cache-Site":"9"
+                        }), self_calls)
+                        self.tls = tls
+                        connections.append(self)
+                    def request(self, method, path, headers):
+                        super().request(method,path,headers)
+                        if force_https and not self.tls:
+                            self.response = Response(301, {
+                                "Location":"https://"+hostname+path
+                            })
+                    def getresponse(self):
+                        # Each individual hop succeeds within the existing
+                        # 4-second socket timeout. Nine upgrades total 49.5s.
+                        elapsed[0] += 3.5 if self.tls else 2
+                        return super().getresponse()
+                self_calls, hostname = self.calls, self.name
+                with patch.object(runtime.http.client,"HTTPConnection",
+                                  side_effect=lambda *a,**kw: TimedConnection(False)) as http, \
+                     patch.object(runtime,"https_connection",
+                                  side_effect=lambda *a,**kw: TimedConnection(True)) as https:
+                    result = runtime.probe_private_cache(
+                        self.site,self.audit,vhost_root=str(self.root),
+                        profile="woocommerce_default")
+                self.assertEqual(result["state"],"Observed BYPASS")
+                self.assertEqual(len(result["probes"]),9)
+                self.assertEqual(elapsed[0],49.5 if force_https else 18)
+                self.assertEqual(http.call_count,9)
+                self.assertEqual(https.call_count,9 if force_https else 0)
+                self.assertTrue(all(x.kwargs["timeout"]==4 for x in http.call_args_list))
+                self.assertTrue(all(x.kwargs["timeout"]==4 for x in https.call_args_list))
+                self.assertTrue(all(p["scheme"]==("HTTPS" if force_https else "HTTP")
+                                    for p in result["probes"]))
+                self.assertTrue(all(c.closed for c in connections))
+
+    def test_https_timeout_and_certificate_failure_keep_partial_evidence(self):
+        for stage,error,reason in (
+            ("connect",TimeoutError("private detail"),"timed out"),
+            ("response",TimeoutError("private detail"),"timed out"),
+            ("connect",ssl.SSLCertVerificationError("private detail"),"certificate verification failed"),
+        ):
+            with self.subTest(stage=stage,error=type(error).__name__):
+                self.managed()
+                self.responses[1]=Response(301,{"Location":"https://"+self.name+"/"})
+                connections=[]
+                class FailedTLS(Connection):
+                    def request(self,*args,**kwargs):
+                        if stage=="connect": raise error
+                        super().request(*args,**kwargs)
+                    def getresponse(self):
+                        raise error
+                def tls():
+                    c=FailedTLS(None,self.calls);connections.append(c);return c
+                got=runtime.probe_private_cache(
+                    self.site,self.audit,vhost_root=str(self.root),
+                    connection_factory=self.factory,https_factory=tls)
+                self.assertEqual(got["state"],"Unavailable")
+                self.assertIn("HTTPS",got["reason"])
+                self.assertIn(reason,got["reason"])
+                self.assertNotIn("private detail",str(got))
+                self.assertEqual(len(got["probes"]),1)
+                self.assertEqual(got["probes"][0]["cache"],"BYPASS")
+                self.assertFalse(got["private_probe_bypass_observed"])
+                self.assertTrue(all(c.closed for c in self.connections+connections))
+
+    def test_foreign_redirect_and_first_hop_cache_evidence_are_not_followed(self):
+        self.managed()
+        self.responses[0] = Response(301, {"Location":"https://foreign.test/"})
+        self.responses[1] = Response(301, {"Location":"https://" + self.name + "/",
+                                         "X-ACh-Cache":"HIT","X-ACh-Cache-Site":"9"})
+        with patch.object(runtime, "https_connection",
+                          side_effect=AssertionError("must not follow")):
+            got = self.observe()
+        self.assertEqual(got["state"], "Unavailable")
+        self.assertEqual([p["scheme"] for p in got["probes"]],["HTTP"]*4)
+        self.assertEqual(got["probes"][1]["cache"],"HIT")
 
     def test_any_cached_synthetic_identity_request_fails_positive(self):
         self.responses[2] = Response(200, "HIT From " + self.name)

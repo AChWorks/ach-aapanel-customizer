@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'plugin'/'ach_customizer'))
@@ -1829,6 +1829,168 @@ class CacheManageTests(unittest.TestCase):
                                  ('HEAD','/index.php'))
                 self.assertEqual(connection.requested[1]['headers']['Host'],
                                  'qa.test')
+
+    def test_force_https_probe_uses_only_exact_local_selected_route(self):
+        def response(code, **headers):
+            return SimpleNamespace(status=code,
+                getheader=lambda name: headers.get(name), read=lambda n: b'')
+        def connection(value):
+            return SimpleNamespace(request=Mock(), getresponse=lambda: value, close=Mock())
+        redirect = response(301, Location='https://qa.test/index.php')
+        managed = response(301, **{'X-ACh-Cache-Site':'7','X-ACh-Cache':'BYPASS',
+                                  'Location':'https://qa.test/'})
+        for marker, value in ((None, response(301)), (7, managed)):
+            h, t = connection(redirect), connection(value)
+            with patch.object(cache.http.client, 'HTTPConnection', return_value=h) as http, \
+                 patch.object(cache, 'https_connection', return_value=t) as tls:
+                self.assertEqual(cache._probe(self.site, marker=marker), (301,301))
+                http.assert_called_once_with('127.0.0.1',80,timeout=5)
+                tls.assert_called_once_with('qa.test',443,context=None)
+                for conn in (h,t):
+                    conn.request.assert_called_once_with('HEAD','/index.php',
+                        headers={'Host':'qa.test','Cache-Control':'no-store'})
+                    conn.close.assert_called_once()
+        for value in (response(404), response(200),
+                      response(200, **{'X-ACh-Cache-Site':'8','X-ACh-Cache':'BYPASS'}),
+                      response(301, **{'X-ACh-Cache-Site':'7'})):
+            with patch.object(cache.http.client,'HTTPConnection',return_value=connection(redirect)), \
+                 patch.object(cache,'https_connection',return_value=connection(value)):
+                with self.assertRaises(cache.CacheManageError):
+                    cache._probe(self.site,marker=7)
+        for location in ('https://foreign.test/index.php','https://qa.test:444/index.php',
+                         'https://qa.test/index.php?x=1','https://qa.test/else',
+                         'https://qa.test@foreign.test/index.php'):
+            with patch.object(cache.http.client,'HTTPConnection',
+                              return_value=connection(response(301,Location=location))), \
+                 patch.object(cache,'https_connection') as tls:
+                with self.assertRaises(cache.CacheManageError):
+                    cache._probe(self.site,marker=7)
+                tls.assert_not_called()
+        # A foreign marker on the first hop cannot be hidden by a valid TLS reply.
+        foreign = response(301, **{'Location':'https://qa.test/index.php',
+                                   'X-ACh-Cache-Site':'8','X-ACh-Cache':'BYPASS'})
+        with patch.object(cache.http.client,'HTTPConnection',return_value=connection(foreign)), \
+             patch.object(cache,'https_connection') as tls:
+            with self.assertRaises(cache.CacheManageError):
+                cache._probe(self.site,marker=7)
+            tls.assert_not_called()
+
+    def test_force_https_connector_pins_loopback_and_verifies_named_tls(self):
+        import ach_customizer_origin_http as origin
+        conn=origin.https_connection('qa.test')
+        self.assertTrue(conn.context.check_hostname)
+        self.assertEqual(conn.context.verify_mode,cache.ssl.CERT_REQUIRED)
+        raw, wrapped, context=Mock(), Mock(), Mock()
+        context.wrap_socket.return_value=wrapped
+        conn=origin.https_connection('qa.test',context=context)
+        with patch.object(origin.socket,'create_connection',return_value=raw) as create:
+            conn.connect()
+        create.assert_called_once_with(('127.0.0.1',443),5)
+        context.wrap_socket.assert_called_once_with(raw,server_hostname='qa.test')
+        self.assertIs(conn.sock,wrapped)
+        conn.close()
+        context.wrap_socket.side_effect=cache.ssl.SSLCertVerificationError('fixture cert')
+        conn=origin.https_connection('qa.test',context=context)
+        with patch.object(origin.socket,'create_connection',return_value=raw):
+            with self.assertRaisesRegex(cache.CacheManageError,'certificate verification'):
+                cache._probe_response(conn,'qa.test','HTTPS')
+        raw.close.assert_called_once()
+
+    def test_https_timeout_preserves_specific_post_reload_recovery_without_retrying_write(self):
+        for operation in ('apply','restore'):
+            with self.subTest(operation=operation):
+                if operation=='restore':
+                    self.probe=lambda site,marker=None: (301,200)
+                    active=self.apply()
+                elapsed=[0]
+                attempts=[]
+                closed=[]
+                class Reply:
+                    status=301
+                    def getheader(self,name):
+                        return 'https://qa.test/index.php' if name=='Location' else None
+                    def read(self,count):return b''
+                class Redirect:
+                    def request(self,*args,**kwargs):pass
+                    def getresponse(self):
+                        elapsed[0]+=2
+                        return Reply()
+                    def close(self):closed.append('HTTP')
+                class TimeoutTLS:
+                    def request(self,*args,**kwargs):pass
+                    def getresponse(self):
+                        elapsed[0]+=5
+                        raise TimeoutError('private transport detail')
+                    def close(self):closed.append('HTTPS')
+                def timed_probe(site,*,marker=None):
+                    if not self.commands or self.commands[-1][1:3]!=('-s','reload'):
+                        return (301,200)
+                    attempts.append(marker)
+                    return cache._probe(site,marker=marker)
+                self.probe=timed_probe
+                self.commands.clear()
+                with patch.object(cache.http.client,'HTTPConnection',side_effect=lambda *a,**kw:Redirect()), \
+                     patch.object(cache,'https_connection',side_effect=lambda *a,**kw:TimeoutTLS()), \
+                     patch.object(cache.time,'sleep',side_effect=lambda duration:elapsed.__setitem__(0,elapsed[0]+duration)):
+                    with self.assertRaises(cache.CacheManageError) as caught:
+                        if operation=='apply':
+                            self.apply()
+                        else:
+                            cache.manage_cache('restore',self.site,public=object(),
+                                recovery_id=active['recovery_id'],approved=True,**self.kwargs())
+                self.assertEqual(caught.exception.stage,'uncertain')
+                self.assertRegex(caught.exception.recovery_id,r'^[0-9a-f]{32}$')
+                self.assertIn('after 9 observations',str(caught.exception))
+                self.assertIn('HTTPS PHP handler request timed out',str(caught.exception))
+                self.assertNotIn('private transport detail',str(caught.exception))
+                self.assertEqual(len(attempts),9)
+                self.assertEqual(closed,['HTTP','HTTPS']*9)
+                self.assertAlmostEqual(elapsed[0],65.4)
+                self.assertEqual(sum(cmd[1:3]==('-s','reload') for cmd in self.commands),1)
+                journal=json.loads((self.state/cache._names(7)[2]).read_text())
+                self.assertEqual(journal['op'],caught.exception.recovery_id)
+                self.assertEqual(journal['phase'],'prepared' if operation=='apply' else 'applied')
+                self.probe=lambda site,marker=None: (301,200)
+                if operation=='apply':
+                    self.assertEqual(cache.manage_cache('recheck',self.site,public=object(),
+                        **self.kwargs())['state'],'Recovery Required')
+                    restored=cache.manage_cache('restore',self.site,public=object(),approved=True,
+                        recovery_id=journal['op'],**self.kwargs())
+                    self.assertEqual(restored['state'],'Restored')
+                else:
+                    self.assertTrue((self.vhost/(cache._names(7)[0]+'.'+journal['op']+'.retained')).exists())
+                    self.assertTrue((self.ext/(cache._names(7)[1]+'.'+journal['op']+'.retained')).exists())
+
+    def test_https_connect_timeout_is_specific_and_closes_transport(self):
+        conn=Mock()
+        conn.request.side_effect=TimeoutError('private connection detail')
+        with self.assertRaisesRegex(cache.CacheManageError,'HTTPS PHP handler request timed out'):
+            cache._probe_response(conn,'qa.test','HTTPS')
+        conn.close.assert_called_once()
+
+    def test_fresh_force_https_apply_recheck_restore_exact_both_statuses(self):
+        self.probe=lambda site, marker=None: (301,200)
+        preview=self.preview()
+        self.assertEqual((preview['php_probe_status'],preview['php_probe_https_status']),(301,200))
+        result=self.apply()
+        path=self.state/cache._names(7)[2]
+        journal=json.loads(path.read_text())
+        self.assertEqual(cache._saved_probe_status(journal),(301,200))
+        self.assertEqual(cache._record_decode(json.dumps(journal),7),journal)
+        for bad in (True,404,'200',None):
+            with self.assertRaises(cache.CacheManageError):
+                cache._record_decode(json.dumps(dict(journal,probe_https_status=bad)),7)
+        self.assertEqual(cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())['state'],'Applied')
+        self.probe=lambda site, marker=None: (301,302)
+        changed=cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())
+        self.assertEqual(changed['state'],'Needs Review')
+        self.assertFalse(changed['runtime_verified'])
+        self.probe=lambda site, marker=None: (301,200)
+        restored=cache.manage_cache('restore',self.site,public=object(),approved=True,
+                                     recovery_id=result['recovery_id'],**self.kwargs())
+        self.assertEqual(restored['state'],'Restored')
+        self.assertEqual(cache._saved_probe_status(json.loads(path.read_text())),(301,200))
+        self.assertEqual(cache.manage_cache('recheck',self.site,public=object(),**self.kwargs())['state'],'Restored')
 
     def test_unowned_existing_config_refused_without_writes(self):
         path=self.ext/cache._names(7)[1]

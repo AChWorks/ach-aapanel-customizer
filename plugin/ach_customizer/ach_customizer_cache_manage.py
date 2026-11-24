@@ -13,11 +13,13 @@ import json
 import os
 import pwd
 import re
+import ssl
 import stat
 import time
 from pathlib import Path
 from uuid import uuid4
 
+from ach_customizer_origin_http import https_connection, same_host_https_upgrade
 from ach_customizer_cache_policy import (
     generate_reference, CACHE_ROOT, HSTS_DIRECTIVE, WP_NATIVE_CANONICAL,
     HEADER_DIRECTIVE, valid_inherited_headers, valid_response_header,
@@ -86,6 +88,8 @@ def _record_decode(raw, site_id):
         expected.add('inherited_headers')
     if 'native_handler' in record:
         expected.add('native_handler')
+    if 'probe_https_status' in record:
+        expected.add('probe_https_status')
     identity = record.get('cache_identity')
     valid_identity = (identity is None and record.get('phase') in ('prepared', 'restored') or
                       isinstance(identity, list) and len(identity) == 2 and
@@ -112,7 +116,11 @@ def _record_decode(raw, site_id):
             or not isinstance(record['cache_generation'], str)
             or not TOKEN.fullmatch(record['cache_generation'])
             or type(record['probe_status']) is not int
-            or not 100 <= record['probe_status'] <= 599):
+            or not 100 <= record['probe_status'] <= 599
+            or ('probe_https_status' in record and (
+                record['probe_status'] not in (301, 302, 307, 308) or
+                type(record['probe_https_status']) is not int or
+                not 200 <= record['probe_https_status'] < 400))):
         raise CacheManageError('recovery', 'Untrusted Cache journal; do not modify Nginx')
     return record
 
@@ -1018,43 +1026,88 @@ def _cache_files(state_fd, site, *, vhost_root=VHOST_ROOT):
         raise
 
 
-def _probe(site, *, marker=None):
-    """Loopback PHP handler observation; never DNS, tokens or remote traffic."""
-    if (not SITE_KEY.fullmatch(site['name']) or
-            not any(x.get('name')==site['name'] and x.get('port')==80
-                    for x in site.get('bound_domains',[]))):
-        raise CacheManageError('probe','Native HTTP/80 identity is unavailable')
-    conn=http.client.HTTPConnection('127.0.0.1',80,timeout=5)
+def _probe_response(connection, hostname, scheme):
     try:
-        conn.request('HEAD','/index.php',headers={'Host':site['name'],
-                     'Cache-Control':'no-store'})
-        response=conn.getresponse()
-        code=response.status
-        observed=response.getheader('X-ACh-Cache-Site')
-        upstream_cache=response.getheader('X-ACh-Cache')
+        connection.request('HEAD', '/index.php', headers={
+            'Host': hostname, 'Cache-Control': 'no-store'})
+        response = connection.getresponse()
+        observed = (response.status, response.getheader('X-ACh-Cache-Site'),
+                    response.getheader('X-ACh-Cache'), response.getheader('Location'))
         response.read(0)
-        if not 200 <= code < 400:
-            raise CacheManageError('probe','Registered PHP /index.php is not a healthy HTTP target')
-        if marker is not None and (
-                observed != str(marker) or
-                upstream_cache not in ('BYPASS','MISS','HIT','EXPIRED','STALE','UPDATING','REVALIDATED')):
-            # Nginx error pages can emit add_header ... always without
-            # ever invoking the PHP upstream. Require FastCGI status too.
-            raise CacheManageError('probe','Managed FastCGI upstream was not observed after reload')
-        if marker is None and observed is not None:
-            raise CacheManageError('probe','Unexpected cache handler before activation/after Restore')
-        return code
-    except (OSError,http.client.HTTPException) as exc:
-        raise CacheManageError('probe','Registered local PHP handler request failed') from exc
+        return observed
+    except ssl.SSLCertVerificationError as exc:
+        raise CacheManageError('probe',
+            'Local HTTPS certificate verification failed for the selected hostname') from exc
+    except TimeoutError as exc:
+        raise CacheManageError('probe',
+            'Registered local ' + scheme + ' PHP handler request timed out') from exc
+    except (OSError, http.client.HTTPException) as exc:
+        raise CacheManageError('probe',
+            'Registered local ' + scheme + ' PHP handler request failed') from exc
     finally:
-        conn.close()
+        connection.close()
+
+
+def _verify_probe_response(response, marker, scheme):
+    code, observed, upstream_cache, _ = response
+    if not 200 <= code < 400:
+        raise CacheManageError('probe',
+            'Registered PHP /index.php returned unhealthy ' + scheme + ' status ' + str(code))
+    if marker is not None and (
+            observed != str(marker) or
+            upstream_cache not in ('BYPASS','MISS','HIT','EXPIRED','STALE','UPDATING','REVALIDATED')):
+        # An Nginx-generated redirect/error can carry an add_header marker
+        # without ever reaching PHP. Require the FastCGI status as well.
+        raise CacheManageError('probe',
+            'Managed FastCGI upstream was not observed on ' + scheme)
+    if marker is None and observed is not None:
+        raise CacheManageError('probe',
+            'Unexpected cache handler on ' + scheme + ' before activation/after Restore')
+
+
+def _probe(site, *, marker=None, http_port=80, https_port=443, tls_context=None):
+    """Observe local PHP, including an exact native HTTP-to-HTTPS upgrade.
+
+    Only the registered Host and fixed /index.php are used. Never resolve
+    DNS, follow an arbitrary Location, disable TLS validation or send tokens.
+    Port/context overrides are for isolated runtime fixtures, not operator input.
+    A direct HTTP observation records one status; an HTTPS upgrade
+    records both the redirect status and terminal HTTPS status.
+    """
+    hostname = site['name']
+    if (not SITE_KEY.fullmatch(hostname) or
+            not any(x.get('name') == hostname and x.get('port') == 80
+                    for x in site.get('bound_domains', []))):
+        raise CacheManageError('probe','Native HTTP/80 identity is unavailable')
+    http_response = _probe_response(http.client.HTTPConnection('127.0.0.1', http_port, timeout=5),
+                           hostname, 'HTTP')
+    code, observed, _, location = http_response
+    if same_host_https_upgrade(hostname, '/index.php', code, location):
+        # The native aaPanel database may list only port 80 even when the
+        # selected VHost serves both protocols. The exact same-host upgrade
+        # and verified local TLS/SNI response establish the HTTPS route.
+        # If an upstream marker exists on the first hop, it too must match.
+        if observed is not None:
+            _verify_probe_response(http_response, marker, 'HTTP')
+        https = _probe_response(https_connection(
+            hostname, https_port, context=tls_context), hostname, 'HTTPS')
+        _verify_probe_response(https, marker, 'HTTPS')
+        return (code, https[0])
+    _verify_probe_response(http_response, marker, 'HTTP')
+    return code
+
+
+def _saved_probe_status(record):
+    if 'probe_https_status' in record:
+        return (record['probe_status'], record['probe_https_status'])
+    return record['probe_status']
 
 
 def _await_php_route(site, *, marker, expected_status, probe=None):
-    """Wait boundedly for a single reload's new workers; only read-only HEAD.
+    """Observe at most nine times after one reload; only read-only HEAD.
 
-    Nginx -s reload acknowledges a signal, not new worker adoption. The
-    last outcome is never converted into an extra reload or implicit Apply.
+    Each hop retains its socket timeout. The caller waits for the server
+    result rather than racing a separate wall-clock browser timer.
     """
     last = None
     for attempt in range(9):
@@ -1063,13 +1116,14 @@ def _await_php_route(site, *, marker, expected_status, probe=None):
             if status == expected_status:
                 return status
             last = CacheManageError('probe',
-                'HTTP status differs from the pre-reload registered site')
+                'HTTP/HTTPS status differs from the pre-reload registered site')
         except Exception as exc:
             last = exc
         if attempt < 8:
             time.sleep(0.3)
+    detail = str(last) if isinstance(last, CacheManageError) else type(last).__name__
     raise CacheManageError('probe',
-        'Nginx route did not match its approved post-reload state') from last
+        'Nginx route did not match its approved post-reload state after 9 observations: ' + detail) from last
 
 
 def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT,
@@ -1210,7 +1264,9 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
         # mandatory Apply health check after operator consent.
         php_probe_status = (probe or _probe)(site, marker=None)
         return {'schema':1,'state':'Ready for Review','read_only':True,
-                'php_probe_status':php_probe_status,
+                'php_probe_status':(php_probe_status[0] if isinstance(php_probe_status, tuple) else php_probe_status),
+                **({'php_probe_https_status': php_probe_status[1]}
+                   if isinstance(php_probe_status, tuple) else {}),
                 'apply_supported':True,'runtime_verified':False,
                 'site_id':site['id'],'site_key':site['name'],
                 'source_sha256':native['source_sha256'],
@@ -1223,7 +1279,7 @@ def preview_cache_activation(site,public,*,vhost_root=VHOST_ROOT,
                     for header in sources.get('inherited_headers', [])),
                 'cache_zone':reference['cache_zone'],
                 'cache_directory':reference['cache_directory'],
-                'impact':'One selected HTTP/80 VHost and Nginx service reload; '
+                'impact':'One selected native VHost (HTTP or verified HTTPS upgrade) and Nginx service reload; '
                 'requires exact browser approval and after-state recovery',
                 'note':('No writes/reload/purge in preview. Native wpfastcgi '
                         'response headers and PHP routing source-matched; '
@@ -1464,7 +1520,7 @@ def _cache_observation(site, record, public, *, vhost_root=VHOST_ROOT,
                 state = 'Recovery Required'
             if state in ('Applied', 'Restored'):
                 result = (probe or _probe)(site, marker=site['id'] if state == 'Applied' else None)
-                if record['phase'] == 'applied' and result != record['probe_status']:
+                if record['phase'] == 'applied' and result != _saved_probe_status(record):
                     raise CacheManageError('probe',
                         'PHP response status differs from saved recovery')
     except (StatusPageError, OSError, ValueError) as exc:
@@ -1792,7 +1848,9 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     'global_sha': _hash(global_bytes),
                     'extension_sha': _hash(ext_bytes),
                     'cache_directory': reference['cache_directory'],
-                    'probe_status': initial,
+                    'probe_status': initial[0] if isinstance(initial, tuple) else initial,
+                    **({'probe_https_status': initial[1]}
+                       if isinstance(initial, tuple) else {}),
                 }
                 if previous is not None:
                     # All re-Apply preconditions were rechecked under the
@@ -1861,7 +1919,9 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                     _same_cache_identity(site['id'], record)
                 except Exception as exc:
                     raise CacheManageError('uncertain',
-                        'Cache reload/worker observation unconfirmed; Recheck and Restore',
+                        'Cache reload/worker observation unconfirmed: ' +
+                        (str(exc) if isinstance(exc, StatusPageError) else type(exc).__name__) +
+                        '; Recheck and Restore',
                         recovery_id=record['op']) from exc
                 record['phase'] = 'applied'
                 try:
@@ -1927,13 +1987,15 @@ def manage_cache(action, site, public=None, *, expected_source=None,
                 _nginx('-t', nginx=NGINX, conf=nginx_root+'/nginx.conf', runner=runner)
                 _nginx('reload', nginx=NGINX, conf=nginx_root+'/nginx.conf', runner=runner)
                 _await_php_route(
-                    site, marker=None, expected_status=record['probe_status'],
+                    site, marker=None, expected_status=_saved_probe_status(record),
                     probe=probe)
                 _same_site_sources(site, record,
                                    vhost_root=vhost_root, nginx_root=nginx_root)
             except Exception as exc:
                 raise CacheManageError('uncertain',
-                    'Cache Restore unconfirmed; retained files and journal preserved',
+                    'Cache Restore unconfirmed: ' +
+                    (str(exc) if isinstance(exc, StatusPageError) else type(exc).__name__) +
+                    '; retained files and journal preserved',
                     recovery_id=record['op']) from exc
             record['phase'] = 'restored'
             try:
