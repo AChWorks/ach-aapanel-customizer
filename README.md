@@ -11,7 +11,7 @@ A native aaPanel plugin for **inspect → preview → explicit apply → recheck
 3. In the task-first interface, choose **Manage a website** or **Websites → Summary & changes**, select the exact native website, and start with a read-only inspection of its task. Use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation. In the earlier interface use **Website list** and the shared website selector.
 4. **Optional:** install the separately versioned `ach-aapanel-bridge-vX.Y.Z.zip` through **WordPress → Plugins → Add New → Upload Plugin** only for supported WordPress Cache integration. The Bridge is not embedded in or required by the native ZIP.
 
-The WordPress Bridge 0.1.11 source includes Persian (`fa_IR`) and uses
+The WordPress Bridge 0.1.11 includes Persian (`fa_IR`) and uses
 WordPress's current administration locale, with English fallback. Its
 product name and technical identifiers remain unchanged; the native
 aaPanel interface is independent. Obtain the actual published Bridge
@@ -24,7 +24,8 @@ A successful import does **not** prove that aaPanel's resident Python helpers we
 ## What you can do
 
 The task-first destinations below describe the redesigned interface
-introduced in Native 0.1.101 and refined through 0.1.106. The authoritative
+introduced in Native 0.1.101 and subsequently refined, including the shared
+wrapped-approval spacing correction in PR #139. The authoritative
 published package and its actual availability are recorded in GitHub
 Releases, not implied by this source guide.
 
@@ -53,7 +54,7 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 - **External aaPanel changes can invalidate an earlier approval.** After domain, VHost, PHP or WordPress regeneration, inspect and Recheck; Restore the exact saved recovery if needed, then perform one fresh approved Apply. There is no catch-all automatic site-repair watcher.
 - A site-scoped Fail2ban scanner can ban access to the **entire origin**, not merely its selected website. On an untrusted writable log or unclear proxy real-client IP, it refuses or needs operator review; never assume a check proves CDN attribution.
 - WordPress/WooCommerce *files detected* does not prove application activation. Source and local probes do not prove private-customer Cache safety or external HTTPS. Do not run vendor **Purge All** on shared/ambiguous physical Cache roots.
-- Server-scoped Guard and Status Pages extensions recognize canonical native public/run subdirectories. Extension 404 uses the observed HTTP baseline; 502/50x uses the actual served source. Existing-file replacement remains separately ownership-checked.
+- Server-scoped Guard and Status Pages extensions recognize canonical native public/run subdirectories. Extension 404 uses the observed HTTP baseline; identical content needs no Apply and does not establish Recovery. Unmanaged 502/50x Recheck and preflight use the same actual served-file source, not an unrelated HTTP response. Existing-file replacement remains separately ownership-checked.
 - The Nginx TLS default policy leaves existing named HTTPS sites and certificates alone, and refuses unsupported listener/default-server conflicts. Status Pages HTTP/80, HTTPS/443, and application-layer pages have different delivery and recovery scopes.
 
 **Verified reference, not a universal support promise:** non-production **aaPanel 8.0.7**, Nginx, PHP-FPM **8.1/8.5** on representative sites. Other aaPanel/Nginx/PHP writer layouts are inspected by capability, not arbitrarily rejected by version, but a write requires a supported real source/ownership contract. See [installed-native QA evidence, exact candidate and remaining coverage](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), [feature/compatibility backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [TLS/Status Pages scope](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). **Publishing a Stable Release is not a claim of comprehensive Production certification or permission to deploy to Production.**
