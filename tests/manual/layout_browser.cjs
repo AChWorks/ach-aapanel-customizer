@@ -112,6 +112,16 @@ async function walk(page, width, record) {
   assert.equal(await page.locator('#ach-guard-preview').isEnabled(),true);
   assert.equal(await page.locator('#ach-guard-apply').isEnabled(),false);
   await sample('protection');
+  const checkboxGeometry=await page.locator('.ach-guard-option').evaluate(label=>{
+    const input=label.querySelector('input'),copy=label.querySelector('.ach-option-copy');
+    const a=input.getBoundingClientRect(),b=copy.getBoundingClientRect();
+    return {columns:getComputedStyle(label).display, gap:b.left-a.right,
+      yDelta:a.top-b.top,labelHeight:label.getBoundingClientRect().height};
+  });
+  assert.equal(checkboxGeometry.columns,'grid');
+  assert.ok(checkboxGeometry.gap>=6&&checkboxGeometry.gap<=12&&
+    Math.abs(checkboxGeometry.yDelta)<=5&&checkboxGeometry.labelHeight>=28,
+    JSON.stringify(checkboxGeometry));
   await clickStage(page,'data-task','cache');
   for(const key of ['inspect','connect','configure','clear','bridge']){
     await clickStage(page,'data-cache-task',key);
@@ -126,7 +136,31 @@ async function walk(page, width, record) {
   for(const key of ['debug','cron','xmlrpc','https']){
     await clickStage(page,'data-wp-task',key);
     assert.equal(await page.locator('#ach-wp-settings-apply').isEnabled(),false);
+    assert.equal(await page.locator('p[data-wp-field="https"]').isVisible(),key==='https');
     await sample('wordpress '+key);
+    if(key==='cron'){
+      const composition=await page.locator('#ach-content').evaluate(main=>{
+        main.scrollTop=0;
+        const c=main.getBoundingClientRect(), context=main.querySelector('#ach-website-context');
+        const b=main.querySelector('#ach-wp-settings-recheck').getBoundingClientRect();
+        const bg=getComputedStyle(main.querySelector('#ach-wp-settings-recheck')).backgroundColor;
+        const border=getComputedStyle(main.querySelector('#ach-wp-settings-interval')).borderTopColor;
+        return {contextHeight:context.getBoundingClientRect().height,actionTop:b.top-c.top,
+          actionBottom:b.bottom-c.top,visibleHeight:main.clientHeight,
+          contentHeight:main.scrollHeight,primaryBackground:bg,inputBorder:border};
+      });
+      assert.equal(composition.primaryBackground,'rgb(22, 122, 47)');
+      const luminance=(color)=>color.match(/\d+/g).slice(0,3).map(Number).reduce((sum,v,i)=>{
+        v/=255;return sum+[.2126,.7152,.0722][i]*(v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+      },0);
+      assert.ok(1.05/(luminance(composition.inputBorder)+.05)>=3,
+        'Enabled input boundary contrast: '+composition.inputBorder);
+      if(width>=1024) {
+        assert.ok(composition.contextHeight<=100,JSON.stringify(composition));
+        assert.ok(composition.actionBottom<=composition.visibleHeight,JSON.stringify(composition));
+      }
+      console.log('TASK_COMPOSITION',width,JSON.stringify(composition));
+    }
   }
   await clickStage(page,'data-task','routing');
   for(const key of ['diagnostics','hosts','reconcile']){
@@ -164,6 +198,8 @@ async function walk(page, width, record) {
   await openDestination(page,'status');
   await clickStage(page,'data-status-mode','design');
   await sample('error design');
+  assert.equal(await page.locator('#ach-status-site-id').isVisible(),false,
+    'Global branding does not need an irrelevant disabled site field');
   const local=page.locator('#ach-status-design-result');
   await page.locator('#ach-status-save').click();
   assert.match(await local.innerText(),/Saving global branding/);
@@ -209,6 +245,8 @@ async function walk(page, width, record) {
   await page.locator('#ach-status-template').selectOption('unbound');
   await sample('error fallback');
   await selectStatusSite(page);
+  assert.equal(await page.locator('#ach-status-site-id').isVisible(),true,
+    'Website branding keeps exact explicit scope selection visible');
   await clickStage(page,'data-status-mode','site');
   await page.locator('#ach-status-template').selectOption('404');
   assert.equal(await local.isVisible(),false,'New scope clears local editor result');
@@ -273,6 +311,23 @@ async function walk(page, width, record) {
   await openDestination(page,'activity');
   await resolveLatest(page,'get_activity',{status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
   await sample('activity');
+  await page.locator('#ach-activity-refresh').click();
+  const diagnostic='<img src=x onerror=alert(1)>';
+  await resolveLatest(page,'get_activity',{status:true,schema:1,read_only:true,configured_level:'INFO',
+    entries:[{schema:1,time_utc:'2026-11-24T08:51:33+00:00',level:'ERROR',module:'websites',
+      action:'nginx_guard_manage',stage:'recheck',outcome:'Needs Review',target:'site:7',
+      detail:diagnostic,error_class:'GuardError',operation_id:'a'.repeat(32),recovery_id:'b'.repeat(32)}]});
+  const details=page.locator('#ach-activity-rows .ach-event-detail').first();
+  assert.equal(await details.getAttribute('open'),null);
+  assert.equal(await details.locator('p').first().isVisible(),false);
+  await details.locator('summary').click();
+  assert.match(await details.innerText(),/Operation ID: a{32}/);
+  assert.match(await details.innerText(),/Recovery ID: b{32}/);
+  assert.ok((await page.locator('#ach-activity-rows .ach-event-reason').innerText()).includes(diagnostic));
+  assert.equal(await page.locator('#ach-activity-rows img').count(),0);
+  await sample('activity evidence expanded');
+  await details.locator('summary').click();
+  await sample('activity compact');
   const requests=await page.evaluate(()=>window.__qaRequests.map(x=>
     new URL(x.options.url,location.href).searchParams.get('s')));
   // The deliberate mock branding save is the only write permitted in the walk.

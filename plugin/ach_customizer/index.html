@@ -31,13 +31,14 @@
   #ach-customizer, #ach-customizer * { box-sizing:border-box; }
   #ach-customizer {
     --ach-surface:#fff; --ach-sidebar-bg:#f0f0f1; --ach-soft:#f8f9fa;
-    --ach-text:#333; --ach-muted:#666; --ach-line:#e1e1e1;
+    --ach-text:#29343d; --ach-muted:#52616c; --ach-line:#dce2e5;
+    --ach-control-line:#8996a0;
     --ach-green:#20a53a; --ach-green-hover:#1d9534;
     --ach-primary-fill:#167a2f; --ach-primary-fill-hover:#146f2b;
-    --ach-danger:#bd3935; --ach-warn:#986615; --ach-focus:#20a53a;
+    --ach-danger:#a92e2b; --ach-warn:#986615; --ach-focus:#167a2f;
     /* Spacing tokens: controls (sm), independent stack items (md), major breaks (lg).
        Never position unrelated bordered sections by guessing sibling margins. */
-    --ach-space-xs:4px; --ach-space-sm:8px; --ach-space-md:12px; --ach-space-lg:20px;
+    --ach-space-xs:4px; --ach-space-sm:8px; --ach-space-md:12px; --ach-space-lg:16px;
     --ach-control-height:36px;
     color:var(--ach-text); background:var(--ach-surface); width:100%;
     height:min(718px,calc(100dvh - 90px)); min-height:280px;
@@ -51,7 +52,7 @@
     overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
   }
   #ach-customizer .ach-workspace {
-    display:grid; grid-template-columns:170px minmax(0,1fr); flex:1; min-height:0;
+    display:grid; grid-template-columns:156px minmax(0,1fr); flex:1; min-height:0;
     /* The host dialog owns its title. Only the scrollable content corners are clipped. */
     border-radius:0 0 10px 10px; overflow:hidden;
   }
@@ -62,20 +63,27 @@
   }
   #ach-customizer .ach-sidebar-label {
     display:block; padding:15px 18px 5px; color:#5b6974;
-    font-size:10px; font-weight:700; letter-spacing:.065em; text-transform:uppercase;
+    font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
   }
   #ach-customizer .ach-site-context {
-    display:flex; align-items:center; flex-wrap:wrap; gap:10px 16px;
-    margin:0; padding:var(--ach-space-md) 16px; border-radius:9px;
-    background:#f4f8f5; border:1px solid #d2e5d8;
+    display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px;
+    padding:8px 12px; border:1px solid var(--ach-line); border-radius:6px;
+    background:var(--ach-soft); min-width:0;
   }
-  #ach-customizer .ach-site-context > div { flex:1 1 200px; }
-  #ach-customizer .ach-site-context strong { display:block; font-size:13px; }
-  #ach-customizer .ach-site-context small { font-size:11px; }
-  #ach-customizer .ach-site-context label {
-    display:flex; align-items:center; gap:8px; font-weight:600; color:#34463b;
+  #ach-customizer .ach-site-context .ach-context-field {
+    display:flex; flex:1 1 260px; align-items:center; gap:8px; min-width:0;
   }
-  #ach-customizer .ach-site-context select { min-width:180px; max-width:270px; }
+  #ach-customizer .ach-site-context label { flex:none; font-weight:600; }
+  #ach-customizer .ach-site-context select { flex:1; width:100%; min-width:0; font-weight:400; }
+  #ach-customizer .ach-site-context small { flex:1 0 100%; margin:0; font-size:12px; }
+  #ach-customizer .ach-context-links {
+    display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center;
+  }
+  #ach-customizer .ach-main .ach-context-links button {
+    background:transparent; border:0; border-radius:3px; min-height:28px;
+    padding:2px 0; color:#235d32; text-decoration:underline; text-underline-offset:2px;
+    font-size:13px;
+  }
   /* Contextual help is optional disclosure, never a compulsory banner before
      controls. Keep safety/recovery guidance beside the affected action. */
   #ach-customizer .ach-view > h4:not(.ach-sr-only) { font-size:17px; line-height:1.35; }
@@ -124,7 +132,7 @@
   #ach-customizer .ach-main label:has(> input[type="checkbox"]:disabled) {
     color:#667681; cursor:not-allowed;
   }
-  #ach-customizer .ach-php-selection > .ach-inline-field { max-width:300px; }
+  #ach-customizer .ach-php-selection > .ach-inline-field { max-width:420px; }
   #ach-customizer .ach-workflow-label {
     display:block; margin:14px 0 5px; font-size:13px; color:#223846;
   }
@@ -152,7 +160,7 @@
   #ach-customizer .ach-main {
     display:flex; flex-direction:column; gap:var(--ach-space-md);
     overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
-    padding:16px 20px 28px; min-width:0; min-height:0; scrollbar-gutter:stable;
+    padding:16px 20px 24px; min-width:0; min-height:0; scrollbar-gutter:stable;
     background:var(--ach-surface);
   }
   #ach-customizer .ach-main h4 {
@@ -176,14 +184,14 @@
     background:#fff8eb; color:#77510f; border-color:#e8c68e; font-weight:600;
   }
   #ach-customizer .ach-view > p.ach-note { padding:0; border:0; background:transparent; }
-  #ach-customizer .ach-home-intro { font-size:14px; line-height:1.6; color:#445566; max-width:66ch; }
+  @media (max-width:460px) { #ach-customizer #ach-status-preview-surface { padding:8px 0; border:0; background:transparent; } }
   #ach-customizer .ach-task-launch-grid {
     display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
     gap:12px; margin:0 0 8px;
   }
   #ach-customizer .ach-main button.ach-task-link {
-    display:block; width:100%; min-height:112px; text-align:left;
-    padding:16px; background:#fff; border:1px solid #d5dfe4; border-radius:10px;
+    display:block; width:100%; min-height:88px; text-align:left;
+    padding:12px 16px; background:#fff; border:1px solid var(--ach-control-line); border-radius:6px;
     color:var(--ach-text); line-height:1.5; white-space:normal;
   }
   #ach-customizer .ach-task-link strong { display:block; font-size:15px; margin-bottom:5px; }
@@ -203,33 +211,24 @@
   #ach-customizer .ach-note > :is(.ach-scroll, button, iframe, div:not([class])) {
     margin-block-start:var(--ach-space-md);
   }
-  /* A checkbox label can contain text, <code> and emphasis. Flexbox
-     treats each text run as a separate flex item and crushes words into
-     vertical columns in the aaPanel modal. Keep ordinary labels in inline
-     text flow; reserve a two-column layout for explicitly wrapped copy. */
+  /* Wrap each checkbox label's whole copy in one text column. */
   #ach-customizer .ach-main .ach-note > label:has(> input[type="checkbox"]) {
-    display:block; margin-block:var(--ach-space-md) 0;
+    margin-block:var(--ach-space-md) 0;
   }
-  #ach-customizer .ach-main .ach-note > label.ach-guard-option:has(> input[type="checkbox"]) {
-    display:grid; grid-template-columns:16px minmax(0,1fr); align-items:start;
-    column-gap:10px; min-width:0;
-  }
-  #ach-customizer .ach-guard-option > input[type="checkbox"] { margin:3px 0 0; }
-  #ach-customizer .ach-guard-option > span { display:block; min-width:0; }
-  #ach-customizer .ach-guard-option strong { display:block; color:#344653; }
-  #ach-customizer .ach-guard-option small { margin:4px 0 0; font-size:12px; }
-  /* Follow the measured Nginx label / 150px control rhythm. Two compact
-     setting columns use the Customizer's wider evidence-oriented dialog. */
+  #ach-customizer .ach-option-copy { display:block; min-width:0; overflow-wrap:anywhere; }
+  #ach-customizer .ach-option-copy > small { margin:4px 0 0; font-size:12px; }
+  #ach-customizer .ach-option-copy > strong { display:block; }
+  /* Labels sit directly above their controls; the grid reflows as a unit. */
   #ach-customizer .ach-fields, #ach-customizer .ach-status-fields {
-    display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
-    gap:var(--ach-space-sm) 18px; margin:var(--ach-space-md) 0;
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));
+    gap:var(--ach-space-md) 16px; margin:var(--ach-space-md) 0;
   }
   #ach-customizer .ach-fields > div, #ach-customizer .ach-status-fields > div {
-    display:grid; grid-template-columns:minmax(0,1fr) minmax(0,150px);
+    display:grid; grid-template-columns:minmax(0,1fr); row-gap:4px;
     align-items:center; column-gap:10px; min-width:0; min-height:40px;
   }
   #ach-customizer .ach-fields label, #ach-customizer .ach-status-fields label {
-    display:block; margin:0; font-size:12px; font-weight:400;
+    display:block; margin:0; font-size:13px; font-weight:500;
     color:#4b5964; overflow-wrap:anywhere;
   }
   #ach-customizer .ach-fields input:not([type="checkbox"]),
@@ -237,11 +236,12 @@
   #ach-customizer .ach-status-fields input:not([type="checkbox"]) {
     display:block; width:100%; min-width:0; max-width:none; margin:0;
   }
+  #ach-customizer .ach-fields:has(#ach-status-scope option[value="global"]:checked) > .ach-status-site-field { display:none; }
   #ach-customizer .ach-fields > .ach-field-site {
-    grid-column:1/-1; grid-template-columns:minmax(0,175px) minmax(0,220px) minmax(0,1fr);
+    grid-column:1/-1; grid-template-columns:minmax(0,1fr);
   }
   #ach-customizer .ach-field-site > .ach-controls,
-  #ach-customizer .ach-field-site > small { grid-column:2/-1; margin-top:var(--ach-space-xs); }
+  #ach-customizer .ach-field-site > small { grid-column:1; margin-top:var(--ach-space-xs); }
   #ach-customizer .ach-table-skeleton {
     display:grid; gap:15px; padding:15px 12px;
     min-height:160px; align-content:start;
@@ -261,7 +261,7 @@
   #ach-customizer .ach-main select,
   #ach-customizer .ach-main textarea {
     appearance:auto; min-width:0; max-width:100%; min-height:var(--ach-control-height); height:auto;
-    padding:5px 10px; border:1px solid #d4dade; border-radius:8px;
+    padding:6px 10px; border:1px solid var(--ach-control-line); border-radius:6px;
     background:#fff; color:var(--ach-text); font:inherit; line-height:max(20px,1.25em);
     transition:border-color .12s ease, box-shadow .12s ease;
   }
@@ -270,21 +270,20 @@
   #ach-customizer .ach-main select:disabled { background:#f4f6f7; color:#75818a; }
   #ach-customizer .ach-main input[type="checkbox"] {
     appearance:auto; width:16px; height:16px; min-width:16px;
-    padding:0; margin:0 6px 0 0; vertical-align:middle; accent-color:var(--ach-green);
+    padding:0; margin:3px 0 0; vertical-align:middle; accent-color:var(--ach-green);
   }
   #ach-customizer .ach-main label:has(> input[type="checkbox"]) {
-    display:block; min-width:0; line-height:1.6;
+    display:grid; grid-template-columns:16px minmax(0,1fr);
+    align-items:start; column-gap:8px; min-width:0; min-height:28px;
+    padding:4px 0; line-height:1.5; font-size:14px; font-weight:400; cursor:pointer;
   }
   #ach-customizer .ach-switches { display:flex; flex-wrap:wrap; gap:var(--ach-space-md) 20px; margin:var(--ach-space-md) 0; }
-  /* Monitor switches contain only a checkbox and one plain-text label. */
-  #ach-customizer .ach-main .ach-switches label:has(> input[type="checkbox"]) {
-    display:inline-flex; align-items:center; gap:4px; cursor:pointer;
-  }
-  #ach-customizer .ach-switches input { margin:0; }
+  #ach-customizer .ach-switches label { flex:0 1 auto; }
+  #ach-customizer .ach-controls > label:has(> input[type="checkbox"]) { flex:1 1 100%; }
   #ach-customizer .ach-main button {
     appearance:none; display:inline-flex; align-items:center; justify-content:center;
-    min-height:var(--ach-control-height); max-width:100%; padding:5px 12px; border:1px solid #cbd3d8;
-    border-radius:8px; background:#fff; color:#374151; font:inherit; line-height:20px;
+    min-height:var(--ach-control-height); max-width:100%; padding:6px 12px; border:1px solid var(--ach-control-line);
+    border-radius:6px; background:#fff; color:#374151; font:inherit; line-height:20px;
     white-space:normal; text-align:center; cursor:pointer;
     transition:background-color .12s ease, border-color .12s ease;
   }
@@ -302,7 +301,20 @@
   #ach-customizer .ach-main button.btn-warning {
     background:#fff8eb; border-color:#e8c68e; color:#79500e;
   }
-  #ach-customizer .ach-main button:disabled { opacity:.58; cursor:not-allowed; box-shadow:none; }
+  #ach-customizer .ach-main button:disabled {
+    opacity:1; background:#f1f3f4; border-color:#dce1e4;
+    color:#69757e; cursor:not-allowed; box-shadow:none;
+  }
+  #ach-customizer .ach-main button.ach-next:not(:disabled),
+  #ach-customizer .ach-action-set:not(:has(.ach-commit:not(:disabled))) button.ach-check:not(:disabled),
+  #ach-customizer .ach-main button.ach-commit:not(:disabled) {
+    color:#fff; background:var(--ach-primary-fill); border-color:var(--ach-primary-fill);
+  }
+  #ach-customizer .ach-main button.ach-next:hover:not(:disabled),
+  #ach-customizer .ach-action-set:not(:has(.ach-commit:not(:disabled))) button.ach-check:hover:not(:disabled),
+  #ach-customizer .ach-main button.ach-commit:hover:not(:disabled) {
+    background:var(--ach-primary-fill-hover); border-color:var(--ach-primary-fill-hover);
+  }
   #ach-customizer .ach-main button:focus-visible, #ach-customizer .ach-sidebar button:focus-visible,
   #ach-customizer input:focus-visible, #ach-customizer select:focus-visible,
   #ach-customizer .ach-main:focus-visible {
@@ -314,9 +326,9 @@
   #ach-customizer .ach-main select:focus-visible {
     border-color:var(--ach-focus); box-shadow:0 0 0 2px rgba(41,125,192,.12);
   }
-  #ach-customizer table { width:100%; border-collapse:collapse; font-size:12px; }
+  #ach-customizer table { width:100%; border-collapse:collapse; font-size:13px; }
   #ach-customizer td, #ach-customizer th {
-    padding:9px 10px; text-align:start; border-bottom:1px solid #e8edf0;
+    padding:8px 10px; text-align:start; border-bottom:1px solid #e8edf0;
     overflow-wrap:anywhere; vertical-align:top;
   }
   #ach-customizer th { background:#f7f9fa; color:#586775; font-weight:600; white-space:nowrap; }
@@ -327,6 +339,10 @@
   #ach-customizer .ach-scroll > table { min-width:640px; }
   #ach-customizer .ach-scroll > table.ach-website-table,
   #ach-customizer .ach-scroll > table.ach-activity-table { min-width:760px; }
+  #ach-customizer .ach-website-table :is(th,td):first-child,
+  #ach-customizer .ach-change-table :is(th,td):first-child { min-width:48px; white-space:nowrap; }
+  #ach-customizer .ach-website-table td:nth-child(2) { font-weight:500; }
+  #ach-customizer .ach-website-table td:nth-child(4) { font-size:12px; }
   #ach-customizer .ach-controls { display:flex; align-items:center; flex-wrap:wrap; gap:var(--ach-space-sm); margin:var(--ach-space-md) 0 0; }
   /* A labeled field is taller than an action button. In mixed flex rows,
      align the actual select/input and button bottoms, not the center of
@@ -382,11 +398,14 @@
   #ach-customizer #ach-status-result[data-state="error"] {
     background:#fff5f3; border-color:#e8ccca; color:#a5312d;
   }
+  #ach-customizer .ach-preview-viewport { overflow-x:auto; max-width:100%; margin-top:8px; }
+  #ach-customizer .ach-preview-viewport:focus-visible { outline:2px solid var(--ach-focus); }
   #ach-customizer .ach-status-preview {
-    display:block; width:100%; min-height:440px; border:1px solid var(--ach-line);
+    display:block; width:100%; min-width:282px; min-height:clamp(440px,65dvh,680px); border:1px solid var(--ach-line);
     border-radius:8px; background:#fff;
   }
-  #ach-customizer .ach-status-metadata { font-family:ui-monospace,monospace; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #ach-customizer .ach-status-metadata { overflow-wrap:anywhere; white-space:pre-wrap; font-size:13px; }
+  #ach-customizer .ach-technical-report .ach-status-metadata { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px; }
   #ach-customizer .ach-status-comparison {
     max-width:100%; max-height:260px; margin:8px 0 14px; overflow:auto;
     border:1px solid var(--ach-line); border-radius:8px; padding:10px 12px;
@@ -400,36 +419,31 @@
   #ach-customizer .ach-activity-info { color:#3b6474; }
   #ach-customizer .ach-activity-table { table-layout:fixed; }
   #ach-customizer .ach-activity-table th:nth-child(1) { width:145px; }
-  #ach-customizer .ach-activity-table th:nth-child(2) { width:83px; }
+  #ach-customizer .ach-activity-table th:nth-child(2) { width:96px; }
   #ach-customizer .ach-activity-table th:nth-child(3) { width:170px; }
   #ach-customizer .ach-activity-table th:nth-child(4) { width:175px; }
-  #ach-customizer .ach-activity-table th:nth-child(5) { width:187px; }
+  #ach-customizer .ach-activity-table th:nth-child(5) { width:174px; }
   #ach-customizer .ach-activity-table td { overflow-wrap:anywhere; }
   #ach-customizer .ach-activity-table td:nth-child(2) { white-space:nowrap; }
-  #ach-customizer .ach-activity-time span { display:block; }
+  #ach-customizer .ach-activity-time span { display:block; white-space:nowrap; }
+  #ach-customizer .ach-event-detail { font-size:12px; }
+  #ach-customizer .ach-event-detail summary { cursor:pointer; color:#34546b; font-weight:500; }
+  #ach-customizer .ach-event-detail p { overflow-wrap:anywhere; margin:6px 0; }
+  #ach-customizer .ach-event-reason { color:var(--ach-muted); font-size:12px; margin:4px 0 0; }
+  #ach-customizer .ach-event-detail code { white-space:normal; overflow-wrap:anywhere; font-size:12px; }
   #ach-customizer .ach-main hr { border:0; border-top:1px solid var(--ach-line); margin:var(--ach-space-lg) 0; }
   #ach-customizer .ach-main small { display:block; margin-top:6px; color:var(--ach-muted); line-height:1.55; }
-  @media (max-width:880px) {
-    #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { grid-template-columns:minmax(0,1fr); }
-  }
   @media (max-width:720px) {
     #ach-customizer .ach-sidebar-label { display:none; }
     #ach-customizer .ach-site-context { align-items:stretch; }
-    #ach-customizer .ach-site-context label { flex-wrap:wrap; }
     #ach-customizer .ach-help dl { grid-template-columns:minmax(0,1fr); }
     #ach-customizer .ach-main { padding:14px 14px 26px; }
-    #ach-customizer .ach-fields, #ach-customizer .ach-status-fields { grid-template-columns:minmax(0,1fr); }
   }
   @media (max-width:600px) {
     #ach-customizer .ach-task-launch-grid { grid-template-columns:minmax(0,1fr); }
   }
   @media (max-width:460px) {
-    #ach-customizer .ach-fields > div, #ach-customizer .ach-status-fields > div,
-    #ach-customizer .ach-fields > .ach-field-site {
-      grid-template-columns:minmax(0,1fr); row-gap:var(--ach-space-xs); padding:3px 0;
-    }
-    #ach-customizer .ach-field-site > .ach-controls,
-    #ach-customizer .ach-field-site > small { grid-column:1; }
+    #ach-customizer .ach-fields > div, #ach-customizer .ach-status-fields > div { padding:2px 0; }
   }
   @media (max-height:550px) { #ach-customizer { height:calc(100dvh - 64px); min-height:200px; } }
   @media (prefers-reduced-motion:reduce) {
@@ -447,39 +461,38 @@
     color:#1d5130; font-weight:700;
   }
   #ach-customizer .ach-sidebar button:hover:not([aria-current="page"]) { background:#e6ece9; }
-  #ach-customizer .ach-task-heading { border-bottom:1px solid var(--ach-line); padding-bottom:12px; }
+  #ach-customizer .ach-task-heading { padding-bottom:0; }
   #ach-customizer .ach-mobile-nav button:focus-visible,
   #ach-customizer #ach-task-title:focus-visible {
     outline:2px solid var(--ach-focus); outline-offset:2px;
   }
   #ach-customizer #ach-breadcrumb { margin:0 0 5px; color:var(--ach-muted); font-size:12px; }
-  #ach-customizer #ach-task-title { margin:0 0 5px; font-size:21px; line-height:1.35; color:#263544; }
+  #ach-customizer #ach-task-title { margin:0 0 4px; font-size:22px; line-height:1.3; font-weight:600; color:#263544; }
   #ach-customizer #ach-task-intro { margin:0; max-width:75ch; color:#526171; font-size:13px; }
   #ach-customizer .ach-task-nav {
-    display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr));
-    gap:7px; padding:0 0 12px; border-bottom:1px solid var(--ach-line);
+    display:flex; flex-wrap:wrap; align-items:center;
+    gap:4px; padding:0 0 6px; border-bottom:1px solid var(--ach-line);
   }
   #ach-customizer .ach-main .ach-task-nav button {
-    min-height:42px; justify-content:flex-start; text-align:left; font-size:13px;
+    flex:0 1 auto; min-height:32px; padding:5px 9px;
+    border:1px solid transparent; border-radius:4px;
+    justify-content:flex-start; text-align:left; font-size:13px;
   }
   #ach-customizer .ach-main .ach-task-nav button[aria-current="page"] {
-    border-color:#81b59a; background:#edf6f0; color:#245a38; font-weight:700;
+    background:#edf6f0; border-color:#81b59a; color:#245a38; font-weight:600;
   }
-  #ach-customizer .ach-subtask-nav {
-    grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); padding:8px 0 12px;
-    background:transparent;
-  }
+  #ach-customizer .ach-subtask-nav { border:0; padding:0; }
   #ach-customizer .ach-task-effect {
-    margin:0; padding:10px 12px; border:1px solid #d2e1e6; border-radius:8px;
-    background:#f3f8fa; color:#334e60; line-height:1.5; overflow-wrap:anywhere;
+    margin:0; padding:0; color:#435765; font-size:13px;
+    line-height:1.5; overflow-wrap:anywhere;
   }
-  #ach-customizer .ach-activity-owner {
-    display:block; margin-top:8px; min-height:36px; font-size:12px;
+  #ach-customizer .ach-main button.ach-activity-owner {
+    display:block; margin-top:4px; min-height:28px; padding:3px 0; font-size:12px; border:0; background:transparent; color:#235d32; text-decoration:underline;
     white-space:normal; text-align:left;
   }
   #ach-customizer .ach-task-empty {
-    padding:16px; border:1px solid #d4e2ee; background:#f6f9fc;
-    border-radius:9px; color:#314c62;
+    padding:10px 12px; border:1px solid #d4e2ee; background:#f6f9fc;
+    border-radius:6px; color:#314c62;
   }
   #ach-customizer .ach-task-empty strong { display:block; font-size:15px; }
   #ach-customizer .ach-task-empty p { margin:7px 0 12px; }
@@ -513,7 +526,14 @@
     #ach-customizer .ach-sidebar button[aria-current="page"] {
       box-shadow:inset 3px 0 0 var(--ach-primary-fill); border:0;
     }
-    #ach-customizer .ach-main { flex:1; min-height:0; }
+    #ach-customizer .ach-main { flex:1; min-height:0; gap:8px; padding:12px 14px 20px; }
+    #ach-customizer .ach-task-heading #ach-task-title { font-size:20px; }
+    #ach-customizer .ach-main .ach-task-nav button { min-height:32px; padding:4px 7px; }
+  }
+  @media (max-width:460px) {
+    #ach-customizer .ach-site-context .ach-context-field { flex-wrap:wrap; flex-basis:100%; }
+    #ach-customizer .ach-main .ach-task-nav button { flex:1 1 42%; }
+    #ach-customizer .ach-task-empty p { margin:4px 0; }
   }
 
 </style>
@@ -555,22 +575,23 @@
           <button type="button" data-server-task="http" aria-current="false">Default HTTP/TLS</button>
           <button type="button" data-server-task="monitor" aria-current="false">Monitoring controls</button>
         </nav>
+        <div id="ach-website-context" class="ach-site-context" hidden>
+          <div class="ach-context-field">
+            <label for="ach-hosts-site-id">Website</label>
+            <select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select>
+          </div>
+          <div class="ach-context-links">
+            <button id="ach-website-browse" type="button">Browse websites</button>
+            <button id="ach-website-error-pages" type="button">Error pages (choose scope)</button>
+          </div>
+          <small id="ach-website-context-status" role="status" aria-live="polite">Loading website list…</small>
+        </div>
         <div id="ach-site-required" class="ach-task-empty" hidden>
           <strong id="ach-site-required-title">Choose a website to continue</strong>
-          <p id="ach-site-required-detail">This task needs an exact native aaPanel website. Select it below, or browse the website list to find the right ID and name.</p>
-          <button type="button" id="ach-choose-website">Browse websites</button>
-        </div>
-        <div id="ach-website-context" class="ach-site-context" hidden>
-          <div><strong>Selected website</strong><small>Targets website tasks; supplies a log source for origin-wide attack protection. Server effects are separate.</small><small id="ach-website-context-status" role="status" aria-live="polite">Open Websites to load the native site list.</small></div>
-          <label for="ach-hosts-site-id">Website
-            <select id="ach-hosts-site-id" disabled><option value="">Load the website inventory first</option></select>
-          </label>
-          <button id="ach-website-browse" type="button">Browse websites</button>
-          <button id="ach-website-error-pages" type="button">Error pages (choose scope there)</button>
+          <p id="ach-site-required-detail">Use the selector above or browse all website pages.</p>
+          <div class="ach-context-links"><button type="button" id="ach-choose-website">Browse websites</button></div>
         </div>
         <section class="ach-view" id="ach-panel-overview" aria-label="Home and monitoring" data-view="overview" role="region">
-      <h4 data-home-only>Home</h4>
-      <p class="ach-home-intro" data-home-only>Choose what you want to do. Customizer checks current sources first and shows the exact target and effect before a change.</p>
       <div class="ach-task-launch-grid" data-home-only aria-label="Common tasks">
         <button id="ach-overview-browse-sites" type="button" class="ach-task-link">
           <strong>Manage a website</strong><span>Choose a site, review changes, protection, WordPress and Cache.</span>
@@ -593,9 +614,9 @@
         <summary>Advanced: plugin monitoring controls</summary>
         <p>These controls determine whether Customizer inspections and related workflows are available. They do not stop PHP or Nginx services or enable automatic repair. Disabling the overall or PHP check also suspends any separately enabled PHP auto-repair.</p>
         <div class="ach-switches">
-          <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /> Overall Monitor</label>
-          <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /> Website inventory</label>
-          <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" disabled /> PHP-FPM preview</label>
+          <label for="ach-monitor-enabled"><input id="ach-monitor-enabled" type="checkbox" data-monitor-control="overall" disabled /><span class="ach-option-copy">Overall Monitor</span></label>
+          <label for="ach-site-enabled"><input id="ach-site-enabled" type="checkbox" data-monitor-control="site_inventory" disabled /><span class="ach-option-copy">Website inventory</span></label>
+          <label for="ach-fpm-enabled"><input id="ach-fpm-enabled" type="checkbox" data-monitor-control="php_fpm_file_preview" disabled /><span class="ach-option-copy">PHP-FPM preview</span></label>
         </div>
         <p id="ach-overview-control-result" role="status" aria-live="polite" data-state="info">Change a Monitor control to update its saved state.</p>
         <p id="ach-state-revision" role="status">Monitor state unavailable</p>
@@ -603,7 +624,7 @@
     </section>
     <section class="ach-view" id="ach-panel-websites" aria-label="Website list and baseline" data-view="websites" role="region" hidden>
       <h4>Website list</h4>
-      <p class="ach-note">Browse native aaPanel website records and select a site above for routing or Cache checks. Database names do not prove public DNS or live routing.</p>
+      <p class="ach-note">Native website records; not proof of live routing or public DNS.</p>
       <div class="ach-toolbar">
         <p id="ach-sites-status" role="status" aria-live="polite">Open this section to load native website inventory.</p>
         <button id="ach-sites-refresh" type="button">Refresh websites</button>
@@ -613,12 +634,12 @@
       <div class="ach-note" aria-label="Native website lifecycle Monitor">
         <strong>Website lifecycle changes (read-only)</strong>
         <p>Compare all supported native aaPanel site IDs, site keys, roots, enabled status and bound domain/port records to the last explicitly saved baseline. Does not inspect effective Nginx routing, PHP, DNS or live content. All native site pages are inspected; new/removed sites and aaPanel DB changes are never automatically enforced.</p>
-        <div class="ach-controls"><button type="button" id="ach-site-changes-compare">Compare website records</button></div>
+        <div class="ach-controls"><button type="button" id="ach-site-changes-compare" class="ach-next">Compare website records</button></div>
         <p id="ach-site-changes-summary" class="ach-inspection-summary" data-tone="neutral" role="status" aria-live="polite">No comparison yet. Choose Compare website records to see what changed.</p>
         <details class="ach-technical-report"><summary>Comparison source details (expand when needed)</summary>
           <p id="ach-site-changes-status" role="status">No baseline comparison loaded.</p>
         </details>
-        <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Change</th><th>Site key</th><th>Changed database fields</th></tr></thead><tbody id="ach-site-changes-rows"></tbody></table></div>
+        <div class="ach-scroll"><table class="ach-change-table"><thead><tr><th>Site ID</th><th>Change</th><th>Site key</th><th>Changed database fields</th></tr></thead><tbody id="ach-site-changes-rows"></tbody></table></div>
         <hr />
         <p><strong>Accept baseline for selected website only</strong></p>
         <p>Choose a website from the native selector above, Compare website records, and review its before/after state. This updates <em>only that site's</em> record in the saved plugin baseline; other pending site changes remain visible and unaccepted. No Nginx or PHP settings are changed.</p>
@@ -645,7 +666,7 @@
         <strong>Local Hosts — one-click removal</strong>
         <p>Detected loopback mappings from this server's current <code>/etc/hosts</code> appear here after successful or failed WordPress installation, even if the site no longer exists in aaPanel. Choose the hostname and click Remove. Only that hostname's loopback mappings are removed; external DNS and other Hosts names remain unchanged. No automatic deletion or extra approval checkbox.</p>
         <div class="ach-controls">
-          <button id="ach-hosts-alias-refresh" type="button">Refresh local aliases</button>
+          <button id="ach-hosts-alias-refresh" type="button" class="ach-next">Refresh local aliases</button>
           <div class="ach-inline-field"><label for="ach-hosts-alias-select">Detected hostname</label>
             <select id="ach-hosts-alias-select" disabled><option value="">No aliases inspected</option></select></div>
           <button id="ach-hosts-alias-remove" type="button" class="btn btn-warning" disabled>Remove selected hostname</button>
@@ -667,10 +688,10 @@
         <label for="ach-hosts-removal-domain">Loopback alias from latest inspection</label>
         <select id="ach-hosts-removal-domain" disabled><option value="">Inspect a selected website first</option></select>
         <p id="ach-hosts-removal-why" class="ach-availability" data-state="blocked" role="status">Not available: inspect the selected website and review an unwanted alias.</p>
-        <label><input type="checkbox" id="ach-hosts-removal-reviewed" disabled /> I verified this alias is unintended and approve a recoverable, origin-local /etc/hosts edit.</label>
+        <label><input type="checkbox" id="ach-hosts-removal-reviewed" disabled /><span class="ach-option-copy">I verified this alias is unintended and approve a recoverable, origin-local /etc/hosts edit.</span></label>
         <div class="ach-controls"><button id="ach-hosts-removal-button" type="button" class="btn btn-warning" disabled>Remove selected loopback alias</button></div>
         <p id="ach-hosts-recovery-why" class="ach-availability" data-state="blocked" role="status">No verified hosts recovery is available for this selection.</p>
-        <label><input type="checkbox" id="ach-hosts-restore-reviewed" disabled /> I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</label>
+        <label><input type="checkbox" id="ach-hosts-restore-reviewed" disabled /><span class="ach-option-copy">I reviewed the saved Recovery ID and approve restoring the exact original file only if it has not changed.</span></label>
         <div class="ach-controls"><button id="ach-hosts-restore-button" type="button" class="btn btn-warning" disabled>Restore saved local hosts file</button></div>
       </details>
       </div>
@@ -682,7 +703,7 @@
           <p>On supported aaPanel 8.0.7 Nginx sources, the witness records failure evidence for individual WP Toolkit operations. It is not required for inspecting or removing a local alias, even if that website has already been removed from aaPanel.</p>
         </details>
         <p id="ach-wp-terminal-status" role="status" aria-live="polite">Inspect the optional read-only witness policy before enabling.</p>
-        <label><input id="ach-wp-terminal-reviewed" type="checkbox" /> Enable optional detailed failed-install diagnostics. Alias removal above works even without this watcher; it never edits /etc/hosts automatically.</label>
+        <label><input id="ach-wp-terminal-reviewed" type="checkbox" /><span class="ach-option-copy">Enable optional detailed failed-install diagnostics. Alias removal above works even without this watcher; it never edits /etc/hosts automatically.</span></label>
         <div class="ach-controls">
           <button type="button" id="ach-wp-terminal-refresh">Inspect witness policy</button>
           <button type="button" id="ach-wp-terminal-recheck" disabled>Recheck current witness</button>
@@ -692,7 +713,7 @@
         <p id="ach-wp-terminal-recheck-result" role="status" aria-live="polite"></p>
         <details class="ach-help"><summary>Resolve an irrecoverable stale witness</summary>
           <p>After Emergency disable, an unverified witness can be discarded by explicit approval only when the native task is no longer active. This never edits /etc/hosts or any WordPress files.</p>
-          <label><input id="ach-wp-terminal-abandon-reviewed" type="checkbox" /> I verified that setup is no longer active and accept discarding this unverified witness without editing Hosts.</label>
+          <label><input id="ach-wp-terminal-abandon-reviewed" type="checkbox" /><span class="ach-option-copy">I verified that setup is no longer active and accept discarding this unverified witness without editing Hosts.</span></label>
           <button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" disabled>Discard stale witness</button>
         </details>
       </div>
@@ -743,17 +764,16 @@
       <hr />
       </div>
       <div class="ach-workflow" data-routing-group="protection">
-      <div class="ach-note" aria-label="Native site sensitive-path protection">
-        <strong>Protect sensitive website files — optional</strong>
-        <p>Block common configuration files, backups and debug logs, plus PHP scripts inside upload folders, for the selected website. Ordinary downloads and certificate verification still work.</p>
+      <div class="ach-note ach-action-set" aria-label="Native site sensitive-path protection">
+        <p>Block access to sensitive files, backups, debug logs and PHP in upload folders. Ordinary downloads and certificate verification still work.</p>
         <details class="ach-help">
           <summary>What changes when I enable this?</summary>
           <p>Customizer adds one recoverable rule to this website's Nginx configuration, checks the syntax and reloads the shared Nginx service. It then checks the actual HTTP/80 response. Restore removes only that managed rule, with another Nginx reload. Nothing is enabled automatically.</p>
           <p>Protected paths include nested <code>.env</code> and <code>.htaccess</code>, backup folders, database dumps, WordPress config backups and PHP execution in uploads/media/tmp. Ordinary files and <code>.well-known</code>/OAuth/ACME remain accessible. This is not a file scanner or a directory-listing toggle. Custom Nginx locations may need their own review; after external changes, run Recheck.</p>
         </details>
-        <label class="ach-guard-option"><input type="checkbox" id="ach-guard-block-xmlrpc" /><span><strong>Also block <code>/xmlrpc.php</code> at Nginx</strong><small>Optional. Leave this off if your website needs XML-RPC. Do not combine it with Customizer's separate WordPress XML-RPC blocker on the same site. Both options use different protection methods.</small></span></label>
+        <label class="ach-guard-option"><input type="checkbox" id="ach-guard-block-xmlrpc" /><span class="ach-option-copy"><strong>Also block <code>/xmlrpc.php</code> at Nginx</strong><small>Optional. Leave this off if your website needs XML-RPC. Do not combine it with Customizer's separate WordPress XML-RPC blocker on the same site. Both options use different protection methods.</small></span></label>
         <div class="ach-controls">
-          <button id="ach-guard-preview" type="button" disabled>Check protection readiness</button>
+          <button id="ach-guard-preview" type="button" disabled class="ach-check">Check protection readiness</button>
           <button id="ach-guard-recheck" type="button" disabled>Recheck current protection</button>
         </div>
         <p id="ach-guard-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Choose a native website, then run readiness check.</p>
@@ -761,7 +781,7 @@
           <p id="ach-guard-result" class="ach-status-metadata" role="status">No native protection inspection yet.</p>
         </details>
         <p id="ach-guard-apply-why" class="ach-availability" data-state="blocked" role="status">Select a website and check readiness before enabling protection.</p>
-        <div class="ach-controls"><button id="ach-guard-apply" type="button" class="btn btn-warning" disabled>Enable protection (reload Nginx)</button></div>
+        <div class="ach-controls"><button id="ach-guard-apply" type="button" class="ach-commit" disabled>Enable protection (reload Nginx)</button></div>
         <p id="ach-guard-restore-why" class="ach-availability" data-state="blocked" role="status">Select a website and Recheck to see whether Restore is available.</p>
         <div class="ach-controls"><button id="ach-guard-restore" type="button" class="btn btn-warning" disabled>Remove managed Guard (reload Nginx)</button></div>
       </div>
@@ -820,16 +840,7 @@
       </nav>
       <p class="ach-task-effect" id="ach-wp-task-effect" role="status" aria-live="polite">Change WP_DEBUG in this website's wp-config.php. Recheck the source before Apply or Restore.</p>
       <div class="ach-note" aria-label="Selected WordPress operational settings">
-        <strong>Current WordPress task</strong>
-        <p>Choose a setting above, Recheck its actual source, then Apply or Restore only that setting. No other WordPress task is changed automatically.</p>
-        <p><strong>Before changing WordPress HTTPS URLs:</strong> Make sure this website's HTTPS connection and certificate already work, or its admin pages may become unreachable.</p>
-        <details class="ach-help"><summary>What does each WordPress operation change?</summary>
-          <p><strong>Debug:</strong> changes one verified <code>wp-config.php</code> constant.</p>
-          <p><strong>System WP-Cron:</strong> creates a site-owned Cron task running PHP as <code>www</code>, then disables the WordPress page-load trigger.</p>
-          <p><strong>Block XML-RPC:</strong> creates an exact site-owned WordPress must-use plugin, returning HTTP 403 for <code>/xmlrpc.php</code> POST requests.</p>
-          <p><strong>HTTPS URLs:</strong> updates the existing <code>home</code> and <code>siteurl</code> database values from HTTP to HTTPS, preserving the verified hostname and path. It does not install SSL or change DNS, Nginx or other URLs automatically.</p>
-          <p>Restore reverses only the matching owned change. If another tool changed the source, run Recheck; never overwrite a foreign setting blindly. Exact recovery details appear after Recheck.</p>
-        </details>
+        <p data-wp-field="https" hidden><strong>Before changing WordPress HTTPS URLs:</strong> Make sure this website's HTTPS connection and certificate already work, or its admin pages may become unreachable.</p>
         <div class="ach-controls">
           <div class="ach-inline-field" hidden><label for="ach-wp-settings-kind">Operation (controlled by task buttons)</label>
             <select id="ach-wp-settings-kind">
@@ -843,12 +854,19 @@
           <div class="ach-inline-field" data-wp-field="cron" hidden><label for="ach-wp-settings-interval">Cron minute step (resets hourly)</label>
             <input id="ach-wp-settings-interval" type="number" min="1" max="59" step="1" value="5" disabled /></div>
         </div>
-        <div class="ach-controls">
-          <button type="button" id="ach-wp-settings-recheck" disabled>Recheck WordPress setting</button>
-          <button type="button" id="ach-wp-settings-apply" class="btn btn-warning" disabled>Apply selected setting</button>
-          <button type="button" id="ach-wp-settings-restore" class="btn btn-warning" disabled>Restore saved WordPress setting</button>
-        </div>
         <p id="ach-wp-settings-why" class="ach-availability" data-state="blocked" role="status">Choose a native website and Recheck. No WordPress file has been modified.</p>
+        <div class="ach-controls ach-action-set">
+          <button type="button" id="ach-wp-settings-recheck" class="ach-check" disabled>Recheck WordPress setting</button>
+          <button type="button" id="ach-wp-settings-apply" class="ach-commit" disabled>Apply selected setting</button>
+          <button type="button" id="ach-wp-settings-restore" disabled>Restore saved WordPress setting</button>
+        </div>
+        <details class="ach-help"><summary>What does each WordPress operation change?</summary>
+          <p><strong>Debug:</strong> changes one verified <code>wp-config.php</code> constant.</p>
+          <p><strong>System WP-Cron:</strong> creates a site-owned Cron task running PHP as <code>www</code>, then disables the WordPress page-load trigger.</p>
+          <p><strong>Block XML-RPC:</strong> creates an exact site-owned WordPress must-use plugin, returning HTTP 403 for <code>/xmlrpc.php</code> POST requests.</p>
+          <p><strong>HTTPS URLs:</strong> updates the existing <code>home</code> and <code>siteurl</code> database values from HTTP to HTTPS, preserving the verified hostname and path. It does not install SSL or change DNS, Nginx or other URLs automatically.</p>
+          <p>Restore reverses only the matching owned change. If another tool changed the source, run Recheck; never overwrite a foreign setting blindly. Exact recovery details appear after Recheck.</p>
+        </details>
         <details class="ach-technical-report"><summary>WordPress setting and Recovery evidence</summary>
           <p id="ach-wp-settings-result" class="ach-status-metadata" role="status" aria-live="polite">No WordPress settings source inspected.</p>
         </details>
@@ -858,8 +876,6 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-cache" aria-label="Website cache" data-view="cache" role="region" hidden>
-      <h4>FastCGI Cache</h4>
-      <p class="ach-note">Inspect FastCGI Cache sources and ownership before changing them. Native selected-site file clear is available only after a verified Applied Recheck and separate approval. Nginx Helper Purge All is a separate vendor operation; this plugin neither intercepts it nor certifies it as site-safe.</p>
       <nav class="ach-task-nav ach-subtask-nav" id="ach-cache-tasks" aria-label="Selected website Cache tasks">
         <button type="button" data-cache-task="inspect" aria-current="page">Inspect &amp; probe</button>
         <button type="button" data-cache-task="connect" aria-current="false">Connect WordPress</button>
@@ -873,11 +889,12 @@
       <details class="ach-help"><summary>What does the Cache audit check?</summary>
         <p>Reads the site's VHost/PHP snippets and aaPanel's top-level <code>0.fastcgi_cache.conf</code> source for zone paths, shared-directory Purge All risk, bypass/write rules, Host keys and ignored headers. Source inspection cannot prove effective routing, private-data safety, live Cache hits or safe vendor Purge All.</p>
       </details>
-      <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled>Inspect selected website FastCGI cache</button></div>
+      <div class="ach-controls"><button id="ach-cache-inspect-button" type="button" disabled class="ach-next">Inspect selected website FastCGI cache</button></div>
       <p id="ach-cache-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect Nginx cache sources and Nginx Helper presence.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-cache-result" class="ach-status-metadata" role="status">Select a native website above to inspect known FastCGI cache source statements. No files or caches are changed.</p>
       </details>
+      <details class="ach-help"><summary>Advanced: privacy probes and policy reference</summary>
       <p class="ach-note"><strong>Check private-request Cache headers:</strong> Use local test requests to see whether WordPress appears to bypass caching for fake cookies and Authorization headers. This is not a real logged-in user test. A faulty policy may cache a test response.</p>
       <details class="ach-help"><summary>What does this probe send and exclude?</summary>
         <p>Sends four synthetic HTTP/80 HEAD requests from localhost, observes native or site-owned Cache headers and checks homepage/WordPress REST bypass. It does not test real users, WooCommerce carts, HTTPS edges, vendor Purge All or private-data safety.</p>
@@ -890,6 +907,7 @@
       <p class="ach-note"><strong>Isolated cache policy reference (Preview only):</strong> for a verified PHP 8.1/8.5 FastCGI-cache website, show a proposed site-specific physical directory/zone and private request/response guards. No Apply, Reload or Purge is available. Generated source is NOT proof of native Nginx compatibility or safe integration.</p>
       <div class="ach-controls"><button id="ach-cache-plan-button" type="button" disabled>Preview isolated cache policy</button></div>
       <p id="ach-cache-plan-result" class="ach-status-metadata" role="status" aria-live="polite">Select a native website above; reference preview does not modify files.</p>
+      </details>
       </div>
       <div class="ach-workflow" data-cache-stage="connect" hidden>
       <div class="ach-note" aria-label="One-time WordPress Nginx Helper connection">
@@ -907,7 +925,7 @@
       </div>
       </div>
       <div class="ach-workflow" data-cache-stage="configure" hidden>
-      <div class="ach-note" aria-label="Guarded site-specific FastCGI Cache activation">
+      <div class="ach-note ach-action-set" aria-label="Guarded site-specific FastCGI Cache activation">
         <strong>Site-owned FastCGI Cache — manual Apply / Restore</strong>
         <p>Create an isolated FastCGI Cache for one verified website, with a separate approval and shared Nginx reload.</p>
         <p><strong>Not included:</strong> This does not enable Nginx Helper Purge All or certify the privacy of logged-in WooCommerce customers.</p>
@@ -915,15 +933,15 @@
           <p>Requires a verified aaPanel 8.0.7 Nginx HTTP/80 site with stock PHP 8.1/8.5 or an exact native WordPress wpfastcgi source match. A site-owned extension takes precedence over the matching PHP location while retaining its routing and headers; no aaPanel vendor source is edited. Nginx syntax, reload and the PHP route are verified. Shared WORDPRESS Cache and native <code>/purge</code> remain untouched, as do Nginx Helper automatic invalidation settings.</p>
         </details>
         <div class="ach-controls">
-          <button type="button" id="ach-cache-activation-preview" disabled>Check site-specific Cache Apply readiness</button>
+          <button type="button" id="ach-cache-activation-preview" class="ach-check" disabled>Check site-specific Cache Apply readiness</button>
           <button type="button" id="ach-cache-activation-recheck" disabled>Recheck Cache / recovery</button>
         </div>
         <p id="ach-cache-activation-result" class="ach-status-metadata" role="status" aria-live="polite">Choose a native website to check Apply readiness or inspect recovery.</p>
         <p id="ach-cache-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Not available yet: choose a website and run Check site-specific Cache Apply readiness. A Needs Review result cannot be approved.</p>
-        <label><input id="ach-cache-activation-reviewed" type="checkbox" aria-describedby="ach-cache-apply-why" disabled /> I reviewed the selected site's cache zone, physical directory, shared Nginx reload, and current source hashes.</label>
-        <div class="ach-controls"><button type="button" id="ach-cache-activation-apply" class="btn btn-warning" disabled>Apply site-specific Cache (reload Nginx)</button></div>
+        <label><input id="ach-cache-activation-reviewed" type="checkbox" aria-describedby="ach-cache-apply-why" disabled /><span class="ach-option-copy">I reviewed the selected site's cache zone, physical directory, shared Nginx reload, and current source hashes.</span></label>
+        <div class="ach-controls"><button type="button" id="ach-cache-activation-apply" class="ach-commit" disabled>Apply site-specific Cache (reload Nginx)</button></div>
         <p id="ach-cache-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore is unavailable until Recheck Cache / recovery confirms a saved, site-owned recovery. No verified recovery means no Restore.</p>
-        <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" disabled /> I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</label>
+        <label><input id="ach-cache-restore-reviewed" type="checkbox" aria-describedby="ach-cache-restore-why" disabled /><span class="ach-option-copy">I reviewed the saved recovery identity and approve restoring this site's Cache state. Nginx may reload; verified unactivated recovery does not.</span></label>
         <div class="ach-controls"><button type="button" id="ach-cache-activation-restore" class="btn btn-danger" disabled>Restore saved Cache / recovery</button></div>
       </div>
       </div>
@@ -935,7 +953,7 @@
         <p>The verified site-owned physical directory may contain earlier Cache generations and aliases. Physical isolation from peer sites is checked again before clearing. The operation does not modify Nginx, shared WORDPRESS Cache, Nginx Helper or saved recovery journals.</p>
       </details>
         <p id="ach-cache-clear-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm the selected site's Cache is Applied before file clear.</p>
-        <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" disabled /> I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</label>
+        <label><input id="ach-cache-clear-reviewed" type="checkbox" aria-describedby="ach-cache-clear-why" disabled /><span class="ach-option-copy">I approve removal of this selected site's verified cached response files. Other sites and recovery records must be preserved.</span></label>
         <div class="ach-controls"><button type="button" id="ach-cache-clear-files" class="btn btn-warning" disabled>Clear all selected-site Cache files</button></div>
         <p class="ach-note"><strong>Clear one cached URL:</strong> Remove verified Cache entries for one path on this site's primary hostname after a fresh Applied Recheck and approval. Other URLs and websites stay untouched.</p>
       <details class="ach-help"><summary>URL matching limits</summary>
@@ -944,7 +962,7 @@
         <label for="ach-cache-url-path">Cached URL path (for example, /news/ or /)</label>
         <input id="ach-cache-url-path" type="text" maxlength="1024" value="/" spellcheck="false" autocomplete="off" aria-describedby="ach-cache-url-why" />
         <p id="ach-cache-url-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Locked: Recheck must confirm this site's Cache is Applied; enter a canonical URL path.</p>
-        <label><input id="ach-cache-url-reviewed" type="checkbox" aria-describedby="ach-cache-url-why" disabled /> I approve removing only this site's exact URL Cache entries, leaving other paths and sites unchanged.</label>
+        <label><input id="ach-cache-url-reviewed" type="checkbox" aria-describedby="ach-cache-url-why" disabled /><span class="ach-option-copy">I approve removing only this site's exact URL Cache entries, leaving other paths and sites unchanged.</span></label>
         <div class="ach-controls"><button type="button" id="ach-cache-clear-url" class="btn btn-warning" disabled>Clear selected URL Cache</button></div>
       </div>
       <div class="ach-workflow" data-cache-stage="bridge" hidden>
@@ -962,15 +980,13 @@
       </div>
     </section>
     <section class="ach-view" id="ach-panel-php" aria-label="PHP shared services" data-view="php" role="region" hidden>
-      <h4>PHP-FPM · Shared service settings</h4>
-      <p class="ach-note">Check PHP service versions, see which sites share a pool and compare desired settings with saved configuration. Changes can affect multiple websites; viewing a report never applies changes.</p>
       <details class="ach-help"><summary>PHP-FPM change and recovery steps</summary><p>Discover installed PHP, inspect the service and affected sites, then preview the settings. Applying shared-service changes requires explicit preparation and approval; the recovery workflow remains available below.</p></details>
-      <div class="ach-controls"><button id="ach-php-discover" type="button">Refresh installed PHP</button></div>
-      <p id="ach-php-discovery-status" role="status" aria-live="polite">Use Refresh installed PHP to discover available versioned services. File presence does not verify running processes or enable Apply.</p>
       <div class="ach-controls ach-php-selection">
-        <div class="ach-inline-field"><label for="ach-php-version">Select installed PHP version</label>
+        <div class="ach-inline-field"><label for="ach-php-version">PHP service</label>
           <select id="ach-php-version" name="php_version" form="ach-php-form" disabled required><option value="">Discover PHP installations first</option></select></div>
+        <button id="ach-php-discover" type="button">Refresh installed PHP</button>
       </div>
+      <p id="ach-php-discovery-status" class="ach-task-effect" role="status" aria-live="polite">Discover installed services. File presence does not verify running processes or enable Apply.</p>
       <nav class="ach-task-nav ach-subtask-nav" id="ach-php-tasks" aria-label="PHP shared service tasks">
         <button type="button" data-php-task="inspect" aria-current="page">Inspect service &amp; sites</button>
         <button type="button" data-php-task="policy" aria-current="false">Policy &amp; preview</button>
@@ -979,7 +995,7 @@
       </nav>
       <p class="ach-task-effect" id="ach-php-task-effect" role="status" aria-live="polite">Inspect the selected PHP master process, socket and assigned native site files. This does not modify the shared service.</p>
       <div class="ach-workflow" data-php-stage="inspect">
-      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled>Inspect selected PHP service + site files (read-only)</button></div>
+      <div class="ach-controls"><button id="ach-php-runtime-check" type="button" disabled class="ach-next">Inspect selected PHP service + site files (read-only)</button></div>
       <p id="ach-php-runtime-summary" class="ach-inspection-summary" role="status" aria-live="polite" data-tone="neutral">Inspect the selected PHP service and site file assignments.</p>
       <details class="ach-technical-report"><summary>Technical evidence (expand when needed)</summary>
         <p id="ach-php-runtime-result" class="ach-status-metadata" role="status">Select a discovered PHP installation for read-only Linux process/socket inspection. This does not test HTTP, effective pool values or grant Apply.</p>
@@ -991,16 +1007,6 @@
       </table></div>
       </div>
       <div class="ach-workflow" data-php-stage="policy" hidden>
-      <details class="ach-help">
-        <summary>What do these PHP-FPM settings mean?</summary>
-        <dl>
-          <dt><code>pm.max_children</code></dt><dd>Maximum simultaneous PHP workers. Higher values may consume more memory.</dd>
-          <dt><code>pm.start_servers</code></dt><dd>Workers started when the service launches in dynamic mode.</dd>
-          <dt><code>pm.min_spare_servers</code> / <code>pm.max_spare_servers</code></dt><dd>Desired range of idle workers in dynamic mode.</dd>
-          <dt><code>pm.max_requests</code></dt><dd>Requests handled by a worker before recycling. Zero disables request-count recycling.</dd>
-        </dl>
-        <p>These are shared-pool settings, not per-website limits. Preview compares file/default values; it does not show actual worker memory usage.</p>
-      </details>
       <form id="ach-php-form">
         <div class="ach-fields">
           <div><label for="ach-max-children">pm.max_children</label><input id="ach-max-children" name="max_children" type="number" min="1" required /></div>
@@ -1011,6 +1017,20 @@
         </div>
         <button type="submit">Preview PHP-FPM settings (no changes)</button>
       </form>
+      <details class="ach-help">
+        <summary>What do these PHP-FPM settings mean?</summary>
+        <dl>
+          <dt><code>pm.max_children</code></dt><dd>Maximum simultaneous PHP workers. Higher values may consume more memory.</dd>
+          <dt><code>pm.start_servers</code></dt><dd>Workers started when the service launches in dynamic mode.</dd>
+          <dt><code>pm.min_spare_servers</code> / <code>pm.max_spare_servers</code></dt><dd>Desired range of idle workers in dynamic mode.</dd>
+          <dt><code>pm.max_requests</code></dt><dd>Requests handled by a worker before recycling. Zero disables request-count recycling.</dd>
+        </dl>
+        <p>These are shared-pool settings, not per-website limits. Preview compares file/default values; it does not show actual worker memory usage.</p>
+      </details>
+      <p id="ach-fpm-result" role="status" aria-live="polite"></p>
+      <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Configured / PHP default</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
+      <p id="ach-impact-summary" role="status" aria-live="polite">Shared PHP-FPM site attribution not loaded.</p>
+      <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-impact-rows"></tbody></table></div>
       <div class="ach-note" aria-label="Saved shared PHP-FPM Monitor policy">
         <strong>Saved shared PHP-FPM policy</strong>
         <p>Save your desired PHP settings for monitoring; Save alone does not change PHP. Optional automatic repair must be enabled separately and may reload the shared PHP service.</p>
@@ -1026,21 +1046,23 @@
         </div>
         <p id="ach-fpm-policy-status" role="status" aria-live="polite">Select an installed version and Preview to compare or save an explicit policy.</p>
         <p id="ach-fpm-policy-recheck-status" class="ach-status-metadata" role="status" aria-live="polite">Select a version and recheck saved policy against current PHP files.</p>
+        <details class="ach-help"><summary>Saved policy and affected-site evidence</summary>
         <div class="ach-scroll" aria-label="Saved-policy file changes"><table><thead><tr><th>Setting</th><th>Saved desired</th><th>Current file/default</th></tr></thead><tbody id="ach-fpm-policy-diff-rows"></tbody></table></div>
         <p id="ach-fpm-policy-impact" class="ach-status-metadata" role="status" aria-live="polite">No affected-site file mapping checked.</p>
         <div class="ach-scroll" aria-label="Saved-policy impacted site assignments"><table><thead><tr><th>Site ID</th><th>Native site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-fpm-policy-impact-rows"></tbody></table></div>
-        <div class="ach-controls" aria-label="Automatic PHP-FPM repair">
+        </details>
+      </div>
+      <div class="ach-note" aria-label="Automatic PHP-FPM repair">
+        <strong>Automatic repair (optional)</strong>
+        <p>May reload this shared PHP service. Saving a Monitor policy does not enable repair.</p>
+        <div class="ach-controls">
           <button id="ach-fpm-auto-refresh" type="button" disabled>Inspect automatic repair</button>
-          <label><input type="checkbox" id="ach-fpm-auto-reviewed" disabled /> Enable verified WordPress and aaPanel PHP-FPM regeneration repair of this entire shared service</label>
+          <label><input type="checkbox" id="ach-fpm-auto-reviewed" disabled /><span class="ach-option-copy">Enable verified WordPress and aaPanel PHP-FPM regeneration repair of this entire shared service</span></label>
           <button type="button" id="ach-fpm-auto-enable" disabled>Enable automatic repair</button>
           <button type="button" id="ach-fpm-auto-disable" disabled>Emergency disable automatic repair</button>
         </div>
         <p id="ach-fpm-auto-status" class="ach-status-metadata" role="status" aria-live="polite">Select a PHP version, inspect current automatic repair state, and recheck the saved policy before enabling. Normal install is disabled.</p>
       </div>
-      <p id="ach-fpm-result" role="status" aria-live="polite"></p>
-      <div class="ach-scroll"><table><thead><tr><th>Setting</th><th>Desired</th><th>Configured / PHP default</th></tr></thead><tbody id="ach-diff-rows"></tbody></table></div>
-      <p id="ach-impact-summary" role="status" aria-live="polite">Shared PHP-FPM site attribution not loaded.</p>
-      <div class="ach-scroll"><table><thead><tr><th>Site ID</th><th>Site key</th><th>PHP file assignment</th></tr></thead><tbody id="ach-impact-rows"></tbody></table></div>
       </div>
       <div class="ach-workflow" data-php-stage="apply" hidden>
       <p>Prepare is available only after a fresh file preview in Policy &amp; preview. Preparation is read-only; Apply requires the shared-service review below.</p>
@@ -1054,7 +1076,7 @@
         <p id="ach-fpm-operation-notice" class="ach-fpm-operation-notice" role="status" aria-live="polite" hidden></p>
         <div id="ach-fpm-review" hidden>
           <p id="ach-fpm-details"></p>
-          <label><input id="ach-fpm-approval" type="checkbox" /> I approve changing the selected PHP version’s shared [www] pool for all affected consumers.</label>
+          <label><input id="ach-fpm-approval" type="checkbox" /><span class="ach-option-copy">I approve changing the selected PHP version’s shared [www] pool for all affected consumers.</span></label>
           <div class="ach-controls"><button id="ach-fpm-commit" type="button" class="btn btn-danger" disabled>Apply shared PHP-FPM change</button></div>
         </div>
       </div>
@@ -1075,15 +1097,13 @@
         <p id="ach-fpm-recovery-impact" role="status" aria-live="polite">Current affected sites not inspected.</p>
         <div class="ach-scroll"><table><thead><tr><th>PHP-FPM setting</th><th>Current</th><th>Restore baseline</th></tr></thead><tbody id="ach-fpm-restore-rows"></tbody></table></div>
         <div id="ach-fpm-rollback-controls" hidden>
-          <label><input id="ach-fpm-rollback-approval" type="checkbox" /> I reviewed the selected version’s current shared-site impact and values, and approve restoring only its saved baseline and reloading that shared service.</label>
+          <label><input id="ach-fpm-rollback-approval" type="checkbox" /><span class="ach-option-copy">I reviewed the selected version’s current shared-site impact and values, and approve restoring only its saved baseline and reloading that shared service.</span></label>
           <div class="ach-controls"><button id="ach-fpm-rollback" type="button" class="btn btn-warning" disabled>Restore saved configuration</button></div>
         </div>
       </div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-status" aria-label="Error pages and default routing" data-view="status" role="region" hidden>
-      <h4>Error pages — design and delivery</h4>
-      <p class="ach-note">Preview and Save change branding only. Live site or shared routing changes use their own Recheck, approval and exact Recovery below; unsupported choices stay preview-only.</p>
       <nav class="ach-task-nav ach-subtask-nav" id="ach-status-modes" aria-label="Error page tasks">
         <button type="button" data-status-mode="design" aria-current="page">Design &amp; preview</button>
         <button type="button" data-status-mode="site" aria-current="false">Show on website</button>
@@ -1111,7 +1131,7 @@
         <div><label for="ach-status-scope">Branding scope</label><select id="ach-status-scope">
           <option value="global">Global defaults</option><option value="site">Website override</option>
         </select></div>
-        <div class="ach-field-site"><label for="ach-status-site-id">Website (native aaPanel inventory)</label>
+        <div class="ach-field-site ach-status-site-field"><label for="ach-status-site-id">Website (native aaPanel inventory)</label>
           <select id="ach-status-site-id" disabled><option value="">Select website scope first</option></select>
           <div class="ach-controls">
             <button id="ach-status-sites-retry" type="button" hidden>Refresh website list</button>
@@ -1120,7 +1140,7 @@
           <small id="ach-status-sites-state" role="status">Available websites load when selecting website scope.</small></div>
       </div>
       <div class="ach-note" id="ach-status-branding-read" aria-label="Saved branding source and recheck">
-        <strong>Saved branding source — required before live delivery checks</strong>
+        <strong>Saved branding</strong>
         <p id="ach-status-source" role="status">Branding not loaded.</p>
         <p id="ach-status-branding-guidance" role="status" aria-live="polite">Load saved branding for this scope before checking live delivery. Use Recheck saved branding below.</p>
         <div class="ach-controls"><button id="ach-status-load" type="button" aria-describedby="ach-status-branding-guidance">Recheck saved branding</button></div>
@@ -1136,7 +1156,7 @@
         <div><label for="ach-status-background">Background color</label><input id="ach-status-background" maxlength="7" placeholder="#f4f2eb" /></div>
         <div><label for="ach-status-foreground">Text color</label><input id="ach-status-foreground" maxlength="7" placeholder="#0b1718" /></div>
       </div>
-      <label><input id="ach-status-footer" type="checkbox" checked /> Show footer attribution</label>
+      <label><input id="ach-status-footer" type="checkbox" checked /><span class="ach-option-copy">Show footer attribution</span></label>
       <p class="ach-note" id="ach-status-color-notes">Accessibility recommendation: Preview your chosen colors and check readability before publishing. Low contrast is a warning, not a Save restriction.</p>
       <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
       <p id="ach-status-reset-why" class="ach-note" role="status" aria-live="polite">Reset changes only the selected saved branding preferences, not live error pages. Check the scope if needed, then select Reset to continue.</p>
@@ -1149,8 +1169,10 @@
       <p id="ach-status-workflow-note" class="ach-note" role="status" hidden>Preview only for this template and scope. No live Apply is supported.</p>
       <div id="ach-status-preview-surface" class="ach-note" aria-label="Offline status page preview" hidden>
         <strong>Offline preview — not installed on any website</strong>
-        <p id="ach-status-sha" class="ach-status-metadata" role="status"></p>
-        <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
+        <div class="ach-preview-viewport" tabindex="0" aria-label="Offline preview, scroll horizontally if needed">
+          <iframe id="ach-status-iframe" class="ach-status-preview" sandbox="" referrerpolicy="no-referrer" title="Sandboxed offline Status Page preview"></iframe>
+        </div>
+        <details class="ach-technical-report"><summary>Preview source hashes</summary><p id="ach-status-sha" class="ach-status-metadata" role="status"></p></details>
       </div>
       </div>
       <div class="ach-workflow" data-status-stage="site" hidden>
@@ -1185,10 +1207,10 @@
           <button id="ach-status-manage-recheck" type="button" disabled>Recheck selected site status</button>
         </div>
         <p id="ach-status-site-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a running website, a current source check and explicit approval.</p>
-        <label><input id="ach-status-manage-apply-approve" type="checkbox" aria-describedby="ach-status-site-apply-why" /> I approve the selected site's exact delivery: extension mode reloads shared Nginx; native-file mode backs up and replaces the site's existing 404.html/502.html without reload.</label>
+        <label><input id="ach-status-manage-apply-approve" type="checkbox" aria-describedby="ach-status-site-apply-why" /><span class="ach-option-copy">I approve the selected site's exact delivery: extension mode reloads shared Nginx; native-file mode backs up and replaces the site's existing 404.html/502.html without reload.</span></label>
         <div class="ach-controls"><button id="ach-status-manage-apply" type="button" aria-describedby="ach-status-site-apply-why" class="btn btn-danger" disabled>Apply selected status page</button></div>
         <p id="ach-status-site-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a matching saved recovery result from Recheck selected site status.</p>
-        <label><input id="ach-status-manage-restore-approve" type="checkbox" aria-describedby="ach-status-site-restore-why" /> I reviewed this site's saved recovery ID and approve exact Restore (extension reloads Nginx; site-file restores saved original bytes).</label>
+        <label><input id="ach-status-manage-restore-approve" type="checkbox" aria-describedby="ach-status-site-restore-why" /><span class="ach-option-copy">I reviewed this site's saved recovery ID and approve exact Restore (extension reloads Nginx; site-file restores saved original bytes).</span></label>
         <div class="ach-controls"><button id="ach-status-manage-restore" type="button" aria-describedby="ach-status-site-restore-why" class="btn btn-warning" disabled>Restore selected site status</button></div>
         <p id="ach-status-manage-result" role="status" aria-live="polite">Recheck saved site recovery before Restore. An uncertain write must not be blindly repeated.</p>
       </div>
@@ -1200,10 +1222,10 @@
         <p>Global branding scope only. Choose <code>new-site</code>, <code>404</code> or <code>502</code> above. aaPanel copies <code>defaultDoc.html</code>, <code>404.html</code> or <code>502.html</code> when creating a new site. Changing these sources <strong>does not change existing sites or active HTTP/Nginx routing</strong>, and does not reload Nginx. Recheck first, then approve the exact source replacement; Restore uses the saved original bytes and recovery ID.</p>
         <div class="ach-controls"><button id="ach-status-default-recheck" type="button" disabled>Recheck new-site default source</button></div>
         <p id="ach-status-default-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires Recheck new-site default source to confirm a current, different proposed template.</p>
-        <label><input id="ach-status-default-apply-approve" type="checkbox" aria-describedby="ach-status-default-apply-why" /> I approve replacing this exact aaPanel new-site default source for future sites only.</label>
+        <label><input id="ach-status-default-apply-approve" type="checkbox" aria-describedby="ach-status-default-apply-why" /><span class="ach-option-copy">I approve replacing this exact aaPanel new-site default source for future sites only.</span></label>
         <div class="ach-controls"><button id="ach-status-default-apply" type="button" aria-describedby="ach-status-default-apply-why" class="btn btn-danger" disabled>Apply future-site default template</button></div>
         <p id="ach-status-default-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a saved applied default-template recovery from Recheck.</p>
-        <label><input id="ach-status-default-restore-approve" type="checkbox" aria-describedby="ach-status-default-restore-why" /> I reviewed the saved recovery ID and approve restoring the previous default source.</label>
+        <label><input id="ach-status-default-restore-approve" type="checkbox" aria-describedby="ach-status-default-restore-why" /><span class="ach-option-copy">I reviewed the saved recovery ID and approve restoring the previous default source.</span></label>
         <div class="ach-controls"><button id="ach-status-default-restore" type="button" aria-describedby="ach-status-default-restore-why" class="btn btn-warning" disabled>Restore previous default source</button></div>
         <p id="ach-status-default-result" role="status" aria-live="polite">Choose global scope and a supported template, then Recheck. No active site is modified.</p>
       </div>
@@ -1218,10 +1240,10 @@
         </details>
         <div class="ach-controls"><button id="ach-status-unbound-recheck" type="button" disabled>Recheck HTTP unbound routing</button></div>
         <p id="ach-status-unbound-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a fresh valid global HTTP/80 Recheck and explicit approval.</p>
-        <label><input id="ach-status-unbound-apply-approve" type="checkbox" aria-describedby="ach-status-unbound-apply-why" /> I approve the exact global HTTP/80 default-server and shared Nginx reload.</label>
+        <label><input id="ach-status-unbound-apply-approve" type="checkbox" aria-describedby="ach-status-unbound-apply-why" /><span class="ach-option-copy">I approve the exact global HTTP/80 default-server and shared Nginx reload.</span></label>
         <div class="ach-controls"><button id="ach-status-unbound-apply" type="button" aria-describedby="ach-status-unbound-apply-why" class="btn btn-danger" disabled>Apply unbound HTTP 404</button></div>
         <p id="ach-status-unbound-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires an existing saved global HTTP/80 recovery from Recheck.</p>
-        <label><input id="ach-status-unbound-restore-approve" type="checkbox" aria-describedby="ach-status-unbound-restore-why" /> I reviewed the recovery ID and approve restoring the previous HTTP routing and reloading Nginx.</label>
+        <label><input id="ach-status-unbound-restore-approve" type="checkbox" aria-describedby="ach-status-unbound-restore-why" /><span class="ach-option-copy">I reviewed the recovery ID and approve restoring the previous HTTP routing and reloading Nginx.</span></label>
         <div class="ach-controls"><button id="ach-status-unbound-restore" type="button" aria-describedby="ach-status-unbound-restore-why" class="btn btn-warning" disabled>Restore previous HTTP default routing</button></div>
         <p id="ach-status-unbound-result" role="status" aria-live="polite">Select global/unbound and Recheck. HTTP/80 only; no TLS/443 changes.</p>
       </div>
@@ -1234,10 +1256,10 @@
         <p>This is a separately opted-in <strong>shared Nginx reload</strong>. Preview the current TLS listeners and Recovery state first. After Apply or Restore, compare the actual TLS handshake of unknown SNI with a known configured HTTPS hostname. A failed or interrupted operation retains a Recovery ID for Recheck.</p>
         <div class="ach-controls"><button id="ach-status-tls-recheck" type="button" disabled>Recheck HTTPS unknown-SNI policy</button></div>
         <p id="ach-status-tls-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Apply requires a compatible configured HTTPS/443 listener and a fresh Recheck.</p>
-        <label><input id="ach-status-tls-apply-approve" type="checkbox" /> I approve a plugin-owned unknown-SNI TLS default server on already configured HTTPS listeners and the shared Nginx reload.</label>
+        <label><input id="ach-status-tls-apply-approve" type="checkbox" /><span class="ach-option-copy">I approve a plugin-owned unknown-SNI TLS default server on already configured HTTPS listeners and the shared Nginx reload.</span></label>
         <div class="ach-controls"><button id="ach-status-tls-apply" type="button" class="btn btn-warning" disabled>Reject unknown TLS handshakes</button></div>
         <p id="ach-status-tls-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a saved Recovery ID from Recheck.</p>
-        <label><input id="ach-status-tls-restore-approve" type="checkbox" /> I reviewed the exact TLS Recovery ID and approve restoring the original HTTPS default-server routing with shared Nginx reload.</label>
+        <label><input id="ach-status-tls-restore-approve" type="checkbox" /><span class="ach-option-copy">I reviewed the exact TLS Recovery ID and approve restoring the original HTTPS default-server routing with shared Nginx reload.</span></label>
         <div class="ach-controls"><button id="ach-status-tls-restore" type="button" class="btn btn-warning" disabled>Restore previous TLS default routing</button></div>
         <p id="ach-status-tls-result" class="ach-status-metadata" role="status" aria-live="polite">Choose global/unbound and Recheck. No HTTPS setting has been changed.</p>
       </div>
@@ -1252,18 +1274,17 @@
         </details>
         <div class="ach-controls"><button id="ach-status-stopped-recheck" type="button" disabled>Recheck native stopped-site route</button></div>
         <p id="ach-status-stopped-apply-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Arm requires a running native site and a successful saved-rule Recheck.</p>
-        <label><input id="ach-status-stopped-apply-approve" type="checkbox" aria-describedby="ach-status-stopped-apply-why" /> I approve adding this website's exact native 503 rule and reloading shared Nginx.</label>
+        <label><input id="ach-status-stopped-apply-approve" type="checkbox" aria-describedby="ach-status-stopped-apply-why" /><span class="ach-option-copy">I approve adding this website's exact native 503 rule and reloading shared Nginx.</span></label>
         <div class="ach-controls"><button id="ach-status-stopped-apply" type="button" aria-describedby="ach-status-stopped-apply-why" class="btn btn-danger" disabled>Arm HTTP 503 for SiteStop</button></div>
         <p id="ach-status-stopped-restore-why" class="ach-availability" data-state="blocked" role="status" aria-live="polite">Restore requires a matching saved stopped-site recovery from Recheck.</p>
-        <label><input id="ach-status-stopped-restore-approve" type="checkbox" aria-describedby="ach-status-stopped-restore-why" /> I reviewed the selected website's saved Recovery ID and approve removing its managed rule with a shared Nginx reload.</label>
+        <label><input id="ach-status-stopped-restore-approve" type="checkbox" aria-describedby="ach-status-stopped-restore-why" /><span class="ach-option-copy">I reviewed the selected website's saved Recovery ID and approve removing its managed rule with a shared Nginx reload.</span></label>
         <div class="ach-controls"><button id="ach-status-stopped-restore" type="button" aria-describedby="ach-status-stopped-restore-why" class="btn btn-warning" disabled>Restore native stopped-site route</button></div>
         <p id="ach-status-stopped-result" role="status" aria-live="polite">Select a verified website, stopped template and locale, then Recheck. Native stop requires a fresh website inventory.</p>
       </div>
       </div>
     </section>
     <section class="ach-view" id="ach-panel-activity" aria-label="Activity and recovery" data-view="activity" role="region" hidden>
-      <h4>Activity &amp; recovery</h4>
-      <p class="ach-note">Filter by severity or module, inspect the exact Operation / Recovery ID, then open the owning task and Recheck current state. A log entry is not permission to Restore; opening a task never automatically selects a website or applies a change. Records are limited to the primary aaPanel administrator.</p>
+      <p class="ach-note">Open the owning task to check current state before recovery. An event does not authorize changes or select a website.</p>
       <div class="ach-controls">
         <div class="ach-inline-field"><label for="ach-activity-level">Severity</label>
           <select id="ach-activity-level"><option value="">All</option><option value="ERROR">Errors</option><option value="WARNING">Warnings</option><option value="INFO">Information</option><option value="DEBUG">Debug</option></select></div>
@@ -1286,7 +1307,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.101'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.102'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -2744,8 +2765,7 @@
     hostsManageReset();
     ++hostsTicket;
     root.find('#ach-hosts-result').text('Site selection changed; recheck.');
-    siteContextNotice(hostsSiteId() ? 'Selected: ' + hostsPageSites.get(hostsSiteId()).name +
-      '. Run an inspection to get current evidence.' :
+    siteContextNotice(hostsSiteId() ? 'Ready to inspect the selected website.' :
       'Choose one website to inspect.');
     inspectionSummary('hosts', 'Website changed. Run the local hosts check again.');
     invalidateCacheAudit('Website selection changed; no previous cache audit is current.');
@@ -6098,9 +6118,16 @@
         $('<td>').append(when).appendTo(tr);
         $('<td>').text(entry.level).addClass('ach-activity-' + entry.level.toLowerCase()).appendTo(tr);
         $('<td>').text(entry.module + ' / ' + entry.action + (entry.target ? ' · ' + entry.target : '')).appendTo(tr);
-        $('<td>').text(entry.outcome + ' · ' + entry.stage + (entry.error_class ? ' (' + entry.error_class + ')' : '') + (entry.detail ? ': ' + entry.detail : '')).appendTo(tr);
-        var identityCell = $('<td>').text(entry.operation_id +
-          (entry.recovery_id ? ' / recovery ' + entry.recovery_id : '')).appendTo(tr);
+        var outcomeCell = $('<td>').text(entry.outcome + ' · ' + entry.stage).appendTo(tr);
+        var prominentReason = entry.detail && ['WARNING','ERROR'].includes(entry.level);
+        if (prominentReason) $('<p>').addClass('ach-event-reason').text(entry.detail).appendTo(outcomeCell);
+        var identityCell = $('<td>').appendTo(tr);
+        var detail = $('<details>').addClass('ach-event-detail').appendTo(identityCell);
+        $('<summary>').text('Operation details').appendTo(detail);
+        $('<p>').text('Operation ID: ' + entry.operation_id).appendTo(detail);
+        if (entry.recovery_id) $('<p>').text('Recovery ID: ' + entry.recovery_id).appendTo(detail);
+        if (entry.error_class) $('<p>').text('Error: ' + entry.error_class).appendTo(detail);
+        if (entry.detail && !prominentReason) $('<p>').text(entry.detail).appendTo(detail);
         var owningTask = activityOwnerTask(entry);
         if (owningTask) {
           $('<button>').attr('type','button').addClass('ach-activity-owner')
@@ -6445,11 +6472,11 @@
   var websiteTasks = ['summary','protection','cache','wordpress','routing'];
   var serverTasks = ['php','hosts','attack','http','monitor'];
   var taskDescriptions = {
-    'overview': ['Home','Start a task','Choose a task. Read-only inspections do not change website or server configuration.'],
+    'overview': ['Home','Start a task','Choose a task to manage your websites or server.'],
     'websites:summary': ['Websites','Summary & changes','Browse native website records. Compare observed changes before accepting any saved baseline.'],
     'websites:protection': ['Websites','Protect sensitive files','Selected website Nginx rule. Enabling or removing it may reload the shared Nginx service.'],
     'websites:cache': ['Websites','Cache & performance','Selected website Cache and optional WordPress integration. Clear affects only verified owned Cache objects.'],
-    'websites:wordpress': ['Websites','WordPress settings','Configure Debug, Cron, XML-RPC or HTTPS URLs for the selected native WordPress site.'],
+    'websites:wordpress': ['Websites','WordPress settings','Manage the selected website’s WordPress settings.'],
     'websites:routing': ['Websites','Routing & diagnostics','Inspect the selected website VHost, local Hosts mappings and recovery evidence. Inspections are read-only.'],
     'server:php': ['Server','PHP services','PHP-FPM settings are shared. Inspect discovered services and affected websites before live Apply.'],
     'server:hosts': ['Server','Local hostnames','Inspect this server\'s actual loopback mappings. The machine hostname is protected; no website is required to inspect aliases.'],
@@ -6457,7 +6484,7 @@
     'server:http': ['Server','Default HTTP/TLS routing','Review unknown-host HTTP and unknown-SNI TLS routing. The Error pages editor currently shares this owner view.'],
     'server:monitor': ['Server','Monitoring controls','Manage Customizer inspection availability. Disabling related checks also suspends separately enabled PHP auto-repair.'],
     'status': ['Error pages','Error pages','Design and preview first. Saving branding does not publish to a website or change fallback routing.'],
-    'activity': ['Activity & recovery','Recent events and recovery','Find exact operation evidence and return to its module-owned Recheck or Restore workflow.']
+    'activity': ['Activity & recovery','Recent events and recovery','Review results and find the owning task for recovery.']
   };
   function taskRoute(destination, task) {
     if (destination === 'overview') return 'overview';
@@ -6529,7 +6556,7 @@
       'Choose a source website to configure scanner bans' : 'Choose a website to continue');
     root.find('#ach-site-required-detail').text(attackTask ?
       'Scanner settings need a native website access log. Orphan-jail recovery below works without selecting a website.' :
-      'This task needs an exact native aaPanel website. Select it below, or browse the website list to find the right ID and name.');
+      'Use the website selector above or browse the inventory.');
     root.find('#ach-website-context').prop('hidden', !needChooser);
     root.find('#ach-site-required').prop('hidden', !needsSiteBanner || siteSelected);
     root.find('[data-routing-group]').prop('hidden', true);

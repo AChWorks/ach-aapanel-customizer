@@ -177,12 +177,21 @@ def _read_journal(data_fd, site_id):
             or not isinstance(record["site_root"], str)
             or not ROOT.fullmatch(record["site_root"])
             or "//" in record["site_root"] or ".." in record["site_root"].split("/")
-            or record["ruleset"] not in RULESETS
             or not isinstance(record["op"], str) or not TOKEN.fullmatch(record["op"])
             or record["phase"] not in ("prepared", "applied", "restored")
             or any(not isinstance(record[k], str) or not HASH.fullmatch(record[k])
-                   for k in ("bindings_sha", "vhost_sha", "include_sha"))
-            or _sha(_include(record["op"], record["ruleset"])) != record["include_sha"]):
+                   for k in ("bindings_sha", "vhost_sha", "include_sha"))):
+        raise GuardError("recovery", "Invalid or altered native security recovery journal")
+    if not isinstance(record["ruleset"], str):
+        raise GuardError("recovery", "Invalid or altered native security recovery journal")
+    if record["ruleset"] not in RULESETS:
+        # An older/unrecognized rule family cannot be verified by the current
+        # generator. Preserve the journal and refuse all writes; incompatibility
+        # alone does not establish tampering.
+        raise GuardError("recovery", "Unsupported native security recovery ruleset; "
+                         "saved journal preserved. Review the original rule and Recovery ID "
+                         "before any change")
+    if _sha(_include(record["op"], record["ruleset"])) != record["include_sha"]:
         raise GuardError("recovery", "Invalid or altered native security recovery journal")
     return record
 

@@ -1,6 +1,6 @@
 # Native UI redesign — accepted task-first experience contract
 
-Status: Owner-approved product direction, **implementation in progress**. Scope: `AChWorks/ach-aapanel-customizer`. Source of approval and complete audit: [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7090292152). This document owns the intended UI/navigation and testing contract, not backend authorization, actual installed capabilities, or release status.
+Status: Owner-approved product direction and visual refinement (2026-11-24), **implementation in progress**. Scope: `AChWorks/ach-aapanel-customizer`. Source of approval and complete audit: [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7090292152). This document owns the intended UI/navigation and testing contract, not backend authorization, actual installed capabilities, or release status.
 
 ## Outcome and compatibility
 
@@ -87,6 +87,47 @@ One dominant action per local decision; neutral read-only links, red destructive
 - Responsive at 320/375/800/1024/1280 and browser zoom 200%; narrow top-level navigation becomes a labelled menu, not a horizontally hidden seven-tab strip. Site selection, edits and focus survive safe navigation/resize; source or site change invalidates only affected prepared operations. Technical tables can scroll inside a clearly labelled container.
 - Native interface starts English/LTR, but text is localizable and all eleven existing Status templates preserve correct EN/LTR and FA/RTL previews with bidi-safe domains and codes. Full native Persian translation is **not a prerequisite** for the approved redesign; do not block later i18n.
 
+## Visual consistency refinement (Owner accepted 2026-11-24)
+
+[Measured installed 0.1.101 audit and accepted correction plan](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7126797508)
+establish the baseline; [Owner acceptance receipt](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7127490129)
+records the authorization to implement. Native 0.1.102 candidate uses the
+existing five destinations and one canonical operation owner, not a new framework.
+
+- Compact selected-site context: exact native selector, short state feedback,
+  browse/independent error-page scope links. Secondary task choices wrap as
+  navigation rather than full-size command cards. No duplicate Home/title
+  headings; explain the actual chosen operation rather than every sibling.
+- Use shared scoped controls: 14px body, 22px/600 desktop task title, 13px
+  labels and data table text, adaptive form groups with label above the field,
+  36px standard control height, and one 16px checkbox plus a whole-copy text
+  column. Effective checkbox label target at least 28px. Stronger enabled
+  input boundaries, visible focus and distinct disabled state. A designated
+  check is the primary next action until its positive commit is eligible;
+  consequential restore and destructive actions retain explicit scope and
+  distinct treatment. Do not change authorization based on styling.
+- Put WordPress HTTPS warning only in HTTPS task. PHP Preview result and
+  affected-site evidence directly follow the editable form; optional auto
+  repair has its own visible section. Cache source inspection is first;
+  optional privacy probes and reference policy remain discoverable in one
+  advanced disclosure. Error design hides irrelevant global-scope website
+  selector, keeps branding read/retry and live delivery explicit, and
+  contains the sandboxed preview independently; its hashes are accessible on
+  demand. Activity shows outcome and warning/error reason first; raw
+  Operation/Recovery IDs and detailed machine evidence remain selectable in
+  native disclosure. No diagnostic fields removed or mutator cloned.
+- The installed-audit legacy Guard journal is not established as tampered.
+  A structurally parseable but unsupported ruleset returns an explicit
+  unsupported-family error and remains blocked. Keep all original journal
+  bytes and native files; this is not a legacy recovery migration.
+
+For acceptance, run real Chromium route/width regression plus composition
+checks (compact site context, first action visible on desktop, checkbox
+alignment, enabled input contrast, conditional warning and global-scope
+selector, exact text-rendered Activity evidence). Repeat the installed QA
+journeys and inspect real pixels. Do not claim human usability, full
+screen-reader acceptance, or production writer qualification from geometry.
+
 ## Protect sensitive files — reference interaction states
 
 The image concept previously generated is **not runtime proof** and its compulsory acknowledgement checkbox is **not mandatory** in this contract.
@@ -103,8 +144,8 @@ The image concept previously generated is **not runtime proof** and its compulso
 
 ## Current source implementation and acceptance boundary
 
-S1–S5 are merged into `main` through PRs #129–#132. Native source version
-0.1.101 provides a distinct package identity for the redesign; the earlier
+S1–S5 are merged into `main` through PRs #129–#133. Native source
+0.1.101 established the task-first redesign; 0.1.102 is the visual refinement candidate; the earlier
 published 0.1.100 package uses the seven-tab interface. A source ZIP is not
 a published Release asset. Current release availability belongs to GitHub
 Releases; exact installed QA and human acceptance belong to Issues #21 and

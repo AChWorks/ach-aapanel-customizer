@@ -368,7 +368,7 @@ function loadUi() {
   function $(value) {
     if (value === '#ach-customizer') return selection([root]);
     if (value && typeof value === 'object' && value.handlers) return selection([value]);
-    if (typeof value === 'string' && /^<(tr|td|option|time|span|button)\b/.test(value)) {
+    if (typeof value === 'string' && /^<(tr|td|option|time|span|button|details|summary|p)\b/.test(value)) {
       return selection([fakeNode(value.slice(1).split(/\W/)[0])]);
     }
     throw new Error('Unexpected unscoped jQuery target: ' + String(value));
@@ -5324,7 +5324,7 @@ test('Native task-first sidebar and site/server journeys retain accessible view 
   for (const name of ['php','hosts','attack','http','monitor'])
     assert.match(html, new RegExp('data-server-task="' + name + '"'));
   assert.match(html, /\.ach-main \{[^}]*overflow-y:auto/);
-  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:170px/);
+  assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:156px/);
   assert.match(html, /@media \(max-width:720px\)/);
   assert.doesNotMatch(html, /class="ach-tabs"/);
   assert.match(html, /function fitNativeLayer/);
@@ -5337,7 +5337,7 @@ test('Native task-first sidebar and site/server journeys retain accessible view 
   assert.match(html, /class="ach-sidebar-label"/);
   assert.match(html, /\.ach-main button \{[^}]*min-height:var\(--ach-control-height\)/);
   assert.match(html, /\.ach-toolbar \[role="status"\] \{[^}]*flex:1 1 220px/);
-  assert.match(html, /<h4 data-home-only>Home<\/h4>/);
+  assert.doesNotMatch(html, /<h4 data-home-only>Home<\/h4>/);
   assert.match(html, /class="ach-task-launch-grid" data-home-only/);
 });
 
@@ -5634,7 +5634,7 @@ test('Activity records show a complete WARNING label and a semantic two-line UTC
     datetime:'2026-11-22T04:57:40+00:00',lines:['2026-11-22','04:57:40+00:00']
   }]);
   assert.equal(ui.activityRows()[0][1],'WARNING');
-  assert.match(ui.activityRows()[0][4], /^a{32}Open task \(Recheck first\)$/);
+  assert.match(ui.activityRows()[0][4], /^Operation detailsOperation ID: a{32}Open task \(Recheck first\)$/);
 });
 
 test('Activity panel filters read-only structured events and uses text rendering', () => {
@@ -5651,7 +5651,8 @@ test('Activity panel filters read-only structured events and uses text rendering
       recovery_id:'b'.repeat(32),target:'PHP85-www-shared-service'}]
   });
   assert.equal(ui.activityRows().length, 1);
-  assert.equal(ui.activityRows()[0][3], 'failed · reload (FpmApplyError): <img src=x onerror=alert(1)>');
+  assert.equal(ui.activityRows()[0][3], 'failed · reload<img src=x onerror=alert(1)>');
+  assert.match(ui.activityRows()[0][4], /Recovery ID: b{32}Error: FpmApplyError/);
   assert.match(ui.activityMessage(), /1 record\(s\)/);
   const filtered = ui.activityFilter('#ach-activity-level', 'ERROR');
   assert.equal(filtered.options.data.level, 'ERROR');
@@ -5782,7 +5783,7 @@ test('Newest Activity filter wins when responses arrive out of order', () => {
     entries:[row('INFO','a')]});
   assert.equal(ui.activityRows().length,1);
   assert.match(ui.activityRows()[0][1],/ERROR/);
-  assert.match(ui.activityRows()[0][4],/^e{32}/);
+  assert.match(ui.activityRows()[0][4],/^Operation detailsOperation ID: e{32}/);
   assert.match(ui.activityMessage(),/1 record/);
 });
 
@@ -5942,7 +5943,7 @@ test('Lifecycle Activity can be filtered and displayed with canonical fields', (
       recovery_id:''}]});
   assert.equal(ui.activityRows().length,1);
   assert.match(ui.activityRows()[0][2],/lifecycle \/ uninstall/);
-  assert.match(ui.activityRows()[0][3],/IconCleanupFailed/);
+  assert.match(ui.activityRows()[0][4],/IconCleanupFailed/);
 });
 
 test('Reviewer: pending Prepare A cannot revive approval after a newer identical Preview B fails', () => {
@@ -7511,14 +7512,13 @@ test('Review R3: PHP-FPM Restore confirmation and uncertain result both invalida
 });
 
 
-test('Native Nginx form rhythm: compact left labels, 150px inputs and responsive reflow', () => {
-  assert.match(html, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/,
-    'Desktop setting groups must have two balanced columns');
-  assert.match(html, /grid-template-columns:minmax\(0,1fr\) minmax\(0,150px\)/,
-    'Each setting has a 150px Nginx-style input with a neighboring label');
-  assert.match(html, /@media \(max-width:880px\)/);
+test('Native form rhythm: balanced columns with associated labels above controls and responsive reflow', () => {
+  assert.match(html, /grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,220px\),1fr\)\)/,
+    'Setting groups adapt to available pane width');
+  assert.match(html, /grid-template-columns:minmax\(0,1fr\); row-gap:4px/,
+    'Each setting groups its label and flexible input in one column');
   assert.match(html, /@media \(max-width:460px\)/);
-  assert.match(html, /class="ach-field-site"/);
+  assert.match(html, /class="ach-field-site ach-status-site-field"/);
   assert.match(html, /#ach-customizer \.ach-table-skeleton\[hidden\]/);
   assert.match(html, /prefers-reduced-motion:reduce/);
 });

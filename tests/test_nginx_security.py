@@ -750,6 +750,28 @@ class NativeSecurityTests(unittest.TestCase):
             self.site["id"])).read_text())["phase"], "applied")
         self.assertEqual(self.operate("recheck")["state"], "Recovery Required")
 
+    def test_unsupported_ruleset_is_distinct_from_tamper_and_never_writes(self):
+        applied = self.operate("apply")
+        journal = self.state / guard._journal(self.site["id"])
+        record = json.loads(journal.read_text())
+        record["ruleset"] = "nested-sensitive-v2"
+        journal.write_text(json.dumps(record))
+        original = journal.read_bytes()
+        fragment = self.fragment.read_bytes()
+        commands = list(self.commands)
+        for action in ("preview", "recheck", "apply", "restore"):
+            with self.subTest(action=action), self.assertRaisesRegex(
+                    guard.GuardError, "Unsupported native security recovery ruleset"):
+                self.operate(action, recovery=applied["recovery_id"])
+            self.assertEqual(journal.read_bytes(), original)
+            self.assertEqual(self.fragment.read_bytes(), fragment)
+            self.assertEqual(self.commands, commands)
+        record["ruleset"] = guard.RULESET
+        record["include_sha"] = "0" * 64
+        journal.write_text(json.dumps(record))
+        with self.assertRaisesRegex(guard.GuardError, "Invalid or altered"):
+            self.operate("recheck")
+
     def test_occupied_guard_name_preserves_foreign_file_and_recovery_journal(self):
         applied = self.operate("apply")
         checked = self.operate("recheck")

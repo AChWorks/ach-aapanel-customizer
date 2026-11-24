@@ -7,7 +7,7 @@ A native aaPanel plugin for **inspect → preview → explicit apply → recheck
 **Use the assets and checksums from [GitHub Releases](https://github.com/AChWorks/ach-aapanel-customizer/releases)**. GitHub source archives and locally built ZIPs are not substitutes for a published, checksum-verified package.
 
 1. Download the matching `ach-aapanel-customizer-vX.Y.Z.zip` and `SHA256SUMS.txt` from the **same Release**. Verify the native ZIP against the supplied SHA-256 manifest.
-2. In aaPanel open **App Store → Third-party Plug-ins → Import plugins** and import the native ZIP. For the task-first interface (source version **0.1.101**), open **ACh aaPanel Customizer → Home → Refresh observations**. If using the earlier v0.1.100 package, the equivalent is **Overview → Refresh state**.
+2. In aaPanel open **App Store → Third-party Plug-ins → Import plugins** and import the native ZIP. For the task-first interface (source versions **0.1.101+**), open **ACh aaPanel Customizer → Home → Refresh observations**. If using the earlier v0.1.100 package, the equivalent is **Overview → Refresh state**.
 3. In the task-first interface, choose **Manage a website** or **Websites → Summary & changes**, select the exact native website, and start with a read-only inspection of its task. Use explicit **Apply**, **Recheck** and **Restore** only for the chosen operation. In the earlier interface use **Website list** and the shared website selector.
 4. **Optional:** install the separately versioned `ach-aapanel-bridge-vX.Y.Z.zip` through **WordPress → Plugins → Add New → Upload Plugin** only for supported WordPress Cache integration. The Bridge is not embedded in or required by the native ZIP.
 
@@ -18,7 +18,7 @@ A successful import does **not** prove that aaPanel's resident Python helpers we
 ## What you can do
 
 The task-first destinations below describe the redesigned source/package
-identity 0.1.101. The authoritative published package and its actual availability
+identity 0.1.101+, including the 0.1.102 visual refinement candidate. The authoritative published package and its actual availability
 are recorded in GitHub Releases, not implied by this source guide.
 
 | Start here | Tasks and boundaries |
@@ -32,7 +32,7 @@ are recorded in GitHub Releases, not implied by this source guide.
 | **Server → PHP services** | Inspect service/sites, desired policy, explicit shared Apply, independently available saved-service Recovery and separately opted-in automatic repair of witnessed regeneration. |
 | **Server → Local hostnames / Attack protection / Default HTTP/TLS** | Remove an exact chosen origin-local loopback alias without touching the system hostname; site-log Fail2ban bans are origin-wide; orphan Recovery is site-selection-independent. Unknown HTTP/80 and eligible TLS/443 fallback are separate. |
 | **Error pages** | Design/preview 11 EN/LTR + 11 FA/RTL templates; explicitly choose website delivery, future-site defaults, stopped-site 503 or server fallback. TLS handshake rejection does not create certificates/listeners. |
-| **Activity & recovery** | Read exact operation stage, result, time and Operation/Recovery IDs; open the owning task then Recheck without inferring a site or authorizing Restore. |
+| **Activity & recovery** | Read exact operation stage, result, time and Operation/Recovery IDs in Operation details; open the owning task then Recheck without inferring a site or authorizing Restore. |
 
 For the older **v0.1.100** package, the equivalents are Overview, Website list,
 Routing & Nginx, FastCGI Cache, PHP-FPM, Status Pages and Activity & Logs.
