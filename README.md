@@ -40,18 +40,15 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 
 **Verified reference, not a universal support promise:** non-production **aaPanel 8.0.7**, Nginx, PHP-FPM **8.1/8.5** on representative sites. Other aaPanel/Nginx/PHP writer layouts are inspected by capability, not arbitrarily rejected by version, but a write requires a supported real source/ownership contract. See [installed-native QA evidence, exact candidate and remaining coverage](https://github.com/AChWorks/ach-aapanel-customizer/issues/21), [feature/compatibility backlog](https://github.com/AChWorks/ach-aapanel-customizer/issues/2) and [TLS/Status Pages scope](https://github.com/AChWorks/ach-aapanel-customizer/issues/10). **Publishing a Stable Release is not a claim of comprehensive Production certification or permission to deploy to Production.**
 
-## Task-first interface redesign (source in progress, not released)
+## Task-first interface redesign (merged source, acceptance in progress)
 
-The Owner-approved redesign is being implemented in stages under
+The Owner-approved redesign is tracked under
 [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
-and the [screen and task contract](docs/UX-REDESIGN.md). The **merged S1**
-source (PRs [#129](https://github.com/AChWorks/ach-aapanel-customizer/pull/129)
-and [#130](https://github.com/AChWorks/ach-aapanel-customizer/pull/130))
-has a task-first native shell with **Home**, **Websites**, **Server**,
-**Error pages** and **Activity & recovery**. It is not part of the
-published v0.1.100 package.
+and the [screen and task contract](docs/UX-REDESIGN.md). S1–S4 are merged
+through PRs #129–#131. The native shell uses **Home**, **Websites**, **Server**,
+**Error pages** and **Activity & recovery**. These are the merged source
+destinations, not the interface in the published v0.1.100 ZIP.
 
-The **S2–S4 candidate is under development/review, not merged or installed**.
 Its task-level navigation groups the original module-owned controls instead of
 introducing another writer, store, permission route or Recovery mechanism:
 
@@ -69,9 +66,11 @@ introducing another writer, store, permission route or Recovery mechanism:
 The original native UI behavior, source and safety checks remain the authority
 for all live actions; task navigation alone never authorizes a write. A disabled
 operation explains its missing evidence and guides the operator back to Recheck
-or the relevant source check. The new screen layout and novice flows require
-**S5 installed-native acceptance**, independent source review, and separate
-Owner Merge and Release approvals before they may be considered delivered.
+or the relevant source check. The installed-native S5 acceptance is tracked
+separately in Issue #128 and the exact QA receipt in Issue #21. Source tests
+and automated journeys do not establish unassisted human task completion.
+New changes require independent review and Owner Merge approval; public
+Release requires its own approval.
 
 The **Install** and **What you can do** sections above describe the currently
 **published native ZIP** (seven-tab interface), not an unreviewed source build.
@@ -109,6 +108,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p 'test_*.py
 node --test tests/test_inventory_ui.cjs
 sh -n plugin/ach_customizer/install.sh
 ```
+
+The isolated real-DOM task/geometry and Status 50x checks use Playwright,
+Chromium and the pinned aaPanel jQuery 2.2.4 test fixture documented in
+[the native guide](docs/aapanel-integration.md#isolated-browser-regression).
+They intercept network requests and never use a live panel or credentials.
 
 These checks do **not** replace authenticated, installed aaPanel/browser/HTTP/HTTPS/site-recovery testing. The [native integration guide](docs/aapanel-integration.md) contains exact operator/runtime prerequisites and the protected QA Browser procedure. Use the **one retained QA VM** and existing credential workflow recorded in Issue #21; do not create more QA guests or reset its credentials.
 

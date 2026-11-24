@@ -186,10 +186,13 @@ rollback requirements use the [upgrade/recovery runbook](aapanel-upgrade-recover
 
 ## Native interface contract
 
-The Customizer opens **inside** aaPanel. Its seven operator destinations are
-Overview, Website list, Routing & Nginx, FastCGI Cache, PHP-FPM, Status Pages,
-and Activity & Logs. The single shared selected-site context must not be
-replaced with a second raw-ID field. Readiness, errors and recovery steps
+The Customizer opens **inside** aaPanel. Merged task-first source exposes
+Home, Websites, Server, Error pages, and Activity & recovery. Website and
+server tasks have contextual stages; the shared selected-site context is not
+replaced with a raw-ID field. The official published Native v0.1.100 ZIP
+still has Overview, Website list, Routing & Nginx, FastCGI Cache, PHP-FPM,
+Status Pages, and Activity & Logs. Use the instructions matching the actual
+installed package; the [redesign contract](UX-REDESIGN.md) maps source tasks. Readiness, errors and recovery steps
 belong **beside their action**, with the technical report available on demand.
 
 Current [independently reviewed UI contract](https://github.com/AChWorks/ach-aapanel-customizer/issues/80):
@@ -204,6 +207,33 @@ for the other.
 Do not enable Apply merely because a checkbox is ticked or the UI looks
 valid. Refreshing or changing a selected site, version, branding, policy,
 VHost or relevant source revokes stale selection/preview/approval evidence.
+
+### Isolated browser regression
+
+Run the actual bundled UI in Chromium (no panel login or live API). Provide
+Playwright through `NODE_PATH`, the Chromium executable via
+`CHROMIUM_EXECUTABLE`, and the original aaPanel jQuery 2.2.4 file through
+`ACH_NATIVE_JQUERY`. The test fixture validates the exact SHA-256 of the
+observed 85,578-byte jQuery file
+(`05b85d96f41fff14d8f608dad03ab71e2c1017c2da0914d7c59291bad7a54f8e`).
+The same upstream file is available from
+`https://code.jquery.com/jquery-2.2.4.min.js`; do not add it to the shipped ZIP.
+
+```bash
+node tests/manual/layout_browser.cjs
+node tests/manual/status_50x_browser.cjs
+```
+
+The layout runner follows real destination/task/stage controls at seven
+viewport widths from 320 to 1280 px, including selected-site and no-site
+states, keyboard focus, mixed label/input/button alignment, local editor
+feedback, loading states, contrast, and the contained source-diff surface.
+`tests/manual/control_alignment_browser.cjs` is the same layout entrypoint
+for the documented form-row contract. The 50x runner tests the real DOM's
+preflight/approval/Apply request contract and invalidation paths. All native
+responses in these runners are explicitly mocked; the fixture intercepts
+every network request. They are not installed-native, live HTTP/reload, or
+human usability evidence.
 
 ## Native authenticated Browser QA runbook (aaPanel 8.0.7)
 
