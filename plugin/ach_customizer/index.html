@@ -314,16 +314,62 @@
   #ach-customizer .ach-disabled-anchor:focus-visible {
     outline:2px solid var(--ach-focus); outline-offset:2px; border-radius:6px;
   }
+  /* One restrained, control-anchored light help surface. The arrow and
+     transparent hover bridge sit outside the independently scrollable copy. */
   #ach-customizer .ach-disabled-bubble {
-    position:absolute; z-index:20; max-width:min(340px,calc(100% - 16px));
-    max-height:calc(100% - 16px); overflow:auto;
-    padding:9px 12px; border:1px solid #344b5d; border-radius:6px;
-    background:#293b49; color:#fff; font:13px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;
-    overflow-wrap:anywhere; box-shadow:0 4px 12px #0003;
+    position:absolute; z-index:20; width:max-content; max-width:min(320px,calc(100% - 24px));
+    border:1px solid #cbd5db; border-radius:8px; background:#fff;
+    color:var(--ach-text); font:400 13px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;
+    text-align:start; white-space:normal; overflow-wrap:anywhere;
+    box-shadow:0 3px 12px rgba(35,49,59,.12);
+  }
+  #ach-customizer .ach-disabled-bubble[hidden] { display:none !important; }
+  #ach-customizer .ach-disabled-bubble-text {
+    position:relative; overflow:auto; overscroll-behavior:contain; padding:9px 12px;
+    border-radius:inherit; background:inherit; color:inherit; font:inherit;
+  }
+  #ach-customizer .ach-disabled-bubble::before {
+    content:""; position:absolute; width:9px; height:9px; background:#fff;
+    left:var(--ach-help-arrow,50%); transform:translateX(-50%) rotate(45deg);
+    border:solid #cbd5db; border-width:1px 0 0 1px;
+  }
+  #ach-customizer .ach-disabled-bubble[data-placement="below"]::before { top:-5px; }
+  #ach-customizer .ach-disabled-bubble[data-placement="above"]::before {
+    bottom:-5px; transform:translateX(-50%) rotate(225deg);
+  }
+  #ach-customizer .ach-disabled-bubble::after {
+    content:""; position:absolute; inset-inline:0; height:8px;
+  }
+  #ach-customizer .ach-disabled-bubble[data-placement="below"]::after { bottom:100%; }
+  #ach-customizer .ach-disabled-bubble[data-placement="above"]::after { top:100%; }
+  /* A dispatched operation is not an eligibility failure. Preserve labels,
+     request guards and native disabled properties; only its initiator spins. */
+  #ach-customizer .ach-main button[data-ach-action-pending]:disabled {
+    color:#346047; background:#edf5ef; border-color:#b8d1c1;
+    cursor:progress;
+  }
+  #ach-customizer .ach-disabled-anchor.ach-action-pending { cursor:progress; }
+  #ach-customizer .ach-main label.ach-action-pending:has(> input[type="checkbox"]:disabled) {
+    grid-template-columns:16px minmax(0,1fr) 13px; cursor:progress;
+  }
+  #ach-customizer label.ach-action-pending::after {
+    grid-column:3; grid-row:1; align-self:center; color:#346047;
+  }
+  #ach-customizer .ach-main button[data-ach-action-pending]::before,
+  #ach-customizer label.ach-action-pending::after {
+    content:""; display:inline-block; box-sizing:border-box; width:13px; height:13px;
+    vertical-align:-2px; flex:none; border:2px solid currentColor; border-top-color:transparent;
+    border-radius:50%; animation:ach-action-spin .75s linear infinite;
+  }
+  #ach-customizer .ach-main button[data-ach-action-pending]::before { margin-inline-end:7px; }
+  @keyframes ach-action-spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion:reduce) {
+    #ach-customizer .ach-main button[data-ach-action-pending]::before,
+    #ach-customizer label.ach-action-pending::after { animation:none; }
   }
   @media (hover:none) {
-    #ach-customizer span.ach-disabled-anchor::after {
-      content:"?"; flex:none; margin-inline-start:4px; width:18px; height:18px;
+    #ach-customizer span.ach-disabled-anchor:not(.ach-action-pending)::after {
+      content:"i"; flex:none; margin-inline-start:4px; width:18px; height:18px;
       border:1px solid var(--ach-control-line); border-radius:50%;
       color:var(--ach-muted); text-align:center; font-size:12px; line-height:16px;
     }
@@ -1330,7 +1376,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.105'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.106'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -1401,14 +1447,54 @@
   }
   // Each disabled action receives its explanation at the existing eligibility
   // transition. A #reference reuses the adjacent inline guidance verbatim.
-  // No observer, event interception of enabled controls, or second gate.
+  // Request feedback is scoped to the actual initiating action, not inferred
+  // from disabled state or text. Neither presentation path grants permission.
   var pendingActionReason = 'A check or operation is in progress. Wait for its result.';
   var phpSelectionReason = 'Discover PHP installations and select a file-preview-capable service.';
   var witnessInspectionReason = 'Inspect the current failed-install witness policy first.';
   var witnessStaleReason = 'The resident witness helper is incompatible. Ask an administrator to verify the installed version and reload the panel if needed.';
-  var disabledBubble = null, activeHelp = null;
-  var dismissedPointer = false, lastPointer = null;
-  var helpAnchors = new WeakMap();
+  var disabledBubble = null, disabledBubbleText = null, activeHelp = null;
+  var lastPointer = null, quietHelpFocus = false;
+  var helpAnchors = new WeakMap(), actionProgress = new WeakMap();
+  var initiatingAction = null;
+  // Only direct request-producing action bindings establish an initiator.
+  // Automatic navigation/selection reads keep their existing inline statuses.
+  function bindAction(selector, eventName, handler) {
+    root.find(selector).on(eventName,function(event) {
+      if (!root[0].ownerDocument) return handler.apply(this,arguments);
+      var previous = initiatingAction;
+      var control = eventName === 'submit' ?
+        (event && event.originalEvent && event.originalEvent.submitter ||
+          this.querySelector('button[type=submit]')) : this;
+      initiatingAction = control && !control.disabled ? control : null;
+      try { return handler.apply(this,arguments); }
+      finally { initiatingAction = previous; }
+    });
+  }
+  function actionIsPending(control) { return actionProgress.has(control); }
+  function beginActionProgress(control) {
+    if (!control) return function() {};
+    actionProgress.set(control,(actionProgress.get(control) || 0) + 1);
+    control.setAttribute('data-ach-action-pending','');
+    control.setAttribute('aria-busy','true');
+    hideDisabledHelp();
+    syncDisabledHelp(control);
+    return function() {
+      var remaining = (actionProgress.get(control) || 1) - 1;
+      if (remaining > 0) { actionProgress.set(control,remaining); return; }
+      actionProgress.delete(control);
+      control.removeAttribute('data-ach-action-pending');
+      control.removeAttribute('aria-busy');
+      // Even if settlement leaves the focused action genuinely disabled,
+      // show its new reason only after a deliberate subsequent interaction.
+      if (root[0].contains(control)) syncDisabledHelp(control);
+    };
+  }
+  function focusWithoutHelp(element) {
+    quietHelpFocus = true;
+    try { element.focus({preventScroll:true}); }
+    finally { quietHelpFocus = false; }
+  }
   function helpText(control) {
     var reason = control.getAttribute('data-ach-disabled-help') || '';
     if (reason.charAt(0) === '#') {
@@ -1425,25 +1511,45 @@
     if (!activeHelp || !disabledBubble) return;
     var anchor = activeHelp.anchor, control = activeHelp.control;
     var parent = root[0].getBoundingClientRect();
-    var box = anchor.getBoundingClientRect();
+    var box = control.matches('button') ? control.getBoundingClientRect() : anchor.getBoundingClientRect();
     var pane = anchor.closest('.ach-main');
     var visible = pane ? pane.getBoundingClientRect() : parent;
-    if (!control.disabled || !anchor.getClientRects().length ||
+    if (!control.disabled || actionIsPending(control) || !anchor.getClientRects().length ||
         box.bottom <= visible.top || box.top >= visible.bottom ||
         box.right <= visible.left || box.left >= visible.right) {
       hideDisabledHelp(); return;
     }
-    disabledBubble.textContent = helpText(control);
+    // Fit inside the dialog and content column. Use the actual visible control,
+    // not the wrapper's touch hint or an assumed full-width row.
+    var inset = 12, gap = 8;
+    var minX = Math.max(parent.left,visible.left) + inset;
+    var maxX = Math.min(parent.right,visible.right) - inset;
+    var minY = parent.top + inset, maxY = parent.bottom - inset;
+    var targetX = (Math.max(box.left,visible.left) + Math.min(box.right,visible.right)) / 2;
+    var above = Math.max(0,Math.max(box.top,visible.top) - gap - minY);
+    var below = Math.max(0,maxY - Math.min(box.bottom,visible.bottom) - gap);
+    var reason = helpText(control);
+    if (disabledBubbleText.textContent !== reason) disabledBubbleText.textContent = reason;
+    disabledBubble.style.maxWidth = Math.min(320,Math.max(0,maxX - minX)) + 'px';
+    disabledBubbleText.style.maxHeight = '';
     disabledBubble.hidden = false;
-    var width = disabledBubble.offsetWidth, height = disabledBubble.offsetHeight;
-    var left = Math.max(8, Math.min(box.left - parent.left, parent.width - width - 8));
-    var top = box.bottom - parent.top;
-    if (top + height > parent.height - 8) top = box.top - parent.top - height;
-    disabledBubble.style.left = left + 'px';
-    disabledBubble.style.top = Math.max(8, Math.min(top, parent.height - height - 8)) + 'px';
+    var height = disabledBubble.offsetHeight;
+    var placement = below >= height || below >= above ? 'below' : 'above';
+    var available = placement === 'below' ? below : above;
+    if (available < 24 || maxX <= minX) { hideDisabledHelp(); return; }
+    disabledBubbleText.style.maxHeight = Math.max(0,available - 2) + 'px';
+    var width = disabledBubble.offsetWidth;
+    height = disabledBubble.offsetHeight;
+    var left = Math.max(minX,Math.min(targetX - width / 2,maxX - width));
+    var top = placement === 'below' ? Math.min(box.bottom,visible.bottom) + gap :
+      Math.max(box.top,visible.top) - gap - height;
+    disabledBubble.dataset.placement = placement;
+    disabledBubble.style.setProperty('--ach-help-arrow',Math.max(10,Math.min(width - 10,targetX - left)) + 'px');
+    disabledBubble.style.left = (left - parent.left) + 'px';
+    disabledBubble.style.top = (top - parent.top) + 'px';
   }
   function showDisabledHelp(entry) {
-    if (!entry.control.disabled || !helpText(entry.control)) return;
+    if (!entry.control.disabled || actionIsPending(entry.control) || !helpText(entry.control)) return;
     activeHelp = entry;
     positionDisabledHelp();
   }
@@ -1466,14 +1572,16 @@
         entry.anchor.removeAttribute('tabindex');
         entry.anchor.removeAttribute('aria-describedby');
         entry.anchor.removeAttribute('aria-label');
-        entry.anchor.removeEventListener('pointerenter',entry.enter);
+        entry.anchor.classList.remove('ach-action-pending');
+        entry.anchor.removeAttribute('aria-busy');
         entry.anchor.removeEventListener('pointerleave',entry.leave);
+        entry.anchor.removeEventListener('keydown',entry.key);
         entry.anchor.removeEventListener('focus',entry.focus);
         entry.anchor.removeEventListener('blur',entry.blur);
         entry.anchor.removeEventListener('click',entry.click);
       }
       helpAnchors.delete(control);
-      if (focused && control.getClientRects().length) control.focus({preventScroll:true});
+      if (focused && control.getClientRects().length) focusWithoutHelp(control);
       return;
     }
     if (!entry) {
@@ -1493,14 +1601,17 @@
       anchor.appendChild(description);
       anchor.setAttribute('aria-describedby',description.id);
       entry = {anchor:anchor,control:control,description:description};
-      entry.enter = function(event) {
-        if (!dismissedPointer && event.pointerType !== 'touch') showDisabledHelp(entry);
-      };
       entry.leave = function(event) {
-        if (activeHelp === entry && event.relatedTarget !== disabledBubble &&
+        if (activeHelp === entry && !disabledBubble.contains(event.relatedTarget) &&
             doc.activeElement !== anchor) hideDisabledHelp();
       };
-      entry.focus = function() { showDisabledHelp(entry); };
+      entry.focus = function() { if (!quietHelpFocus) showDisabledHelp(entry); };
+      entry.key = function(event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault(); event.stopPropagation();
+          showDisabledHelp(entry);
+        }
+      };
       entry.blur = function() { if (activeHelp === entry && !anchor.matches(':hover') &&
         !disabledBubble.matches(':hover')) hideDisabledHelp(); };
       entry.click = function(event) {
@@ -1508,15 +1619,22 @@
         event.preventDefault();
         showDisabledHelp(entry);
       };
-      anchor.addEventListener('pointerenter',entry.enter);
       anchor.addEventListener('pointerleave',entry.leave);
+      anchor.addEventListener('keydown',entry.key);
       anchor.addEventListener('focus',entry.focus);
       anchor.addEventListener('blur',entry.blur);
       anchor.addEventListener('click',entry.click);
       helpAnchors.set(control,entry);
     }
-    entry.description.textContent = helpText(control);
-    if (activeHelp === entry) positionDisabledHelp();
+    var pending = actionIsPending(control);
+    entry.anchor.classList.toggle('ach-action-pending',pending);
+    if (pending) entry.anchor.setAttribute('aria-busy','true');
+    else entry.anchor.removeAttribute('aria-busy');
+    entry.description.textContent = pending ? 'Operation in progress. Wait for the result.' : helpText(control);
+    if (activeHelp === entry) {
+      if (pending) hideDisabledHelp();
+      else positionDisabledHelp();
+    }
   }
   function setActionDisabled(selector, disabled, reason) {
     var controls = root.find(selector);
@@ -1528,7 +1646,9 @@
     if (doc) {
       root[0].querySelectorAll(selector).forEach(syncDisabledHelp);
       var entry = retainFocus && helpAnchors.get(focused);
-      if (entry && entry.anchor.getClientRects().length) entry.anchor.focus({preventScroll:true});
+      // Focus continuity must not turn a click-induced disabled transition
+      // into an unsolicited tooltip. Explicit focus/hover still works.
+      if (entry && entry.anchor.getClientRects().length) focusWithoutHelp(entry.anchor);
     }
   }
   function initializeDisabledHelp() {
@@ -1536,6 +1656,9 @@
     var doc = root[0].ownerDocument;
     disabledBubble = doc.createElement('div');
     disabledBubble.className = 'ach-disabled-bubble';
+    disabledBubbleText = doc.createElement('div');
+    disabledBubbleText.className = 'ach-disabled-bubble-text';
+    disabledBubble.appendChild(disabledBubbleText);
     disabledBubble.setAttribute('aria-hidden','true'); // the focused anchor has its own associated description
     disabledBubble.hidden = true;
     root[0].appendChild(disabledBubble);
@@ -1543,34 +1666,34 @@
       if (activeHelp && !activeHelp.anchor.contains(event.relatedTarget) &&
           doc.activeElement !== activeHelp.anchor) hideDisabledHelp();
     });
-    // Layout changes can synthesize pointer-enter without physical movement.
-    // Keep Escape dismissal until an actual pointer move or explicit focus/tap.
-    // Track movement across the host document, not just the dialog. Leaving
-    // the dialog and returning to the same coordinates must also clear Escape.
+    // Hover requires actual pointer movement, not a synthetic pointerenter
+    // caused by disabling, wrapping, scrolling or settling an action.
+    // Document scope also handles leaving/re-entering the native dialog.
     $(doc).off('pointermove.achDisabledHelp').on('pointermove.achDisabledHelp',function(event) {
       if (!root[0].isConnected) { $(doc).off('pointermove.achDisabledHelp'); return; }
       var pointer = event.originalEvent || event;
       var moved = !lastPointer || lastPointer.x !== pointer.clientX || lastPointer.y !== pointer.clientY;
       lastPointer = {x:pointer.clientX,y:pointer.clientY};
-      if (dismissedPointer && moved && pointer.pointerType !== 'touch') {
-        dismissedPointer = false;
+      if (moved && pointer.pointerType !== 'touch') {
         var anchor = event.target.closest && event.target.closest('.ach-disabled-anchor');
         var control = anchor && root[0].contains(anchor) && anchor.querySelector('button:disabled,input:disabled');
-        if (control && helpAnchors.has(control)) showDisabledHelp(helpAnchors.get(control));
+        var entry = control && helpAnchors.get(control);
+        if (entry && activeHelp !== entry) showDisabledHelp(entry);
       }
     });
     root[0].addEventListener('pointerdown',function(event) {
       if (activeHelp && !activeHelp.anchor.contains(event.target) &&
           !disabledBubble.contains(event.target)) hideDisabledHelp();
     },true);
-    root[0].addEventListener('scroll',positionDisabledHelp,true);
+    root[0].addEventListener('scroll',function(event) {
+      if (!disabledBubble.contains(event.target)) positionDisabledHelp();
+    },true);
     $(window).off('resize.achDisabledHelp').on('resize.achDisabledHelp',positionDisabledHelp);
     // Escape must also dismiss pointer help when focus is elsewhere in the
     // native dialog; the namespace is replaced on plugin reopen.
     $(doc).off('keydown.achDisabledHelp').on('keydown.achDisabledHelp',function(event) {
       if (!root[0].isConnected) { $(doc).off('keydown.achDisabledHelp'); return; }
       if (activeHelp && event.key === 'Escape') {
-        dismissedPointer = true;
         hideDisabledHelp(); event.preventDefault(); event.stopPropagation();
       }
     });
@@ -1822,6 +1945,12 @@
         correlationId : '');
   }
   function request(method, data, done, shouldReport, expectedRestoreSha) {
+    var finishProgress = beginActionProgress(initiatingAction);
+    var complete = done;
+    done = function() {
+      try { return complete.apply(this,arguments); }
+      finally { finishProgress(); }
+    };
     // Multiple independent panels may load in parallel. Preserve the global
     // status of the latest initiated request; stale callbacks still complete
     // their own view, subject to each view's selection/version checks.
@@ -2053,8 +2182,8 @@
         accepted ? 'info' : 'error');
     });
   }
-  root.find('#ach-overview-refresh').on('click', overview);
-  root.find('[data-monitor-control]').on('change', function () {
+  bindAction('#ach-overview-refresh','click', overview);
+  bindAction('[data-monitor-control]','change', function () {
     if (controlBusy || monitorRecheckRequired || !lastOverview) {
       if (lastOverview) displayControls(lastOverview);
       return;
@@ -2332,7 +2461,7 @@
       explanation);
     refreshSelectedSiteBaselineGate();
   }
-  root.find('#ach-site-changes-compare').on('click', function () {
+  bindAction('#ach-site-changes-compare','click', function () {
     if (siteChangesBusy || siteBusy || websitePolicyState !== 'stable') return;
     resetSiteChanges('Comparing native website records...');
     inspectionSummary('site-changes', 'Comparing the current aaPanel site records with the saved baseline…');
@@ -2386,7 +2515,7 @@
       siteChangesLock(false);
     });
   });
-  root.find('#ach-site-changes-save-selected').on('click', function () {
+  bindAction('#ach-site-changes-save-selected','click', function () {
     if (siteChangesBusy || siteBusy || websitePolicyState !== 'stable') return;
     var candidate = selectedSiteBaselineCandidate();
     if (!candidate || !siteChangesSnapshot) return;
@@ -2428,7 +2557,7 @@
         'observed');
     });
   });
-  root.find('#ach-site-changes-save').on('click', function () {
+  bindAction('#ach-site-changes-save','click', function () {
     if (siteChangesBusy || siteBusy || !siteChangesSnapshot ||
         siteChangesSnapshot.state === 'No Changes' ||
         websitePolicyState !== 'stable') return;
@@ -2657,11 +2786,11 @@
       hostsAliasLock();
     });
   }
-  root.find('#ach-hosts-alias-refresh').on('click', function () {
+  bindAction('#ach-hosts-alias-refresh','click', function () {
     loadHostsAliases();
   });
   root.find('#ach-hosts-alias-select').on('change', hostsAliasLock);
-  root.find('#ach-hosts-alias-remove').on('click', function () {
+  bindAction('#ach-hosts-alias-remove','click', function () {
     var domain = String(root.find('#ach-hosts-alias-select').val() || '');
     if (hostsAliasBusy || !hostsAliasDomains.includes(domain)) return;
     hostsAliasBusy = true;
@@ -2870,9 +2999,9 @@
       root.find('#ach-wp-settings-kind').val(kind).trigger('change');
     else renderWordPressTask();
   });
-  root.find('#ach-wp-settings-recheck').on('click',function(){wpSettingsRequest('recheck');});
-  root.find('#ach-wp-settings-apply').on('click',function(){wpSettingsRequest('apply');});
-  root.find('#ach-wp-settings-restore').on('click',function(){wpSettingsRequest('restore');});
+  bindAction('#ach-wp-settings-recheck','click', function(){wpSettingsRequest('recheck');});
+  bindAction('#ach-wp-settings-apply','click', function(){wpSettingsRequest('apply');});
+  bindAction('#ach-wp-settings-restore','click', function(){wpSettingsRequest('restore');});
   function nativeHostsSnapshot(site) {
     var bindings = site.bound_domains.map(function (item) { return [item.name, item.port]; });
     bindings.sort(function (a, b) {
@@ -3004,7 +3133,7 @@
     refreshSelectedSiteBaselineGate();
     renderNavigationScope();
   });
-  root.find('#ach-hosts-inspect-button').on('click', function () {
+  bindAction('#ach-hosts-inspect-button','click', function () {
     var id = hostsSiteId();
     if (!id || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var ticket = ++hostsTicket;
@@ -3115,8 +3244,8 @@
       hostsLock(false);
     });
   }
-  root.find('#ach-hosts-removal-button').on('click', function () { dispatchHostsManage('remove'); });
-  root.find('#ach-hosts-restore-button').on('click', function () { dispatchHostsManage('restore'); });
+  bindAction('#ach-hosts-removal-button','click', function () { dispatchHostsManage('remove'); });
+  bindAction('#ach-hosts-restore-button','click', function () { dispatchHostsManage('restore'); });
   function validReconciliation(r, id) {
     var site = hostsPageSites.get(id);
     if (!site || !r || r.status !== true || r.schema !== 1 ||
@@ -3156,7 +3285,7 @@
     return !(r.state === 'Observed' && (r.vhost.state !== 'File Match' ||
       php.state === 'File Drift' || recovery.state === 'Needs Review'));
   }
-  root.find('#ach-reconcile-button').on('click', function () {
+  bindAction('#ach-reconcile-button','click', function () {
     var id = hostsSiteId();
     if (!id || reconcileBusy || siteBusy || hostsBusy ||
         websitePolicyState !== 'stable') return;
@@ -3294,7 +3423,7 @@
       expected.every((code, i) => r.findings[i] === code) &&
       r.state === (expected.length ? 'File Drift' : 'File Match');
   }
-  root.find('#ach-vhost-inspect-button').on('click', function () {
+  bindAction('#ach-vhost-inspect-button','click', function () {
     var id = hostsSiteId();
     if (!id || vhostBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var ticket = ++vhostTicket;
@@ -3388,7 +3517,7 @@
       /^[a-f0-9]{64}$/.test(r.candidate_config_sha256 || '') &&
       /^[a-f0-9]{64}$/.test(r.vhost_content_sha256 || '');
   }
-  root.find('#ach-nginx-candidate-button').on('click', function () {
+  bindAction('#ach-nginx-candidate-button','click', function () {
     var id = hostsSiteId();
     if (!id || nginxCandidateBusy || hostsBusy || siteBusy ||
         websitePolicyState !== 'stable') return;
@@ -3645,10 +3774,10 @@
         '\nAfter changes, run Recheck. HTTPS, WAF and custom application exceptions require independent QA.');
     }, function () { return ticket === guardTicket && id === hostsSiteId(); });
   }
-  root.find('#ach-guard-preview').on('click',function () {guardRequest('preview');});
-  root.find('#ach-guard-recheck').on('click',function () {guardRequest('recheck');});
-  root.find('#ach-guard-apply').on('click',function () {guardRequest('apply');});
-  root.find('#ach-guard-restore').on('click',function () {guardRequest('restore');});
+  bindAction('#ach-guard-preview','click', function () {guardRequest('preview');});
+  bindAction('#ach-guard-recheck','click', function () {guardRequest('recheck');});
+  bindAction('#ach-guard-apply','click', function () {guardRequest('apply');});
+  bindAction('#ach-guard-restore','click', function () {guardRequest('restore');});
   root.find('#ach-guard-block-xmlrpc').on('change',function () {
     guardReady=null;
     // Option edits invalidate readiness, not the verified existing journal state.
@@ -3782,10 +3911,10 @@
         '\n' + r.reason);
     });
   }
-  root.find('#ach-scan-preview').on('click',function () {scanRequest('preview');});
-  root.find('#ach-scan-recheck').on('click',function () {scanRequest('recheck');});
-  root.find('#ach-scan-apply').on('click',function () {scanRequest('apply');});
-  root.find('#ach-scan-restore').on('click',function () {scanRequest('restore');});
+  bindAction('#ach-scan-preview','click', function () {scanRequest('preview');});
+  bindAction('#ach-scan-recheck','click', function () {scanRequest('recheck');});
+  bindAction('#ach-scan-apply','click', function () {scanRequest('apply');});
+  bindAction('#ach-scan-restore','click', function () {scanRequest('restore');});
   root.find('#ach-scan-maxretry,#ach-scan-findtime,#ach-scan-bantime')
     .on('input change',function () {
       scanReady = null;
@@ -3890,8 +4019,8 @@
       orphanLock();
     });
   }
-  root.find('#ach-scan-orphan-list').on('click',function(){orphanRequest('orphan_list');});
-  root.find('#ach-scan-orphan-restore').on('click',function(){orphanRequest('orphan_restore');});
+  bindAction('#ach-scan-orphan-list','click', function(){orphanRequest('orphan_list');});
+  bindAction('#ach-scan-orphan-restore','click', function(){orphanRequest('orphan_restore');});
   root.find('#ach-scan-orphan-choice').on('change',orphanLock);
   orphanLock();
   function validNginxHelperAudit(h) {
@@ -4012,7 +4141,7 @@
           r.unresolved_other_sites !== 0 || r.reason !== '')) return false;
     return true;
   }
-  root.find('#ach-cache-inspect-button').on('click', function () {
+  bindAction('#ach-cache-inspect-button','click', function () {
     var id = hostsSiteId();
     if (!id || cacheBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var ticket = ++cacheTicket;
@@ -4128,7 +4257,7 @@
         r.probes.length === expected.length &&
         r.probes.every(p => p.cache === 'BYPASS' && p.http_status === 200));
   }
-  root.find('#ach-cache-private-probe-button').on('click', function () {
+  bindAction('#ach-cache-private-probe-button','click', function () {
     var id = hostsSiteId();
     if (!id || cacheProbeBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var ticket = ++cacheProbeTicket;
@@ -4159,7 +4288,7 @@
     });
   });
 
-  root.find('#ach-cache-woo-probe-button').on('click', function () {
+  bindAction('#ach-cache-woo-probe-button','click', function () {
     var id = hostsSiteId();
     if (!id || cacheProbeBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var ticket = ++cacheProbeTicket;
@@ -4219,7 +4348,7 @@
       r.global_http_fragment.length > 100 &&
       r.site_server_fragment.length > 100;
   }
-  root.find('#ach-cache-plan-button').on('click', function () {
+  bindAction('#ach-cache-plan-button','click', function () {
     var id = hostsSiteId();
     if (!id || cachePlanBusy || hostsBusy || siteBusy ||
         websitePolicyState !== 'stable') return;
@@ -4320,7 +4449,7 @@
   }
   root.find('#ach-cache-activation-reviewed,#ach-cache-restore-reviewed,#ach-cache-clear-reviewed')
     .on('change', cacheActivationLock);
-  root.find('#ach-bridge-inspect,#ach-bridge-enable,#ach-bridge-disable').on('click', function () {
+  bindAction('#ach-bridge-inspect,#ach-bridge-enable,#ach-bridge-disable','click', function () {
     var id = hostsSiteId(), intent = this.id;
     if (!id || cacheActivationBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var action = intent === 'ach-bridge-enable' ? 'bridge_enable' :
@@ -4355,7 +4484,7 @@
       cacheActivationLock();
     });
   });
-  root.find('#ach-wp-cache-inspect,#ach-wp-cache-setup,#ach-wp-cache-restore').on('click', function () {
+  bindAction('#ach-wp-cache-inspect,#ach-wp-cache-setup,#ach-wp-cache-restore','click', function () {
     var id = hostsSiteId();
     if (!id || cacheActivationBusy || hostsBusy || siteBusy || websitePolicyState !== 'stable') return;
     var action = this.id === 'ach-wp-cache-inspect' ? 'inspect' :
@@ -4390,7 +4519,7 @@
       cacheActivationLock();
     });
   });
-  root.find('#ach-cache-activation-preview').on('click', function () {
+  bindAction('#ach-cache-activation-preview','click', function () {
     var id = hostsSiteId();
     if (!id || cacheActivationBusy || hostsBusy || siteBusy ||
         websitePolicyState !== 'stable') return;
@@ -4477,7 +4606,7 @@
             (r.recovery_scope == null &&
              r.changed === true && r.runtime_verified === true));
   }
-  root.find('#ach-cache-activation-recheck').on('click', function () {
+  bindAction('#ach-cache-activation-recheck','click', function () {
     var id = hostsSiteId();
     if (!id || cacheActivationBusy || hostsBusy || siteBusy ||
         websitePolicyState !== 'stable') return;
@@ -4553,7 +4682,7 @@
       validCacheUrlPath(path) ? path : null;
     cacheActivationLock();
   });
-  root.find('#ach-cache-clear-url').on('click', function () {
+  bindAction('#ach-cache-clear-url','click', function () {
     var id = hostsSiteId(), recovery = cacheClearIdentity;
     var path = root.find('#ach-cache-url-path').val();
     if (!id || cacheActivationBusy || !recovery || !validCacheUrlPath(path) ||
@@ -4588,7 +4717,7 @@
       cacheActivationLock();
     });
   });
-  root.find('#ach-cache-clear-files').on('click', function () {
+  bindAction('#ach-cache-clear-files','click', function () {
     var id = hostsSiteId(), recovery = cacheClearIdentity;
     if (!id || cacheActivationBusy || !recovery ||
         root.find('#ach-cache-clear-reviewed').prop('checked') !== true ||
@@ -4620,7 +4749,7 @@
       cacheActivationLock();
     });
   });
-  root.find('#ach-cache-activation-apply').on('click', function () {
+  bindAction('#ach-cache-activation-apply','click', function () {
     var id = hostsSiteId(), plan = cacheActivationSnapshot;
     if (!id || cacheActivationBusy || !plan || plan.site_id !== id ||
         root.find('#ach-cache-activation-reviewed').prop('checked') !== true ||
@@ -4665,7 +4794,7 @@
       cacheActivationLock();
     });
   });
-  root.find('#ach-cache-activation-restore').on('click', function () {
+  bindAction('#ach-cache-activation-restore','click', function () {
     var id = hostsSiteId(), recovery = cacheRecoveryIdentity;
     if (!id || cacheActivationBusy || !recovery ||
         root.find('#ach-cache-restore-reviewed').prop('checked') !== true ||
@@ -4700,7 +4829,7 @@
       cacheActivationLock();
     });
   });
-  root.find('#ach-sites-refresh').on('click', function () {
+  bindAction('#ach-sites-refresh','click', function () {
     if (siteBusy || websitePolicyState !== 'stable') return;
     page = 1;
     sectionsLoaded.websites = false;
@@ -5162,9 +5291,9 @@
       statusLock(statusBusy);
     });
   }
-  root.find('#ach-status-sites-more').on('click', function () { loadStatusSites(false); });
-  root.find('#ach-status-sites-retry').on('click', function () { loadStatusSites(true); });
-  root.find('#ach-status-load').on('click', function () { statusLoad(); });
+  bindAction('#ach-status-sites-more','click', function () { loadStatusSites(false); });
+  bindAction('#ach-status-sites-retry','click', function () { loadStatusSites(true); });
+  bindAction('#ach-status-load','click', function () { statusLoad(); });
   root.find('#ach-status-scope').on('change', function () {
     if ((statusBusy && !statusReadBusy) || !statusMayDiscardEdits()) {
       statusRestoreAcceptedSelection();
@@ -5209,7 +5338,7 @@
     statusClearPreview();
     statusLock(statusBusy);
   });
-  root.find('#ach-status-preview-button').on('click', function () {
+  bindAction('#ach-status-preview-button','click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
     if (!scope || !statusTrustedSelection(scope)) {
@@ -5339,7 +5468,7 @@
       (r.state !== 'Conflict' ||
         r.page_file_state === 'Different bytes' || r.error_page_sources.length > 0);
   }
-  root.find('#ach-status-inspect-button').on('click', function () {
+  bindAction('#ach-status-inspect-button','click', function () {
     var scope = statusScope();
     var template = root.find('#ach-status-template').val();
     var locale = root.find('#ach-status-locale').val();
@@ -5476,7 +5605,7 @@
       r.body_matches_render === (r.body_matches_file && r.body_sha256 === r.rendered_sha256) &&
       (r.adoption_preview === undefined || validAdoptionPreview(r.adoption_preview, r));
   }
-  root.find('#ach-status-probe-button').on('click', function () {
+  bindAction('#ach-status-probe-button','click', function () {
     var scope = statusScope(), locale = root.find('#ach-status-locale').val();
     var template = root.find('#ach-status-template').val();
     var selectedSite = selectedProbeSite(scope);
@@ -5761,13 +5890,13 @@
       statusLock(false);
     });
   }
-  root.find('#ach-status-manage-recheck').on('click', function () {
+  bindAction('#ach-status-manage-recheck','click', function () {
     manageStatusRequest('recheck');
   });
-  root.find('#ach-status-manage-apply').on('click', function () {
+  bindAction('#ach-status-manage-apply','click', function () {
     manageStatusRequest('apply');
   });
-  root.find('#ach-status-manage-restore').on('click', function () {
+  bindAction('#ach-status-manage-restore','click', function () {
     manageStatusRequest('restore');
   });
   function validDefaultResponse(r, action, template, locale, revision) {
@@ -5874,13 +6003,13 @@
       statusLock(false);
     });
   }
-  root.find('#ach-status-default-recheck').on('click', function () {
+  bindAction('#ach-status-default-recheck','click', function () {
     manageDefaultRequest('recheck');
   });
-  root.find('#ach-status-default-apply').on('click', function () {
+  bindAction('#ach-status-default-apply','click', function () {
     manageDefaultRequest('apply');
   });
-  root.find('#ach-status-default-restore').on('click', function () {
+  bindAction('#ach-status-default-restore','click', function () {
     manageDefaultRequest('restore');
   });
   root.find('#ach-status-default-apply-approve, #ach-status-default-restore-approve')
@@ -6020,13 +6149,13 @@
       statusLock(false);
     });
   }
-  root.find('#ach-status-stopped-recheck').on('click', function () {
+  bindAction('#ach-status-stopped-recheck','click', function () {
     manageStoppedRequest('recheck');
   });
-  root.find('#ach-status-stopped-apply').on('click', function () {
+  bindAction('#ach-status-stopped-apply','click', function () {
     manageStoppedRequest('apply');
   });
-  root.find('#ach-status-stopped-restore').on('click', function () {
+  bindAction('#ach-status-stopped-restore','click', function () {
     manageStoppedRequest('restore');
   });
   root.find('#ach-status-stopped-apply-approve, #ach-status-stopped-restore-approve')
@@ -6134,13 +6263,13 @@
       statusLock(false);
     });
   }
-  root.find('#ach-status-unbound-recheck').on('click', function () {
+  bindAction('#ach-status-unbound-recheck','click', function () {
     manageUnboundRequest('recheck');
   });
-  root.find('#ach-status-unbound-apply').on('click', function () {
+  bindAction('#ach-status-unbound-apply','click', function () {
     manageUnboundRequest('apply');
   });
-  root.find('#ach-status-unbound-restore').on('click', function () {
+  bindAction('#ach-status-unbound-restore','click', function () {
     manageUnboundRequest('restore');
   });
   root.find('#ach-status-unbound-apply-approve, #ach-status-unbound-restore-approve')
@@ -6235,18 +6364,18 @@
       statusLock(false);
     });
   }
-  root.find('#ach-status-tls-recheck').on('click', function () {
+  bindAction('#ach-status-tls-recheck','click', function () {
     manageTlsRequest('recheck');
   });
-  root.find('#ach-status-tls-apply').on('click', function () {
+  bindAction('#ach-status-tls-apply','click', function () {
     manageTlsRequest('apply');
   });
-  root.find('#ach-status-tls-restore').on('click', function () {
+  bindAction('#ach-status-tls-restore','click', function () {
     manageTlsRequest('restore');
   });
   root.find('#ach-status-tls-apply-approve, #ach-status-tls-restore-approve')
     .on('change', function () { statusLock(statusBusy); });
-  root.find('#ach-status-save').on('click', function () {
+  bindAction('#ach-status-save','click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
     if (!scope || !statusTrustedSelection(scope)) {
@@ -6285,7 +6414,7 @@
       statusLock(false);
     });
   });
-  root.find('#ach-status-reset').on('click', function () {
+  bindAction('#ach-status-reset','click', function () {
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
     if (!statusTrustedSelection(scope)) return;
@@ -6437,7 +6566,7 @@
         (r.activity_warning ? ' ' + String(r.activity_warning).slice(0,240) : ''));
     });
   }
-  root.find('#ach-activity-refresh').on('click', loadActivity);
+  bindAction('#ach-activity-refresh','click', loadActivity);
   root.find('#ach-activity-level').on('change', loadActivity);
   root.find('#ach-activity-module').on('change', loadActivity);
   var phpInventoryTicket = 0, phpInventoryBusy = false, phpInventory = new Map();
@@ -6662,7 +6791,7 @@
       );
     }, function () { return ticket === phpInventoryTicket; });
   }
-  root.find('#ach-php-discover').on('click', loadPhpInventory);
+  bindAction('#ach-php-discover','click', loadPhpInventory);
   root.find('#ach-php-version').on('change', function () {
     ++fpmPolicyLoadTicket;
     resetFpmRecheck('PHP version changed; recheck this service against saved intent.');
@@ -6674,7 +6803,7 @@
     resetRecovery();
     root.find('#ach-fpm-recovery-status').text('PHP version changed. Inspect this version’s recovery before restoring.');
   });
-  root.find('#ach-php-runtime-check').on('click', function () {
+  bindAction('#ach-php-runtime-check','click', function () {
     var selected = String(root.find('#ach-php-version').val() || '');
     if (phpInventoryBusy || phpRuntimeBusy ||
         !phpInventory.get(selected)?.preview_candidate) return;
@@ -7066,8 +7195,8 @@
       direction && index >= 0 ? (index + direction + list.length) % list.length : -1;
     if (next >= 0) { event.preventDefault(); list[next].focus(); list[next].click(); }
   });
-  root.find('#ach-prev').on('click', function () { if (page > 1 && !siteBusy && websitePolicyState === 'stable') { page -= 1; sites(); } });
-  root.find('#ach-next').on('click', function () { if (hasMore && !siteBusy && websitePolicyState === 'stable') { page += 1; sites(); } });
+  bindAction('#ach-prev','click', function () { if (page > 1 && !siteBusy && websitePolicyState === 'stable') { page -= 1; sites(); } });
+  bindAction('#ach-next','click', function () { if (hasMore && !siteBusy && websitePolicyState === 'stable') { page += 1; sites(); } });
   function validImpact(impact, phpVersion) {
     if (!impact || impact.schema !== 1 ||
         impact.scope !== 'shared_service' || impact.version !== phpVersion ||
@@ -7158,7 +7287,7 @@
       renderFpmAutoControls();
     }, function () { return ticket === fpmAutoTicket; });
   }
-  root.find('#ach-fpm-auto-refresh').on('click', refreshFpmAuto);
+  bindAction('#ach-fpm-auto-refresh','click', refreshFpmAuto);
   root.find('#ach-fpm-auto-reviewed').on('change', renderFpmAutoControls);
   function mutateFpmAuto(action) {
     var version = String(root.find('#ach-php-version').val() || '');
@@ -7204,8 +7333,8 @@
           fpmPolicyFailure('read', failure, 'No enabled state inferred.'));
     }, function () { return ticket === fpmAutoTicket; });
   }
-  root.find('#ach-fpm-auto-enable').on('click', function () { mutateFpmAuto('enable'); });
-  root.find('#ach-fpm-auto-disable').on('click', function () { mutateFpmAuto('disable'); });
+  bindAction('#ach-fpm-auto-enable','click', function () { mutateFpmAuto('enable'); });
+  bindAction('#ach-fpm-auto-disable','click', function () { mutateFpmAuto('disable'); });
   function resetFpmRecheck(note) {
     fpmAutoReview = null;
     root.find('#ach-fpm-auto-reviewed').prop('checked', false);
@@ -7249,7 +7378,7 @@
     return changesOk &&
       (r.state === 'File Match' ? r.changes.length === 0 : r.changes.length > 0);
   }
-  root.find('#ach-fpm-policy-recheck').on('click', function () {
+  bindAction('#ach-fpm-policy-recheck','click', function () {
     var version = String(root.find('#ach-php-version').val() || '');
     if (fpmRecheckBusy || fpmPolicyBusy || phpInventoryBusy ||
         !phpInventory.get(version)?.preview_candidate) return;
@@ -7356,7 +7485,7 @@
       fpmPolicyBusy ? 'Saving desired Monitor settings. Wait for the verified result before another Save.' :
       settledWhy || 'Locked: the five values need a new valid PHP file preview. This approval saves desired Monitor values only, not PHP-FPM configuration.');
   }
-  root.find('#ach-fpm-policy-load').on('click', function () {
+  bindAction('#ach-fpm-policy-load','click', function () {
     var version = String(root.find('#ach-php-version').val() || '');
     if (fpmPolicyBusy || !phpInventory.get(version)?.preview_candidate) return;
     var generation = fpmFormGeneration, ticket = ++fpmPolicyLoadTicket;
@@ -7393,7 +7522,7 @@
         version === String(root.find('#ach-php-version').val() || '');
     });
   });
-  root.find('#ach-fpm-policy-save').on('click', function () {
+  bindAction('#ach-fpm-policy-save','click', function () {
     var evidence = fpmPolicyEvidence, data = phpFields();
     if (!evidence || fpmPolicyBusy ||
         JSON.stringify(data) !== evidence.form ||
@@ -7525,7 +7654,7 @@
         'Inputs changed; inspect the selected PHP recovery again.');
     }
   });
-  root.find('#ach-fpm-prepare').on('click', function () {
+  bindAction('#ach-fpm-prepare','click', function () {
     if (fpmBusy || !phpPreviewEligible) return;
     resetFpmPlan();
     var fields = phpFields(), snapshot = JSON.stringify(fields);
@@ -7567,7 +7696,7 @@
     }, fresh);
   });
   root.find('#ach-fpm-approval').on('change', function () { fpmLock(fpmBusy); });
-  root.find('#ach-fpm-commit').on('click', function () {
+  bindAction('#ach-fpm-commit','click', function () {
     if (fpmBusy || !fpmPlan || root.find('#ach-fpm-approval').prop('checked') !== true) return;
     var fieldsNow = phpFields();
     if (JSON.stringify(fieldsNow) !== JSON.stringify(fpmFields)) {
@@ -7604,7 +7733,7 @@
       'Recovery version changed. Inspect the saved operation again.');
     fpmLock(fpmBusy);
   });
-  root.find('#ach-fpm-check-recovery').on('click', function () {
+  bindAction('#ach-fpm-check-recovery','click', function () {
     var version = String(root.find('#ach-fpm-recovery-version').val() || '');
     if (fpmBusy || !['81','85'].includes(version)) return;
     resetRecovery(); fpmLock(true);
@@ -7667,7 +7796,7 @@
     });
   });
   root.find('#ach-fpm-rollback-approval').on('change', function () { fpmLock(fpmBusy); });
-  root.find('#ach-fpm-rollback').on('click', function () {
+  bindAction('#ach-fpm-rollback','click', function () {
     if (fpmBusy || !fpmRecovery || root.find('#ach-fpm-rollback-approval').prop('checked') !== true) return;
     var op = fpmRecovery.operation_id, current = fpmRecovery;
     if (current.version !== String(root.find('#ach-fpm-recovery-version').val() || '')) {
@@ -7688,7 +7817,7 @@
         'Recovery not confirmed. Inspect saved recovery before retrying.');
     }, null, current.baseline_sha256);
   });
-  root.find('#ach-php-form').on('submit', function (event) {
+  bindAction('#ach-php-form','submit', function (event) {
     event.preventDefault();
     // A newer Preview invalidates ALL prior Prepare results and approvals,
     // even if inputs are byte-for-byte identical.
@@ -7920,11 +8049,11 @@
     });
   }
   root.find('#ach-wp-terminal-reviewed, #ach-wp-terminal-abandon-reviewed').on('change', wpTerminalControl);
-  root.find('#ach-wp-terminal-refresh').on('click', loadWpTerminal);
-  root.find('#ach-wp-terminal-recheck').on('click', function () { updateWpTerminal('recheck'); });
-  root.find('#ach-wp-terminal-abandon').on('click', function () { updateWpTerminal('abandon'); });
-  root.find('#ach-wp-terminal-enable').on('click', function () { updateWpTerminal('enable'); });
-  root.find('#ach-wp-terminal-disable').on('click', function () { updateWpTerminal('disable'); });
+  bindAction('#ach-wp-terminal-refresh','click', loadWpTerminal);
+  bindAction('#ach-wp-terminal-recheck','click', function () { updateWpTerminal('recheck'); });
+  bindAction('#ach-wp-terminal-abandon','click', function () { updateWpTerminal('abandon'); });
+  bindAction('#ach-wp-terminal-enable','click', function () { updateWpTerminal('enable'); });
+  bindAction('#ach-wp-terminal-disable','click', function () { updateWpTerminal('disable'); });
 
   initializeDisabledHelp();
   navigateTask('overview',null,false);

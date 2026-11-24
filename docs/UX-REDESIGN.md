@@ -138,7 +138,7 @@ screen-reader acceptance, or production writer qualification from geometry.
 ## Owner follow-up: secondary actions and disabled-action guidance
 
 [Accepted OF-01/OF-02 contract](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7130362918).
-Native 0.1.105 review-remediated candidate uses the shared secondary-button primitive for
+Native 0.1.105 established the shared secondary-button primitive for
 Browse websites and Error pages. Error pages retains a distinct scope and
 does not inherit the Website selector. No second Browse action.
 
@@ -195,6 +195,42 @@ HTTP unbound distinguishes Conflict/Drift from missing inspection and
 uses the existing explicit approvals. These are mocked native responses;
 they are not live writer certification.
 
+### Owner follow-up OF-03 / OF-04: anchored help versus real request progress
+
+[Owner-approved correction](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7131966316).
+Native 0.1.106 retains one help surface but uses a white, normal-weight
+popover with a subtle border/shadow, an 8px gap and a directional arrow
+pointing at the visible control. Position within the content column and
+dialog; prefer below, flip above when appropriate, and scroll lengthy
+copy internally instead of overlapping the action. Pointer movement,
+explicit keyboard focus/Enter/Space and tap can disclose reasons; Escape
+dismisses them. Automatic focus restoration and synthetic pointer-entry
+events never request help. Keep the hover bridge and associated
+description; reduced-motion users get a nonanimated progress glyph.
+
+Use `bindAction(selector, event, handler)` for direct request-producing
+buttons, Monitor controls and PHP Preview submit. It scopes the
+initiating element to the synchronous handler. The existing
+`request()` lifecycle adds/removes that element's progress indicator and
+aria-busy state, including stale, malformed, refusal and transport
+completions. No new busy guard or request restriction is introduced.
+Independent or intentionally repeated read-only requests retain their
+own indicator until their outstanding callbacks settle. Navigation
+and automatic reads continue using existing task statuses, and
+dependent disabled controls may explain their current waiting state
+on deliberate inspection. The initiating action does not show
+disabled-help while busy or auto-open it when the request settles.
+Its original label and native disabled/approval checks remain intact.
+
+The previous R135 expectation that help is open on the initiating
+pending Save is superseded by OF-04. The canonical settled reason must
+still be accurate and available after explicit subsequent interaction;
+late Preview replies must not overwrite it. Existing 36-case identity
+and lifecycle assertions remain unchanged. The progress walk exercises
+31 actual request bindings in desktop and emulated-touch Chromium,
+including Compare, Monitor checkbox changes, independent concurrent
+Save/Preview and repeated Preview settlement; all transport is mocked.
+
 Retain #128 and #21 for exact candidate and native QA evidence.
 
 ## Protect sensitive files — reference interaction states
@@ -214,7 +250,7 @@ The image concept previously generated is **not runtime proof** and its compulso
 ## Current source implementation and acceptance boundary
 
 S1–S5 are merged into `main` through PRs #129–#133. Native source
-0.1.101 established the task-first redesign; 0.1.103 is the integrated review-remediated visual refinement; 0.1.104 was the first Owner follow-up candidate; 0.1.105 is the R135 remediation candidate; the earlier
+0.1.101 established the task-first redesign; 0.1.103 is the integrated review-remediated visual refinement; 0.1.104 was the first Owner follow-up candidate; 0.1.105 is the merged R135 remediation; 0.1.106 refines the help surface and separates initiating-action progress; the earlier
 published 0.1.100 package uses the seven-tab interface. A source ZIP is not
 a published Release asset. Current release availability belongs to GitHub
 Releases; exact installed QA and human acceptance belong to Issues #21 and

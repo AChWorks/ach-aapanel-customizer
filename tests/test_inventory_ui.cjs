@@ -10618,7 +10618,7 @@ test('S2S4-01: saved branding source, failure and canonical Recheck live outside
     assert.equal(html.split(marker).length,2,'Only one canonical '+id);
   }
   assert.match(panel,/id="ach-status-load"[^>]+aria-describedby="ach-status-branding-guidance"/);
-  assert.equal((html.match(/root\.find\('#ach-status-load'\)\.on\('click'/g)||[]).length,1,
+  assert.equal((html.match(/bindAction\('#ach-status-load','click'/g)||[]).length,1,
     'Keep one status_preferences reader and unsaved-draft guard');
   for (const id of ['ach-status-manage-recheck','ach-status-default-recheck',
     'ach-status-stopped-recheck','ach-status-unbound-recheck','ach-status-tls-recheck'])
