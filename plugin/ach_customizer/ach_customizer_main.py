@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.109'
+WORKER_SOURCE_VERSION = '0.1.110'
 
 _STATE_DIR = DATA_DIR
 
@@ -1991,7 +1991,7 @@ class ach_customizer_main:
             rendered = render_page(self._argument(args, "locale"), template, effective)
             if template == "404":
                 observed = probe_site_404(
-                    before, locale=self._argument(args, "locale"),
+                    before, delivery=delivery, locale=self._argument(args, "locale"),
                     rendered_sha256=rendered["rendered_sha256"],
                     rendered_html=rendered["html"],
                 )

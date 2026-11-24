@@ -1381,7 +1381,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.109'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.110'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
@@ -5557,23 +5557,30 @@
   function validStatusProbe(r, scope, locale, selectedSite, selectedSnapshot) {
     var hash = function (value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); };
     var maybeHash = function (value) { return value === null || hash(value); };
-    if (['502','50x'].includes(root.find('#ach-status-template').val())) {
+    var extension404 = root.find('#ach-status-template').val() === '404' &&
+      root.find('#ach-status-delivery').val() === 'extension' &&
+      r && r.scope === 'native_vhost_http404';
+    if (extension404 || ['502','50x'].includes(root.find('#ach-status-template').val())) {
       var plan = r && r.adoption_preview;
       return r && r.status === true && r.schema === 1 &&
         r.template === root.find('#ach-status-template').val() &&
-        r.state === 'Source Ready' && r.scope === 'native_vhost_source_only' &&
+        r.state === 'Source Ready' &&
+        (extension404 ? r.http_status === 404 && r.http_404_observed === true &&
+          hash(r.body_sha256) && r.page_file_sha256 === null :
+          r.scope === 'native_vhost_source_only' && r.http_status === null &&
+          r.body_sha256 === null && hash(r.page_file_sha256)) &&
         r.read_only === true && r.apply_supported === false &&
-        r.nginx_runtime_verified === false && r.http_status === null &&
-        r.body_sha256 === null && !r.body_matches_file && !r.body_matches_render &&
+        r.nginx_runtime_verified === false && !r.body_matches_file && !r.body_matches_render &&
         r.site_id === Number(scope.site_id) && selectedSite &&
         r.site_key === selectedSite.name && r.verified_site_snapshot === selectedSnapshot &&
         r.locale === locale && r.revision === statusRevision &&
-        hash(r.page_file_sha256) && hash(r.rendered_sha256) &&
+        hash(r.rendered_sha256) &&
         plan && plan.schema === 1 && plan.state === 'Source Ready' &&
         plan.route_source_state === 'Native VHost' &&
         plan.apply_supported === false && plan.ownership_verified === false &&
         plan.recovery_verified === false && hash(plan.vhost_sha256) &&
-        plan.current_sha256 === r.page_file_sha256 &&
+        (extension404 ? plan.requires_adoption === false && plan.requires_backup === false : true) &&
+        plan.current_sha256 === (extension404 ? r.body_sha256 : r.page_file_sha256) &&
         plan.proposed_sha256 === r.rendered_sha256 &&
         typeof r.reason === 'string' && r.reason.length <= 240 &&
         typeof r.note === 'string' && r.note.length <= 600;
@@ -5664,23 +5671,27 @@
           '\nHTTP body matches selected render: ' + (r.body_matches_render ? 'Yes' : 'No') +
           '\n' + r.note);
         var adoption = r.adoption_preview;
-        if (((template === '404' && r.state === 'HTTP Match' &&
+        if (((template === '404' && delivery === 'file' && r.state === 'HTTP Match' &&
                r.page_file_sha256 !== r.rendered_sha256) ||
-              (['502','50x'].includes(template) && r.state === 'Source Ready')) &&
+              ((['502','50x'].includes(template) ||
+                (template === '404' && delivery === 'extension' &&
+                 r.scope === 'native_vhost_http404' && r.body_sha256 !== r.rendered_sha256)) &&
+               r.state === 'Source Ready')) &&
             adoption && adoption.route_source_state === 'Native VHost' &&
             /^[0-9a-f]{64}$/.test(adoption.vhost_sha256 || '')) {
           statusProbeEvidence = {
             ticket:ticket, revision:statusRevision, scope:scope.site_id,
             snapshot:selectedSnapshot, locale:locale, template:template, delivery:delivery,
             brand:JSON.stringify(submittedBrand),
-            current:r.page_file_sha256, proposed:r.rendered_sha256,
+            current:adoption.current_sha256, proposed:r.rendered_sha256,
             vhost:adoption.vhost_sha256
           };
         }
         root.find('#ach-status-adoption-result').text(adoption ?
           'Read-only ' + template + ' preflight: ' + adoption.state + ' — ' + adoption.reason +
           '\nTextual route provenance: ' + adoption.route_source_state +
-          '\nExisting file SHA-256: ' + (adoption.current_sha256 || 'Unavailable') +
+          '\n' + (r.scope === 'native_vhost_http404' ? 'Existing HTTP body SHA-256: ' :
+            'Existing file SHA-256: ') + (adoption.current_sha256 || 'Unavailable') +
           '\nProposed SHA-256: ' + adoption.proposed_sha256 +
           '\nExplicit adoption and backup required: ' + (adoption.requires_backup ? 'Yes' : 'Not inferred') +
           '\nNo write is authorized by this preview. Explicit approval triggers ' +

@@ -17,12 +17,13 @@ import re
 import time
 from uuid import uuid4
 
-from ach_customizer_status_inspect import _directory, VHOST_ROOT
-from ach_customizer_status_site_file import _server_directives
+from ach_customizer_status_inspect import (
+    _directory, VHOST_ROOT, StatusInspectError, _verified_served_root,
+)
 from ach_customizer_status_extension import (
     DOMAIN, HASH, NGINX, NGINX_CONF, TOKEN, ExtensionError,
     _bounded_file, _nginx, _owned_dir, _publish_complete,
-    _rename_noreplace, _include_graph_guard, _write_exclusive,
+    _rename_noreplace, _include_graph_guard, _write_exclusive, _server_directives,
 )
 
 MODE = "native_site_sensitive_paths"
@@ -327,8 +328,12 @@ def _source_safe(site, *, vhost_root, nginx_conf):
     roots = values("root")
     server_names = values("server_name")
     expected_glob = vhost_root + "/extension/" + name + "/*.conf"
-    if roots != [root] or len(server_names) != 1:
+    if len(roots) != 1 or len(server_names) != 1:
         raise GuardError("source", "Native root or server identity is unproven")
+    try:
+        _verified_served_root(root, roots[0])
+    except (StatusInspectError, OSError) as exc:
+        raise GuardError("source", "Native served document root is unproven: " + str(exc)) from exc
     if includes.count(expected_glob) != 1:
         if expected_glob not in includes:
             raise GuardError(

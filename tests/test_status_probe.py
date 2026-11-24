@@ -480,8 +480,9 @@ class NativeProbeEndpointTests(unittest.TestCase):
         self.assertEqual(spy.call_args.args[0]["bound_domains"],
                          [{"name": "demo.test", "port": 80}])
         self.assertEqual(set(spy.call_args.kwargs), {
-            "locale", "rendered_sha256", "rendered_html"
+            "delivery", "locale", "rendered_sha256", "rendered_html"
         })
+        self.assertEqual(spy.call_args.kwargs["delivery"], "extension")
         self.assertEqual(response["state"], "HTTP Mismatch")
         self.assertEqual(response["selection_source"], "Global default")
 

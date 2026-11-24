@@ -66,6 +66,29 @@ def _directory(path, *, trace=None):
         raise
 
 
+def _verified_served_root(registered, served):
+    """Prove a literal native root or its canonical served subdirectory.
+
+    Server-scoped operations may use a native site's public/run directory.
+    This is not permission to adopt a file in an arbitrary or peer root.
+    Anchor both paths without following symlinks.
+    """
+    def canonical(value):
+        if (not isinstance(value, str) or
+                not re.fullmatch(r"/[A-Za-z0-9_./-]{1,1023}", value) or
+                "//" in value or any(part in (".", "..")
+                                     for part in value.split("/"))):
+            raise StatusInspectError("Native served root is not a literal safe path")
+        return value.rstrip("/")
+    registered, served = canonical(registered), canonical(served)
+    if served != registered and not served.startswith(registered + "/"):
+        raise StatusInspectError("Native served root is outside the registered website")
+    for path in (registered, served):
+        fd = _directory(path)
+        os.close(fd)
+    return served
+
+
 def _identity(stat_result):
     return tuple(getattr(stat_result, key) for key in _FILE_FIELDS)
 
@@ -360,7 +383,7 @@ def inspect_site_files(site, *, locale, template, rendered_sha256,
         "vhost_sha256": None, "extension_include_textual": False,
         "extensions_scanned": [], "error_page_sources": [],
         "route_source_state": "Uninspected",
-        "note": ("Disk and textual VHost/extension snapshot only; error_page sources concern "
+        "note": ("Registered-site path file and textual VHost/extension snapshot; the served root may differ. error_page sources concern "
                  "the selected HTTP status or unrecognized syntax, not unrelated statuses. "
                  "An include may disappear "
                  "during aaPanel regeneration; neither loaded Nginx routes nor HTTP "

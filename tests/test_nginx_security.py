@@ -94,6 +94,21 @@ class NativeSecurityTests(unittest.TestCase):
             runner=self.runner, probe=self.probe,
             block_xmlrpc=kwargs.get("xmlrpc", False))
 
+    def test_nested_native_served_directory_is_server_scoped_not_file_adoption(self):
+        served = self.site_root / "public"
+        served.mkdir()
+        sentinel = served / "unchanged.txt"
+        sentinel.write_bytes(b"app")
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "root " + str(self.site_root), "root " + str(served)))
+        preview = self.operate("preview")
+        applied = self.operate("apply", source=preview["vhost_sha256"])
+        self.assertEqual(applied["state"], "Applied")
+        self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])["state"],
+                         "Restored")
+        self.assertEqual(sentinel.read_bytes(), b"app")
+        self.assertFalse(self.fragment.exists())
+
     def test_rule_names_and_proof_paths_are_fixed_and_site_path_independent(self):
         self.assertEqual(len(guard.PROOF_KINDS), 14)
         sample = guard._include("a" * 32).decode()

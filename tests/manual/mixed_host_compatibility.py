@@ -8,6 +8,7 @@ and loopback-only high ports; use the existing native PHP-FPM socket for
 synthetic PHP pages. This is a runtime fixture, not a native UI Apply test.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,9 @@ import ach_customizer_cache_wordpress as wp
 import ach_customizer_wp_settings as settings
 import ach_customizer_monitor as monitor
 import ach_customizer_vhost_drift as drift
+import ach_customizer_nginx_security as guard
+import ach_customizer_status_extension as status
+import ach_customizer_status_site_file as status_file
 
 NGINX = "/www/server/nginx/sbin/nginx"
 NATIVE_CONF = Path("/www/server/nginx/conf")
@@ -212,13 +216,23 @@ def profile(base, label, wp_count, php_count):
         ext = vhosts / "extension" / name
         ext.mkdir(parents=True)
         write(rewrite / (name + ".conf"), "")
-        row = {"id": 100+i, "name": name, "path": str(root), "status": 1,
+        registered = root
+        # One observed NL application uses aaPanel's legitimate public
+        # subdirectory. Parent status files exist but are not served.
+        nested = label == "nl" and i == wp_count + 1
+        if nested:
+            write(registered / "404.html", "unserved parent 404")
+            write(registered / "502.html", "unserved parent 502")
+            root = registered / "public"
+            root.mkdir()
+        row = {"id": 100+i, "name": name, "path": str(registered), "status": 1,
                "bound_domains": [{"name": name, "port": 80}, {"name": name, "port": 443}]}
         rows.append(row)
         for leaf in ("index.php", "private.php", "cookie.php", "vary.php", "expired.php", "accel.php", "app/health.php"):
             write(root / leaf, PHP)
-        write(root / "404.html", "fixture 404")
-        write(root / "502.html", "fixture 502")
+        if not nested:
+            write(root / "404.html", "fixture 404")
+            write(root / "502.html", "fixture 502")
         if wordpress:
             write(root / "wp-config.php", "<?php\ndefine('RT_WP_NGINX_HELPER_CACHE_PATH','/www/server/fastcgi_cache');\nrequire_once ABSPATH . 'wp-settings.php';\n")
             for leaf in ("wp-load.php", "wp-settings.php", "wp-cron.php"):
@@ -270,13 +284,22 @@ def profile(base, label, wp_count, php_count):
         edits = wp._edits(row)
         assert edits["wp_before"] != edits["wp_after"] and edits["ini_before"] != edits["ini_after"]
         result["wp_edit_preview"] += 1
-    assert result["vhost_file_match"] == len(rows)
+    assert result["vhost_file_match"] == len(rows) - (label == "nl")
+    result["native_nested_root"] = int(label == "nl")
     pool = directory / "pool.conf"
     write(pool, "[www]\nlisten = /tmp/php-cgi-85.sock\n")
     impact = monitor.inspect_php_fpm_site_impact(panel, "85", pool,
         vhost_root=str(vhosts), nginx_conf_root=str(confdir), rewrite_root=str(rewrite))
     assert impact["state"] == "File Mapping" and len(impact["matched_sites"]) == len(rows), impact
     result["fpm_attributed"] = len(impact["matched_sites"])
+    # The real topologies include a public-root application and unrelated
+    # foreign routes; neither may block a scoped server-owned extension.
+    for row in rows:
+        guard._source_safe(row, vhost_root=str(vhosts), nginx_conf=str(main))
+        for code in ("404", "50x"):
+            status._source(row, code, str(vhosts), str(main))
+    result["guard_source_ready"] = len(rows)
+    result["status_extension_source_ready"] = len(rows)
     # The stock site chosen for runtime has no foreign selected-route writer.
     selected = [rows[0], rows[-1]]
     generated = []
@@ -310,6 +333,89 @@ def profile(base, label, wp_count, php_count):
             assert response["status"] == 200 and response["body"].startswith("fixture:/index.php:")
             out[row["name"]] = response_semantics(response)
         return out, peer_requests()
+    if label == "nl":
+        target = rows[wp_count+1]
+        parent = Path(target["path"])
+        assert (parent / "502.html").read_text() == "unserved parent 502"
+        for code in ("404", "502"):
+            try:
+                status_file._source(target, code, str(vhosts))
+            except status.ExtensionError:
+                pass
+            else:
+                raise AssertionError("File writer must not adopt the unserved parent")
+        state = directory / "recovery"
+        state.mkdir()
+        html = "<html><body>Scoped error fixture</body></html>"
+        rendered = hashlib.sha256(html.encode()).hexdigest()
+        def scoped_runner(argv, **kwargs):
+            # Signal ONLY the isolated task-owned master selected by its
+            # exact pid and prefix; never invoke aaPanel's live reload.
+            assert argv[0] == NGINX and argv[-2:] == ["-c", str(main)]
+            assert argv[1] in ("-t", "-s")
+            return subprocess.run([NGINX, "-p", str(directory)+"/"] + argv[1:], **kwargs)
+        def guard_probe(site, op, kind):
+            return guard._probe(site, op, kind, port=http_port)
+        def status_probe(site, code, op):
+            return status._probe(site, code, op, port=http_port)
+        def lifecycle():
+            peer_before = peer_requests()
+            old_404 = status_probe(target, "404", None)
+            assert old_404[0] == 404, old_404
+            native_before = guard._source_safe(target,vhost_root=str(vhosts),nginx_conf=str(main))[0]
+            fd=os.open(state,os.O_RDONLY|os.O_DIRECTORY)
+            try:
+                gkw=dict(data_fd=fd,approved=True,vhost_root=str(vhosts),
+                    nginx_conf=str(main),nginx=NGINX,runner=scoped_runner,probe=guard_probe)
+                preview=guard.manage_guard("preview",target,**gkw)
+                applied=guard.manage_guard("apply",target,expected_vhost=native_before,
+                    expected_proposal=preview["proposal_sha256"],**gkw)
+                assert applied["state"] == "Applied", applied
+                assert request(target["name"],http_port,"/index.php")["status"] == 200
+                assert peer_requests()==peer_before
+                rechecked=guard.manage_guard("recheck",target,**gkw)
+                assert rechecked["state"]=="Applied",rechecked
+                restored=guard.manage_guard("restore",target,
+                    expected_vhost=rechecked["vhost_sha256"],
+                    expected_recovery=applied["recovery_id"],**gkw)
+                assert restored["state"] == "Restored", restored
+                skw=dict(html=html,data_fd=fd,vhost_root=str(vhosts),nginx_conf=str(main),
+                    public_root=str(directory/"status-assets"),nginx=NGINX,
+                    runner=scoped_runner,probe=status_probe)
+                for code in ("404", "50x"):
+                    vhost_sha,_,served,raw_sha=status._source(target,code,str(vhosts),str(main))
+                    assert served==str(parent/"public")
+                    if code=="404":
+                        pre=status.preview_site_404_extension(target,locale="en",
+                            rendered_sha256=rendered,vhost_root=str(vhosts),
+                            nginx_conf=str(main),probe=status_probe)
+                        current=pre["body_sha256"]
+                        assert current==old_404[1] and pre["page_file_sha256"] is None
+                    else:
+                        current=status._previous_502_source(target,str(vhosts),html,served,raw_sha)
+                        assert current==hashlib.sha256(b"").hexdigest()
+                    params=dict(code=code,expected_current=current,
+                        expected_vhost=vhost_sha,expected_render=rendered,expected_recovery=None)
+                    applied=status.manage_site_extension("apply",target,**params,**skw)
+                    assert applied["state"]=="Applied",applied
+                    if code=="404":
+                        ordinary=request(target["name"],http_port,"/missing-fixture.css")
+                        assert ordinary["status"]==404 and ordinary["body"]==html, ordinary
+                    assert peer_requests()==peer_before
+                    params["expected_recovery"]=applied["recovery_id"]
+                    restored=status.manage_site_extension("restore",target,**params,**skw)
+                    assert restored["state"]==("Restored" if code=="404" else "Source Restored"),restored
+                    assert status_probe(target,"404",None)==old_404
+                    assert (parent/"404.html").read_text()=="unserved parent 404"
+                    assert (parent/"502.html").read_text()=="unserved parent 502"
+                    assert not (parent/"public"/"404.html").exists()
+                    assert not (parent/"public"/"502.html").exists()
+                return {"guard":"Applied/Restored","404":"Applied/Restored; real missing CSS",
+                    "50x":"Applied/Source Restored; all four proof statuses",
+                    "unserved_parent":"unchanged","file_writer":"refused","peer_routes":"unchanged"}
+            finally:
+                os.close(fd)
+        result["nested_root_runtime"] = process(main,directory,lifecycle)
     old_headers, old_peer = process(main,directory,baseline)
     owned = directory / "private-cache"
     owned.mkdir()

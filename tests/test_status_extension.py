@@ -574,6 +574,72 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(error.exception.stage, "source")
         self.assertFalse(list(self.state.iterdir()))
 
+    def test_nested_served_root_uses_actual_502_baseline_and_preserves_parent(self):
+        served = self.site_root / "public"
+        served.mkdir()
+        parent = self.site_root / "502.html"
+        parent.write_bytes(b"unserved parent file")
+        self.vhost.write_text(self.vhost.read_text().replace(
+            "root " + str(self.site_root), "root " + str(served)))
+        # Actual served page is absent even though the registered directory
+        # has a real 502.html. An extension must not adopt the parent file.
+        self.assertEqual(self.run_manager("recheck", code="50x")["page_file_sha256"],
+                         hashlib.sha256(b"").hexdigest())
+        approved_sha = extension._source(self.site, "50x", str(self.vhost_root),
+                                         str(self.nginx_conf))[0]
+        applied = self.run_manager(code="50x", vhost=approved_sha)
+        self.assertEqual(applied["state"], "Applied")
+        # A changed registered parent cannot inherit a saved nested-root operation.
+        changed_site = dict(self.site, path=str(served))
+        self.assertNotEqual(extension._source(changed_site, "50x", str(self.vhost_root),
+                                              str(self.nginx_conf))[0], approved_sha)
+        self.assertEqual(self.run_manager("restore", code="50x", vhost=approved_sha,
+                         recovery=applied["recovery_id"])["state"], "Source Restored")
+        self.assertEqual(parent.read_bytes(), b"unserved parent file")
+        self.assertFalse((served / "502.html").exists())
+        # A separate current baseline is required if the served file appears.
+        (served / "502.html").write_bytes(b"actual served file")
+        with self.assertRaises(extension.ExtensionError):
+            self.run_manager(code="50x")
+        self.assertEqual(self.run_manager("recheck", code="50x")["state"], "Needs Review")
+        self.assertEqual(parent.read_bytes(), b"unserved parent file")
+
+    def test_404_extension_preview_without_existing_file_uses_http_body(self):
+        self.assertFalse((self.site_root / "404.html").exists())
+        result = extension.preview_site_404_extension(
+            self.site, locale="en", rendered_sha256=self.after,
+            vhost_root=str(self.vhost_root), nginx_conf=str(self.nginx_conf),
+            probe=self.probe)
+        self.assertEqual(result["scope"], "native_vhost_http404")
+        self.assertEqual(result["state"], "Source Ready")
+        self.assertEqual(result["adoption_preview"]["current_sha256"], self.before)
+        self.assertIsNone(result["page_file_sha256"])
+        self.assertFalse(result["adoption_preview"]["requires_backup"])
+        for status, proof in [(200, None), (404, "a"*32)]:
+            with self.assertRaises(extension.ExtensionError):
+                extension.preview_site_404_extension(
+                    self.site, locale="en", rendered_sha256=self.after,
+                    vhost_root=str(self.vhost_root), nginx_conf=str(self.nginx_conf),
+                    probe=lambda *_: (status, self.before, proof))
+        applied = self.run_manager()
+        self.assertEqual(self.run_manager("restore",
+                         recovery=applied["recovery_id"])["state"], "Restored")
+        self.assertFalse((self.site_root / "404.html").exists())
+
+    def test_nested_root_symlink_or_outside_path_remains_refused(self):
+        original = self.vhost.read_text()
+        elsewhere = self.root / "external-root"
+        elsewhere.mkdir()
+        link = self.site_root / "public"
+        link.symlink_to(elsewhere)
+        for target in (link, elsewhere, self.site_root / ".."):
+            self.vhost.write_text(original.replace(
+                "root " + str(self.site_root), "root " + str(target)))
+            with self.assertRaises(extension.ExtensionError):
+                self.run_manager()
+            self.assertFalse(list(self.state.iterdir()))
+            self.assertFalse(list(self.ext.iterdir()))
+
     def test_retained_destination_cannot_be_overwritten(self):
         applied = self.run_manager()
         record = json.loads((self.state / extension._record_name(7, "404")).read_text())

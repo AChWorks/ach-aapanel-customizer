@@ -22,7 +22,9 @@ import subprocess
 import time
 from uuid import uuid4
 
-from ach_customizer_status_inspect import _directory, VHOST_ROOT, READ_FLAGS, StatusInspectError
+from ach_customizer_status_inspect import (
+    _directory, VHOST_ROOT, READ_FLAGS, StatusInspectError, _verified_served_root,
+)
 from ach_customizer_status_pages import StatusPageError
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _native_unused_subdir,
@@ -53,6 +55,89 @@ class ExtensionError(StatusPageError):
         self.stage = stage
         self.recovery_id = recovery_id if isinstance(recovery_id, str) and TOKEN.fullmatch(recovery_id) else None
         super().__init__(reason)
+
+
+def _server_directives(source):
+    """Extract only direct directives from one bounded native server block.
+
+    This is intentionally NOT an effective Nginx parser: unrelated nested
+    location/if directives are skipped, while unknown block layouts and
+    ambiguous delimiters fail closed. Quotes, escapes and comments must not
+    be mistaken for context boundaries.
+    """
+    depth = 0
+    servers = 0
+    statement = []
+    direct = []
+    quote = None
+    escaped = False
+    variable = False
+    if "\x00" in source:
+        raise ExtensionError("source", "Native site VHost contains invalid text")
+    try:
+        source = _active_nginx_text(source)
+    except MonitorInputError as exc:
+        raise ExtensionError("source", "Ambiguous native Nginx arguments") from exc
+    for char in source:
+        if escaped:
+            statement.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            statement.append(char)
+            escaped = True
+            continue
+        if quote:
+            statement.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+            statement.append(char)
+            continue
+        if variable:
+            statement.append(char)
+            if char == "}":
+                variable = False
+            elif not re.fullmatch(r"[A-Za-z0-9_]", char):
+                raise ExtensionError("source", "Ambiguous native Nginx variable")
+            continue
+        if char == "{" and statement and statement[-1] == "$":
+            statement.append(char)
+            variable = True
+            continue
+        if char == "{":
+            header = "".join(statement).strip()
+            if depth == 0:
+                if header != "server" or servers != 0:
+                    raise ExtensionError("source", "Native VHost is not one top-level server block")
+                servers += 1
+            elif not re.match(r"^(?:location\s+|if\s*\(|limit_except\s+)", header):
+                raise ExtensionError("source", "Unsupported nested native Nginx context")
+            depth += 1
+            if depth > 8:
+                raise ExtensionError("source", "Native VHost nesting is too deep")
+            statement.clear()
+            continue
+        if char == "}":
+            if depth == 0 or "".join(statement).strip():
+                raise ExtensionError("source", "Unbalanced or ambiguous native VHost context")
+            depth -= 1
+            statement.clear()
+            continue
+        if char == ";":
+            directive = " ".join("".join(statement).split())
+            if depth == 0 or not directive:
+                raise ExtensionError("source", "Unexpected native VHost directive")
+            if depth == 1:
+                direct.append(directive)
+            statement.clear()
+            continue
+        statement.append(char)
+    if quote or escaped or variable or depth != 0 or servers != 1 or "".join(statement).strip():
+        raise ExtensionError("source", "Incomplete or ambiguous native VHost context")
+    return direct
 
 
 def _sha(data):
@@ -450,12 +535,22 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
     def exact(expr):
         return len(re.findall(expr, text, re.M)) == 1
     document_root = site.get("path")
-    if (len(re.findall(r"(?m)^\s*server\s*\{", text)) != 1 or
+    direct = _server_directives(text)
+    roots = [item[5:] for item in direct if item.startswith("root ")]
+    if len(roots) != 1:
+        raise ExtensionError("source", "Native server document root is unproven")
+    try:
+        served_root = _verified_served_root(document_root, roots[0])
+    except (StatusInspectError, OSError) as exc:
+        raise ExtensionError("source", "Native served document root is unproven: " + str(exc)) from exc
+    native_page = "502" if code == "50x" else code
+    if (direct.count("server_name " + name) != 1 or
+            direct.count("error_page " + native_page + " /" + native_page + ".html") != 1 or
+            len(re.findall(r"(?m)^\s*server\s*\{", text)) != 1 or
             len(re.findall(r"(?m)^\s*server_name\s+", text)) != 1 or
             not isinstance(document_root, str) or
             not re.fullmatch(r"/[a-zA-Z0-9/_.-]{1,1023}", document_root) or
             ".." in document_root.split("/") or "//" in document_root or
-            not exact(r"^\s*root\s+" + re.escape(document_root.rstrip("/")) + r"/?\s*;") or
             not exact(r"^\s*server_name\s+" + re.escape(name) + r"\s*;") or
             not exact(r"^\s*error_page\s+" + ("502" if code == "50x" else code) +
                       r"\s+/" + ("502" if code == "50x" else code) + r"\.html\s*;") or
@@ -492,7 +587,11 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
         _owned_dir(ext)
     finally:
         os.close(ext)
-    return _sha(source), ext_path
+    raw_sha = _sha(source)
+    source_sha = (raw_sha if served_root == document_root.rstrip("/") else
+                  _sha(json.dumps([document_root, served_root, raw_sha],
+                                  separators=(",", ":")).encode("utf8")))
+    return source_sha, ext_path, served_root, raw_sha
 
 
 def _include_name(site_id, code):
@@ -724,6 +823,40 @@ def _verified_absent(site, code, op, baseline_sha, *, probe=None):
         time.sleep(0.2)
 
 
+def preview_site_404_extension(site, *, locale, rendered_sha256, rendered_html=None,
+                               vhost_root=VHOST_ROOT, nginx_conf=NGINX_CONF,
+                               probe=None):
+    """Observe the real native 404 baseline without requiring a site file."""
+    if not isinstance(rendered_sha256, str) or not HASH.fullmatch(rendered_sha256):
+        raise ExtensionError("input", "Invalid rendered page fingerprint")
+    before = _source(site, "404", vhost_root, nginx_conf)
+    status, body_sha, proof = (probe or _probe)(site, "404", None)
+    if status != 404 or not HASH.fullmatch(body_sha or "") or proof is not None:
+        raise ExtensionError("probe", "A native HTTP 404 baseline without an active managed proof is required")
+    if _source(site, "404", vhost_root, nginx_conf) != before:
+        raise ExtensionError("concurrency", "Native VHost changed during HTTP 404 preview")
+    return {
+        "schema": 1, "site_id": site["id"], "site_key": site["name"],
+        "template": "404", "locale": locale, "state": "Source Ready",
+        "reason": "Observed native HTTP 404 baseline for site-owned Nginx extension",
+        "read_only": True, "apply_supported": False,
+        "nginx_runtime_verified": False, "scope": "native_vhost_http404",
+        "http_status": 404, "http_404_observed": True, "body_sha256": body_sha,
+        "body_bytes": None, "page_file_sha256": None,
+        "rendered_sha256": rendered_sha256, "body_matches_file": False,
+        "body_matches_render": False,
+        "note": "The live HTTP body is the Restore baseline; no existing site file is required or changed. Apply rechecks ownership and actual worker proof.",
+        "adoption_preview": {
+            "schema": 1, "state": "Source Ready", "route_source_state": "Native VHost",
+            "current_sha256": body_sha, "proposed_sha256": rendered_sha256,
+            "vhost_sha256": before[0], "requires_adoption": False,
+            "requires_backup": False, "ownership_verified": False,
+            "recovery_verified": False, "apply_supported": False,
+            "reason": "Explicit plugin-owned extension and global Nginx reload approval required",
+        },
+    }
+
+
 def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
                      vhost_root=VHOST_ROOT, template="502"):
     """Read-only native 502 source preview; NOT a synthetic live 502 claim.
@@ -734,11 +867,15 @@ def preview_site_502(site, *, locale, rendered_sha256, rendered_html,
     from ach_customizer_status_inspect import inspect_site_files
     if template not in ("502", "50x"):
         raise ExtensionError("input", "Unsupported Nginx source preview")
-    source_sha, _ = _source(site, template, vhost_root)
+    source_sha, _, served_root, raw_sha = _source(site, template, vhost_root)
     inspected = inspect_site_files(
-        site, locale=locale, template="502",
+        {**site, "path": served_root}, locale=locale, template="502",
         rendered_sha256=rendered_sha256, rendered_html=rendered_html,
         vhost_root=vhost_root, source_fingerprint=True)
+    if inspected.get("page_file_state") not in ("Absent", "Same bytes", "Different bytes"):
+        raise ExtensionError("source", "Site 502.html is uninspectable; source-only approval is unsafe")
+    if inspected.get("vhost_sha256") != raw_sha:
+        raise ExtensionError("concurrency", "Native VHost changed during served-root inspection")
     current = inspected.get("page_file_sha256")
     if inspected.get("page_file_state") == "Absent":
         current = _sha(b"")
@@ -783,13 +920,17 @@ def preview_site_50x(site, *, locale, rendered_sha256, rendered_html,
         rendered_html=rendered_html, vhost_root=vhost_root, template="50x")
 
 
-def _previous_502_source(site, vhost_root, html):
+def _previous_502_source(site, vhost_root, html, served_root, raw_sha):
     """Source fingerprint only: never infer a preexisting live HTTP 502."""
     from ach_customizer_status_inspect import inspect_site_files
     inspected = inspect_site_files(
-        site, locale="en", template="502", rendered_sha256=_sha(html.encode("utf8")),
+        {**site, "path": served_root}, locale="en", template="502", rendered_sha256=_sha(html.encode("utf8")),
         rendered_html=html, vhost_root=vhost_root, source_fingerprint=True,
     )
+    if inspected.get("page_file_state") not in ("Absent", "Same bytes", "Different bytes"):
+        raise ExtensionError("source", "Site 502.html is uninspectable; source-only approval is unsafe")
+    if inspected.get("vhost_sha256") != raw_sha:
+        raise ExtensionError("concurrency", "Native VHost changed during served-root inspection")
     current = inspected.get("page_file_sha256")
     if inspected.get("page_file_state") == "Absent":
         return _sha(b"")
@@ -856,7 +997,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
         return _saved_recovery_unavailable(
             site, code, html_bytes, data_fd, stopped=True)
     try:
-        source_sha, ext_path = _source(site, code, vhost_root, nginx_conf)
+        source_sha, ext_path, served_root, raw_sha = _source(site, code, vhost_root, nginx_conf)
     except (ExtensionError, OSError, StatusInspectError):
         if action != "recheck":
             raise
@@ -911,7 +1052,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                 try:
                     status, body, proof = (probe or _probe)(site, code, record["op"])
                     source_ok = (code == "404" or
-                                 _previous_502_source(site, vhost_root, html) ==
+                                 _previous_502_source(site, vhost_root, html, served_root, raw_sha) ==
                                  record["before_sha"])
                     old_404 = code != "404" or (
                         status == 404 and body == record["before_sha"])
@@ -921,7 +1062,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                     state = "Needs Review"
             if record is None and current_config is None:
                 if code == "50x":
-                    current_sha = _previous_502_source(site, vhost_root, html)
+                    current_sha = _previous_502_source(site, vhost_root, html, served_root, raw_sha)
                 else:
                     try:
                         _status, current_sha, _proof = (probe or _probe)(site, code, None)
@@ -963,7 +1104,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
             if code == "404" and (prior_status != 404 or prior_sha != expected_current):
                 raise ExtensionError("concurrency", "Live existing HTTP 404 differs from approval")
             if code in ("502", "50x"):
-                if _previous_502_source(site, vhost_root, html) != expected_current:
+                if _previous_502_source(site, vhost_root, html, served_root, raw_sha) != expected_current:
                     raise ExtensionError(
                         "concurrency", "Existing 502 file differs from approved source preview")
             if historical_restored:
@@ -1084,7 +1225,7 @@ def manage_site_extension(action, site, *, code, html, expected_current,
                              probe=probe)
             if (_source(site, code, vhost_root, nginx_conf)[0] != record["vhost_sha"]
                     or (code in ("502", "50x") and
-                        _previous_502_source(site, vhost_root, html) !=
+                        _previous_502_source(site, vhost_root, html, served_root, raw_sha) !=
                         record["before_sha"])):
                 raise ExtensionError(
                     "concurrency", "Native 502 file or Nginx source drifted during Restore")

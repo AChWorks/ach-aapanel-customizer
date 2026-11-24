@@ -1078,6 +1078,29 @@ are not a claim of guarded Apply on every other version or pool.
 
 ## Status Pages: static assets and distinct delivery modes
 
+Server-scoped Nginx sensitive-path Guard and Status Pages extension delivery
+accept a native site's exact registered root or an existing canonical served
+subdirectory (for example the native public/run directory). The selected
+server and native domain binding, exclusive extension include graph,
+registered-site identity, source fingerprint, Nginx syntax and live worker
+proof remain mandatory. No per-site exception, root rewrite or customer
+file is needed. The nested-root source fingerprint includes the registered
+parent, while existing exact-root recovery fingerprints remain unchanged.
+
+Extension 404 preflight observes the real local HTTP 404 body and binds
+Apply/Restore to that baseline. It does **not** require an existing
+`404.html` or adopt the parent directory's HTML. For 502/50x the
+source-only baseline is the actual served directory's `502.html`
+(including verified absence); Apply still proves the real generated error
+statuses and operation nonce. A physical site-file replacement retains its
+separate exact-root/existing-file/route ownership and recoverable backup
+requirements. Missing or unserved files are not silently created/adopted.
+The generic disk comparison reports registered-site files, not a claim that
+the configured served root is identical. The stopped-site writer and
+unknown-SNI TLS retain their separate native lifecycle/listener contracts;
+this is not an expanded Stop/Start or TLS policy.
+
+
 The package contains **11 templates × English/Persian = 22** versioned,
 self-contained static HTML assets under
 [`plugin/ach_customizer/status_pages/`](../plugin/ach_customizer/status_pages/).

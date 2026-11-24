@@ -157,13 +157,21 @@ class _DeadlineSocket:
 
 def probe_site_404(site, *, locale, rendered_sha256, rendered_html=None,
                    vhost_root=VHOST_ROOT, port=80, connection_factory=None,
-                   token_factory=None, total_timeout=TOTAL_HTTP_SECONDS):
+                   token_factory=None, total_timeout=TOTAL_HTTP_SECONDS,
+                   delivery="file"):
     """Return bounded response evidence for an explicit full-admin operation.
 
     Port and injected HTTP factory are internal test seams, not request inputs.
     This observes only HTTP/80 on loopback. It cannot attest HTTPS/443, worker
     generation, Cloudflare, routes for other URLs, or a safe Apply adapter.
     """
+    if delivery == "extension":
+        from ach_customizer_status_extension import preview_site_404_extension
+        return preview_site_404_extension(
+            site, locale=locale, rendered_sha256=rendered_sha256,
+            rendered_html=rendered_html, vhost_root=vhost_root)
+    if delivery != "file":
+        raise StatusProbeError("Unsupported 404 delivery mode")
     if not isinstance(site, dict):
         raise StatusProbeError("Invalid native site")
     site_id = site.get("id")

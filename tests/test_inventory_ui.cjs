@@ -4365,7 +4365,19 @@ const managed404Original='b'.repeat(64);
 const managed404Render='a'.repeat(64);
 const managed404Vhost='c'.repeat(64);
 const managed404Recovery='e'.repeat(32);
-function native404Proposal() {
+function native404Proposal(delivery='extension') {
+  if (delivery==='extension') return statusProbe({
+    scope:'native_vhost_http404',state:'Source Ready',
+    body_sha256:managed404Original,page_file_sha256:null,body_bytes:null,
+    rendered_sha256:managed404Render,body_matches_file:false,body_matches_render:false,
+    adoption_preview:{
+      schema:1,state:'Source Ready',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,requires_adoption:false,requires_backup:false,
+      ownership_verified:false,recovery_verified:false,apply_supported:false,
+      reason:'Fresh HTTP baseline and explicit extension approval required'
+    }
+  });
   return statusProbe({
     body_sha256:managed404Original,page_file_sha256:managed404Original,
     rendered_sha256:managed404Render,body_matches_file:true,body_matches_render:false,
@@ -4397,6 +4409,38 @@ function manage404Response(action,fields={}) {
     ...fields
   };
 }
+test('Native extension 404 uses live body baseline without an existing site file', () => {
+  const ui=statusProbeUi();
+  ui.statusSetValue('#ach-status-delivery','extension','change');
+  const result=statusProbe({
+    scope:'native_vhost_http404',state:'Source Ready',
+    page_file_sha256:null,body_sha256:managed404Original,body_bytes:null,
+    body_matches_file:false,body_matches_render:false,
+    adoption_preview:{
+      schema:1,state:'Source Ready',route_source_state:'Native VHost',
+      current_sha256:managed404Original,proposed_sha256:managed404Render,
+      vhost_sha256:managed404Vhost,requires_adoption:false,requires_backup:false,
+      ownership_verified:false,recovery_verified:false,apply_supported:false,
+      reason:'Observed HTTP baseline; extension ownership rechecked at Apply'
+    }
+  });
+  ui.statusClick('#ach-status-probe-button').respond(result);
+  assert.match(ui.state().statusProbe,/Source Ready/);
+  assert.match(ui.state().statusAdoption,/Existing HTTP body SHA-256/);
+  ui.statusSetChecked('#ach-status-manage-apply-approve',true);
+  const request=ui.statusClick('#ach-status-manage-apply');
+  assert.equal(request.options.data.expected_page_sha256,managed404Original);
+  assert.equal(request.options.data.site_delivery,'extension');
+  const bad=statusProbeUi();
+  bad.statusSetValue('#ach-status-delivery','extension','change');
+  bad.statusClick('#ach-status-probe-button').respond({
+    ...result,adoption_preview:{...result.adoption_preview,current_sha256:'f'.repeat(64)}
+  });
+  assert.match(bad.state().statusProbe,/incompatible/);
+  bad.statusSetChecked('#ach-status-manage-apply-approve',true);
+  assert.equal(bad.state().statusManageApplyDisabled,true);
+});
+
 test('Guarded existing-site 404 Apply/Recheck/Restore is operator-confirmed and snapshot-bound', () => {
   const ui=statusProbeUi();
   assert.equal(ui.state().statusManageRecheckDisabled,false);
@@ -4519,7 +4563,7 @@ test('Native site-file Apply does not require extension-only baseline response',
     const ui=statusProbeUi();
     ui.statusSetValue('#ach-status-delivery','file','change');
     if (template==='502') ui.statusSetValue('#ach-status-template','502','change');
-    const proposal=template==='404' ? native404Proposal() : statusProbe({
+    const proposal=template==='404' ? native404Proposal('file') : statusProbe({
       template, state:'Source Ready', scope:'native_vhost_source_only',
       page_file_sha256:managed404Original,body_sha256:null,http_status:null,
       body_bytes:null,body_matches_file:false,body_matches_render:false,
@@ -4625,7 +4669,7 @@ test('Native site-file 404 approval and Restore are delivery-bound and never req
   assert.equal(ui.state().statusManageApplyDisabled,true);
   const read=ui.statusClick('#ach-status-probe-button');
   assert.equal(read.options.data.site_delivery,'file');
-  read.respond(native404Proposal());
+  read.respond(native404Proposal('file'));
   ui.statusSetChecked('#ach-status-manage-apply-approve',true);
   assert.equal(ui.state().statusManageApplyDisabled,false);
   const apply=ui.statusClick('#ach-status-manage-apply');
@@ -4663,7 +4707,7 @@ test('Switching delivery invalidates prior preflight and rejects mismatched mode
   old.respond(native404Proposal());
   assert.equal(ui.state().statusManageApplyDisabled,true);
   const fresh=ui.statusClick('#ach-status-probe-button');
-  fresh.respond(native404Proposal());
+  fresh.respond(native404Proposal('file'));
   ui.statusSetChecked('#ach-status-manage-apply-approve',true);
   const apply=ui.statusClick('#ach-status-manage-apply');
   apply.respond(manage404Response('apply'));

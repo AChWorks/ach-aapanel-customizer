@@ -23,8 +23,8 @@ from ach_customizer_status_inspect import _directory
 from ach_customizer_status_extension import (
     DOMAIN, HASH, TOKEN, MAX_VHOST, VHOST_ROOT, NGINX, NGINX_CONF,
     ExtensionError, _bounded_file, _owned_dir, _sha, _write_exclusive, _nginx,
+    _server_directives,
 )
-from ach_customizer_status_site_file import _server_directives
 
 RECORD_PREFIX = "ach_customizer.stopped503."
 STOP_ROOT = "/www/server/stop"
