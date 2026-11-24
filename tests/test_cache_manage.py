@@ -1571,7 +1571,7 @@ class CacheManageTests(unittest.TestCase):
                 path.write_text(data)
         self.assertEqual(inspect(),original)
         for path, addition, message in (
-            (self.vhost/'qa.test.conf',' add_header Content-Security-Policy "default-src self";\n',
+            (self.vhost/'qa.test.conf',' add_header X-ACh-Cache-Site forged;\n',
              'VHost response headers'),
             (self.nginx/'nginx.conf',' add_header X-Frame-Options SAMEORIGIN always;\n',
              'HTTP-level response headers'),
@@ -1667,18 +1667,15 @@ class CacheManageTests(unittest.TestCase):
         original = vhost.read_text()
         valid = 'add_header Strict-Transport-Security "max-age=31536000";'
         cases = (
-            'add_header X-Frame-Options SAMEORIGIN;',
-            'add_header Strict-Transport-Security "$unknown";',
-            valid + '\n add_header X-Frame-Options SAMEORIGIN;',
+            'add_header X-ACh-Cache forged;',
+            'add_header X-ACh-Cache-Site 8 always;',
             'location /private { ' + valid + ' }',
             'server { ' + valid + ' }',
-            'add_header Strict-Transport-Security "max-age=31536000"; '
-            'add_header X-Test unsafe;',
             'if ($host = "qa.test") { ' + valid + ' }',
-            'add_header Strict-Transport-Security "max-age=31536000" always; '
-            'add_header Strict-Transport-Security "max-age=63072000";',
-            'add_header Strict-Transport-Security "max-age=31536000; preload; '
-            'unexpected" always;',
+            'add_header_inherit merge;',
+            'add_header Cache-Control private;',
+            'add_header Set-Cookie "session=example";',
+            'add_header X-Test first second third;',
         )
         for extra in cases:
             with self.subTest(extra=extra):
@@ -1689,6 +1686,42 @@ class CacheManageTests(unittest.TestCase):
                     cache._site_sources(self.site, '85', vhost_root=str(self.vhost),
                                         nginx_root=str(self.nginx))
         vhost.write_text(original)
+
+    def test_mixed_server_headers_preserved_for_stock_and_native_wordpress(self):
+        vhost = self.vhost / 'qa.test.conf'
+        original = vhost.read_text()
+        headers = [
+            'add_header Strict-Transport-Security "max-age=31536000";',
+            """add_header Alt-Svc 'quic=":443"; h3=":443"';""",
+            'add_header Content-Security-Policy "default-src self; object-src none" always;',
+        ]
+        vhost.write_text(original.replace(' include enable-php-85.conf;',
+            ' ' + '\n '.join(headers) + '\n include enable-php-85.conf;'))
+        sources = cache._site_sources(self.site, '85',
+            vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+        self.assertIsNone(sources['inherited_hsts'])
+        self.assertEqual(sources['inherited_headers'], headers)
+        def compat(site, public, **kw):
+            return (self.native, cache.generate_reference(
+                7, '85', cache_generation=kw.get('cache_generation'),
+                inherited_headers=headers), sources)
+        with patch.object(cache, '_compatibility', side_effect=compat):
+            applied = self.apply()
+            journal = json.loads((self.state / cache._names(7)[2]).read_text())
+            self.assertEqual(journal['inherited_headers'], headers)
+            self.assertEqual(cache._record_decode(json.dumps(journal), 7), journal)
+            ext = (self.ext / cache._names(7)[1]).read_text()
+            for header in headers:
+                self.assertEqual(ext.count(header), 1)
+            self.assertEqual(cache.manage_cache('restore', self.site,
+                recovery_id=applied['recovery_id'], approved=True, **self.kwargs())['state'], 'Restored')
+        from ach_customizer_cache_policy import WP_NATIVE_CANONICAL
+        vhost.write_text(vhost.read_text().replace('enable-php-85.conf;', 'enable-php-85-wpfastcgi.conf;'))
+        (self.nginx/'enable-php-85-wpfastcgi.conf').write_text(WP_NATIVE_CANONICAL.replace('NATIVE_PHP','85'))
+        wp = cache._site_sources(self.site, '85', native_handler='wpfastcgi',
+            vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+        self.assertIsNone(wp['inherited_hsts'])
+        self.assertNotIn('inherited_headers', wp)
 
     def test_hsts_journal_is_strict_and_legacy_journal_still_reads(self):
         applied = self.apply()

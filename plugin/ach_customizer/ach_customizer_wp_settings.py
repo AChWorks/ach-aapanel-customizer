@@ -305,10 +305,25 @@ def _site_source(site, public, *, vhost_root):
                               + type(exc).__name__) from exc
     if not raw.lstrip().startswith(b"<?php") or not settings.lstrip().startswith(b"<?php") or not cron.lstrip().startswith(b"<?php"):
         raise WPSettingsError("compatibility", "Verified WordPress PHP source files are required")
-    versions = re.findall(rb"(?m)^\s*include\s+enable-php-([1-9][0-9]{1,2})[.]conf\s*;", vhost)
-    if len(versions) != 1:
-        raise WPSettingsError("compatibility", "Unique native PHP assignment is not available")
-    version = versions[0].decode("ascii")
+    from ach_customizer_monitor import (
+        _active_nginx_text, _native_server_direct_include, MonitorInputError,
+    )
+    # Local WordPress operations need the site's native PHP CLI assignment,
+    # not the entire Cache writer's source/peer admission predicate.
+    try:
+        active = _active_nginx_text(vhost.decode("utf-8"))
+        candidates = re.findall(
+            r"\binclude[ \t]+(enable-php-([^;\s]+)\.conf)[ \t]*;", active)
+        if len(candidates) != 1:
+            raise ValueError("No unique native PHP assignment")
+        handler, assignment = candidates[0]
+        match = re.fullmatch(r"([1-9][0-9]{1,2})(?:-wpfastcgi)?", assignment)
+        if not match or not _native_server_direct_include(active, handler):
+            raise ValueError("Unverified native PHP assignment or server scope")
+        version = match.group(1)
+    except (ValueError, UnicodeError, MonitorInputError) as exc:
+        raise WPSettingsError("compatibility",
+            "Unique server-scoped native PHP assignment is not available") from exc
     php = "/www/server/php/" + version + "/bin/php"
     if not os.path.isfile(php) or os.path.islink(php) or not os.access(php, os.X_OK):
         raise WPSettingsError("compatibility", "Selected site's native PHP CLI is unavailable")

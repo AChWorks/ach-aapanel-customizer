@@ -679,6 +679,60 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         (extension_dir / "custom.conf").write_text("access_log off;\n")
         self.assertEqual(self.inspect()["state"], "Source Observed")
 
+    def test_foreign_application_peer_routes_are_scoped_and_fingerprinted(self):
+        self.global_cache_fixture()
+        self.make_vhost("shop.test", "enable-php-85.conf")
+        (self.nginx / "enable-php-85.conf").write_text(r"""location ~ \.php$ {
+ include fastcgi.conf;
+ fastcgi_pass unix:/tmp/php-cgi-85.sock;
+}
+""")
+        (self.nginx / "pathinfo.conf").write_text(r"""set $real_script_name $fastcgi_script_name;
+if ($fastcgi_script_name ~ "^(.+?\.php)(/.+)$") {
+ set $real_script_name $1;
+ set $path_info $2;
+}
+fastcgi_param SCRIPT_FILENAME $document_root$real_script_name;
+fastcgi_param SCRIPT_NAME $real_script_name;
+fastcgi_param PATH_INFO $path_info;
+""")
+        path = self.vhost / "extension" / "shop.test"
+        path.mkdir(parents=True)
+        peer = self.vhost / "shop.test.conf"
+        peer.write_text(peer.read_text().replace("}\n",
+            " include " + str(path / "*.conf") + ";\n}\n"))
+        route = path / "app.conf"
+        good_source = """location = /app/health.php {
+    try_files $uri =404;
+    fastcgi_pass unix:/tmp/php-cgi-85.sock;
+    fastcgi_index index.php;
+    include fastcgi.conf;
+    include pathinfo.conf;
+}
+location = /app/old { return 307 https://shop.test/app/new$is_args$args; }
+location ^~ /app/retired/ { return 410; }
+"""
+        route.write_text(good_source)
+        result = self.inspect()
+        self.assertEqual(result["state"], "Source Observed", result)
+        self.assertEqual(result["unresolved_other_sites"], 0)
+        self.assertFalse(result["purge_supported"])
+        for bad in (
+            good_source.replace("fastcgi_index index.php;", "fastcgi_cache WORDPRESS;"),
+            good_source.replace("include pathinfo.conf;", "include foreign.conf;"),
+            good_source.replace("return 410;", "content_by_lua_block { return 1; }"),
+            good_source.replace("unix:/tmp/php-cgi-85.sock", "$foreign_upstream"),
+        ):
+            with self.subTest(source=bad):
+                route.write_text(bad)
+                result = self.inspect()
+                self.assertEqual(result["state"], "Partial", result)
+                self.assertEqual(result["unresolved_other_sites"], 1)
+        route.write_text(good_source)
+        params = self.nginx / "pathinfo.conf"
+        params.write_text(params.read_text() + "\ninclude unknown.conf;\n")
+        self.assertEqual(self.inspect()["state"], "Partial")
+
     def test_source_change_during_scan_rejects_all_positive_claims(self):
         original = audit._site_source
         calls = 0

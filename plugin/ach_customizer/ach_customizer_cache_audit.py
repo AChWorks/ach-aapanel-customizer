@@ -16,7 +16,7 @@ from pathlib import Path
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
     _native_nginx_php_version, _native_extension_fingerprint,
-    _native_unused_subdir, _native_server_direct_include,
+    _native_unused_subdir, _native_server_direct_include, _native_local_route_dependencies,
     _unsupported_nginx_upstream, MAX_NGINX_SITE_BYTES,
     iter_native_site_rows,
 )
@@ -109,7 +109,7 @@ def _merge_directives(*sources):
     return result
 
 
-def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
+def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root, *, peer=False):
     if not isinstance(site_key, str) or not SITE_KEY.fullmatch(site_key):
         raise CacheAuditError("Unsupported native website VHost key")
     vhost_path = Path(vhost_root) / (site_key + ".conf")
@@ -195,8 +195,16 @@ def _site_source(site_id, site_key, vhost_root, nginx_root, rewrite_root):
         sources.append(text)
         fingerprints.append(("rewrite", site_key, sig))
     if has_extension:
+        # A selected writer remains strict; an independently registered
+        # peer may have a fully inspected, Cache-irrelevant application route.
+        owned = extension / ("ach_customizer_cache_%d.conf" % site_id)
+        inspect_foreign = None
+        if (peer and not owned.exists() and not owned.is_symlink()
+                and _native_server_direct_include(vhost, str(extension / "*.conf"))):
+            inspect_foreign = lambda active: _native_local_route_dependencies(active, nginx_root)
         sig = _native_extension_fingerprint(
-            extension, site_id=site_id, site_key=site_key)
+            extension, site_id=site_id, site_key=site_key,
+            inspect_foreign=inspect_foreign)
         fingerprints.append(("extension", site_key, sig))
         # The native scanner verified the exact journal-owned Cache source.
         # Audit its real directives too: otherwise a successfully activated
@@ -572,7 +580,7 @@ def inspect_site_fastcgi_cache(panel_public, site_id, site_key, *,
                     continue
                 try:
                     peer_directives, files, _, _ = _site_source(
-                        ident, key, vhost_root, nginx_root, rewrite_root)
+                        ident, key, vhost_root, nginx_root, rewrite_root, peer=True)
                     _, peer_zone = _cache_zone(peer_directives)
                 except (CacheAuditError, MonitorInputError, OSError, UnicodeError, ValueError) as exc:
                     unresolved += 1

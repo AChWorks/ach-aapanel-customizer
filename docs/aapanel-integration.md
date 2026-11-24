@@ -39,7 +39,13 @@ native hostname, URL path and existing HTTPS URL; it removes an explicit
 configuration files. Set up and check working site HTTPS **before** clicking
 Apply to avoid locking out WordPress administration. The custom PHP bridge
 uses the selected native PHP CLI as `www` and WordPress's own `update_option`;
-WP-CLI is not installed or required. This action refuses multisite, PHP
+WP-CLI is not installed or required. The connector uses the real CLI
+context, not WP_ADMIN or a simulated authenticated browser user. It
+reports an early bootstrap exit or missing result distinctly from an
+option-update failure. The shared selected-site source reader recognizes
+both native stock and wpfastcgi PHP assignments at server scope without
+requiring Cache writer compatibility for independent Debug, Cron, HTTPS
+or XML-RPC operations. This action refuses multisite, PHP
 `WP_HOME`/`WP_SITEURL` overrides, foreign/filtered or unknown host values.
 Its journal records the original and target options and the exact Recovery ID.
 An interrupted partial DB update can be **Rechecked and Restored** only while
@@ -1217,6 +1223,42 @@ checks. An IP/Host-partitioned key within a **shared filesystem** does
 stock-handler shapes differ; inspect actual source, inherited directives,
 regex precedence, original request URI and current handler before proposing
 an Apply.
+
+Preserve native response-header semantics: the recognized wpfastcgi PHP
+location already defines its own headers, so its parent HSTS/Alt-Svc are
+not inherited under default Nginx inheritance. Stock PHP inherits direct
+server headers; copy their exact supported statements alongside Cache
+markers, preserving existing Stable HSTS-only journal bytes. Reject
+unknown inheritance overrides, conflicting diagnostic markers, or
+stock downstream headers that affect cache privacy and are not represented
+by upstream response predicates. This is not a blanket header-name
+allowlist.
+
+A foreign peer application's verified literal local FastCGI and terminal
+return/redirect locations are independently scoped. Fingerprint the real
+file and its recognized parameter dependencies for physical Cache
+inspection; do not admit foreign Cache directives, dynamic upstreams,
+unknown nested includes or arbitrary executable routing. The selected
+Cache writer remains source-checked separately. Shared PHP-FPM impact
+can attribute these same inspected routes when their sockets match the
+site's verified pool; a real mixed-pool assignment remains unresolved.
+No application-specific path or domain exception is required.
+
+**Mixed-host regression:** `tests/manual/mixed_host_compatibility.py`
+runs on the retained authorized native QA guest. It builds sanitized
+IR-shaped (six WordPress, two PHP sites) and NL-shaped (one WordPress,
+five PHP sites, scoped application routes) profiles, with actual native
+Nginx/PHP snippets, custom roots, HSTS/Alt-Svc, SSL/QUIC, ACME source and
+legacy shared Cache directives. It checks candidate source preflights,
+then launches an independent loopback-only Nginx process using temporary
+config/cache and actual QA PHP-FPM. It compares stock/wpfastcgi headers
+and peer routes before/after generated private Cache, checks HTTP/3,
+MISS/HIT, authenticated/Cookie BYPASS and private-response nonstorage.
+No actual aaPanel DB, native service config or existing site is changed.
+Synthetic PHP/WordPress source fixtures are not installed WordPress
+admin acceptance; real native Connect/Restore and WordPress operation
+evidence must be reported separately.
+
 
 The reference policy conservatively excludes unsafe methods, authenticated
 or Cookie-bearing requests, query strings, noncanonical paths, private

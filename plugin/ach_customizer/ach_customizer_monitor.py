@@ -1064,8 +1064,80 @@ def _native_unused_subdir(vhost_root, site_key):
     return _native_extension_fingerprint(directory, allowed_conf_names=frozenset())
 
 
+# An independently scoped native application route may be irrelevant to
+# another site's *physical Cache* ownership. Prove the entire source has
+# only literal locations, local FastCGI and terminal redirects/returns.
+# This is not permission to alter the selected VHost or its PHP routing.
+_PEER_LOCATION = re.compile(r"\s*location\s+(?:(?:=|\^~)\s+)?/[A-Za-z0-9_./~-]*\s*\{([^{}]*)\}", re.S)
+_PEER_STATEMENT = re.compile(r"\s*([a-z_]+)\s+([^;{}\r\n]+);")
+_LOCAL_SOCKET = re.compile(r"unix:/tmp/php-cgi-[1-9][0-9]{1,2}\.sock")
+
+
+def _native_local_route_dependencies(source, nginx_root):
+    dependencies = []
+    sockets = []
+    offset = 0
+    count = 0
+    while source[offset:].strip():
+        route = _PEER_LOCATION.match(source, offset)
+        if route is None:
+            raise MonitorInputError("Peer extension contains unverified location/routing")
+        count += 1
+        offset = route.end()
+        body = route.group(1)
+        pos = 0
+        commands = {}
+        while body[pos:].strip():
+            statement = _PEER_STATEMENT.match(body, pos)
+            if statement is None:
+                raise MonitorInputError("Peer extension contains unverified directive syntax")
+            pos = statement.end()
+            name, value = statement.group(1), statement.group(2).strip()
+            commands.setdefault(name, []).append(value)
+        if set(commands) == {"return"} and len(commands["return"]) == 1:
+            # Nginx return has no upstream or cache read/write. Permit a
+            # literal HTTP status and an optional simple redirect target.
+            if not re.fullmatch(r"[2-5][0-9]{2}(?:[ \t]+https?://[^\s;{}\"'\\]+)?",
+                                commands["return"][0]):
+                raise MonitorInputError("Peer extension return syntax needs review")
+            continue
+        if (set(commands) != {"try_files", "fastcgi_pass", "fastcgi_index", "include"}
+                or commands["try_files"] != ["$uri =404"]
+                or commands["fastcgi_index"] != ["index.php"]
+                or len(commands["fastcgi_pass"]) != 1
+                or not _LOCAL_SOCKET.fullmatch(commands["fastcgi_pass"][0])
+                or commands["include"] not in (["fastcgi.conf"], ["fastcgi.conf", "pathinfo.conf"])):
+            raise MonitorInputError("Peer extension has unverified Cache-affecting directives")
+        sockets.append(commands["fastcgi_pass"][0][len("unix:"):])
+        for name in commands["include"]:
+            raw, sig = _bounded_file_text(Path(nginx_root) / name, MAX_NGINX_SITE_BYTES, with_fingerprint=True)
+            text = _active_nginx_text(raw)
+            # No arbitrary nested source. The native parameter-only file
+            # and PATH_INFO rewrite are recognized by their actual complete
+            # grammar, not merely their conventional filenames.
+            if name == "fastcgi.conf":
+                if re.sub(r"(?m)^[ \t]*fastcgi_param[ \t]+[A-Za-z0-9_]+[ \t]+[^;{}\r\n]+;[ \t]*$", "", text).strip():
+                    raise MonitorInputError("Peer FastCGI parameters contain unverified directives")
+            else:
+                canonical = r"""set $real_script_name $fastcgi_script_name;
+if ($fastcgi_script_name ~ "^(.+?\.php)(/.+)$") {
+set $real_script_name $1;
+set $path_info $2;
+}
+fastcgi_param SCRIPT_FILENAME $document_root$real_script_name;
+fastcgi_param SCRIPT_NAME $real_script_name;
+fastcgi_param PATH_INFO $path_info;"""
+                if re.sub(r"\s+", " ", text).strip() != re.sub(r"\s+", " ", canonical).strip():
+                    raise MonitorInputError("Peer PATH_INFO source contains unverified directives")
+            dependencies.append((name, sig))
+    if not count:
+        raise MonitorInputError("Peer extension has no verified routing")
+    return {"includes": dependencies, "sockets": sorted(set(sockets))}
+
+
 def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
-                                  allowed_conf_names=None, cache_state_dir=None):
+                                  allowed_conf_names=None, cache_state_dir=None,
+                                  inspect_foreign=None):
     """Read a single native per-site '*.conf' glob without following links.
 
     Accept inert native logging overlays or the exact verified, plugin-owned
@@ -1133,11 +1205,15 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
                                   "status_journal": journal})
                 else:
                     active = _active_nginx_text(text)
-                    for line in active.splitlines():
-                        if (line.strip() and not re.fullmatch(
-                                r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)):
+                    inert = all(not line.strip() or re.fullmatch(
+                        r"[ \t]*(?:access_log|error_log)[ \t]+[^;{}\r\n]+;[ \t]*", line)
+                        for line in active.splitlines())
+                    observed = {"name": name, "signature": signature}
+                    if not inert:
+                        if inspect_foreign is None or name == "site_total.conf":
                             raise MonitorInputError("Native extension has unverified routing or directives")
-                    files.append({"name": name, "signature": signature})
+                        observed["operation_dependencies"] = inspect_foreign(active)
+                    files.append(observed)
             after = os.fstat(fd)
             if any(getattr(before, field) != getattr(after, field) for field in identities):
                 raise MonitorInputError("Native extension changed during inspection")
@@ -1257,7 +1333,7 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
         "other_php_sites_count": 0,
         **({"other_sites": []} if include_other_sites else {}),
         "reason": "",
-        "note": ("Verified native Nginx VHost/PHP includes, inert or owned Status Pages site extensions and [www] Unix-socket FILE attribution only; "
+        "note": ("Verified native Nginx VHost/PHP includes, verified site extensions and [www] Unix-socket FILE attribution only; "
                  "not proof of effective routing, PHP worker state, or a complete impact boundary for Apply."),
     }
     try:
@@ -1324,9 +1400,24 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     dependencies.append({"kind": "native_rewrite", "id": site_id,
                                          "signature": rewrite_signature})
                 if has_extension:
+                    inspect_foreign = None
+                    if _native_server_direct_include(vhost, str(extension / "*.conf")):
+                        # A literal application FastCGI route can be attributed
+                        # to the same pool as this site's native assignment.
+                        # A real mixed-pool route remains unresolved rather than
+                        # being silently counted as only the native PHP version.
+                        assigned_socket = (None if assigned == "00" else socket if assigned == version else
+                            (other_socket_resolver(assigned) if other_socket_resolver else
+                             "/tmp/php-cgi-" + assigned + ".sock"))
+                        def inspect_foreign(active):
+                            evidence = _native_local_route_dependencies(active, nginx_dir)
+                            if any(dest != assigned_socket for dest in evidence["sockets"]):
+                                raise MonitorInputError("Native application route uses a different PHP pool")
+                            return evidence
                     dependencies.append({"kind": "native_extension", "id": site_id,
                                          "signature": _native_extension_fingerprint(
-                                             extension, site_id=site_id, site_key=name)})
+                                             extension, site_id=site_id, site_key=name,
+                                             inspect_foreign=inspect_foreign)})
                 if php_name not in checked_snippets:
                     if assigned == "00":
                         if php_name != "enable-php-00.conf":
@@ -1356,8 +1447,9 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                     checked_snippets.add(php_name)
                 dependencies.append({"kind": "vhost", "id": site_id,
                                      "signature": vhost_signature})
-            except (OSError, UnicodeError, MonitorInputError):
-                result["unresolved_sites"].append({**site_key, "reason": "VHost PHP assignment needs review"})
+            except (OSError, UnicodeError, MonitorInputError) as exc:
+                reason = str(exc)[:180] if isinstance(exc, MonitorInputError) else type(exc).__name__
+                result["unresolved_sites"].append({**site_key, "reason": "VHost PHP assignment needs review: " + reason})
                 continue
             if assigned == version:
                 result["matched_sites"].append(site_key)

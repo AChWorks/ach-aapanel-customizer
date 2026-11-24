@@ -1329,6 +1329,27 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         self.assertEqual(accepted["state"], "File Mapping", accepted)
         self.assertTrue(accepted["manual_apply_eligible"])
 
+    def test_scoped_application_route_same_pool_is_attributed_not_globally_blocked(self):
+        self._native_qa_shapes()
+        extension = self.vhosts / 'extension' / 'site-a.example.test'
+        route = extension / 'application.conf'
+        route.write_text("""location = /health.php {
+    try_files $uri =404;
+    fastcgi_pass unix:/tmp/php-cgi-85.sock;
+    fastcgi_index index.php;
+    include fastcgi.conf;
+}
+location ^~ /retired/ { return 410; }
+""")
+        good = self.inspect()
+        self.assertEqual(good['state'], 'File Mapping', good)
+        self.assertEqual([s['id'] for s in good['matched_sites']], [3, 6])
+        route.write_text(route.read_text().replace('php-cgi-85.sock','php-cgi-81.sock'))
+        bad = self.inspect()
+        self.assertEqual(bad['state'], 'Needs Review', bad)
+        self.assertIn('different PHP pool', bad['unresolved_sites'][0]['reason'])
+        self.assertFalse(bad['manual_apply_eligible'])
+
     def test_native_extension_changes_invalidate_approval_identity(self):
         self._native_qa_shapes()
         good = self.inspect()

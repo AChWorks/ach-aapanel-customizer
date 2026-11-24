@@ -28,8 +28,16 @@ $input = json_decode(stream_get_contents(STDIN), true);
 if (!is_array($input) || !in_array($input['action'] ?? null, ['inspect', 'set'], true)) {
     fwrite(STDERR, "Invalid WordPress URL operation\n"); exit(10);
 }
-define('WP_ADMIN', true);
+// Native site-user CLI, not an authenticated HTTP admin request.
+$ach_url_phase = 'bootstrap';
+$ach_url_finished = false;
+register_shutdown_function(static function () use (&$ach_url_phase, &$ach_url_finished) {
+    if (!$ach_url_finished) {
+        fwrite(STDERR, "\nACH_WP_URL_PHASE=".$ach_url_phase."\n");
+    }
+});
 require 'wp-load.php';
+$ach_url_phase = 'inspect';
 if (defined('WP_HOME') || defined('WP_SITEURL')) {
     fwrite(STDERR, "WordPress URL is controlled by WP_HOME/WP_SITEURL constants; update the source manually\n");
     exit(17);
@@ -59,6 +67,7 @@ function ach_wp_urls_snapshot() {
 }
 $values = ach_wp_urls_snapshot();
 if ($input['action'] === 'set') {
+    $ach_url_phase = 'set';
     $before = $input['before'] ?? null;
     $after = $input['after'] ?? null;
     if (!is_array($before) || !is_array($after) ||
@@ -82,7 +91,9 @@ if ($input['action'] === 'set') {
         fwrite(STDERR, "WordPress URL update did not persist exact target values\n"); exit(16);
     }
 }
-echo "ACH_WP_URL_RESULT=", json_encode($values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), "\n";
+$ach_url_phase = 'encode';
+echo "\nACH_WP_URL_RESULT=", json_encode($values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), "\n";
+$ach_url_finished = true;
 """
 
 
@@ -150,19 +161,35 @@ def _php(site, php, command, *, before=None, after=None, runner=None):
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise WPSettingsError("wordpress", "WordPress URL PHP operation unavailable: "
                               + type(exc).__name__) from exc
-    if result.returncode:
-        lines = (result.stderr or "").strip().splitlines()
-        raise WPSettingsError(
-            "wordpress", "WordPress " + command + " failed: " +
-            (lines[-1][:350] if lines else "PHP exit " + str(result.returncode)))
-    try:
-        lines = [line[len(PREFIX):] for line in result.stdout.splitlines()
-                 if line.startswith(PREFIX)]
-        data = json.loads(lines[0]) if len(lines) == 1 else None
-    except (ValueError, UnicodeError) as exc:
-        raise WPSettingsError("wordpress", "WordPress URL operation returned invalid status") from exc
-    if not _valid_values(data):
-        raise WPSettingsError("wordpress", "WordPress URL operation returned incomplete values")
+    lines = [line[len(PREFIX):] for line in result.stdout.splitlines()
+             if line.startswith(PREFIX)]
+    data = None
+    if len(lines) == 1:
+        try:
+            data = json.loads(lines[0])
+        except (ValueError, UnicodeError):
+            pass
+    if result.returncode or not _valid_values(data):
+        phases = [line[len("ACH_WP_URL_PHASE="):]
+                  for line in (result.stderr or "").splitlines()
+                  if line.startswith("ACH_WP_URL_PHASE=")]
+        phase = (phases[0] if len(phases) == 1 and phases[0] in
+                 ("bootstrap", "inspect", "set", "encode") else "unknown phase")
+        reasons = {
+            10: "Invalid WordPress URL operation",
+            11: "WordPress multisite URL changes are not supported",
+            12: "WordPress URL value is overridden, filtered or missing",
+            13: "Malformed WordPress URL update",
+            14: "WordPress URL changed before update",
+            15: "WordPress failed to update URL",
+            16: "WordPress URL update did not persist exact target values",
+            17: "WordPress URL controlled by WP_HOME/WP_SITEURL constants",
+        }
+        reason = reasons.get(result.returncode, "Missing result marker" if not lines
+                             else "Incomplete or invalid result")
+        raise WPSettingsError("wordpress", f"WordPress {command} failed during {phase}: "
+                              f"{reason} (PHP exit {result.returncode})")
+
     return data
 
 
