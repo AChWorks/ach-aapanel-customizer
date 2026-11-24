@@ -38,7 +38,7 @@ async function geometry(page, label) {
         .map(outer=>({outer,control:outer.querySelector('select,input:not([type="checkbox"])')}))
         .filter(x=>x.control && visible(x.control));
       const children=[...fields.map(x=>({...x,type:'field'})),
-        ...[...row.querySelectorAll(':scope > button')].filter(visible)
+        ...[...row.querySelectorAll(':scope > button, :scope > .ach-disabled-anchor > button')].filter(visible)
           .map(control=>({outer:control,control,type:'button'}))];
       for(let i=0;i<children.length;i++)for(let j=i+1;j<children.length;j++){
         const a=children[i],b=children[j];
@@ -59,6 +59,15 @@ async function geometry(page, label) {
       scrollMode:getComputedStyle(main).overflowY,
       active:[...root.querySelectorAll('[data-destination][aria-current="page"]')].map(x=>x.dataset.destination),
       visibleViews:[...root.querySelectorAll('[data-view]')].filter(visible).map(x=>x.dataset.view),
+      badDisabledActions:[...main.querySelectorAll('button:disabled,input[type=checkbox]:disabled')]
+        .filter(visible).filter(el=>{
+          const anchor=el.closest('.ach-disabled-anchor');
+          const id=anchor?.getAttribute('aria-describedby');
+          return !anchor || anchor.tabIndex!==0 || !id ||
+            !document.getElementById(id)?.textContent.trim();
+        }).map(el=>el.id||el.textContent.trim()),
+      enabledWithHelp:[...main.querySelectorAll('.ach-disabled-anchor > button:enabled,.ach-disabled-anchor > input:enabled')]
+        .filter(visible).map(el=>el.id),
       clippedControls:[...main.querySelectorAll('button,input:not([type="checkbox"]),select')]
         .filter(el=>visible(el)&&!el.closest('.ach-scroll') &&
           (el.getBoundingClientRect().left<edge.left-1||el.getBoundingClientRect().right>edge.right+1))
@@ -69,6 +78,8 @@ async function geometry(page, label) {
     result.scrollMode==='auto' && result.active.length===1 && result.visibleViews.length<=1 &&
     !result.docOverflow && !result.rootOverflow && !result.overflow &&
     !result.clippedControls.length, label+' '+JSON.stringify(result));
+  assert.deepEqual(result.badDisabledActions,[],label+' disabled actions require associated specific guidance');
+  assert.deepEqual(result.enabledWithHelp,[],label+' enabled actions have no redundant help stop');
   assert.deepEqual(result.rows.filter(x=>x.delta>1.5),[],label+' mixed control bottoms');
   return result.rows;
 }
@@ -115,6 +126,14 @@ async function walk(page, width, record) {
   async function checkWebsiteContext(expected, missing){
     assert.equal(await browse.count(),1,'Exactly one visible Browse websites action');
     assert.equal(await page.locator('#ach-website-error-pages').isVisible(),true);
+    assert.equal(await page.locator('#ach-website-error-pages').innerText(),'Error pages');
+    for(const id of ['ach-website-browse','ach-website-error-pages']){
+      const style=await page.locator('#'+id).evaluate(el=>({
+        height:el.getBoundingClientRect().height,border:getComputedStyle(el).borderTopWidth,
+        decoration:getComputedStyle(el).textDecorationLine
+      }));
+      assert.ok(style.height>=36 && parseFloat(style.border)>=1 && style.decoration==='none',JSON.stringify(style));
+    }
     assert.equal(await website.inputValue(),expected,'No automatic website selection');
     assert.equal(await page.locator('#ach-site-required').isVisible(),missing);
   }

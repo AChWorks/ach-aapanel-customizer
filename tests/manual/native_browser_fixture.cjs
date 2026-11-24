@@ -50,7 +50,7 @@ window.jQuery.ajax = window.$.ajax = function(options) {
 };
 `;
 const origin = 'http://ach-customizer-qa.invalid';
-const fixture = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+const fixture = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="${origin}/jquery.js"></script>
   <script src="${origin}/transport.js"></script>
   </head><body><div class="layui-layer" style="position:fixed;left:90px;top:20%;width:1100px;height:672px">
@@ -58,8 +58,8 @@ const fixture = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   <div class="layui-layer-content">${pluginHtml}</div>
   </div></body></html>`;
 
-async function realPage(browser, width, height=720) {
-  const page = await browser.newPage({viewport:{width,height}});
+async function realPage(browser, width, height=720, options={}) {
+  const page = await browser.newPage({viewport:{width,height},...options});
   page.setDefaultTimeout(5000);
   const pageErrors = [];
   page.on('pageerror', e => pageErrors.push(e.message));

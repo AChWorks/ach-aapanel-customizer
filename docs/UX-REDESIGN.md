@@ -135,6 +135,49 @@ selector, exact text-rendered Activity evidence). Repeat the installed QA
 journeys and inspect real pixels. Do not claim human usability, full
 screen-reader acceptance, or production writer qualification from geometry.
 
+## Owner follow-up: secondary actions and disabled-action guidance
+
+[Accepted OF-01/OF-02 contract](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7130362918).
+Native 0.1.104 candidate uses the shared secondary-button primitive for
+Browse websites and Error pages. Error pages retains a distinct scope and
+does not inherit the Website selector. No second Browse action.
+
+Use `setActionDisabled(selector, disabled, reason)` at the existing
+eligibility transition. A reason can reference the canonical adjacent
+inline guidance by its element ID. The native disabled property and
+existing request/authorization guards are authoritative; the presentation
+helper does not grant permission. An associated focusable help anchor
+exists only while the action is disabled; hover, keyboard focus and tap
+expose its reason. Escape dismisses the bubble. The description is
+associated programmatically, and current evidence/input changes update or
+remove it. Enabled controls have no redundant tab stop. Preserve complete
+technical diagnostics separately; do not infer recovery from an error.
+
+Coverage matrix (existing actual controls, not new feature requirements):
+
+| Task / action family | Disabled help follows |
+|---|---|
+| Home and Monitor | pending observation/write, missing verified Monitor state, Refresh |
+| Website inventory and baseline | pending/invalid inventory, page bounds, selected/whole baseline comparison and reviewed change |
+| Protection | exact selected site, check/preview, saved ruleset refusal, source/recovery state |
+| Cache inspect/connect/configure/clear/Bridge | native selection, pending check, fresh site-owned plan/recovery/Applied Cache identity, exact URL validity/approval |
+| WordPress Debug/Cron/XML-RPC/HTTPS | selection/value, pending and failed check, Source Ready/Restored vs Already Configured/conflict, matching Recovery ID |
+| Routing and selected-site Hosts | verified site, source inspection, removable alias and matching recovery/approval |
+| PHP inspect/policy/Apply/Restore/auto | discovered compatible service, pending operations, current form/plan/revision, shared scope and recovery |
+| Local hostnames / failed-install witness | refreshed alias selection, matching witness/readiness, stale helper refusal |
+| Attack protection / independent orphan | current site and parameters, Fail2ban capability/log trust, journal ownership; orphan recovery does not require a site |
+| Error pages | explicit independent scope/template, loaded branding, current source/preflight, running/stopped site, saved recovery/approval; separate HTTP and TLS capabilities |
+| Activity | pending refresh; dynamic owner links navigate only and never select a target or authorize Restore |
+
+Regression: actual disabled and enabled DOM states are checked in the
+seven-width route walk. `disabled_help_browser.cjs` additionally exercises
+the real DOM with mocked native responses: pointer/focus/touch, Escape,
+viewport containment, pending/Already Configured/Needs Review/malformed
+evidence, enabling, stale input, unsupported Guard journal and the exact
+allowed WP request contract. This is not live mutation or screen-reader
+certification. The installed HTTPS no-op observation is version-bound.
+Retain #128 and #21 for exact candidate and native QA evidence.
+
 ## Protect sensitive files — reference interaction states
 
 The image concept previously generated is **not runtime proof** and its compulsory acknowledgement checkbox is **not mandatory** in this contract.
@@ -152,7 +195,7 @@ The image concept previously generated is **not runtime proof** and its compulso
 ## Current source implementation and acceptance boundary
 
 S1–S5 are merged into `main` through PRs #129–#133. Native source
-0.1.101 established the task-first redesign; 0.1.103 is the review-remediated visual refinement candidate; the earlier
+0.1.101 established the task-first redesign; 0.1.103 is the integrated review-remediated visual refinement; 0.1.104 is the Owner follow-up candidate; the earlier
 published 0.1.100 package uses the seven-tab interface. A source ZIP is not
 a published Release asset. Current release availability belongs to GitHub
 Releases; exact installed QA and human acceptance belong to Issues #21 and

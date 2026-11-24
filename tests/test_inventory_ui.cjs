@@ -1519,6 +1519,28 @@ test('Fresh PHP preview permits reviewed desired-policy save without invoking FP
   assert.equal(ui.requests.filter(r=>/s=fpm_apply$/.test(r.options.url)).length,0);
 });
 
+test('Pending PHP policy save disables load, recheck and any parallel preview approval', () => {
+  const ui=loadUi();
+  ui.submitPhp().respond(fpmPolicyPreview());
+  const pending=ui.saveFpmPolicy();
+  assert.equal(ui.state().fpmPolicyLoadDisabled,true);
+  const count=ui.requests.length;
+  ui.loadFpmPolicy();
+  assert.equal(ui.requests.length,count);
+  ui.changePhp('max_children','101');
+  assert.equal(ui.state().fpmPolicyLoadDisabled,true);
+  ui.submitPhp('85',false).respond(fpmPolicyPreview());
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  pending.respond({status:true,schema:1,state:'Policy Saved',version:'85',
+    scope:'shared_service',auto_enforce:false,runtime_verified:false,
+    policy_revision:1,changed:true});
+  assert.equal(ui.state().fpmPolicySaveDisabled,true);
+  assert.equal(ui.state().fpmPolicyLoadDisabled,false);
+  const before=ui.requests.length;
+  ui.saveFpmPolicy();
+  assert.equal(ui.requests.length,before);
+});
+
 test('Changing PHP values or missing a trusted source token revokes policy-save authorization', () => {
   const ui = loadUi();
   ui.submitPhp().respond(fpmPolicyPreview());
@@ -2179,6 +2201,23 @@ test('system Cron interval, changed site and source uncertainty never reuse obso
   assert.equal(ui.state().wpSettingsRestoreDisabled,false);
   ui.statusSetValue('#ach-hosts-site-id','8','input change');
   assert.equal(ui.state().wpSettingsRestoreDisabled,true);
+});
+
+test('WordPress selection change during pending Recheck releases busy state without stale evidence',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  ui.statusSetValue('#ach-wp-settings-kind','https','input change');
+  const pending=ui.statusClick('#ach-wp-settings-recheck');
+  assert.equal(ui.state().wpSettingsRecheckDisabled,true);
+  // Deselect and reselect while the request is outstanding, even if the final
+  // site identity equals the old one. The old ticket remains invalidated.
+  ui.statusSetValue('#ach-hosts-site-id','','input change');
+  ui.statusSetValue('#ach-hosts-site-id','7','input change');
+  assert.equal(ui.state().wpSettingsRecheckDisabled,true);
+  pending.respond(wpSettingsReply('recheck','https'));
+  assert.equal(ui.state().wpSettingsRecheckDisabled,false);
+  assert.equal(ui.state().wpSettingsApplyDisabled,true);
+  ui.statusClick('#ach-wp-settings-recheck').respond(wpSettingsReply('recheck','https'));
+  assert.equal(ui.state().wpSettingsApplyDisabled,false);
 });
 
 test('101, 135 and 1001 native domains stay selectable and reach complete read-only tools', () => {
