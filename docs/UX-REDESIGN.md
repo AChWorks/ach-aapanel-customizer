@@ -1,6 +1,6 @@
 # Native UI redesign — accepted task-first experience contract
 
-Status: Owner-approved task-first interface and visual refinement, implemented and integrated through PR #136 (Native 0.1.106, 2026-11-24). Exact delivery and residual acceptance evidence belong to Issues #128 and #21. Scope: `AChWorks/ach-aapanel-customizer`. Source of approval and complete audit: [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7090292152). This document owns the intended UI/navigation and testing contract, not backend authorization, actual installed capabilities, or release status.
+Status: Owner-approved task-first interface and visual refinement, implemented in PRs #129–#136, with wrapped-approval and Status Pages guidance refinements in PR #139 (Native 0.1.111, 2026-11-24). Exact delivery and residual acceptance evidence belong to Issues #128 and #21. Scope: `AChWorks/ach-aapanel-customizer`. Source of approval and complete audit: [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7090292152). This document owns the intended UI/navigation and testing contract, not backend authorization, actual installed capabilities, or release status.
 
 ## Outcome and compatibility
 
@@ -269,6 +269,12 @@ refined layout; 0.1.105 integrated the R135 remediation; 0.1.106 refines
 the help surface and separates initiating-action progress. The historical
 0.1.100 package uses the seven-tab interface. The 0.1.106 source was
 independently approved, verified on retained QA, and accepted by the Owner.
+PR #139 preserves the task-first navigation, corrects wrapped approval spacing
+and makes already-current HTTP 404 and source-only 502/50x observations
+explicit without granting a write or Recovery. Native 0.1.111 was independently
+approved and installed on the retained QA guest; exact evidence remains in
+[PR #139](https://github.com/AChWorks/ach-aapanel-customizer/pull/139)
+and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21).
 This does not certify every Production writer or unassisted novice task.
 A source ZIP is not a published Release asset. Current release availability
 belongs to GitHub Releases; exact installed QA and human acceptance belong
