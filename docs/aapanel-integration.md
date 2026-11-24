@@ -1133,6 +1133,22 @@ journal, without overwriting the original snapshot. Only current journals with a
 baseline are accepted. Missing, filtered-only or otherwise incomplete
 journals fail before another WordPress/PHP/Cache mutation; no migration
 or guessed-role fallback is implemented.
+The site-user PHP connector runs as a CLI operation, not a WordPress HTTP
+admin request: do not define WP_ADMIN or spoof WP_CLI, user login, or an
+authenticated request. Load the official plugin APIs explicitly. Login
+protection on a real site can otherwise redirect and exit during bootstrap
+even with exit code zero. A failed connector reports action, actual phase,
+exit status, a controlled reason or fatal type/source line, and correlation
+in Activity; do not log arbitrary site output or credentials.
+
+Native Cache and shared PHP impact inspection recognize the observed aaPanel
+per-site SSL `well-known/<site>.conf` helper only at its exact server-level
+include with the complete verified template and bounded trusted file identity.
+The helper is part of source fingerprinting. Edited, foreign, nested, linked
+or missing helpers remain unresolved, so no shared-directory purge or
+unverified routing is authorized. This is source compatibility, not a claim
+about all future aaPanel SSL templates.
+
 Bridge 0.1.9 maps a valid authenticated, nonce-checked frontend
 `Purge Current Page` through the same generation-bound per-URL
 GET/HEAD selector for HTTP/HTTPS cache keys, including an HTTPS public

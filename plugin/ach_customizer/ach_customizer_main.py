@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.107'
+WORKER_SOURCE_VERSION = '0.1.108'
 
 _STATE_DIR = DATA_DIR
 
@@ -84,7 +84,8 @@ class ach_customizer_main:
                               action in ("manage_cache_policy", "cache_manage",
                                          "manage_nginx_protection", "nginx_guard_manage",
                                          "manage_abusive_scan", "abusive_scan_manage",
-                                         "wp_settings_manage", "wp_settings_uncertain"))
+                                         "wp_settings_manage", "wp_settings_uncertain",
+                                         "manage_wordpress_cache", "wordpress_cache_setup"))
             hosts_recovery = (module == "websites" and
                               action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
@@ -122,10 +123,12 @@ class ach_customizer_main:
         controlled = (PermissionError, StateError, StatusPageError,
                       MonitorInputError, FpmApplyError, HostsInspectionError,
                       ActivityError)
+        wordpress_detail = False
         if stage.startswith("wordpress_cache_"):
             try:
                 from ach_customizer_cache_wordpress import WordpressCacheError
                 controlled += (WordpressCacheError,)
+                wordpress_detail = isinstance(error, (WordpressCacheError, StatusPageError))
             except ImportError:
                 pass
         if stage == "abusive_scan_manage":
@@ -177,6 +180,8 @@ class ach_customizer_main:
                 trusted_hosts_recovery = isinstance(error, AbuseError)
             except ImportError:
                 trusted_hosts_recovery = False
+        if stage == "wordpress_cache_setup":
+            trusted_hosts_recovery = wordpress_detail
         if (trusted_hosts_recovery and isinstance(actual_recovery, str) and
                 re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):
             response["recovery_id"] = actual_recovery
@@ -191,7 +196,7 @@ class ach_customizer_main:
             error=diagnostic_error if diagnostic_error is not None else error,
             # This text was explicitly reviewed at the typed endpoint boundary;
             # keep its original exception class and the actionable Activity cause.
-            trusted_detail=message if typed_domain_detail else None,
+            trusted_detail=message if typed_domain_detail or wordpress_detail else None,
             activity_stage=activity_stage)
 
     def get_activity(self, args):
@@ -1338,6 +1343,8 @@ class ach_customizer_main:
         This is a coordinated site setup, not a second cache purger.
         """
         request_id = uuid4().hex
+        action = ""
+        target = ""
         try:
             self._status_primary_admin_post()
             self._require_enabled("site_inventory")
@@ -1348,6 +1355,7 @@ class ach_customizer_main:
                 raise MonitorInputError("Select Connect or Disconnect for this site")
             from ach_customizer_cache_wordpress import inspect, setup, restore
             public, before, current_site = self._selected_native_website(args)
+            target = str(before["id"])
             result = {"inspect": inspect, "setup": setup, "restore": restore}[action](
                 before, public)
             if current_site() != before:
@@ -1362,7 +1370,11 @@ class ach_customizer_main:
         except PermissionError as exc:
             return self._fail("wordpress_cache_authorization", exc, request_id)
         except Exception as exc:
-            return self._fail("wordpress_cache_setup", exc, request_id)
+            from ach_customizer_cache_wordpress import WordpressCacheError
+            from ach_customizer_cache_manage import CacheManageError
+            phase = exc.stage if isinstance(exc, (WordpressCacheError, CacheManageError)) else "unexpected"
+            return self._fail("wordpress_cache_setup", exc, request_id, target=target,
+                              activity_stage=(action + ":" + phase) if action in ("inspect", "setup", "restore") else phase)
 
     def wp_settings_manage(self, args):
         """One selected WordPress site's debug or system scheduler policy."""

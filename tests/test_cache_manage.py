@@ -1287,6 +1287,24 @@ class CacheManageTests(unittest.TestCase):
         finally:
             vhost.write_text(original)
 
+    def test_native_ssl_helper_selected_source_recheck_requires_exact_template(self):
+        helper = self.vhost / "well-known" / "qa.test.conf"
+        helper.parent.mkdir()
+        template = (ROOT / "tests/fixtures/native-well-known.conf").read_bytes()
+        helper.write_bytes(template)
+        vhost = self.vhost / "qa.test.conf"
+        vhost.write_text(vhost.read_text().replace(
+            " include enable-php-", " include " + str(helper) + ";\n include enable-php-"))
+        source = cache._site_sources(self.site, "85",
+                    vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+        self.assertIn("vhost_sha", source)
+        helper.write_bytes(template + b"\nreturn 403;\n")
+        with self.assertRaisesRegex(cache.CacheManageError, "well-known"):
+            cache._site_sources(self.site, "85",
+                vhost_root=str(self.vhost), nginx_root=str(self.nginx))
+        self.assertFalse(self.commands)
+        self.assertFalse(list(self.state.iterdir()))
+
     def test_native_807_subdir_route_cannot_bypass_cache_preflight(self):
         vhost = self.vhost / 'qa.test.conf'
         original = vhost.read_text()

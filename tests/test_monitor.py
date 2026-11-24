@@ -803,6 +803,26 @@ class SharedPHPFileImpactTests(unittest.TestCase):
         include.write_text(include.read_text() + '# in-place include change\n')
         self.assertNotEqual(updated['dependency_sha256'], self.inspect()['dependency_sha256'])
 
+    def test_native_ssl_challenge_helper_preserves_php_impact(self):
+        template = (Path(__file__).resolve().parent / "fixtures/native-well-known.conf").read_bytes()
+        helper = self.vhosts / "well-known" / "site-b.example.test.conf"
+        helper.parent.mkdir()
+        helper.write_bytes(template)
+        host = self.vhost("site-b.example.test")
+        original = host.read_text()
+        host.write_text(original.replace("  include enable-php-", "  include " + str(helper) + ";\n  include enable-php-"))
+        good = self.inspect()
+        self.assertEqual(good["state"], "File Mapping", good)
+        self.assertTrue(good["manual_apply_eligible"])
+        helper.write_bytes(template + b"\nset $unexpected 1;\n")
+        bad = self.inspect()
+        self.assertEqual(bad["state"], "Needs Review", bad)
+        self.assertEqual([site["id"] for site in bad["unresolved_sites"]], [6])
+        self.assertFalse(bad["manual_apply_eligible"])
+        helper.write_bytes(template)
+        helper.chmod(0o666)
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+
     def test_native_fastcgi_parameter_dependency_is_bounded_and_fingerprinted(self):
         include = self.nginx / 'enable-php-85.conf'
         include.write_text(

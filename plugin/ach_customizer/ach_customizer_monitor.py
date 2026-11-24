@@ -1167,9 +1167,40 @@ def _native_extension_fingerprint(directory, *, site_id=None, site_key=None,
     ).encode("utf-8")).hexdigest()
 
 
+def _native_well_known_fingerprint(active_vhost, path):
+    """Recognize the exact native per-site SSL challenge helper.
+
+    The observed aaPanel helper reads the challenge body with Lua and
+    returns it; it does not select a PHP/cache upstream. Arbitrary Lua
+    cannot be classified as inert routing. Match the complete template,
+    not its filename or panel version. Other templates need verification.
+    """
+    expected = str(path)
+    refs = re.findall(r"\binclude\s+[^;\n]*/well-known/[^;\n]*;", active_vhost)
+    if not refs:
+        return None
+    if (len(refs) != 1 or not re.fullmatch(
+            r"include[ \t]+" + re.escape(expected) + r"[ \t]*;", refs[0])
+            or not _native_server_direct_include(active_vhost, expected)):
+        raise MonitorInputError("Unverified native SSL well-known include scope or site identity")
+    try:
+        raw, signature = _bounded_file_text(
+            Path(path), MAX_NGINX_SITE_BYTES, with_fingerprint=True)
+    except (OSError, UnicodeError) as exc:
+        raise MonitorInputError("Native SSL well-known source unavailable or untrusted") from exc
+    # Only outer/line-end whitespace and CRLF may differ. Observed identical
+    # complete source on two registered sites; fixture tests bind the hash.
+    canonical = "\n".join(line.rstrip(" \t") for line in raw.replace("\r\n", "\n").split("\n")).strip()
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if digest != "a9133e7ee4b5adff671827baf815e6cab3118aa2688612ef8e11af14d30bc8c1":
+        raise MonitorInputError("Native SSL well-known helper content needs review")
+    return signature
+
+
 def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
-                              native_extension=None, native_subdir=None):
-    """Accept exact aaPanel PHP/rewrite/extension and optional unused sub_dir."""
+                              native_extension=None, native_subdir=None,
+                              native_well_known=None):
+    """Accept verified native PHP/rewrite/extension/sub_dir and SSL helper."""
     active = _active_nginx_text(vhost_text)
     includes = re.findall(
         r"(?m)^[ \t]*include[ \t]+([^;\s]+)[ \t]*;[ \t]*$", active,
@@ -1184,15 +1215,19 @@ def _native_nginx_php_version(vhost_text, *, native_rewrite=None,
     if len(php) != 1:
         raise MonitorInputError("No unique native Nginx PHP include")
     extras = [name for name in includes if name != php[0][1]]
-    if (len(extras) > 3 or any(
-            name not in (native_rewrite, native_extension, native_subdir)
-            or name is None for name in extras)):
+    if any(
+            name not in (native_rewrite, native_extension, native_subdir, native_well_known)
+            or name is None for name in extras):
         raise MonitorInputError("Additional or unverified Nginx include/routing needs review")
     if native_subdir in extras and native_subdir is not None:
         if not _native_server_direct_include(active, native_subdir):
             raise MonitorInputError("Native subdirectory include is not server-scoped")
+    well_known = (_native_well_known_fingerprint(active, native_well_known)
+                  if native_well_known in extras else None)
+    if native_well_known in extras and not well_known:
+        raise MonitorInputError("Unverified native SSL well-known include")
     return (php[0][0], php[0][1], native_rewrite in extras,
-            native_extension in extras, native_subdir in extras)
+            native_extension in extras, native_subdir in extras, well_known)
 
 
 def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
@@ -1264,11 +1299,15 @@ def inspect_php_fpm_site_impact(panel_public, version, pool_source, *,
                 )
                 rewrite = rewrite_dir / (name + ".conf")
                 extension = vhost_dir / "extension" / name
-                assigned, php_name, has_rewrite, has_extension, has_subdir = _native_nginx_php_version(
+                assigned, php_name, has_rewrite, has_extension, has_subdir, well_known = _native_nginx_php_version(
                     vhost, native_rewrite=str(rewrite),
                     native_extension=str(extension / "*.conf"),
                     native_subdir=str(vhost_dir / "sub_dir" / name / "*.conf"),
+                    native_well_known=str(vhost_dir / "well-known" / (name + ".conf")),
                 )
+                if well_known:
+                    dependencies.append({"kind": "native_ssl_well_known", "id": site_id,
+                                         "signature": well_known})
                 if has_subdir:
                     dependencies.append({
                         "kind": "native_unused_subdir", "id": site_id,

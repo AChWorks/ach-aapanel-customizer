@@ -25,7 +25,7 @@ from ach_customizer_cache_audit import inspect_site_fastcgi_cache
 from ach_customizer_monitor import (
     MonitorInputError, _active_nginx_text, _bounded_file_text,
     _native_extension_fingerprint, _native_unused_subdir,
-    _native_server_direct_include,
+    _native_server_direct_include, _native_well_known_fingerprint,
     MAX_NGINX_SITE_BYTES,
 )
 from ach_customizer_state import DATA_DIR, _open_state_dir, _exclusive_lock
@@ -368,6 +368,13 @@ def _site_sources(site, php, *, native_handler="stock",
             'rerun Cache readiness before any manual edit. If still missing, use '
             'the latest native Config editor and recheck. No VHost/Cache change was made.',
             reason_code='native_extension_include_missing')
+    # Recheck and Restore also verify the live selected SSL helper.
+    # An identical certificate renewal need not invalidate the journal.
+    try:
+        _native_well_known_fingerprint(
+            active, Path(vhost_root) / "well-known" / (site["name"] + ".conf"))
+    except (OSError, MonitorInputError) as exc:
+        raise CacheManageError("compatibility", str(exc)) from exc
     native_subdir = 'include '+vhost_root+'/sub_dir/'+site['name']+'/*.conf;'
     subdir_refs = re.findall(r'\binclude\s+[^;\n]*/sub_dir/[^;\n]*;', active)
     if subdir_refs:
@@ -1056,6 +1063,9 @@ def _compatibility(site, public, *, vhost_root=VHOST_ROOT, nginx_root=NGINX_ROOT
     stock_source = (native['zone_state'] == 'No Direct Directive'
                     and not native['purge_directive_seen'])
     native_handler = 'wpfastcgi' if wp_source else 'stock'
+    if native.get("unresolved_other_sites"):
+        raise CacheManageError("compatibility",
+            native.get("reason") or "Uninspected peer Cache source requires review")
     if (native['state'] != 'Source Observed'
             or not (stock_source or wp_source)
             or native['php_version'] not in ('81','85')

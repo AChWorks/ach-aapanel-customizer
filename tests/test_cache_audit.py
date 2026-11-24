@@ -157,6 +157,51 @@ class FastCgiCacheSourceTests(unittest.TestCase):
         selected_dir.unlink()
         self.assertEqual(self.inspect()["state"], "Source Observed")
 
+    def test_native_ssl_well_known_source_is_verified_for_every_peer(self):
+        self.global_cache_fixture()
+        template = (ROOT / "tests/fixtures/native-well-known.conf").read_bytes()
+        helper_dir = self.vhost / "well-known"
+        helper_dir.mkdir()
+        for name in ("wp.test", "shop.test"):
+            helper = helper_dir / (name + ".conf")
+            helper.write_bytes(template)
+            host = self.vhost / (name + ".conf")
+            host.write_text(host.read_text().replace(
+                " include enable-php-", " include " + str(helper) + ";\n include enable-php-"))
+        good = self.inspect()
+        self.assertEqual(good["state"], "Source Observed", good)
+        self.assertEqual(good["unresolved_other_sites"], 0)
+        self.assertEqual(good["purge_scope"], "Shared Registered Directory")
+        self.assertFalse(good["purge_supported"])
+        peer = helper_dir / "shop.test.conf"
+        peer.write_bytes(template.replace(b"return 200", b"return 403"))
+        bad = self.inspect()
+        self.assertEqual(bad["state"], "Partial", bad)
+        self.assertIn("shop.test", bad["reason"])
+        self.assertIn("well-known", bad["reason"])
+        self.assertFalse(bad["purge_supported"])
+        peer.write_bytes(template.replace(b"\n", b"\r\n"))
+        restored = self.inspect()
+        self.assertEqual(restored["state"], "Source Observed")
+        self.assertNotEqual(good["source_sha256"], restored["source_sha256"])
+        peer.unlink()
+        peer.symlink_to(helper_dir / "wp.test.conf")
+        self.assertEqual(self.inspect()["state"], "Partial")
+        peer.unlink()
+        peer.write_bytes(template)
+        selected = self.vhost / "wp.test.conf"
+        original = selected.read_text()
+        selected.write_text(original.replace(
+            str(helper_dir / "wp.test.conf"), str(helper_dir / "shop.test.conf")))
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+        selected.write_text(original.replace(
+            " include " + str(helper_dir / "wp.test.conf") + ";",
+            " location /other {\n include " + str(helper_dir / "wp.test.conf") + ";\n }"))
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+        selected.write_text(original)
+        (helper_dir / "wp.test.conf").write_bytes(template + b"\ninclude foreign.conf;\n")
+        self.assertEqual(self.inspect()["state"], "Needs Review")
+
     def test_global_aaPanel_cache_include_is_fingerprinted_and_flags_shared_physical_purge(self):
         cache = self.global_cache_fixture()
         result = self.inspect()
