@@ -328,7 +328,7 @@ class WordpressConnectionTests(unittest.TestCase):
         self.assertIn(("php", "restore"), self.events)
         self.assertIn(("cache", "restore"), self.events)
         self.assertEqual(wp.restore(self.site, object(), data_dir=str(self.root))["changed"], False)
-        with patch.object(wp, "_native_record", return_value={
+        with patch.object(wp, "manage_cache", return_value={
                 "state": "Restored", "recovery_id": "f" * 32,
                 "runtime_verified": True}):
             self.assertEqual(
@@ -467,6 +467,72 @@ class WordpressConnectionTests(unittest.TestCase):
             reload.assert_called_once_with("85")
         self.assertEqual(self.ini.read_bytes(), self.original_ini)
         self.assertEqual(wp._extract_constant(self.config.read_bytes()), self.cache)
+
+    def test_disconnect_before_native_apply_reports_not_connected(self):
+        self.start()
+        with patch.object(wp, "preview_cache_activation",
+                          side_effect=wp.CacheManageError("compatibility", "preview refused")):
+            with self.assertRaises(wp.CacheManageError):
+                wp.setup(self.site, object(), data_dir=str(self.root))
+        result = wp.restore(self.site, object(), data_dir=str(self.root))
+        self.assertEqual(result["state"], "Restored")
+        self.assertFalse(self.connected)
+        self.assertEqual(wp.inspect(self.site, object(), data_dir=str(self.root))["state"],
+                         "Not Connected")
+        self.assertEqual(self.config.read_bytes(), self.original_config)
+        self.assertEqual(self.ini.read_bytes(), self.original_ini)
+
+    def test_restored_connection_is_independent_of_later_native_cache(self):
+        self.start()
+        self.setup_once()
+        wp.restore(self.site, object(), data_dir=str(self.root))
+        journal = self.root / "ach_customizer.nginx-helper.7.json"
+        before = (journal.read_bytes(), self.config.read_bytes(), self.ini.read_bytes())
+        for state in ("Applied", "Recovery Required", "Needs Review"):
+            with self.subTest(state=state), \
+                 patch.object(wp, "manage_cache", return_value={
+                     "state": state, "recovery_id": "a" * 32,
+                     "runtime_verified": state == "Applied"
+                 }) as native, patch.object(wp, "_php") as php, \
+                 patch.object(wp, "_save") as save:
+                observed = wp.inspect(self.site, object(), data_dir=str(self.root))
+                self.assertEqual(observed["state"], "Not Connected")
+                self.assertTrue(observed["read_only"])
+                self.assertEqual(observed["recovery_id"], self.native_id)
+                self.assertIn("independent native Cache", observed["note"])
+                self.assertFalse(wp.restore(self.site, object(),
+                                            data_dir=str(self.root))["changed"])
+                native.assert_not_called()
+                php.assert_not_called()
+                save.assert_not_called()
+                self.assertEqual((journal.read_bytes(), self.config.read_bytes(),
+                                  self.ini.read_bytes()), before)
+
+    def test_check_reports_partial_native_recovery_without_a_write(self):
+        self.start()
+        self.setup_once()
+        journal = self.root / "ach_customizer.nginx-helper.7.json"
+        before = (journal.read_bytes(), self.config.read_bytes(), self.ini.read_bytes())
+        for state in ("Recovery Required", "Needs Review"):
+            with self.subTest(state=state), \
+                 patch.object(wp, "manage_cache", return_value={
+                     "state": state, "recovery_id": "f" * 32,
+                     "runtime_verified": False, "note": "Saved source requires review"
+                 }) as native, patch.object(wp, "_php") as php, \
+                 patch.object(wp, "_save") as save:
+                result = wp.inspect(self.site, object(), data_dir=str(self.root))
+                self.assertEqual(result["state"], "Needs Review")
+                self.assertTrue(result["read_only"])
+                self.assertEqual(result["recovery_id"], "f" * 32)
+                self.assertIn(state, result["note"])
+                self.assertIn("Apply & restore", result["note"])
+                self.assertIn("Saved source requires review", result["note"])
+                self.assertEqual(native.call_args.args[0], "recheck")
+                native.assert_called_once()
+                php.assert_not_called()
+                save.assert_not_called()
+                self.assertEqual((journal.read_bytes(), self.config.read_bytes(),
+                                  self.ini.read_bytes()), before)
 
     def test_inspect_detects_only_cache_method_drift(self):
         self.start()

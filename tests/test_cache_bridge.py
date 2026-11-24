@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin" / "ach_customizer"))
@@ -55,6 +56,60 @@ class CacheBridgeManifestTests(unittest.TestCase):
             "cache_identity": [12345, 67890],
             "op": "b" * 32,
         }
+
+    def test_endpoint_inspect_without_native_lock_uses_real_manifest_contract(self):
+        from ach_customizer_cache_manage import manage_cache
+        state = Path(self.tmp.name) / "state"
+        state.mkdir()
+        actual_inspect = lambda site, public, record: inspect(
+            site, public, record, owner_uid=self.owner)
+        with patch("ach_customizer_cache_bridge.inspect",
+                   side_effect=actual_inspect) as reader:
+            def check(expected):
+                result = manage_cache("bridge_inspect", self.site, self.public,
+                                      data_dir=str(state))
+                self.assertEqual(result["state"], expected)
+                self.assertEqual(result["site_key"], self.site["name"])
+                self.assertEqual(result["site_id"], self.site["id"])
+                self.assertIsNone(result["recovery_id"])
+                self.assertTrue(result["read_only"])
+                self.assertFalse(result["runtime_verified"])
+                self.assertFalse(result["purge_supported"])
+                self.assertEqual(list(state.iterdir()), [])
+            check("Not Provisioned")
+            enable(self.site, self.public, self.record, owner_uid=self.owner)
+            manifest = self.root / "wp-content" / MANIFEST_DIR / MANIFEST_NAME
+            original = manifest.read_bytes()
+            check("Stale — Disable Required")
+            self.assertEqual(manifest.read_bytes(), original)
+            data = json.loads(original[len(MANIFEST_PREFIX):])
+            data["site_key"] = "foreign.example"
+            manifest.write_bytes(MANIFEST_PREFIX + json.dumps(data).encode() + b"\n")
+            check("Needs Review")
+            manifest.write_bytes(original)
+            manifest.chmod(0o666)
+            check("Needs Review: WordPress Bridge manifest is not native-owned")
+            self.assertEqual(manifest.read_bytes(), original)
+            self.assertEqual(reader.call_count, 4)
+
+    def test_endpoint_reinspects_if_first_writer_creates_lock_during_read(self):
+        from ach_customizer_cache_manage import manage_cache
+        from ach_customizer_state import LOCK_FILE
+        state = Path(self.tmp.name) / "state"
+        state.mkdir()
+        lock = state / LOCK_FILE
+        def appearing(site, public, record):
+            if not lock.exists():
+                lock.touch(mode=0o600)
+                return "Not Provisioned"
+            return "Stale — Disable Required"
+        with patch("ach_customizer_cache_bridge.inspect", side_effect=appearing) as reader:
+            result = manage_cache("bridge_inspect", self.site, self.public,
+                                  data_dir=str(state))
+        self.assertEqual(result["state"], "Stale — Disable Required")
+        self.assertEqual(reader.call_count, 2)
+        self.assertEqual(list(state.iterdir()), [lock])
+        self.assertEqual(lock.stat().st_size, 0)
 
     def test_enable_inspect_and_disable_exact_site(self):
         self.assertEqual(inspect(self.site, self.public, self.record,

@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.113'
+WORKER_SOURCE_VERSION = '0.1.115'
 
 _STATE_DIR = DATA_DIR
 
@@ -85,7 +85,9 @@ class ach_customizer_main:
                                          "manage_nginx_protection", "nginx_guard_manage",
                                          "manage_abusive_scan", "abusive_scan_manage",
                                          "wp_settings_manage", "wp_settings_uncertain",
-                                         "manage_wordpress_cache", "wordpress_cache_setup"))
+                                         "manage_wordpress_cache", "wordpress_cache_setup",
+                                         "wordpress_cache_inspect", "wordpress_cache_restore",
+                                         "wordpress_cache_request", "wordpress_cache_authorization"))
             hosts_recovery = (module == "websites" and
                               action in ("manage_local_hosts", "hosts_management"))
             recovery = (response.get("recovery_id")
@@ -180,7 +182,7 @@ class ach_customizer_main:
                 trusted_hosts_recovery = isinstance(error, AbuseError)
             except ImportError:
                 trusted_hosts_recovery = False
-        if stage == "wordpress_cache_setup":
+        if stage.startswith("wordpress_cache_"):
             trusted_hosts_recovery = wordpress_detail
         if (trusted_hosts_recovery and isinstance(actual_recovery, str) and
                 re.fullmatch(r"[0-9a-f]{32}", actual_recovery)):
@@ -1366,14 +1368,17 @@ class ach_customizer_main:
             return self._activity_result(
                 {"status": True, "request_id": request_id, **result},
                 "websites", "manage_wordpress_cache", target=str(before["id"]),
-                level="WARNING" if result["state"] != "Connected" else "INFO")
+                level="WARNING" if result["state"] == "Needs Review" else "INFO")
         except PermissionError as exc:
             return self._fail("wordpress_cache_authorization", exc, request_id)
         except Exception as exc:
             from ach_customizer_cache_wordpress import WordpressCacheError
             from ach_customizer_cache_manage import CacheManageError
             phase = exc.stage if isinstance(exc, (WordpressCacheError, CacheManageError)) else "unexpected"
-            return self._fail("wordpress_cache_setup", exc, request_id, target=target,
+            stage = ("wordpress_cache_" + action
+                     if action in ("inspect", "setup", "restore")
+                     else "wordpress_cache_request")
+            return self._fail(stage, exc, request_id, target=target,
                               activity_stage=(action + ":" + phase) if action in ("inspect", "setup", "restore") else phase)
 
     def wp_settings_manage(self, args):

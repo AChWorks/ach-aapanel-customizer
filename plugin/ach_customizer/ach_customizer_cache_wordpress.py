@@ -606,7 +606,7 @@ def _save(site, record, data_dir):
 def _native_record(site, public):
     current = manage_cache("recheck", site, public)
     if current["state"] not in ("Applied", "Unmanaged", "Restored"):
-        raise WordpressCacheError("cache", "Native Cache recovery needs review before WordPress setup",
+        raise WordpressCacheError("cache", "Native Cache recovery needs review. Open Apply & restore and Recheck the saved recovery.",
                                   current.get("recovery_id"))
     return current
 
@@ -896,14 +896,26 @@ def inspect(site, public, *, data_dir=DATA_DIR):
     if journal is None:
         return {"schema": 1, "state": "Not Connected", "site_id": site["id"],
                 "site_key": site["name"], "read_only": True}
-    runtime = _native_record(site, public)
-    if journal["phase"] == "restored" and (
-            runtime["state"] == "Restored" or
-            runtime["state"] == "Applied" and not journal.get("cache_owned", True)):
+    if journal["phase"] == "restored":
+        # Completed disconnection is independent of subsequent native Cache
+        # generations. Disconnect would be a no-op; native recovery belongs
+        # to Apply & restore, not a new WordPress connection.
         return {"schema": 1, "state": "Not Connected",
                 "site_id": site["id"], "site_key": site["name"],
                 "read_only": True, "recovery_id": journal["recovery_id"],
-                "note": "WordPress Cache connection restored to its previous state."}
+                "note": "WordPress Cache connection restored to its previous state. "
+                        "Inspect independent native Cache in Apply & restore if needed."}
+    runtime = manage_cache("recheck", site, public)
+    # A partial native generation is an expected read-only observation,
+    # not a failed setup or a permission to restore. Keep the native
+    # recovery identity and the reason visible without advancing a journal.
+    if runtime["state"] not in ("Applied", "Unmanaged", "Restored"):
+        return {"schema": 1, "state": "Needs Review", "site_id": site["id"],
+                "site_key": site["name"], "read_only": True,
+                "recovery_id": runtime.get("recovery_id"),
+                "note": "Native Cache: " + runtime["state"] +
+                        ". Open Apply & restore and Recheck the saved recovery. " +
+                        (runtime.get("note") or "")}
     state = "Needs Review"
     if (journal["phase"] == "connected" and runtime["state"] == "Applied"
             and runtime["runtime_verified"]

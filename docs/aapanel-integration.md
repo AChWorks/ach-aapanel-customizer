@@ -1152,6 +1152,25 @@ This is **one click per WordPress site**, not an unattended watcher or
 a recurring per-post/per-update manual configuration. The original Nginx
 Helper frontend **Purge Current Page** and admin **Purge All** stay in use.
 
+After a verified Connected response the UI disables unnecessary repeat
+Connect; Check WordPress connection and the applicable Disconnect remain
+available. Not Connected disables redundant Disconnect; Needs Review is a
+read-only warning, not a failed Setup. It includes the native recovery
+identity and the appropriate Recheck guidance when native Cache is partial.
+Site selection, related changes and conflicting or unconfirmed recovery
+observations clear the earlier connection/manifest proof. No mandatory Check
+is added before a first or repair Connect; the backend still revalidates every
+requested operation.
+
+Verified Cache Clear preserves current connection evidence, including a
+confirmed zero-file no-op; failed or unconfirmed Clear invalidates that
+evidence. A Bridge inspection is read-only even on a first install without
+a native Cache lock; an existing journal without its lock requires review.
+A completed WordPress Disconnect is independent of later native Cache
+generations; inspect their recovery in Apply & restore, not by repeating
+Disconnect.
+
+
 The native one-click also ensures the official Nginx Helper's two
 administrator-role capabilities (`Nginx Helper | Config` and
 `Nginx Helper | Purge cache`) are present; CLI activation has no
