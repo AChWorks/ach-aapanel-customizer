@@ -187,7 +187,7 @@ rollback requirements use the [upgrade/recovery runbook](aapanel-upgrade-recover
 ## Native interface contract
 
 The Customizer opens **inside** aaPanel. Task-first Native source/package
-identity 0.1.101 exposes Home, Websites, Server, Error pages, and
+identity 0.1.101+ exposes Home, Websites, Server, Error pages, and
 Activity & recovery. Website and
 server tasks have contextual stages; the shared selected-site context is not
 replaced with a raw-ID field. The earlier official Native v0.1.100 ZIP
@@ -228,7 +228,7 @@ node tests/manual/status_50x_browser.cjs
 The layout runner follows real destination/task/stage controls at seven
 viewport widths from 320 to 1280 px, including selected-site and no-site
 states, keyboard focus, mixed label/input/button alignment, local editor
-feedback, loading states, contrast, and the contained source-diff surface.
+feedback, loading states, contrast, and the contained source-diff surface. The 0.1.103 composition checks cover compact website context, desktop first action, checkbox text-column geometry, conditional HTTPS warning and global-scope selector, exact Activity evidence disclosure, a single Browse websites action, typed unsupported Guard recovery guidance, and a named keyboard-scrollable offline preview.
 `tests/manual/control_alignment_browser.cjs` is the same layout entrypoint
 for the documented form-row contract. The 50x runner tests the real DOM's
 preflight/approval/Apply request contract and invalidation paths. All native

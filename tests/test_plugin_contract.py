@@ -158,7 +158,7 @@ class PackageContractTests(unittest.TestCase):
 
     def test_home_starts_with_four_task_launchers_and_no_unconditional_writes(self):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('<h4 data-home-only>Home</h4>', html)
+        self.assertNotIn('<h4 data-home-only>Home</h4>', html)
         self.assertIn('aria-label="Common tasks"', html)
         for control, task in (
                 ('ach-overview-browse-sites', 'Manage a website'),
@@ -184,22 +184,21 @@ class PackageContractTests(unittest.TestCase):
     def test_checkbox_text_flow_and_guard_option_remain_readable(self):
         import re
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
-        # A label with text + code + emphasis must not make each fragment
-        # a separate flex item that collapses into vertical letter columns.
+        # Every checkbox has one complete text column (including inline
+        # code/emphasis), rather than splitting text nodes into grid items.
         generic = re.search(
             r'#ach-customizer \.ach-main label:has\(> input\[type="checkbox"\]\)\s*\{([^}]+)\}',
             html)
         self.assertIsNotNone(generic)
-        self.assertIn('display:block', generic.group(1))
-        self.assertNotIn('inline-flex', generic.group(1))
-        note = re.search(
-            r'#ach-customizer \.ach-main \.ach-note > label:has\(> input\[type="checkbox"\]\)\s*\{([^}]+)\}',
-            html)
-        self.assertIsNotNone(note)
-        self.assertIn('display:block', note.group(1))
+        self.assertIn('display:grid', generic.group(1))
+        self.assertIn('grid-template-columns:16px minmax(0,1fr)', generic.group(1))
+        labels = re.findall(
+            r'<label(?:\s[^>]*)?>\s*<input\b(?=[^>]*type="checkbox")[^>]*>(.*?)</label>',
+            html, re.S)
+        self.assertGreaterEqual(len(labels), 20)
+        self.assertTrue(all(copy.startswith('<span class="ach-option-copy">') for copy in labels))
         self.assertIn('class="ach-guard-option"', html)
-        self.assertIn('id="ach-guard-block-xmlrpc" /><span>', html)
-        self.assertIn('grid-template-columns:16px minmax(0,1fr)', html)
+        self.assertIn('id="ach-guard-block-xmlrpc" /><span class="ach-option-copy">', html)
         self.assertIn('#ach-customizer .ach-view code { white-space:nowrap; }', html)
         self.assertIn('<summary>What changes when I enable this?</summary>', html)
         self.assertIn('Check protection readiness', html)
