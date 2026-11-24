@@ -25,24 +25,24 @@ _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 
 
-class UnsafeIconPath(Exception):
+class UnsafeCleanupPath(Exception):
     """A path or owner is not the exact trustworthy aaPanel layout."""
 
 
 def _owned_directory(fd, expected_uid, expected_device=None):
     entry = os.fstat(fd)
     if not stat.S_ISDIR(entry.st_mode) or entry.st_uid != expected_uid:
-        raise UnsafeIconPath("directory identity/owner mismatch")
+        raise UnsafeCleanupPath("directory identity/owner mismatch")
     if entry.st_mode & 0o022:
-        raise UnsafeIconPath("directory is group/world writable")
+        raise UnsafeCleanupPath("directory is group/world writable")
     if expected_device is not None and entry.st_dev != expected_device:
-        raise UnsafeIconPath("unexpected filesystem boundary")
+        raise UnsafeCleanupPath("unexpected filesystem boundary")
 
 
 def _open_directories(stack, parent_fd, components, uid, device=None):
     for component in components:
         if not component or component in (".", "..") or "/" in component:
-            raise UnsafeIconPath("unsafe path component")
+            raise UnsafeCleanupPath("unsafe path component")
         fd = os.open(component, _DIRECTORY_FLAGS, dir_fd=parent_fd)
         stack.callback(os.close, fd)
         _owned_directory(fd, uid, device)
@@ -55,9 +55,9 @@ def _open_owned_file(stack, parent_fd, filename, uid, device):
     stack.callback(os.close, fd)
     entry = os.fstat(fd)
     if not stat.S_ISREG(entry.st_mode) or entry.st_uid != uid or entry.st_dev != device:
-        raise UnsafeIconPath("not an owned regular file")
+        raise UnsafeCleanupPath("not an owned regular file")
     if entry.st_nlink != 1 or entry.st_size > _MAX_FILE_BYTES:
-        raise UnsafeIconPath("file link count/size is ambiguous")
+        raise UnsafeCleanupPath("file link count/size is ambiguous")
     return fd, entry
 
 
@@ -89,12 +89,12 @@ def cleanup_owned_icon(*, trusted_root="/", panel_components=_PANEL_COMPONENTS,
                 stack, destination_parent, _DEST_NAME, expected_uid, panel_device
             )
             if source_stat.st_size != destination_stat.st_size:
-                raise UnsafeIconPath("icon content mismatch")
+                raise UnsafeCleanupPath("icon content mismatch")
             while True:
                 first = os.read(source, 65536)
                 second = os.read(destination, 65536)
                 if first != second:
-                    raise UnsafeIconPath("icon content mismatch")
+                    raise UnsafeCleanupPath("icon content mismatch")
                 if not first:
                     break
 
@@ -110,11 +110,11 @@ def cleanup_owned_icon(*, trusted_root="/", panel_components=_PANEL_COMPONENTS,
                 or current.st_nlink != 1
                 or current.st_uid != expected_uid
             ):
-                raise UnsafeIconPath("icon was replaced before cleanup")
+                raise UnsafeCleanupPath("icon was replaced before cleanup")
             os.unlink(_DEST_NAME, dir_fd=destination_parent)
         print("ACh aaPanel Customizer: verified owned icon copy removed")
         return True
-    except (OSError, UnsafeIconPath) as exc:
+    except (OSError, UnsafeCleanupPath) as exc:
         print("ACh aaPanel Customizer: icon copy preserved (" + str(exc) + ")")
         return False
 
@@ -141,8 +141,9 @@ def retire_scanner_source(*, trusted_root="/", panel_components=_PANEL_COMPONENT
                     stack, parent, _RETIRED_SCANNER, expected_uid, device)
             except FileNotFoundError:
                 return True
-            if hashlib.sha256(os.read(source, _MAX_FILE_BYTES + 1)).hexdigest() != expected_sha256:
-                raise UnsafeIconPath("retired source is not the previous packaged file")
+            if (entry.st_mode & 0o022 or
+                    hashlib.sha256(os.read(source, _MAX_FILE_BYTES + 1)).hexdigest() != expected_sha256):
+                raise UnsafeCleanupPath("retired source is not the previous packaged file")
             candidates = []
             try:
                 cache = _open_directories(stack, parent, ("__pycache__",),
@@ -154,6 +155,8 @@ def retire_scanner_source(*, trusted_root="/", panel_components=_PANEL_COMPONENT
                     if _RETIRED_BYTECODE.fullmatch(name):
                         _, saved = _open_owned_file(
                             stack, cache, name, expected_uid, device)
+                        if saved.st_mode & 0o022:
+                            raise UnsafeCleanupPath("retired bytecode is group/world writable")
                         candidates.append((cache, name, saved))
             candidates.append((parent, _RETIRED_SCANNER, entry))
             # Check all identities before deleting any of these exact files.
@@ -162,12 +165,12 @@ def retire_scanner_source(*, trusted_root="/", panel_components=_PANEL_COMPONENT
                 if any(getattr(current, field) != getattr(saved, field) for field in
                        ("st_dev", "st_ino", "st_mode", "st_uid", "st_nlink",
                         "st_size", "st_mtime_ns", "st_ctime_ns")):
-                    raise UnsafeIconPath("retired file changed before cleanup")
+                    raise UnsafeCleanupPath("retired file changed before cleanup")
             for directory, name, _ in candidates:
                 os.unlink(name, dir_fd=directory)
         print("ACh aaPanel Customizer: retired scanner source and bytecode removed")
         return True
-    except (OSError, UnsafeIconPath) as exc:
+    except (OSError, UnsafeCleanupPath) as exc:
         print("ACh aaPanel Customizer: retired scanner source preserved (" + str(exc) + ")")
         return False
 

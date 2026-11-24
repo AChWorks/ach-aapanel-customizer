@@ -129,11 +129,13 @@ def high_port():
         return port
 
 
-def request(name, port, path="/index.php", *, tls=False, protocol=None, headers=()):
+def request(name, port, path="/index.php", *, tls=False, protocol=None, headers=(), source=None):
     url = ("https" if tls else "http") + f"://{name}:{port}{path}"
     args = ["curl", "--noproxy", "*", "--silent", "--show-error", "--max-time", "8",
             "--connect-timeout", "3", "--resolve", f"{name}:{port}:127.0.0.1",
             "-k", "-D", "-", url]
+    if source:
+        args.extend(("--interface", source))
     if protocol:
         args.insert(1, protocol)
     for header in headers:
@@ -459,6 +461,52 @@ def profile(base, label, wp_count, php_count):
             assert response["status"] == 200 and response["body"].startswith("fixture:/index.php:")
             out[row["name"]] = response_semantics(response)
         return out, peer_requests()
+    # #146: reuse these observed native layouts, including stock and WP
+    # handlers, the well-known include and a nested public root. No new
+    # compatibility matrix or live aaPanel mutation is required.
+    if not ARGS.status_only:
+        scan_state = directory / "scanner-state"
+        scan_state.mkdir(mode=0o700)
+        def scan_runner(argv, **kwargs):
+            assert argv[0] == NGINX and argv[-2:] == ["-c", str(main)]
+            assert argv[1] in ("-t", "-s")
+            return subprocess.run([NGINX, "-p", str(directory)+"/"] + argv[1:], **kwargs)
+        def scan_lifecycle():
+            fd = os.open(scan_state, os.O_RDONLY | os.O_DIRECTORY)
+            out = []
+            try:
+                targets = [rows[0], rows[-1] if label == "ir" else rows[wp_count+1]]
+                for target in targets:
+                    name = target["name"]
+                    other = rows[-1 if target is rows[0] else 0]["name"]
+                    def query(path="/index.php", host=name):
+                        return request(host,http_port,path,source="127.0.0.2")["status"]
+                    assert query() == 200 and query(host=other) == 200
+                    opts = dict(data_fd=fd, vhost_root=str(vhosts), nginx_conf=str(main),
+                        nginx=NGINX, runner=scan_runner,
+                        probe=lambda site,op,kind: guard._probe(site,op,kind,port=http_port))
+                    policy = {"maxretry":3,"findtime":30,"bantime":30}
+                    preview = guard.manage_guard("preview",target,scan_policy=policy,**opts)
+                    assert preview["state"] == "Unmanaged",preview
+                    applied = guard.manage_guard("apply",target,approved=True,scan_policy=policy,
+                        expected_vhost=preview["vhost_sha256"],
+                        expected_proposal=preview["proposal_sha256"],**opts)
+                    assert applied["state"]=="Applied",applied
+                    assert [query("/.env") for _ in range(3)] == [403,403,403]
+                    assert query() == 429 and query(host=other) == 200
+                    assert request(name,http_port)["status"]==200
+                    checked = guard.manage_guard("recheck",target,**opts)
+                    assert checked["state"]=="Applied" and checked["scan_policy"]==policy,checked
+                    restored = guard.manage_guard("restore",target,approved=True,
+                        expected_vhost=checked["vhost_sha256"],
+                        expected_recovery=checked["recovery_id"],**opts)
+                    assert restored["state"]=="Restored" and query()==200,restored
+                    assert query(host=other)==200
+                    out.append({"site":name,"apply_recheck_restore":"PASS","same_ip_peer":"200"})
+                return out
+            finally:
+                os.close(fd)
+        result["scanner_lifecycle"] = process(main,directory,scan_lifecycle)
     if label == "nl":
         target = rows[wp_count+1]
         parent = Path(target["path"])
