@@ -40,10 +40,10 @@ function loadUi() {
   const siteTasks = ['summary','protection','cache','wordpress','routing'].map(name => fakeNode('button', {
     'data-task': name, 'aria-current': name === 'summary' ? 'page' : 'false'
   }));
-  const serverTasks = ['php','hosts','attack','http','monitor'].map(name => fakeNode('button', {
+  const serverTasks = ['php','hosts','http','monitor'].map(name => fakeNode('button', {
     'data-server-task': name, 'aria-current': name === 'php' ? 'page' : 'false'
   }));
-  const groups = ['intro','aliases','hosts','witness','reconcile','diagnostics','protection','attack','attack-orphan','wordpress'].map(name => fakeNode('div', {'data-routing-group':name}));
+  const groups = ['intro','aliases','hosts','witness','reconcile','diagnostics','protection','wordpress'].map(name => fakeNode('div', {'data-routing-group':name}));
   const taskSpecs = {
     'routing-detail':['diagnostics','hosts','reconcile'],
     'wp-task':['debug','cron','xmlrpc','https'],
@@ -138,11 +138,8 @@ function loadUi() {
     '#ach-guard-result', '#ach-guard-apply-why',
     '#ach-guard-apply', '#ach-guard-restore-why',
     '#ach-guard-restore',
-    '#ach-scan-preview', '#ach-scan-recheck', '#ach-scan-apply',
-    '#ach-scan-restore', '#ach-scan-summary', '#ach-scan-result',
-    '#ach-scan-maxretry', '#ach-scan-findtime', '#ach-scan-bantime',
-    '#ach-scan-orphan-list', '#ach-scan-orphan-choice',
-    '#ach-scan-orphan-restore', '#ach-scan-orphan-result',
+    '#ach-guard-scan','#ach-guard-maxretry','#ach-guard-findtime',
+    '#ach-guard-bantime','#ach-guard-scan-settings','#ach-guard-scan-help',
     '#ach-nginx-candidate-button', '#ach-nginx-candidate-result',
     '#ach-page', '#ach-prev', '#ach-next', '#ach-php-form',
     '#ach-fpm-result', '#ach-diff-rows', '#ach-state-revision',
@@ -232,9 +229,9 @@ function loadUi() {
   elements.get('#ach-php-version').props.value = '';
   elements.get('#ach-php-version').props.disabled = true;
   elements.get('#ach-fpm-recovery-version').props.value = '85';
-  elements.get('#ach-scan-maxretry').props.value = '6';
-  elements.get('#ach-scan-findtime').props.value = '120';
-  elements.get('#ach-scan-bantime').props.value = '600';
+  elements.get('#ach-guard-maxretry').props.value = '6';
+  elements.get('#ach-guard-findtime').props.value = '120';
+  elements.get('#ach-guard-bantime').props.value = '600';
   elements.get('#ach-php-runtime-check').props.disabled = true;
   const requests = [];
   let allowStatusDiscard = false;
@@ -520,14 +517,6 @@ function loadUi() {
       guardSummary: elements.get('#ach-guard-summary').textContent,
       guardApplyWhy: elements.get('#ach-guard-apply-why').textContent,
       guardRestoreWhy: elements.get('#ach-guard-restore-why').textContent,
-      scanResult: elements.get('#ach-scan-result').textContent,
-      scannerOrphanResult: elements.get('#ach-scan-orphan-result').textContent,
-      scannerOrphanRestoreDisabled: elements.get('#ach-scan-orphan-restore').props.disabled,
-      scannerOrphanChoices: elements.get('#ach-scan-orphan-choice').children.map(x => ({
-        value:x.props.value, label:x.textContent
-      })),
-      scanApplyDisabled: elements.get('#ach-scan-apply').props.disabled,
-      scanRestoreDisabled: elements.get('#ach-scan-restore').props.disabled,
       guardApplyDisabled: elements.get('#ach-guard-apply').props.disabled,
       guardRestoreDisabled: elements.get('#ach-guard-restore').props.disabled,
       guardPreviewDisabled: elements.get('#ach-guard-preview').props.disabled,
@@ -5598,7 +5587,7 @@ test('Native task-first sidebar and site/server journeys retain accessible view 
     assert.match(html, new RegExp('id="ach-panel-' + name + '"[^>]*role="region"'));
   for (const name of ['summary','protection','cache','wordpress','routing'])
     assert.match(html, new RegExp('data-task="' + name + '"'));
-  for (const name of ['php','hosts','attack','http','monitor'])
+  for (const name of ['php','hosts','http','monitor'])
     assert.match(html, new RegExp('data-server-task="' + name + '"'));
   assert.match(html, /\.ach-main \{[^}]*overflow-y:auto/);
   assert.match(html, /\.ach-workspace \{[^}]*grid-template-columns:156px/);
@@ -5631,7 +5620,6 @@ test('S1b: website task context requires an exact native site before actions app
   ui.statusSetValue('#ach-hosts-site-id','7','input change');
   assert.equal(ui.siteGateHidden(),true);
   assert.equal(ui.workflowVisible('protection'),true);
-  assert.equal(ui.workflowVisible('attack'),false,'Origin-wide Fail2ban belongs to Server');
   assert.equal(ui.state().hostsInspectDisabled,false);
   assert.equal(ui.state().cacheActivationApplyDisabled,true,'Navigation never authorizes Apply');
   assert.equal(ui.requests.filter(r=>/s=(manage_|apply_|restore_|remove_)/.test(r.options.url)).length,0);
@@ -5701,129 +5689,20 @@ test('S1b: Server local aliases do not impersonate selected-site actions', () =>
   assert.equal(ui.state().websiteContextHidden,true);
   assert.equal(ui.workflowVisible('aliases'),true);
   assert.equal(ui.workflowVisible('witness'),true);
-  for (const group of ['hosts','diagnostics','protection','wordpress','attack'])
+  for (const group of ['hosts','diagnostics','protection','wordpress'])
     assert.equal(ui.workflowVisible(group),false,group+' must not be shown in local hostnames');
   assert.equal(ui.siteGateHidden(),true);
   assert.ok(ui.requests.some(req=>/s=inspect_hosts_aliases$/.test(req.options.url)));
 });
 
-test('S1B-01: no-site Attack presents distinct scanner prompt and orphan-jail recovery', () => {
-  const ui=loadUi();
-  ui.clickDestination('server');ui.clickServerTask('attack');
-  assert.equal(ui.selectedServerTask(),'attack');
-  assert.equal(ui.siteGateHidden(),false);
-  assert.match(ui.siteGateText(),/Choose a source website to configure scanner bans/);
-  assert.match(ui.siteGateText(),/Orphan-jail recovery below works without selecting a website/);
-  assert.doesNotMatch(ui.siteGateText(),/This task needs an exact native aaPanel website/);
-  assert.equal(ui.state().websiteContextHidden,false,'Only scanner source selection is site-scoped');
-  assert.equal(ui.workflowVisible('attack'),false,'No site-scanner configuration forest');
-  assert.equal(ui.workflowVisible('attack-orphan'),true,'Orphan action works without website');
-  assert.equal(ui.state().scanApplyDisabled,true);
-  const listing=ui.statusClick('#ach-scan-orphan-list');
-  assert.equal(listing.options.data.scan_action,'orphan_list');
-  assert.equal(listing.options.data.site_id,undefined);
-  listing.respond(scannerOrphanInventory([{
-    site_id:41,site_key:'removed.test',recovery_id:'c'.repeat(32),
-    journal_phase:'prepared',state:'Recovery Required',recoverable:true
-  }]));
-  assert.equal(ui.state().scannerOrphanRestoreDisabled,false,
-    'Deleted-site Recovery is available even while scanner controls are hidden');
-  const restore=ui.statusClick('#ach-scan-orphan-restore');
-  assert.equal(restore.options.data.scan_action,'orphan_restore');
-  assert.equal(restore.options.data.orphan_site_id,'41');
-  assert.equal(restore.options.data.approved,'true');
-  assert.equal(restore.options.data.recovery_id,'c'.repeat(32));
-  restore.respond({
-    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
-    state:'Restored',site_id:41,site_key:'removed.test',
-    recovery_id:'c'.repeat(32),journal_phase:'restored',
-    changed:true,read_only:false,runtime_verified:true,orphan_restored:true
-  });
-  assert.match(ui.state().scannerOrphanResult,/Verified orphan Restore/);
-});
-
-test('S1B-01: verified native site reveals scanner, while orphan recovery stays accessible', () => {
-  const ui=loadUi();
-  ui.clickDestination('server');ui.clickServerTask('attack');
-  const req=ui.requests.find(r=>/s=get_sites$/.test(r.options.url));
-  req.respond(hostsInventory());
-  assert.equal(ui.workflowVisible('attack'),false,'Inventory alone does not select an arbitrary website');
-  ui.statusSetValue('#ach-hosts-site-id','7','input change');
-  assert.equal(ui.siteGateHidden(),true);
-  assert.equal(ui.workflowVisible('attack'),true);
-  assert.equal(ui.workflowVisible('attack-orphan'),true);
-  assert.equal(ui.state().websiteContextHidden,false);
-  assert.match(html,/A ban affects web traffic for the entire server/);
-  assert.match(html,/Triggered source-IP bans affect TCP\/UDP ports/);
-  assert.equal(ui.state().scanApplyDisabled,true,'Selection never silently approves a jail');
-  const preview=ui.statusClick('#ach-scan-preview');
-  assert.equal(preview.options.data.site_id,'7');
-  preview.respond(scannerReport());
-  assert.equal(ui.state().scanApplyDisabled,false,'Fresh prepared scanner may be applied');
-});
-
-test('S1B-01: selection changes revoke prepared scanner but preserve orphan recovery', () => {
-  const ui=loadUi();
-  ui.clickDestination('server');ui.clickServerTask('attack');
-  ui.respond(hostsInventory());
-  ui.statusSetValue('#ach-hosts-site-id','7','input change');
-  ui.statusClick('#ach-scan-preview').respond(scannerReport());
-  assert.equal(ui.state().scanApplyDisabled,false);
-  ui.statusSetValue('#ach-hosts-site-id','8','input change');
-  assert.equal(ui.state().scanApplyDisabled,true,'Previous site plan is never transferable');
-  const before=ui.requests.length;
-  ui.statusClick('#ach-scan-apply');
-  assert.equal(ui.requests.length,before,'Stale plan cannot apply');
-  assert.equal(ui.workflowVisible('attack-orphan'),true);
-  ui.statusSetValue('#ach-hosts-site-id','', 'input change');
-  assert.equal(ui.workflowVisible('attack'),false);
-  assert.equal(ui.workflowVisible('attack-orphan'),true);
-  assert.equal(ui.siteGateHidden(),false);
-});
-
-test('S1B-01: refreshing website inventory hides stale scanner actions', () => {
-  const ui=loadUi();
-  ui.clickDestination('server');ui.clickServerTask('attack');
-  ui.respond(hostsInventory());
-  ui.statusSetValue('#ach-hosts-site-id','7','input change');
-  ui.statusClick('#ach-scan-preview').respond(scannerReport());
-  assert.equal(ui.state().scanApplyDisabled,false);
-  // The shared Browse websites route is the existing Refresh entry point.
-  ui.clickDestination('websites');
-  const refresh=ui.refreshSites();
-  assert.match(refresh.options.url,/s=get_sites$/);
-  ui.clickDestination('server');ui.clickServerTask('attack');
-  assert.equal(ui.siteGateHidden(),false);
-  assert.equal(ui.workflowVisible('attack'),false);
-  assert.equal(ui.workflowVisible('attack-orphan'),true);
-  assert.equal(ui.state().scanApplyDisabled,true);
-  refresh.respond(hostsInventory());
-  assert.equal(ui.workflowVisible('attack'),false,'Refreshing does not silently reselect prior source');
-  assert.equal(ui.workflowVisible('attack-orphan'),true);
-  const before=ui.requests.length;
-  ui.statusClick('#ach-scan-apply');
-  assert.equal(ui.requests.length,before);
-});
-
-test('S1B-01: one real site scanner owner, one orphan Restore and clear scope copy', () => {
-  const routed=html.slice(html.indexOf('id="ach-panel-routing"'),
-    html.indexOf('id="ach-panel-cache"'));
-  const scanner=routed.split('data-routing-group="attack"')[1].split('data-routing-group="attack-orphan"')[0];
-  const orphan=routed.split('data-routing-group="attack-orphan"')[1].split('data-routing-group="wordpress"')[0];
-  for (const id of ['ach-scan-maxretry','ach-scan-findtime','ach-scan-bantime',
-    'ach-scan-preview','ach-scan-recheck','ach-scan-apply','ach-scan-restore']) {
-    assert.match(scanner,new RegExp('id="'+id+'"'));
-    assert.doesNotMatch(orphan,new RegExp('id="'+id+'"'));
-  }
-  for (const id of ['ach-scan-orphan-list','ach-scan-orphan-choice','ach-scan-orphan-restore']) {
-    assert.match(orphan,new RegExp('id="'+id+'"'));
-    assert.doesNotMatch(scanner,new RegExp('id="'+id+'"'));
+test('Site-local scanner belongs to the single website Protection owner',()=>{
+  assert.doesNotMatch(html,/data-server-task="attack"|ach-scan-orphan|manage_abusive_scan/);
+  const section=html.split('data-routing-group="protection"')[1].split('data-routing-group="wordpress"')[0];
+  for(const id of ['ach-guard-scan','ach-guard-maxretry','ach-guard-findtime','ach-guard-bantime','ach-guard-apply','ach-guard-restore']){
+    assert.match(section,new RegExp('id="'+id+'"'));
     assert.equal(html.split('id="'+id+'"').length,2);
   }
-  assert.match(orphan,/No website selection needed/);
-  assert.match(scanner,/A ban affects web traffic for the entire server/);
-  assert.match(html,/id="ach-site-required-title"/);
-  assert.match(html,/id="ach-site-required-detail"/);
+  assert.match(section,/Blocks only this website/);
 });
 test('S1b: Server monitor reuses the original control owner, not a cloned writer', () => {
   const ui=loadUi();
@@ -5860,7 +5739,6 @@ test('S1b: each privileged UI control stays unique under contextual grouping', (
     ['aliases','ach-hosts-alias-remove'],
     ['hosts','ach-hosts-restore-button'],
     ['protection','ach-guard-apply'],
-    ['attack','ach-scan-apply'],
     ['wordpress','ach-wp-settings-apply']
   ]) {
     const chunk=routed.split('data-routing-group="'+group+'"')[1]?.split('data-routing-group="')[0];
@@ -5882,8 +5760,7 @@ test('Shared native form-row primitive aligns actual labeled controls, not label
   assert.match(html, /\.ach-controls > \.ach-inline-field \{[^}]*align-self:stretch/);
   assert.match(html, /\.ach-controls > \.ach-inline-field > :is\([^}]*margin-top:auto/);
   for (const [fieldId, buttonId] of [
-    ['ach-hosts-alias-select','ach-hosts-alias-refresh'],
-    ['ach-scan-orphan-choice','ach-scan-orphan-list']
+    ['ach-hosts-alias-select','ach-hosts-alias-refresh']
   ]) {
     assert.match(html, new RegExp('class="ach-controls"[\\s\\S]*?id="' + buttonId +
       '"[\\s\\S]*?class="ach-inline-field"[\\s\\S]*?id="' + fieldId + '"'));
@@ -10234,221 +10111,12 @@ test('One-click WordPress setup refuses stale cross-site backend replies', () =>
 });
 
 
-function scannerReport(state='Unmanaged', change={}) {
-  const active=state==='Applied', restored=state==='Restored';
-  return {
-    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
-    ruleset:'sensitive-scan-combined-v1',
-    site_id:7,site_key:'site.test',state,
-    reason:'Verified site source and selected native access log',
-    recovery_id:active||restored?'a'.repeat(32):null,
-    journal_phase:active?'applied':restored?'restored':null,
-    runtime_verified:active||restored,changed:false,read_only:true,
-    firewall_scope:'origin_wide_web_ports',log_scope:'selected_native_site',
-    vhost_sha256:'b'.repeat(64),plan_sha256:'c'.repeat(64),
-    log_path:'/www/wwwlogs/site.test.log',
-    ...change
-  };
-}
-
-test('Fail2ban scanner UI uses verified plan and Recovery ID across real site actions',()=>{
-  const ui=loadUi();selectHostsSite(ui);
-  let before=ui.requests.length;
-  ui.statusClick('#ach-scan-apply');
-  assert.equal(ui.requests.length,before);
-  const preview=ui.statusClick('#ach-scan-preview');
-  assert.match(preview.options.url,/s=manage_abusive_scan$/);
-  assert.equal(preview.options.data.scan_action,'preview');
-  assert.equal(preview.options.data.site_id,'7');
-  assert.equal(preview.options.data.approved,undefined);
-  preview.respond(scannerReport());
-  const apply=ui.statusClick('#ach-scan-apply');
-  assert.equal(apply.options.data.scan_action,'apply');
-  assert.equal(apply.options.data.expected_plan_sha256,'c'.repeat(64));
-  assert.equal(apply.options.data.approved,'true');
-  assert.equal(apply.options.data.maxretry,'6');
-  assert.equal(apply.options.data.findtime,'120');
-  assert.equal(apply.options.data.bantime,'600');
-  apply.respond(scannerReport('Applied',{
-    changed:true,read_only:false,reason:'Live Fail2ban jail active'
-  }));
-  const check=ui.statusClick('#ach-scan-recheck');
-  check.respond(scannerReport('Applied'));
-  const restore=ui.statusClick('#ach-scan-restore');
-  assert.equal(restore.options.data.scan_action,'restore');
-  assert.equal(restore.options.data.recovery_id,'a'.repeat(32));
-  assert.equal(restore.options.data.approved,'true');
-  restore.respond(scannerReport('Restored',{
-    changed:true,read_only:false,reason:'Jail removed, no running process'
-  }));
-  assert.match(ui.state().scanResult,/State: Restored/);
-  assert.equal(ui.state().scanRestoreDisabled,true);
-  assert.equal(ui.state().scanApplyDisabled,true);
-});
-
-test('Fail2ban scanner UI rejects stale selection, changed policy and malformed restore',()=>{
-  const ui=loadUi();selectHostsSite(ui);
-  const pending=ui.statusClick('#ach-scan-preview');
-  ui.statusSetValue('#ach-hosts-site-id','8','input change');
-  pending.respond(scannerReport());
-  const count=ui.requests.length;
-  ui.statusClick('#ach-scan-apply');
-  assert.equal(ui.requests.length,count,'cross-site reply must never enable scanner');
-  ui.statusSetValue('#ach-hosts-site-id','7','input change');
-  ui.statusClick('#ach-scan-preview').respond(scannerReport());
-  ui.statusSetValue('#ach-scan-maxretry','9','input change');
-  const count2=ui.requests.length;
-  ui.statusClick('#ach-scan-apply');
-  assert.equal(ui.requests.length,count2,'changed retry policy must invalidate preview');
-  ui.statusClick('#ach-scan-recheck').respond(scannerReport('Restored',{
-    recovery_id:null,runtime_verified:false
-  }));
-  const count3=ui.requests.length;
-  ui.statusClick('#ach-scan-restore');
-  assert.equal(ui.requests.length,count3,'invalid restoration cannot authorize action');
-});
-
-
-test('Fail2ban prepared-but-running journal remains recoverable through normal UI',()=>{
-  const ui=loadUi();selectHostsSite(ui);
-  const r=ui.statusClick('#ach-scan-recheck');
-  r.respond(scannerReport('Recovery Required',{
-    recovery_id:'b'.repeat(32),journal_phase:'prepared',
-    runtime_verified:false,reason:'Interrupted Apply, jail is live'
-  }));
-  assert.match(ui.state().scanResult,/Recovery Required/);
-  assert.equal(ui.state().scanRestoreDisabled,false);
-  const restore=ui.statusClick('#ach-scan-restore');
-  assert.equal(restore.options.data.recovery_id,'b'.repeat(32));
-  assert.equal(restore.options.data.approved,'true');
-  restore.respond(scannerReport('Restored',{
-    recovery_id:'b'.repeat(32),journal_phase:'restored',
-    runtime_verified:true,changed:true,read_only:false
-  }));
-  assert.match(ui.state().scanResult,/State: Restored/);
-  assert.equal(ui.state().scanRestoreDisabled,true);
-});
-
-function scannerOrphanInventory(rows) {
-  return {
-    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
-    ruleset:'sensitive-scan-combined-v1',
-    firewall_scope:'origin_wide_web_ports',log_scope:'selected_native_site',
-    state:'Orphan Inventory',read_only:true,changed:false,
-    runtime_verified:false,orphans:rows
-  };
-}
-
-test('Fail2ban orphan UI restores deleted-site journal without site selection',()=>{
-  const ui=loadUi();
-  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
-  const list=ui.statusClick('#ach-scan-orphan-list');
-  assert.match(list.options.url,/s=manage_abusive_scan$/);
-  assert.equal(list.options.data.scan_action,'orphan_list');
-  assert.equal(list.options.data.site_id,undefined);
-  list.respond(scannerOrphanInventory([{
-    site_id:41,site_key:'deleted.example',recovery_id:'c'.repeat(32),
-    journal_phase:'prepared',state:'Recovery Required',recoverable:true
-  }]));
-  assert.equal(ui.state().scannerOrphanChoices.length,1);
-  assert.equal(ui.state().scannerOrphanChoices[0].value,'41');
-  assert.equal(ui.state().scannerOrphanRestoreDisabled,false);
-  const restore=ui.statusClick('#ach-scan-orphan-restore');
-  assert.equal(restore.options.data.scan_action,'orphan_restore');
-  assert.equal(restore.options.data.orphan_site_id,'41');
-  assert.equal(restore.options.data.recovery_id,'c'.repeat(32));
-  assert.equal(restore.options.data.approved,'true');
-  restore.respond({
-    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
-    state:'Restored',site_id:41,site_key:'deleted.example',
-    recovery_id:'c'.repeat(32),journal_phase:'restored',
-    changed:true,read_only:false,runtime_verified:true,
-    orphan_restored:true
-  });
-  assert.match(ui.state().scannerOrphanResult,/Verified orphan Restore/);
-  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
-});
-
-test('Fail2ban orphan UI distinguishes offline jail retirement from verified firewall Restore',()=>{
-  const ui=loadUi();
-  const token='e'.repeat(32);
-  const entry={site_id:41,site_key:'deleted.example',recovery_id:token,
-    journal_phase:'applied',state:'Recovery Required',recoverable:true};
-  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([entry]));
-  assert.equal(ui.state().scannerOrphanRestoreDisabled,false);
-  const first=ui.statusClick('#ach-scan-orphan-restore');
-  assert.equal(first.options.data.recovery_id,token);
-  first.respond({
-    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
-    state:'Recovery Required',site_id:41,site_key:'deleted.example',
-    recovery_id:token,journal_phase:'restore_pending',changed:true,
-    read_only:false,runtime_verified:false,orphan_restored:false,
-    reason:'Owned jail source retired while Fail2ban was stopped'
-  });
-  assert.match(ui.state().scannerOrphanResult,/OFFLINE RECOVERY PENDING/);
-  assert.match(ui.state().scannerOrphanResult,/Firewall bans have NOT been verified removed/);
-  assert.match(ui.state().scannerOrphanResult,/Start\/reconnect Fail2ban/);
-  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
-  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([
-    {...entry, journal_phase:'restore_pending'}
-  ]));
-  const second=ui.statusClick('#ach-scan-orphan-restore');
-  assert.equal(second.options.data.recovery_id,token,'repeat exact Recovery ID after restart');
-  second.respond({
-    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
-    state:'Restored',site_id:41,site_key:'deleted.example',
-    recovery_id:token,journal_phase:'restored',changed:true,
-    read_only:false,runtime_verified:true,orphan_restored:true
-  });
-  assert.match(ui.state().scannerOrphanResult,/Verified orphan Restore/);
-});
-
-test('Fail2ban orphan UI refuses malformed false-positive offline completion',()=>{
-  const ui=loadUi();
-  const token='f'.repeat(32);
-  ui.statusClick('#ach-scan-orphan-list').respond(scannerOrphanInventory([{
-    site_id:41,site_key:'deleted.example',recovery_id:token,
-    journal_phase:'prepared',state:'Recovery Required',recoverable:true
-  }]));
-  const first=ui.statusClick('#ach-scan-orphan-restore');
-  first.respond({
-    status:true,schema:1,mode:'native_site_abusive_scan_fail2ban',
-    state:'Recovery Required',site_id:41,site_key:'deleted.example',
-    recovery_id:token,journal_phase:'restored',changed:true,
-    read_only:false,runtime_verified:false,orphan_restored:false,
-    reason:'This invalid result must not claim retired'
-  });
-  assert.doesNotMatch(ui.state().scannerOrphanResult,/OFFLINE RECOVERY PENDING/);
-  assert.match(ui.state().scannerOrphanResult,/unconfirmed/i);
-});
-
-test('Fail2ban orphan UI never restores foreign or malformed journals',()=>{
-  const ui=loadUi();
-  const noRole=ui.statusClick('#ach-scan-orphan-list');
-  noRole.respond(scannerOrphanInventory([{
-    site_id:42,site_key:'previous.example',
-    recovery_id:'d'.repeat(32),journal_phase:'applied',
-    state:'Needs Review',recoverable:false
-  }]));
-  const count=ui.requests.length;
-  ui.statusClick('#ach-scan-orphan-restore');
-  assert.equal(ui.requests.length,count);
-  assert.equal(ui.state().scannerOrphanRestoreDisabled,true);
-  const bad=ui.statusClick('#ach-scan-orphan-list');
-  bad.respond(scannerOrphanInventory([{
-    site_id:43,site_key:'forged.example',recovery_id:'bad',
-    journal_phase:'prepared',state:'Recovery Required',recoverable:true
-  }]));
-  ui.statusClick('#ach-scan-orphan-restore');
-  assert.equal(ui.requests.length,count+1,'bad journal response cannot authorize Restore');
-});
-
 function sensitiveGuardResponse(state='Unmanaged', changes={}) {
   const active=state==='Applied', retired=state==='Restored';
   return {
     status:true,schema:1,site_id:7,site_key:'site.test',
     site_root:'/www/site.test',mode:'native_site_sensitive_paths',
-    ruleset:'site-sensitive-files-v1',block_xmlrpc:false,
+    ruleset:'site-sensitive-files-v1',block_xmlrpc:false,scan_policy:null,
     state,reason:'Native source and exclusive include verified',
     read_only:true,changed:false,runtime_verified:active||retired,
     vhost_sha256:'a'.repeat(64),proposal_sha256:'b'.repeat(64),
@@ -10654,17 +10322,15 @@ const unsupportedGuardFailure = {
   operation_id:'d'.repeat(32)
 };
 
-test('Guard and scanner disabled reasons describe verified existing state and matching recovery',()=>{
+test('Guard disabled reasons describe verified existing state and matching recovery',()=>{
   const families=[
-    {key:'guard',method:'manage_nginx_protection',reply:sensitiveGuardResponse, noun:/Guard protection/,check:/Recheck current protection/,id:'c'.repeat(32)},
-    {key:'scan',method:'manage_abusive_scan',reply:scannerReport,noun:/Fail2ban scanner/,check:/Recheck jail \/ recovery/,id:'a'.repeat(32)}
+    {key:'guard',method:'manage_nginx_protection',reply:sensitiveGuardResponse, noun:/Guard protection/,check:/Recheck current protection/,id:'c'.repeat(32)}
   ];
   for(const f of families){
     const apply='#ach-'+f.key+'-apply',restore='#ach-'+f.key+'-restore';
-    for(const state of ['Unmanaged','Restored','Applied','Recovery Required','Needs Review',...(f.key==='scan'?['Dependency Missing']:['Suspended'])]){
+    for(const state of ['Unmanaged','Restored','Applied','Recovery Required','Needs Review','Suspended']){
       const ui=loadUi();selectHostsSite(ui);
-      const reason=state==='Dependency Missing'?'Fail2ban missing':
-        state==='Needs Review'?'Native source ownership not verified':
+      const reason=state==='Needs Review'?'Native source ownership not verified':
         state==='Suspended'?'Monitor disabled':'Interrupted managed operation';
       const report=f.reply(state,{reason,...(state==='Recovery Required'?{
         recovery_id:f.id,journal_phase:'prepared',runtime_verified:false
@@ -10696,8 +10362,7 @@ test('Guard and scanner disabled reasons describe verified existing state and ma
         ui.statusClick('#ach-'+f.key+'-recheck').respond(report);
         assert.equal(ui.state()[f.key+'RestoreDisabled'],false);
         assert.equal(ui.state()[f.key+'ApplyDisabled'],true);
-        if(f.key==='guard')ui.statusSetChecked('#ach-guard-block-xmlrpc',true);
-        else ui.statusSetValue('#ach-scan-maxretry','9','input change');
+        ui.statusSetChecked('#ach-guard-block-xmlrpc',true);
         assert.match(ui.actionReason(apply),state==='Applied'?/already Applied/:/Recovery Required/);
         const req=ui.statusClick(restore);
         assert.match(req.options.url,new RegExp('s='+f.method+'$'));
@@ -11341,4 +11006,39 @@ test('Recovery instructions name the actual Home refresh and website task routes
   assert.doesNotMatch(ui.state().workerVersionNotice,/Refresh state/);
   ui.openSites().respond({status:false,stage:'website_discovery',msg:'unavailable'});
   assert.match(ui.elementText('#ach-website-context-status'),/Websites \/ Summary & changes.*Refresh websites/);
+});
+
+test('Temporary scan option is bound to current site and previewed numeric policy',()=>{
+  const ui=loadUi();selectHostsSite(ui);
+  const policy={maxretry:6,findtime:120,bantime:600};
+  ui.statusSetChecked('#ach-guard-scan',true);
+  const p=ui.statusClick('#ach-guard-preview');
+  assert.equal(p.options.data.guard_scan,'true');
+  assert.equal(p.options.data.maxretry,'6');
+  p.respond(sensitiveGuardResponse('Unmanaged',{scan_policy:policy}));
+  assert.equal(ui.state().guardApplyDisabled,false);
+  ui.statusSetValue('#ach-guard-bantime','900','input change');
+  assert.equal(ui.state().guardApplyDisabled,true);
+  const q=ui.statusClick('#ach-guard-preview');
+  assert.equal(q.options.data.bantime,'900');
+  q.respond(sensitiveGuardResponse('Unmanaged',{scan_policy:{...policy,bantime:900}}));
+  const a=ui.statusClick('#ach-guard-apply');
+  assert.equal(a.options.data.bantime,'900');
+  a.respond(sensitiveGuardResponse('Applied',{scan_policy:{...policy,bantime:900},changed:true,read_only:false}));
+  assert.match(ui.state().guardResult,/Temporary site IP blocking: 6 attempts in 120 seconds; block for 900 seconds/);
+  ui.statusClick('#ach-guard-recheck').respond(sensitiveGuardResponse('Applied',{scan_policy:{...policy,bantime:900}}));
+  ui.statusSetChecked('#ach-guard-scan',false);
+  assert.equal(ui.state().guardRestoreDisabled,false);
+  const r=ui.statusClick('#ach-guard-restore');
+  assert.equal(r.options.data.guard_scan,'false');
+  r.respond(sensitiveGuardResponse('Restored',{changed:true,read_only:false}));
+  assert.match(ui.state().guardResult,/Protection: Restored/);
+});
+test('Temporary scanner rejects incorrect or malformed policy evidence',()=>{
+  for(const invalid of [undefined,{maxretry:6,findtime:120,bantime:0},{maxretry:'6',findtime:120,bantime:600},null]){
+    const ui=loadUi();selectHostsSite(ui);
+    ui.statusSetChecked('#ach-guard-scan',true);
+    ui.statusClick('#ach-guard-preview').respond(sensitiveGuardResponse('Unmanaged',{scan_policy:invalid}));
+    assert.equal(ui.state().guardApplyDisabled,true);
+  }
 });

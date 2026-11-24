@@ -293,16 +293,16 @@ Security policy starts disabled until primary-admin opt-in. A site
 freshly created by aaPanel can lack its Nginx `extension/<site>/*.conf`
 include; do not silently edit such a VHost during ordinary inspection.
 Show the exact missing-include prerequisite for a one-time operator-owned
-correction. The optional Fail2ban scanner consumes native access logs to
-make **origin-wide** root firewall decisions: the log file AND its parent
-directory must be protected against non-root writing, replacement and
-forgery. A `root`-owned file alone inside a `www`-writable directory is
-insufficient. Refuse new Scanner Apply with an actionable diagnostic when
-the source is untrusted; do not change aaPanel's shared log directory
-ownership automatically or remove existing recoverable jails. This boundary
-does not pretend that aaPanel's ordinary `www`-writable access logs are
-tamper-proof or that a trusted CDN client-IP ban can be enforced at the
-origin. After native
+correction. The optional abusive-scan policy (#146) is part of the selected
+site's pre-PHP Nginx Guard. Use the same sensitive-path decision, bounded
+shared Lua memory and effective client IP; temporary HTTP 429 blocks affect
+only the selected site. XML-RPC blocking alone does not count as a scan.
+Default 6 attempts / 120 seconds / 600 seconds, operator-configurable.
+No log permission rewrite, firewall action, extra daemon, persistent ban
+database or legacy scanner/orphan writer. Native Lua capability is checked
+on activation; static protection remains available independently. Verify
+proxy real-client attribution rather than trusting arbitrary request headers.
+Current Guard-owned recovery is preserved. After native
 aaPanel regenerates a selected-site source, **manual Recheck followed by
 one-time guarded Apply/Restore** is the accepted reconciliation route;
 a separate automatic Nginx-regeneration watcher is not required. Existing
@@ -320,8 +320,7 @@ changes (with verified, recoverable native event/reconciliation ownership),
 provide a straightforward administrator-click removal of unwanted local
 Hosts loopback aliases even after successful WP installation or a deleted
 site record, implement verified Nginx-sensitive-path and
-pre-PHP anti-scan rules, and address actual HTTP/2/HTTP/3-aware site-log
-Fail2ban compatibility. Site-level `.well-known`/OAuth/hotlink exceptions
+pre-PHP anti-scan rules, and verify HTTP/2/HTTP/3-aware site-local temporary IP blocking. Site-level `.well-known`/OAuth/hotlink exceptions
 and authorized WordPress HTTPS URL, debugging, Cron and XML-RPC corrections
 are also required operational outcomes, not simply a list of diagnostics.
 

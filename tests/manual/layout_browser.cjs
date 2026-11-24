@@ -348,32 +348,21 @@ async function walk(page, width, record) {
   const witness=page.locator('[data-routing-group="witness"] details').last();
   if(!await witness.evaluate(el=>el.open))await witness.locator('summary').click();
   await sample('local hostnames advanced witness');
-  await clickStage(page,'data-server-task','attack');
-  await checkWebsiteContext('7',false);
-  await website.selectOption('');
-  await checkWebsiteContext('',true);
-  assert.equal(await page.locator('[data-routing-group="attack"]').isVisible(),false);
-  assert.equal(await page.locator('#ach-scan-orphan-list').isVisible(),true);
-  assert.equal(await page.locator('#ach-scan-orphan-list').isEnabled(),true);
-  await sample('attack without website');
-  await browse.click();
-  assert.equal(await page.locator('[data-task="summary"]').getAttribute('aria-current'),'page');
-  await openDestination(page,'server');
-  await clickStage(page,'data-server-task','attack');
-  await checkWebsiteContext('',true);
-  assert.equal(await page.locator('#ach-scan-orphan-list').isEnabled(),true);
+  await openDestination(page,'websites');
+  await clickStage(page,'data-task','protection');
   await website.selectOption('7');
-  await checkWebsiteContext('7',false);
-  assert.equal(await page.locator('#ach-scan-orphan-list').isEnabled(),true);
-  await sample('attack protection');
+  await page.locator('#ach-guard-scan').check();
+  await sample('site temporary IP blocking');
   if(width===1024){
-    const field=page.locator('label[for="ach-scan-maxretry"]');
+    const field=page.locator('label[for="ach-guard-maxretry"]');
     const original=await field.innerText();
     await field.evaluate(el=>el.textContent='Attempts per selected native website (additional explanatory words)');
     const rows=await geometry(page,'wrapped scanner label');
-    assert.ok(rows.some(x=>x.a==='ach-scan-maxretry'&&x.b==='ach-scan-findtime'));
+    assert.ok(rows.some(x=>x.a==='ach-guard-maxretry'&&x.b==='ach-guard-findtime'));
     await field.evaluate((el,text)=>el.textContent=text,original);
   }
+  await page.locator('#ach-guard-scan').uncheck();
+  await openDestination(page,'server');
   await clickStage(page,'data-server-task','monitor');
   await sample('monitoring');
   await clickStage(page,'data-server-task','http');
@@ -574,7 +563,7 @@ async function run(){
     assert.ok(samples>=30*widths.length && pairs>0,'Route/geometry coverage missing');
     if(widths.some(([w])=>w===1024)){
       for(const [a,b] of [['ach-hosts-alias-select','ach-hosts-alias-refresh'],
-        ['ach-scan-orphan-choice','ach-scan-orphan-list'],['ach-scan-maxretry','ach-scan-findtime']])
+        ['ach-guard-maxretry','ach-guard-findtime']])
         assert.ok(observed.has([a,b].sort().join('|')),'Missing actual form row '+a+' / '+b);
     }
     const expectedApprovals=await (async()=>{

@@ -871,7 +871,7 @@ cannot use this path. These checks repeat at the final guarded write.
 The existing FPM transaction validates syntax, reloads, verifies the service
 and restores the former bytes on a verified failure when possible.
 
-### Opt-in native PHP regeneration and scanner workflow
+### Opt-in native PHP regeneration and protection workflow
 
 An explicit new FPM auto Enable records the selected service's original
 canonical source SHA, native RAM tier, and saved pm.max_requests before any
@@ -915,74 +915,40 @@ writer events and post-disable re-Enable) belongs to
 [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21),
 not to a rotating status narrative in this guide.
 
-The Fail2ban scanner is a separate opt-in beneath Routing & Nginx site
-sensitive-path protection. Choose a native site with its Nginx Guard Applied,
-check the native combined access log, configure the desired retry/window/ban
-values, inspect the plan, then enable.
+### Optional temporary IP blocking — selected website (#146)
 
-**Native log-integrity preflight (Native 0.1.87 source):** a matching
-`access_log` path is not trusted merely because a root-owned file exists.
-The log's parent directory and the log file must be root-controlled,
-without group/other write: a PHP `www` process can rename/replace even
-a `root:root 0644` log inside a `www`-writable directory. On the retained
-aaPanel 8.0.7 guest, `/www/wwwlogs` is `www:www 0700` and does
-**not** meet this origin-wide firewall trust prerequisite. A specific
-`Needs Review` reason identifies the problem; new Scanner Apply is refused.
-The plugin does **not** automatically chown/chmod this shared aaPanel
-log directory, overwrite foreign logs or disable unrelated jails. Inspect
-native writer, rotation and log owner before any explicitly approved
-system-wide adjustment. Existing scanner Restore/orphan recovery is
-independent of new Apply. Customizer Activity/Recovery journals remain
-root-owned `0600` and do not consume native access logs. This safety
-check is not proof of trusted CDN/proxy client-IP attribution.
+In **Websites → Protection**, select temporary blocking with the normal
+sensitive-path Guard. Choose attempts, observation-window seconds and block
+seconds (defaults 6 / 120 / 600), Check readiness, then explicitly Enable.
+Recheck and exact Restore use the same Guard owner and journal. To change an
+active policy, Recheck, Restore and enable the new selection. No second
+policy owner, daemon, logfile or firewall action exists.
 
-The managed Fail2ban jail is selected
-site-log-scoped, but an nftables ban affects EVERY web service on the origin
-using TCP/UDP 80/443, IPv4 and IPv6. Real-client log addresses from a trusted
-proxy may not be packet sources visible to the origin kernel firewall; never
-assume bans work or are safe behind CDN/proxy without an actual check.
-Normal 404s, .well-known/ACME and OAuth paths are not filter hits.
-A running scanner jail with a durable \`prepared\` journal remains
-**Recovery Required**, not a falsely acknowledged Applied state. The normal
-Recheck exposes its original Recovery ID and enables Restore.
+Nginx server-rewrite classification uses the existing sensitive-path rules.
+The optional XML-RPC rule alone does not increment a scanner counter.
+A single fixed 8 MiB HTTP-context shared dictionary is declared in the
+native VHost include directory when first needed. Keys are scoped to site,
+policy generation and Nginx's effective binary client IP. The first hit
+starts a fixed observation window; reaching the threshold establishes a
+temporary block; subsequent requests on that site return HTTP 429 until
+expiry. Safe allocation does not evict another active block. On exhausted
+memory or recoverable Lua evaluation error, static Guard denial remains;
+the temporary block may not be established. A complete Nginx restart
+clears ephemeral state; ordinary reload preserves the shared memory.
+The declaration itself contains no site identity and may remain idle.
+Restore removes the selected rule, without touching a peer or a system
+Fail2ban jail. Local loopback verification is not counted.
 
-After a website has been deleted, **Find orphaned scanner jails** is
-accessible in Routing & Nginx without selecting a site or enabling Monitor.
-It enumerates only root-owned plugin recovery journals, verifies that each
-former native site ID is absent from aaPanel, and reports exact recovery
-identities. **Restore selected orphan jail** requires primary-admin POST,
-the exact journal Recovery ID, an exact owned-jail byte match and a second
-native-absence check immediately before removal. If Fail2ban is running,
-Restore validates configuration, reloads the daemon, verifies the old
-jail stopped and checks that its named IPv4/IPv6 TCP/UDP nftables sets
-are absent before a durable `Restored` acknowledgment.
-
-If aaPanel deleted the native site **and its logpath**, an owned
-Fail2ban jail can prevent the daemon itself from starting. Native
-0.1.80 supports this narrow **offline orphan recovery**: the
-administrator clicks the same Restore for that exact orphan Recovery ID,
-the plugin removes only the still-matching owned jail config, and
-records `restore_pending` in the existing journal. It does **not**
-start/restart Fail2ban, touch nftables, remove the shared filter or
-claim bans have been lifted. Start/reconnect Fail2ban after the invalid
-jail source is retired; then find the orphan again and use the same
-Recovery ID to finish verification and acknowledge `Restored`.
-If Fail2ban or nftables verification fails, an owned action still exists,
-or the recovery journal save is uncertain, the journal remains
-recoverable and the UI reports the real pending/error state. A crash
-between source unlink and `restore_pending` save is recoverable using
-the older applied journal plus the now-absent owned file. Changed/foreign
-jail files and unrelated Fail2ban/nftables entries are never removed.
-If the site was renamed but its native ID remains, use ordinary selected-site
-Restore instead. Rotation of the site log to a new inode at the same native
-absolute path is compatible with the polling backend; moving the source
-path requires Recheck and an explicit Restore.
-
-Restore retires only the owned jail using the Recovery ID and verifies that
-the jail is no longer active; the shared filter is retained for possible
-other references. No vendor Nginx source or foreign Fail2ban jail is edited.
-Only an actual installed-native HTTP/UI check can prove a particular host
-layout, not unit tests or synthetic Fail2ban traffic.
+No aaPanel access log is trusted for firewall authority. Validate actual
+effective client-IP configuration behind a CDN or reverse proxy; an
+unresolved shared proxy IP can affect other visitors to that same site.
+HTTP/80 local source/proof is not blanket proof of all HTTPS/CDN delivery.
+Native Lua syntax/capability and current exact source are checked before
+activation; if unavailable, select ordinary static protection instead.
+There is no old scanner adapter or automatic cleanup of historical
+system data. Verify no old owned active scanner jail before upgrading;
+retire an actual existing old jail using its owning release first if
+necessary. Existing unrelated service jails and Recovery history stay intact.
 
 ### Automatic PHP-FPM repair — guarded control-flow invariants
 

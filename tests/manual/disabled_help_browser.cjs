@@ -19,15 +19,9 @@ const protection=(family,state,extra={})=>({
   recovery_id:['Applied','Recovery Required','Restored'].includes(state)?'a'.repeat(32):null,
   journal_phase:({Applied:'applied','Recovery Required':'prepared',Restored:'restored'})[state]||null,
   vhost_sha256:'b'.repeat(64),
-  ...(family==='guard'?{
-    mode:'native_site_sensitive_paths',site_root:site.document_root,
-    ruleset:'site-sensitive-files-v1',block_xmlrpc:false,automatic_enforcement:false,
-    proposal_sha256:'c'.repeat(64)
-  }:{
-    mode:'native_site_abusive_scan_fail2ban',ruleset:'sensitive-scan-combined-v1',
-    firewall_scope:'origin_wide_web_ports',log_scope:'selected_native_site',
-    plan_sha256:'c'.repeat(64),log_path:'/www/wwwlogs/demo.test.log'
-  }),...extra
+  mode:'native_site_sensitive_paths',site_root:site.document_root,
+  ruleset:'site-sensitive-files-v1',block_xmlrpc:false,scan_policy:null,
+  automatic_enforcement:false,proposal_sha256:'c'.repeat(64),...extra
 });
 const phpInventory={status:true,schema:1,state:'Observed',read_only:true,runtime_verified:false,
   versions:['81','85'].map(v=>({code:v,label:'PHP '+v[0]+'.'+v[1],state:'File Preview Candidate',
@@ -207,25 +201,6 @@ async function walk(browser,width,height,touch){
     }
     await openDestination(page,'server');
     await resolveLatest(page,'get_php_versions',phpInventory);
-    await page.locator('[data-server-task=attack]').click();
-    await button('ach-hosts-site-id').selectOption('7');
-    for(const state of ['Applied','Recovery Required','Unmanaged','Needs Review','Dependency Missing']){
-      const reason=state==='Needs Review'?'Untrusted native access log':state==='Dependency Missing'?'Fail2ban dependency missing':'Verified source';
-      await button('ach-scan-preview').click();
-      await resolveLatest(page,'manage_abusive_scan',protection('scan',state,{reason}));
-      if(state==='Unmanaged')await explain('ach-scan-restore',/no active saved Fail2ban scanner operation/,semanticMethod);
-      else{
-        await explain('ach-scan-apply',state==='Applied'?/already Applied.*No Enable/:
-          state==='Recovery Required'?/Recovery Required.*Resolve the saved recovery/:
-          new RegExp(reason),semanticMethod);
-        await explain('ach-scan-restore',['Applied','Recovery Required'].includes(state)?/Recheck jail \/ recovery.*Recovery ID/:/No eligible matching recovery/,'focus');
-        if(['Applied','Recovery Required'].includes(state)){
-          await button('ach-scan-recheck').click();
-          await resolveLatest(page,'manage_abusive_scan',protection('scan',state,{reason}));
-          assert.ok(await button('ach-scan-restore').isEnabled());
-        }
-      }
-    }
     await page.locator('[data-server-task=http]').click();
     await resolveLatest(page,'status_preferences',prefs);
     await button('ach-status-template').selectOption('unbound');
@@ -452,10 +427,6 @@ async function progressWalk(browser,width,height,touch){
     await route('[data-server-task=hosts]');
     await resolveLatest(page,'inspect_hosts_aliases',aliases);
     await run('ach-hosts-alias-refresh','inspect_hosts_aliases',aliases);
-    await route('[data-server-task=attack]');
-    await q('ach-hosts-site-id').selectOption('7');
-    await run('ach-scan-preview','manage_abusive_scan',protection('scan','Unmanaged'));
-    await run('ach-scan-orphan-list','manage_abusive_scan');
     await route('[data-server-task=http]');
     await resolveLatest(page,'status_preferences',prefs);
     await q('ach-status-template').selectOption('unbound');

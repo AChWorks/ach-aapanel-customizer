@@ -61,7 +61,7 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_cache_helper.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_bridge.py', names)
                 self.assertIn('ach_customizer/ach_customizer_nginx_security.py', names)
-                self.assertIn('ach_customizer/ach_customizer_abusive_scan.py', names)
+                self.assertNotIn('ach_customizer/ach_customizer_abusive_scan.py', names)
                 self.assertIn('ach_customizer/ach_customizer_site_changes.py', names)
                 self.assertIn('ach_customizer/ach_customizer_site_reconcile.py', names)
                 self.assertIn('ach_customizer/ach_customizer_activity.py', names)
@@ -207,9 +207,8 @@ class PackageContractTests(unittest.TestCase):
         # Each formerly detached flex label/select pair is one wrapping
         # field, across Routing, PHP-FPM, and Activity.
         for control_id in (
-            'ach-hosts-alias-select', 'ach-scan-maxretry',
-            'ach-scan-findtime', 'ach-scan-bantime',
-            'ach-scan-orphan-choice', 'ach-wp-settings-kind',
+            'ach-hosts-alias-select', 'ach-guard-maxretry',
+            'ach-guard-findtime', 'ach-guard-bantime', 'ach-wp-settings-kind',
             'ach-wp-settings-debug', 'ach-wp-settings-interval',
             'ach-php-version', 'ach-activity-level', 'ach-activity-module',
         ):

@@ -1,7 +1,8 @@
 """Opt-in, site-specific Nginx pre-PHP sensitive-path protection for aaPanel 8.0.7.
 
 Native site identity, VHost, and exclusive extension inclusion are re-read on
-every operation. The only managed config is one exact site-owned *.conf file.
+every operation. The managed policy is one exact site-owned *.conf file. Optional scan blocking
+uses a dedicated shared HTTP-context Lua memory zone; no log or firewall writer.
 No vendor Nginx templates, WordPress files or peer-site config are edited.
 A root-owned journal survives interrupted publication/reload and permits a
 separate explicit recovery. An HTTP 403 + generated nonce proves that the
@@ -35,6 +36,14 @@ PROOF_BODY = "ACh-Guard-Proof-"
 RULESET = "site-sensitive-files-v1"
 RULESET_XMLRPC = "site-sensitive-files-xmlrpc-v1"
 RULESETS = (RULESET, RULESET_XMLRPC)
+SCAN_DEFAULTS = {"maxretry": 6, "findtime": 120, "bantime": 600}
+SCAN_ZONE = "ach_customizer_scan_state"
+SCAN_ZONE_FILE = "ach_customizer_scan_state.conf"
+# A single bounded pool is independent of the website count. safe_add never
+# evicts another client's active ban when the pool fills.
+SCAN_ZONE_BYTES = ("# Managed by ACh aaPanel Customizer. Shared ephemeral scanner state.\n"
+                   "lua_shared_dict " + SCAN_ZONE + " 8m;\n").encode("ascii")
+SCAN_FALLBACK = "-scan-unavailable"
 PROOF_KINDS = (
     "root_env", "nested_env", "wp_env", "nested_htaccess",
     "backup_dir", "wp_backup_dir", "uploaded_php", "wp_uploaded_php",
@@ -108,7 +117,134 @@ def _public_proof(op):
     return PROOF_BODY + hashlib.sha256(("site-guard-v1:" + op).encode("ascii")).hexdigest()[:32]
 
 
-def _include(op, ruleset=RULESET):
+def _scan_policy(values):
+    if values is None:
+        return None
+    if not isinstance(values, dict) or set(values) != set(SCAN_DEFAULTS):
+        raise GuardError("input", "Choose attempts, window and temporary block duration")
+    policy = {}
+    for name, value in values.items():
+        if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,9}", value):
+            value = int(value)
+        # Retain the previous positive signed-32-bit numeric input contract.
+        if type(value) is not int or not 0 < value < 2147483648:
+            raise GuardError("input", "Invalid temporary scanner " + name)
+        policy[name] = value
+    return policy
+
+
+def _scan_zone(vhost_root, *, create=False, nginx=NGINX, nginx_conf=NGINX_CONF, runner=None):
+    """One exact static HTTP include, shared by all opted-in sites.
+
+    The existing native VHost include graph and caller lock are verified
+    before entry. Never overwrite or adopt different bytes. Keep a valid
+    declaration after the last site is restored; there is no site/jail state
+    in it and no extra writer or per-site orphan lifecycle.
+    """
+    fd = _directory(vhost_root)
+    try:
+        _owned_dir(fd)
+        current = _bounded_file(fd, SCAN_ZONE_FILE, limit=MAX_INCLUDE,
+                                permissions=0o600)
+        if current is not None and current != SCAN_ZONE_BYTES:
+            raise GuardError("scan_source", "Shared Nginx scanner declaration differs: "
+                             + os.path.join(vhost_root, SCAN_ZONE_FILE))
+        if current is not None or not create:
+            return current is not None
+        _publish_complete(fd, SCAN_ZONE_FILE, SCAN_ZONE_BYTES, 0o600, uuid4().hex)
+        try:
+            if _bounded_file(fd, SCAN_ZONE_FILE, limit=MAX_INCLUDE,
+                             permissions=0o600) != SCAN_ZONE_BYTES:
+                raise GuardError("scan_source", "Shared scanner declaration changed")
+            # Prove the actual native Lua directive before creating the
+            # selected-site journal/fragment, without touching live workers.
+            _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
+        except Exception as exc:
+            if _bounded_file(fd, SCAN_ZONE_FILE, limit=MAX_INCLUDE,
+                             permissions=0o600) != SCAN_ZONE_BYTES:
+                raise GuardError("scan_source", "Unconfirmed shared scanner declaration; "
+                                 "inspect the exact file before retrying") from exc
+            os.unlink(SCAN_ZONE_FILE, dir_fd=fd)
+            os.fsync(fd)
+            _nginx("-t", nginx=nginx, conf=nginx_conf, runner=runner)
+            raise GuardError("scan_dependency", "Nginx temporary IP blocking is unavailable: "
+                             "the installed Lua configuration failed syntax validation. "
+                             "The ordinary Guard remains available without this option.") from exc
+        return True
+    finally:
+        os.close(fd)
+
+
+def _scan_lines(proof, patterns, xmlrpc, policy, site_id):
+    """Use the same Nginx regex decision for both Guard and counter.
+
+    Execute synchronously in the native server rewrite phase. A Lua error
+    or full pool cannot disable the independent static denial. Never pass
+    arbitrary headers or browser-provided addresses into shared-memory keys.
+    """
+    _file(site_id)
+    prefix = "ach_scan_" + str(site_id)
+    hit, outcome, body = ("$" + prefix + "_" + x for x in ("hit", "state", "body"))
+    lines = ["set " + hit + " 0;"]
+    for pattern in patterns:
+        lines += ['if ($uri ~* "' + pattern + '") {', "    set " + hit + " 1;", "}"]
+    lines += ["set_by_lua_block " + outcome + " {"]
+    # Lua long strings avoid ambiguous Nginx quoting in include inspection.
+    lines += [
+        "    local function evaluate()",
+        "        local d = ngx.shared." + SCAN_ZONE,
+        "        if not d then return [[fallback]] end",
+        "        local ip = ngx.var.binary_remote_addr",
+        "        if not ip then return [[fallback]] end",
+        "        local addr = ngx.var.remote_addr",
+        "        if addr == [[127.0.0.1]] or addr == [[::1]] then",
+        "            local ok, err = d:safe_add([[health]], true, 1)",
+        "            if not ok and err ~= [[exists]] then return [[fallback]] end",
+        "            return [[ready]]",
+        "        end",
+        "        local key = [[" + str(site_id) + ":" + proof + ":]] .. ip",
+        "        local ban = [[b:]] .. key",
+        "        if d:get(ban) then return [[blocked]] end",
+        "        if ngx.var." + hit[1:] + " ~= [[1]] then return [[ready]] end",
+        "        local counter = [[n:]] .. key",
+        "        local n, err = d:incr(counter, 1)",
+        "        if not n and err == [[not found]] then",
+        "            local ok, why = d:safe_add(counter, 1, " + str(policy["findtime"]) + ")",
+        "            if ok then n = 1",
+        "            elseif why == [[exists]] then n, err = d:incr(counter, 1)",
+        "            else return [[fallback]] end",
+        "        end",
+        "        if not n then return [[fallback]] end",
+        "        if n >= " + str(policy["maxretry"]) + " then",
+        "            local ok, why = d:safe_add(ban, true, " + str(policy["bantime"]) + ")",
+        "            if ok then d:delete(counter)",
+        "            elseif why ~= [[exists]] then return [[fallback]] end",
+        "        end",
+        "        return [[ready]]",
+        "    end",
+        "    local ok, result = pcall(evaluate)",
+        "    if not ok then return [[fallback]] end",
+        "    return result",
+        "}",
+        "if (" + outcome + " = blocked) {",
+        '    return 429 "Too Many Requests";',
+        "}",
+        'set ' + body + ' "' + proof + '";',
+        "if (" + outcome + " = fallback) {",
+        '    set ' + body + ' "' + proof + SCAN_FALLBACK + '";',
+        "}",
+        "if (" + hit + " = 1) {",
+        '    return 403 ' + body + ";",
+        "}",
+    ]
+    # An optional XML-RPC policy is not itself evidence of a hostile scan.
+    if xmlrpc:
+        lines += ['if ($uri ~* "^/xmlrpc[.]php$") {',
+                  "    return 403 " + body + ";", "}"]
+    return lines
+
+
+def _include(op, ruleset=RULESET, scan_policy=None, site_id=None):
     if not isinstance(op, str) or not TOKEN.fullmatch(op):
         raise GuardError("identity", "Invalid Nginx guard generation")
     if ruleset not in RULESETS:
@@ -133,30 +269,32 @@ def _include(op, ruleset=RULESET):
         "|[^/]+[.](?:sql|sqlite|sqlite3|db)(?:[.]gz)?"
         "|[^/]+[.](?:bak|backup))(?:/|$)",
     )
-    if ruleset == RULESET_XMLRPC:
-        # Server rewrite phase executes before php's ^~ or regex location
-        # dispatch. $uri omits the query string; all methods are rejected.
-        patterns += ("^/xmlrpc[.]php$",)
     parts = [
         "# Managed by ACh aaPanel Customizer; do not edit manually.",
         "# Scoped pre-PHP defense. Rule set: " + ruleset,
     ]
-    for pattern in patterns:
-        parts.extend((
-            'if ($uri ~* "' + pattern + '") {',
-            '    return 403 "' + proof + '";',
-            "}",
-        ))
+    policy = _scan_policy(scan_policy)
+    if policy is not None:
+        parts += _scan_lines(proof, patterns, ruleset == RULESET_XMLRPC, policy, site_id)
+    else:
+        if ruleset == RULESET_XMLRPC:
+            patterns += ("^/xmlrpc[.]php$",)
+        for pattern in patterns:
+            parts.extend((
+                'if ($uri ~* "' + pattern + '") {',
+                '    return 403 "' + proof + '";',
+                "}",
+            ))
     result = ("\n".join(parts) + "\n").encode("ascii")
     if len(result) > MAX_INCLUDE:
         raise GuardError("publication", "Generated security rule exceeds limit")
     return result
 
 
-def _proposal_sha(ruleset=RULESET):
+def _proposal_sha(ruleset=RULESET, scan_policy=None, site_id=None):
     # Deterministic approval binds the rule semantics and selected XML-RPC
     # option, independent of the per-activation nonce.
-    return _sha(_include("0" * 32, ruleset))
+    return _sha(_include("0" * 32, ruleset, scan_policy, site_id))
 
 
 def _read_journal(data_fd, site_id):
@@ -170,7 +308,7 @@ def _read_journal(data_fd, site_id):
         raise GuardError("recovery", "Security recovery journal is unreadable") from exc
     fields = {"schema", "site_id", "site_key", "site_root", "bindings_sha",
               "ruleset", "op", "phase", "vhost_sha", "include_sha"}
-    if (not isinstance(record, dict) or set(record) != fields
+    if (not isinstance(record, dict) or set(record) not in (fields, fields | {"scan_policy"})
             or type(record["schema"]) is not int or record["schema"] != SCHEMA
             or type(record["site_id"]) is not int or record["site_id"] != site_id
             or not isinstance(record["site_key"], str)
@@ -194,7 +332,14 @@ def _read_journal(data_fd, site_id):
                          + _journal(site_id) + " preserved. This version cannot verify "
                          "or restore it; a server administrator must investigate the "
                          "original rule and journal separately before further changes.")
-    if _sha(_include(record["op"], record["ruleset"])) != record["include_sha"]:
+    if "scan_policy" in record:
+        try:
+            if _scan_policy(record["scan_policy"]) != record["scan_policy"] or record["scan_policy"] is None:
+                raise GuardError("recovery", "Noncanonical temporary scanner policy")
+        except GuardError as exc:
+            raise GuardError("recovery", "Invalid saved temporary scanner policy") from exc
+    if _sha(_include(record["op"], record["ruleset"], record.get("scan_policy"),
+                     record["site_id"])) != record["include_sha"]:
         raise GuardError("recovery", "Invalid or altered native security recovery journal")
     return record
 
@@ -264,7 +409,11 @@ def _probe(site, op, kind, *, port=80):
         # aaPanel may also return native 403/404 on a missing path.
         # The random per-generation body ties this observation to the
         # precise managed source without adding a global response header.
-        nonce = op if body == _public_proof(op).encode("ascii") else None
+        proof = _public_proof(op)
+        if body == (proof + SCAN_FALLBACK).encode("ascii"):
+            raise GuardError("probe", "Static Guard is denying requests but its temporary "
+                             "scanner runtime is unavailable; Recheck before changing protection")
+        nonce = op if body == proof.encode("ascii") else None
         return code, nonce
     except (OSError, TimeoutError, http.client.HTTPException) as exc:
         raise GuardError("probe", "Local Nginx HTTP/80 verification unavailable") from exc
@@ -386,16 +535,19 @@ def _source_safe(site, *, vhost_root, nginx_conf):
 
 
 def _report(site, *, state, source_sha=None, journal=None, changed=False,
-            runtime_verified=False, reason="", read_only=True, ruleset=RULESET):
-    effective = (journal["ruleset"] if journal and
-                 journal["phase"] in ("prepared", "applied") else ruleset)
+            runtime_verified=False, reason="", read_only=True, ruleset=RULESET,
+            scan_policy=None):
+    active = journal and journal["phase"] in ("prepared", "applied")
+    effective = journal["ruleset"] if active else ruleset
+    effective_scan = journal.get("scan_policy") if active else scan_policy
     return {
         "schema": SCHEMA, "site_id": site["id"], "site_key": site["name"],
         "site_root": site["path"], "mode": MODE, "ruleset": effective,
-        "block_xmlrpc": effective == RULESET_XMLRPC,
+        "block_xmlrpc": effective == RULESET_XMLRPC, "scan_policy": effective_scan,
         "state": state, "reason": reason, "read_only": read_only,
         "changed": changed, "runtime_verified": runtime_verified,
-        "vhost_sha256": source_sha, "proposal_sha256": _proposal_sha(effective),
+        "vhost_sha256": source_sha, "proposal_sha256": _proposal_sha(
+            effective, effective_scan, site["id"]),
         "recovery_id": journal["op"] if journal else None,
         "journal_phase": journal["phase"] if journal else None,
         "automatic_enforcement": False,
@@ -406,7 +558,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
                  expected_vhost=None, expected_proposal=None,
                  expected_recovery=None, vhost_root=VHOST_ROOT,
                  nginx=NGINX, nginx_conf=NGINX_CONF, runner=None,
-                 probe=None, block_xmlrpc=False):
+                 probe=None, block_xmlrpc=False, scan_policy=None):
     """Manage under caller's full-primary-admin, current-site state lock.
 
     Caller must validate the selected native site before and after this
@@ -415,16 +567,22 @@ def manage_guard(action, site, *, data_fd, approved=False,
     if action not in ("preview", "apply", "recheck", "restore") or type(block_xmlrpc) is not bool:
         raise GuardError("input", "Unsupported native Nginx protection action/option")
     selected_ruleset = RULESET_XMLRPC if block_xmlrpc else RULESET
+    selected_scan = _scan_policy(scan_policy)
     bindings_sha = _site_identity(site)
     _owned_dir(data_fd)
     record = _read_journal(data_fd, site["id"])
+
+    def report(**kwargs):
+        return _report(site, scan_policy=selected_scan if action != "restore" else None,
+                       **kwargs)
+
     if action in ("apply", "restore") and approved is not True:
         raise GuardError("approval", "Explicit selected-site Nginx reload approval required")
 
     if site.get("status") not in ("1", 1):
         if action in ("apply", "restore"):
             raise GuardError("identity", "Stopped native website cannot change Nginx policy")
-        return _report(site, state="Suspended" if record else "Needs Review",
+        return report(state="Suspended" if record else "Needs Review",
                        journal=record, reason="Native website is stopped; inspect saved recovery",
                        ruleset=selected_ruleset)
     try:
@@ -433,7 +591,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
     except (ExtensionError, OSError):
         if action in ("apply", "restore") or record is None:
             raise
-        return _report(site, state="Needs Review", journal=record,
+        return report(state="Needs Review", journal=record,
                        reason="Native VHost/include source changed; existing recovery retained",
                        ruleset=selected_ruleset)
 
@@ -478,21 +636,46 @@ def manage_guard(action, site, *, data_fd, approved=False,
             if action in ("apply", "restore"):
                 raise GuardError(
                     "identity", "Native site/VHost changed; preserved security recovery requires review")
-            return _report(site, state="Needs Review", source_sha=source_sha,
+            return report(state="Needs Review", source_sha=source_sha,
                            journal=record, reason="Site identity, root, bindings or native source drifted",
                            ruleset=selected_ruleset)
 
+        # The HTTP memory declaration is shared, but exact bytes are
+        # verified independently of the site extension. Recovery of the
+        # site-owned rule never requires adopting/replacing a foreign zone.
+        active_scan = bool(record and record["phase"] in ("prepared", "applied")
+                           and record.get("scan_policy") is not None)
+        scan_source_error = None
+        if action in ("preview", "recheck") and (active_scan or (selected_scan is not None and (not record or record["phase"] == "restored"))):
+            try:
+                zone_present = _scan_zone(vhost_root)
+                if active_scan and not zone_present:
+                    scan_source_error = "Shared Nginx scanner declaration is absent"
+            except (ExtensionError, OSError) as exc:
+                scan_source_error = str(exc)
+            if scan_source_error:
+                if active_scan and (live_owned or retained_owned or (record["phase"] == "prepared" and current is None and retained is None)):
+                    response = report(state="Recovery Required", source_sha=source_sha,
+                                      journal=record, ruleset=selected_ruleset,
+                                      reason=scan_source_error + "; Restore the saved site policy "
+                                             "before trying a new temporary scanner configuration")
+                    if record["phase"] == "applied":
+                        response["recovery_scope"] = "scanner_runtime_unverified"
+                    return response
+                return report(state="Needs Review", source_sha=source_sha, journal=record,
+                              ruleset=selected_ruleset, reason=scan_source_error)
+
         if action in ("preview", "recheck") and drift_restore_ready:
-            report = _report(
-                site, state="Recovery Required", source_sha=source_sha,
+            response = report(
+                state="Recovery Required", source_sha=source_sha,
                 journal=record, ruleset=selected_ruleset,
                 reason="Native VHost source changed while this exact owned guard remains; "
                        "explicitly Restore its Recovery ID before a fresh Preview/Apply")
             if record["phase"] == "applied":
                 # Frontend validates the exact scope before exposing Restore;
                 # unverified drift must never be displayed as healthy Applied.
-                report["recovery_scope"] = "native_source_drift"
-            return report
+                response["recovery_scope"] = "native_source_drift"
+            return response
 
         if action in ("preview", "recheck"):
             if record is None:
@@ -519,7 +702,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
                               ruleset=record["ruleset"])
                     state = "Applied"
                 except (GuardError, OSError):
-                    state = "Needs Review"
+                    state = "Recovery Required" if active_scan else "Needs Review"
             else:
                 state = "Needs Review"
             reason = {
@@ -531,13 +714,16 @@ def manage_guard(action, site, *, data_fd, approved=False,
             }.get(state, "Native site not eligible")
             if state == "Recovery Required" and record["phase"] == "applied":
                 reason = ("Interrupted Restore retained the exact owned Guard file; "
-                          "explicitly Restore the saved Recovery ID")
-            report = _report(site, state=state, source_sha=source_sha,
+                          "explicitly Restore the saved Recovery ID" if retained_owned else
+                          "Temporary scanner runtime is unconfirmed; Restore the exact owned "
+                          "Guard before reapplying or using static protection only")
+            response = report(state=state, source_sha=source_sha,
                              journal=record, runtime_verified=state in ("Applied", "Restored"),
                              reason=reason, ruleset=selected_ruleset)
             if state == "Recovery Required" and record["phase"] == "applied":
-                report["recovery_scope"] = "interrupted_restore"
-            return report
+                response["recovery_scope"] = ("interrupted_restore" if retained_owned
+                                              else "scanner_runtime_unverified")
+            return response
 
         # Bind Restore to the exact inspected source, not merely the
         # original journal SHA or the selected native site snapshot.
@@ -557,19 +743,24 @@ def manage_guard(action, site, *, data_fd, approved=False,
             if current is not None or record and record["phase"] != "restored":
                 raise GuardError("concurrency", "Existing native security rule is foreign or needs recovery")
             if (expected_vhost != source_sha or
-                    expected_proposal != _proposal_sha(selected_ruleset)):
+                    expected_proposal != _proposal_sha(selected_ruleset, selected_scan, site["id"])):
                 raise GuardError("concurrency", "Selected security plan or VHost changed since Preview")
             if record:
                 _verified(site, record["op"], present=False, probe=probe,
                           ruleset=record["ruleset"])
+            if selected_scan is not None:
+                _scan_zone(vhost_root, create=True, nginx=nginx,
+                           nginx_conf=nginx_conf, runner=runner)
             op = uuid4().hex
-            include_bytes = _include(op, selected_ruleset)
+            include_bytes = _include(op, selected_ruleset, selected_scan, site["id"])
             created = {
                 "schema": SCHEMA, "site_id": site["id"], "site_key": site["name"],
                 "site_root": site["path"], "bindings_sha": bindings_sha,
                 "ruleset": selected_ruleset, "op": op, "phase": "prepared",
                 "vhost_sha": source_sha, "include_sha": _sha(include_bytes),
             }
+            if selected_scan is not None:
+                created["scan_policy"] = selected_scan
             _save_journal(data_fd, created)
             try:
                 _publish_complete(extension_fd, filename, include_bytes, 0o600, op)
@@ -605,6 +796,8 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 _nginx("reload", nginx=nginx, conf=nginx_conf, runner=runner)
                 _verified(site, op, present=True, probe=probe,
                           ruleset=selected_ruleset)
+                if selected_scan is not None and not _scan_zone(vhost_root):
+                    raise GuardError("scan_source", "Shared scanner declaration disappeared")
                 if _source_safe(site, vhost_root=vhost_root,
                                 nginx_conf=nginx_conf)[0] != source_sha:
                     raise GuardError("concurrency", "Native include source changed during guard activation")
@@ -619,7 +812,7 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 raise GuardError(
                     "uncertain", "Security live but final recovery journal unconfirmed; Recheck",
                     recovery_id=op) from exc
-            return _report(site, state="Applied", source_sha=source_sha,
+            return report(state="Applied", source_sha=source_sha,
                            journal=created, changed=True, runtime_verified=True,
                            reason="All selected pre-location probes verified on live Nginx",
                            read_only=False, ruleset=selected_ruleset)
@@ -779,12 +972,13 @@ def manage_guard(action, site, *, data_fd, approved=False,
                 # identity. Cleanup never removes an unknown extension.
                 if _bounded_file(extension_fd, retired_name,
                                  limit=MAX_INCLUDE, permissions=0o600) == _include(
-                                     record["op"], record["ruleset"]):
+                                     record["op"], record["ruleset"],
+                                     record.get("scan_policy"), site["id"]):
                     os.unlink(retired_name, dir_fd=extension_fd)
                     os.fsync(extension_fd)
             except OSError:
                 pass
-        return _report(site, state="Restored", source_sha=source_sha,
+        return report(state="Restored", source_sha=source_sha,
                        journal=record, changed=True, runtime_verified=True,
                        read_only=False, reason="Managed guard removed; no old nonce served")
     finally:
