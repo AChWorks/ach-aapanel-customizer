@@ -103,10 +103,11 @@ The image concept previously generated is **not runtime proof** and its compulso
 
 ## Current source implementation and acceptance boundary
 
-The S1 navigation/identity foundation is merged into `main` through PRs #129
-and #130, but the published and retained installed Native v0.1.100 still uses
-the earlier UI. The S2–S4 task-level candidate is isolated from `main` and
-has not been released. The browser projection adds only one selected workflow
+S1–S4 are merged into `main` through PRs #129–#131. The published and
+retained installed Native v0.1.100 still uses the earlier UI; a source ZIP
+with the same manifest version is not the official Release asset.
+The exact-main installed import and bounded QA receipt is linked from
+Issue #128 and Issue #21; it is partial acceptance, not release. The browser projection adds only one selected workflow
 at a time; privileged actions continue through the original native backend.
 
 - **Selected website:** Protection remains site-owned; WordPress exposes four
@@ -125,9 +126,13 @@ at a time; privileged actions continue through the original native backend.
   without inferring a site or silently executing a recovery.
 - **Navigation dependency:** Clear and Bridge expose a direct route to the
   single original Cache Recheck; PHP Apply exposes a route to the original
-  read-only preview. There is no duplicate backend action or automatic writer.
+  read-only preview. Stage shortcuts transfer keyboard focus to the destination
+  stage. The mobile Sections menu supports Escape from inside the menu.
+  Error page branding read/retry feedback stays common to every mode, while
+  editor Save/Reset/Preview outcomes appear beside their controls with one
+  canonical live announcement. There is no duplicate backend action or automatic writer.
 
-**This is source/interaction structure, not installed acceptance.** Unit tests,
+**Source/interaction structure is not proof of installed acceptance.** Unit tests,
 real Chromium with mocked native reads, and automation can demonstrate specific
 behaviors, but not primary-admin native sessions, live backend authorization,
 active Nginx effects, human novice completion or the health of the retained

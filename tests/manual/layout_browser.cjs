@@ -1,446 +1,271 @@
-// Optional manual Chromium geometry check. No aaPanel backend or credentials.
-// Example on AI Server Agent Dev:
-// NODE_PATH=/opt/ai-server-agent/browser/node_modules \
-// CHROMIUM_EXECUTABLE=/opt/ai-server-agent/browser/browsers/chromium-1228/chrome-linux64/chrome \
-// node tests/manual/layout_browser.cjs
-const fs = require('node:fs');
-const path = require('node:path');
-const {chromium} = require('playwright');
-(async () => {
-  const filename = path.join(__dirname, '../../plugin/ach_customizer/index.html');
-  // Layout-only: remove inline behavior; JS interactive contract has separate tests.
-  const html = fs.readFileSync(filename,'utf8').replace(/<script>[\s\S]*?<\/script>/i,'');
-  const browser = await chromium.launch({
-    headless:true,
-    executablePath:process.env.CHROMIUM_EXECUTABLE || chromium.executablePath(),
-    args:['--no-sandbox','--disable-dev-shm-usage']
+'use strict';
+
+// Real shipped task navigation in isolated Chromium, with mocked native reads.
+// No aaPanel credentials, remote requests, real writes or installed-VM claims.
+// See native_browser_fixture.cjs for the pinned aaPanel jQuery requirement.
+const assert = require('node:assert/strict');
+const version=require('../../plugin/ach_customizer/info.json').versions;
+const {chromium,brand,prefs,site,realPage,resolveLatest,openDestination} =
+  require('./native_browser_fixture.cjs');
+
+const monitor=(worker_source_version)=>({status:true,mode:'Monitor',worker_source_version,
+  notice:'Read-only Monitor controls',enforcement:false,state_schema:1,state_revision:0,
+  overall_enabled:true,modules_enabled:{site_inventory:true,php_fpm_file_preview:true}});
+const inventory={status:true,inventory_schema:2,page:1,page_size:25,has_more:false,sites:[site]};
+const viewports=[[320,480],[375,650],[480,720],[720,650],[800,720],[1024,768],[1280,720]];
+const widths=process.env.ACH_QA_WIDTHS ?
+  viewports.filter(([w])=>process.env.ACH_QA_WIDTHS.split(',').includes(String(w))) : viewports;
+assert.ok(widths.length,'At least one supported QA viewport is required');
+
+async function geometry(page, label) {
+  const result=await page.evaluate(()=>{
+    const root=document.getElementById('ach-customizer');
+    const main=document.getElementById('ach-content');
+    const layer=root.closest('.layui-layer');
+    const rect=layer.getBoundingClientRect(), edge=main.getBoundingClientRect();
+    const visible=el=>el.getClientRects().length>0 && el.getBoundingClientRect().width>0 &&
+      el.getBoundingClientRect().height>0;
+    const overflows=[...main.querySelectorAll('*')].filter(el=>visible(el) &&
+      !el.closest('.ach-scroll') && el.getBoundingClientRect().right>edge.right+1)
+      .map(el=>({id:el.id,tag:el.tagName,cls:el.className.toString().slice(0,70)})).slice(0,10);
+    const rows=[];
+    for(const row of main.querySelectorAll('.ach-controls')){
+      if(!visible(row)) continue;
+      const fields=[...row.querySelectorAll(':scope > .ach-inline-field')].filter(visible)
+        .map(outer=>({outer,control:outer.querySelector('select,input:not([type="checkbox"])')}))
+        .filter(x=>x.control && visible(x.control));
+      const children=[...fields.map(x=>({...x,type:'field'})),
+        ...[...row.querySelectorAll(':scope > button')].filter(visible)
+          .map(control=>({outer:control,control,type:'button'}))];
+      for(let i=0;i<children.length;i++)for(let j=i+1;j<children.length;j++){
+        const a=children[i],b=children[j];
+        if(a.type==='button'&&b.type==='button')continue;
+        const aa=a.outer.getBoundingClientRect(),bb=b.outer.getBoundingClientRect();
+        if(Math.min(aa.bottom,bb.bottom)<=Math.max(aa.top,bb.top)+1)continue;
+        rows.push({a:a.control.id,b:b.control.id,
+          delta:Math.abs(a.control.getBoundingClientRect().bottom-b.control.getBoundingClientRect().bottom)});
+      }
+    }
+    return {
+      docOverflow:document.documentElement.scrollWidth>innerWidth+1,
+      overflow:main.scrollWidth>main.clientWidth+1,
+      rootOverflow:root.scrollWidth>root.clientWidth+1,
+      overflows, rows,
+      layerFits:rect.left>=0&&rect.top>=0&&rect.right<=innerWidth+1&&rect.bottom<=innerHeight+1,
+      rootHeight:root.getBoundingClientRect().height,mainHeight:edge.height,
+      scrollMode:getComputedStyle(main).overflowY,
+      active:[...root.querySelectorAll('[data-destination][aria-current="page"]')].map(x=>x.dataset.destination),
+      visibleViews:[...root.querySelectorAll('[data-view]')].filter(visible).map(x=>x.dataset.view),
+      clippedControls:[...main.querySelectorAll('button,input:not([type="checkbox"]),select')]
+        .filter(el=>visible(el)&&!el.closest('.ach-scroll') &&
+          (el.getBoundingClientRect().left<edge.left-1||el.getBoundingClientRect().right>edge.right+1))
+        .map(el=>el.id||el.textContent.trim()).slice(0,10)
+    };
   });
-  const page = await browser.newPage();
-  const output = [];
-  try {
-    for(const [width,height] of [[1280,720],[1366,768],[1920,1080],[720,650],[375,650]]) {
-      await page.setViewportSize({width,height});
-      await page.setContent(html, {waitUntil:'domcontentloaded'});
-      for(const name of ['overview','websites','routing','cache','php','status','activity']) {
-        await page.evaluate((name)=>{
-          // Mirror the shipped tab handler's aria-selected/tabindex/hidden
-          // transition. Geometry from an impossible active-tab state is not
-          // evidence of navigation continuity.
-          document.querySelectorAll('[data-tab]').forEach(tab=>{
-            const active=tab.getAttribute('data-tab')===name;
-            tab.setAttribute('aria-selected',active?'true':'false');
-            tab.setAttribute('tabindex',active?'0':'-1');
-          });
-          document.querySelectorAll('[data-view]').forEach(
-            view=>view.hidden=view.getAttribute('data-view')!==name);
-          document.getElementById('ach-website-context').hidden =
-            !['websites','routing','cache'].includes(name);
-        },name);
-        // Wait for the intentional 120ms sidebar color transition before
-        // comparing computed fills across the newly selected tab.
-        await page.waitForTimeout(160);
-        const x = await page.evaluate(()=>{
-          const root=document.querySelector('#ach-customizer'), main=document.querySelector('#ach-content'),
-            nav=document.querySelector('.ach-sidebar'), body=document.body;
-          const rb=root.getBoundingClientRect(), mb=main.getBoundingClientRect(), nb=nav.getBoundingClientRect();
-          main.scrollTop=main.scrollHeight;
-          return {viewport:[innerWidth,innerHeight],documentOverflow:document.documentElement.scrollWidth>innerWidth,
-            rootVisible:rb.width>100 && rb.height>150,
-            rootBottom:Math.round(rb.bottom),rootRight:Math.round(rb.right),
-            mainHeight:Math.round(mb.height),mainScrolled:main.scrollTop>2,
-            contentOverflowMode:getComputedStyle(main).overflowY,
-            navVisible:nb.width>30 && nb.height>25,
-            contentWithinViewport:mb.right<=innerWidth+1,
-            contentBottom:Math.round(mb.bottom),
-            controlsHiddenBehindBody:body.scrollHeight>innerHeight+1};
-        });
-        // The shared stack contract must separate each independent top-level
-        // panel, both for a normal matched worker and a visible mismatch alert.
-        // A missing root gap must fail in all seven views, including at 375px.
-        const rhythm=await page.evaluate(name => {
-          const main=document.getElementById('ach-content');
-          const notice=document.getElementById('ach-worker-version-status');
-          function distances() {
-            const visible=[...main.children].filter(el=>el.getClientRects().length &&
-              getComputedStyle(el).display!=='none');
-            return visible.slice(1).map((el,i)=>{
-              const prev=visible[i].getBoundingClientRect(), curr=el.getBoundingClientRect();
-              return Math.round(curr.top-prev.bottom);
-            });
-          }
-          notice.dataset.state='review'; notice.hidden=false;
-          const warning=distances();
-          notice.dataset.state='matched'; notice.hidden=name!=='overview';
-          const routine=distances();
-          const style=getComputedStyle(notice);
-          const view=document.querySelector('.ach-view:not([hidden])');
-          const blocks=[...view.children].filter(el=>el.getClientRects().length &&
-            getComputedStyle(el).display!=='none' &&
-            getComputedStyle(el).position!=='absolute');
-          const sectionGaps=blocks.slice(1).map((el,i)=>Math.round(
-            el.getBoundingClientRect().top-blocks[i].getBoundingClientRect().bottom));
-          return {warning,routine,sectionGaps,matchedBorder:style.borderTopWidth,
-            matchedBackground:style.backgroundColor};
-        },name);
-        if(rhythm.warning.length<1 || rhythm.warning.some(gap=>gap<10) ||
-           rhythm.routine.some(gap=>gap<10) ||
-           rhythm.sectionGaps.some(gap=>gap<11 || gap>13) ||
-           rhythm.matchedBorder!=='0px' ||
-           rhythm.matchedBackground!=='rgba(0, 0, 0, 0)') {
-          throw Error('Independent panel spacing/version hierarchy failed '+
-            JSON.stringify({width,height,name,...rhythm}));
-        }
-        // The desktop active row must merge with the white content surface
-        // without a visible right-side stroke; narrow layouts instead use
-        // the existing horizontal bottom-border navigation treatment.
-        const continuity = await page.evaluate(() => {
-          const side = document.querySelector('.ach-sidebar');
-          const buttons = Array.from(side.querySelectorAll('button[data-tab]'));
-          const active = side.querySelector('button[aria-selected="true"]');
-          const inactive = buttons.filter(button=>button!==active);
-          const main = document.querySelector('.ach-main');
-          const root = document.querySelector('#ach-customizer');
-          const note = document.querySelector('.ach-note');
-          const visible = Array.from(document.querySelectorAll('[data-view]'))
-            .filter(view=>!view.hidden).map(view=>view.getAttribute('data-view'));
-          // Keyboard focus must scroll the horizontal nav into view on
-          // narrow screens; suppressing scroll creates a false clipping alarm.
-          active?.focus();
-          active?.scrollIntoView({block:'nearest',inline:'nearest'});
-          const sideBounds=side.getBoundingClientRect();
-          const focused=active?.getBoundingClientRect();
-          const focusCss=active&&getComputedStyle(active);
-          return {
-            sideBorder:getComputedStyle(side).borderRightWidth,
-            selectedFill:active&&getComputedStyle(active).backgroundColor,
-            contentFill:getComputedStyle(main).backgroundColor,
-            activeTab:active?.getAttribute('data-tab'),
-            selectedCount:buttons.filter(button=>button.getAttribute('aria-selected')==='true').length,
-            activeTabindex:active?.getAttribute('tabindex'),
-            inactiveStates:inactive.every(button=>button.getAttribute('aria-selected')==='false' &&
-              button.getAttribute('tabindex')==='-1'),
-            visible,
-            corner:getComputedStyle(root).borderBottomLeftRadius,
-            noteCorner:getComputedStyle(note).borderTopLeftRadius,
-            selectedBorder:focusCss?.borderBottomColor,
-            inactiveBorder:getComputedStyle(inactive[0]).borderBottomColor,
-            selectedBorderWidth:focusCss?.borderBottomWidth,
-            focused:document.activeElement===active,
-            focusVisible:active?.matches(':focus-visible'),
-            outlineStyle:focusCss?.outlineStyle,
-            outlineWidth:focusCss?.outlineWidth,
-            outlineOffset:focusCss?.outlineOffset,
-            focusRect:focused&&[focused.left,focused.right,focused.top,focused.bottom],
-            navRect:[sideBounds.left,sideBounds.right,sideBounds.top,sideBounds.bottom],
-            navScroll:[side.scrollLeft,side.scrollWidth,side.clientWidth],
-            focusWithinNav:!!focused && focused.left>=sideBounds.left-1 &&
-              focused.right<=sideBounds.right+1 &&
-              focused.top>=sideBounds.top-1 && focused.bottom<=sideBounds.bottom+1,
-          };
-        });
-        if (continuity.activeTab!==name || continuity.selectedCount!==1 ||
-            continuity.activeTabindex!=='0' || !continuity.inactiveStates ||
-            continuity.visible.length!==1 || continuity.visible[0]!==name ||
-            continuity.corner!=='10px' || continuity.noteCorner!=='8px' ||
-            !continuity.focused || !continuity.focusWithinNav ||
-            (continuity.focusVisible && (continuity.outlineStyle==='none' ||
-              continuity.outlineWidth==='0px')) ||
-            (width>720 && (continuity.sideBorder!=='0px' ||
-              continuity.selectedFill!==continuity.contentFill)) ||
-            (width<=720 && (continuity.selectedBorder===continuity.inactiveBorder ||
-              continuity.selectedBorderWidth!=='3px'))) {
-          throw Error('Native dialog active-tab continuity/focus/corners failed '+
-            JSON.stringify({width,height,name,...continuity}));
-        }
-        // Verify reusable control geometry in the actual rendered plugin DOM.
-        // This detects aaPanel-style drift even if the parent layer still fits.
-        const controls=await page.evaluate(()=>{
-          const main=document.getElementById('ach-content');
-          const edge=main.getBoundingClientRect();
-          const found=[...main.querySelectorAll('button,input:not([type="checkbox"]),select')]
-            .filter(el=>el.getClientRects().length>0 && !el.closest('[hidden]'));
-          const failures=found.filter(el=>{
-            const r=el.getBoundingClientRect();
-            const css=getComputedStyle(el);
-            // Home task tiles have a deliberate multi-line 112px+ target;
-            // they are navigation cards, not compact form buttons.
-            const task=el.matches('button.ach-task-link');
-            return r.height<(task?104:31) || r.height>(task?240:96) || r.width<15 ||
-              r.left<edge.left-1 || r.right>edge.right+1 ||
-              css.borderRadius!==(task?'10px':'8px');
-          }).map(el=>el.id||el.tagName);
-          return {visible:found.length,failures};
-        });
-        if(controls.failures.length) {
-          throw Error('Inconsistent native control sizing '+JSON.stringify({width,height,name,...controls}));
-        }
-        output.push({section:name,...x});
-        if(x.documentOverflow || !x.rootVisible || !x.navVisible || !x.contentWithinViewport ||
-          x.contentOverflowMode!=='auto') {
-          throw Error('Layout invariant failed '+JSON.stringify({width,height,name,...x}));
-        }
-        if(name==='status' && !x.mainScrolled) throw Error('Long status page could not scroll');
-        if(name==='php') {
-          const picker=await page.evaluate(()=>{
-            const input=document.querySelector('#ach-php-version'),
-              refresh=document.querySelector('#ach-php-discover'),
-              status=document.querySelector('#ach-php-discovery-status'),
-              viewport=document.documentElement.clientWidth;
-            return {tag:input?.tagName, disabled:input?.disabled,
-              required:input?.required, refreshText:refresh?.textContent?.trim(),
-              status:status?.getAttribute('role'),
-              right:input?.getBoundingClientRect().right, viewport};
-          });
-          if(picker.tag!=='SELECT' || picker.disabled!==true || picker.required!==true ||
-              !picker.refreshText?.includes('Refresh installed PHP') ||
-              picker.status!=='status' || picker.right>picker.viewport+1) {
-            throw Error('Native PHP version picker unsafe or inaccessible '+JSON.stringify(picker));
-          }
-        }
-        if(name==='status') {
-          // Save/Reset acknowledgement must be visible beside the Save action,
-          // not under the 440px preview/diagnostics on a long scroll surface.
-          const feedback=await page.evaluate(()=>{
-            const button=document.getElementById('ach-status-save');
-            const notice=document.getElementById('ach-status-result');
-            const main=document.getElementById('ach-content');
-            button.scrollIntoView({block:'center',inline:'nearest'});
-            const a=button.getBoundingClientRect(), b=notice.getBoundingClientRect(),
-              m=main.getBoundingClientRect();
-            return {gap:Math.round(b.top-a.bottom),withinViewport:b.top>=m.top && b.bottom<=m.bottom+1,
-              withinMain:b.left>=m.left-1 && b.right<=m.right+1,
-              inSamePanel:notice.closest('.ach-view')===button.closest('.ach-view'),
-              live:notice.getAttribute('aria-live')};
-          });
-          if(feedback.gap<0 || feedback.gap>70 || !feedback.withinViewport ||
-             !feedback.withinMain || !feedback.inSamePanel || feedback.live!=='polite') {
-            throw Error('Save acknowledgement hidden or detached from action '+JSON.stringify({width,height,feedback}));
-          }
-        }
-        if(name==='websites') {
-          // Inspect the shipped DOM, not a reconstructed control: discovery
-          // is a select that remains disabled until native inventory arrives.
-          const sitePicker = await page.evaluate(()=>{
-            const picker=document.getElementById('ach-hosts-site-id');
-            const label=document.querySelector('label[for="ach-hosts-site-id"]');
-            const action=document.getElementById('ach-hosts-inspect-button');
-            return {tag:picker?.tagName, disabled:picker?.disabled,
-              label:label?.textContent?.trim(), actionDisabled:action?.disabled,
-              right:picker?.getBoundingClientRect().right};
-          });
-          if(sitePicker.tag!=='SELECT' || sitePicker.disabled!==true ||
-             sitePicker.actionDisabled!==true ||
-             !sitePicker.label?.includes('Website') ||
-             sitePicker.right>width+1) {
-            throw Error('Native inventory-backed Hosts picker missing/unsafe '+
-              JSON.stringify({width,height,...sitePicker}));
-          }
-        }
-        if(name==='php' || name==='status') {
-          const rows = await page.evaluate(name => {
-            const section = name==='php' ? '#ach-php-form .ach-fields' :
-              '#ach-panel-status .ach-status-fields';
-            const row = document.querySelector(section + ' > div');
-            const label = row?.querySelector('label');
-            const input = row?.querySelector('input, select');
-            const rect = x => x?.getBoundingClientRect().toJSON();
-            return {label:rect(label),input:rect(input)};
-          },name);
-          if(!rows.label || !rows.input) throw Error('Native form row missing '+name);
-          if(width>=900 && (
-            rows.input.left<rows.label.right+5 ||
-            Math.abs(rows.input.width-150)>2 ||
-            Math.abs(rows.input.height-32)>2
-          )) throw Error('Desktop label / 150px native control rhythm failed '+
-              JSON.stringify({name,width,rows}));
-          if(width<=460 && rows.input.top<rows.label.bottom) {
-            throw Error('Mobile stacked label/control overlap '+JSON.stringify({name,width,rows}));
-          }
-        }
-      }
+  assert.ok(result.layerFits && result.rootHeight>170 && result.mainHeight>100 &&
+    result.scrollMode==='auto' && result.active.length===1 && result.visibleViews.length<=1 &&
+    !result.docOverflow && !result.rootOverflow && !result.overflow &&
+    !result.clippedControls.length, label+' '+JSON.stringify(result));
+  assert.deepEqual(result.rows.filter(x=>x.delta>1.5),[],label+' mixed control bottoms');
+  return result.rows;
+}
+
+async function clickStage(page, attr, value) {
+  const button=page.locator('['+attr+'="'+value+'"]');
+  await button.click();
+  assert.equal(await button.getAttribute('aria-current'),'page',attr+' '+value);
+}
+async function selectStatusSite(page) {
+  await page.locator('#ach-status-scope').selectOption('site');
+  await resolveLatest(page,'status_sites',{...inventory,purpose:'status_site_selection'});
+  await page.locator('#ach-status-site-id').selectOption('7');
+  await resolveLatest(page,'status_preferences',prefs);
+}
+async function walk(page, width, record) {
+  const sample=async(name)=>record(name,await geometry(page,width+' / '+name));
+  await sample('home pending');
+  await resolveLatest(page,'get_overview',monitor(version));
+  assert.equal(await page.locator('#ach-worker-version-status').getAttribute('data-state'),'matched');
+  await sample('home matched');
+  if(width<=720){
+    await page.locator('#ach-menu-toggle').click();
+    await page.locator('[data-destination="server"]').focus();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#ach-menu-toggle').getAttribute('aria-expanded'),'false');
+    assert.equal(await page.locator('#ach-menu-toggle').evaluate(el=>document.activeElement===el),true);
+  }
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await openDestination(page,'websites');
+  assert.equal(await page.locator('#ach-worker-version-status').isVisible(),false);
+  assert.equal(await page.locator('#ach-sites-loading').isVisible(),true);
+  assert.equal(await page.locator('#ach-sites-rows').isVisible(),false);
+  assert.equal(await page.locator('#ach-sites-loading .ach-skeleton-row span').first()
+    .evaluate(el=>getComputedStyle(el).animationName),'none');
+  await resolveLatest(page,'get_sites',inventory);
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await sample('website summary');
+  await clickStage(page,'data-task','protection');
+  assert.equal(await page.locator('#ach-site-required').isVisible(),true);
+  assert.equal(await page.locator('#ach-guard-apply').isVisible(),false);
+  await sample('choose website');
+  await page.locator('#ach-hosts-site-id').selectOption('7');
+  assert.equal(await page.locator('#ach-guard-preview').isEnabled(),true);
+  assert.equal(await page.locator('#ach-guard-apply').isEnabled(),false);
+  await sample('protection');
+  await clickStage(page,'data-task','cache');
+  for(const key of ['inspect','connect','configure','clear','bridge']){
+    await clickStage(page,'data-cache-task',key);
+    await sample('cache '+key);
+  }
+  await page.locator('#ach-bridge-recheck-route').click();
+  assert.equal(await page.locator('[data-cache-task="configure"]').evaluate(el=>document.activeElement===el),true);
+  await clickStage(page,'data-cache-task','clear');
+  await page.locator('#ach-cache-clear-recheck-route').click();
+  assert.equal(await page.locator('[data-cache-task="configure"]').evaluate(el=>document.activeElement===el),true);
+  await clickStage(page,'data-task','wordpress');
+  for(const key of ['debug','cron','xmlrpc','https']){
+    await clickStage(page,'data-wp-task',key);
+    assert.equal(await page.locator('#ach-wp-settings-apply').isEnabled(),false);
+    await sample('wordpress '+key);
+  }
+  await clickStage(page,'data-task','routing');
+  for(const key of ['diagnostics','hosts','reconcile']){
+    await clickStage(page,'data-routing-detail',key);
+    await sample('routing '+key);
+  }
+  await openDestination(page,'server');
+  for(const key of ['inspect','policy','apply','restore']){
+    await clickStage(page,'data-php-task',key);
+    await sample('php '+key);
+  }
+  await clickStage(page,'data-php-task','apply');
+  await page.locator('#ach-php-preview-route').click();
+  assert.equal(await page.locator('[data-php-task="policy"]').evaluate(el=>document.activeElement===el),true);
+  await clickStage(page,'data-server-task','hosts');
+  await resolveLatest(page,'inspect_hosts_aliases',{status:true,schema:1,read_only:true,state:'Aliases Found',
+    hosts_sha256:'a'.repeat(64),entries:[{domain:'demo.test',address:'127.0.0.1',line:7}]});
+  await sample('local hostnames');
+  await clickStage(page,'data-server-task','attack');
+  await sample('attack protection');
+  if(width===1024){
+    const field=page.locator('label[for="ach-scan-maxretry"]');
+    const original=await field.innerText();
+    await field.evaluate(el=>el.textContent='Attempts per selected native website (additional explanatory words)');
+    const rows=await geometry(page,'wrapped scanner label');
+    assert.ok(rows.some(x=>x.a==='ach-scan-maxretry'&&x.b==='ach-scan-findtime'));
+    await field.evaluate((el,text)=>el.textContent=text,original);
+  }
+  await clickStage(page,'data-server-task','monitor');
+  await sample('monitoring');
+  await clickStage(page,'data-server-task','http');
+  await resolveLatest(page,'status_preferences',prefs);
+  await page.locator('#ach-status-template').selectOption('unbound');
+  await sample('server HTTP/TLS');
+  await openDestination(page,'status');
+  await clickStage(page,'data-status-mode','design');
+  await sample('error design');
+  const local=page.locator('#ach-status-design-result');
+  await page.locator('#ach-status-save').click();
+  assert.match(await local.innerText(),/Saving global branding/);
+  await resolveLatest(page,'status_save',{status:true,schema:1,revision:2,changed:false,scope:'global',
+    site_id:null,source:'Global default',effective:brand});
+  assert.match(await local.innerText(),/No changes needed/);
+  assert.equal(await local.getAttribute('data-state'),'saved');
+  assert.equal(await local.getAttribute('aria-live'),null,'Only shared notice is live');
+  assert.equal(await local.innerText(),await page.locator('#ach-status-result').innerText());
+  const nearby=await local.evaluate(el=>({
+    gap:el.getBoundingClientRect().top-el.previousElementSibling.getBoundingClientRect().bottom,
+    order:[...el.previousElementSibling.querySelectorAll('button')].map(x=>x.id)
+  }));
+  assert.ok(nearby.gap>=0 && nearby.gap<=25,JSON.stringify(nearby));
+  assert.ok(nearby.order.includes('ach-status-save') && nearby.order.includes('ach-status-reset'));
+  await sample('error design save result');
+  if(width===1280){
+    const primary=page.locator('#ach-status-save');
+    const colors=()=>primary.evaluate(el=>({background:getComputedStyle(el).backgroundColor,
+      foreground:getComputedStyle(el).color}));
+    function luminance(value){
+      const rgb=value.match(/[0-9]+/g).slice(0,3).map(Number);
+      return rgb.reduce((sum,v,i)=>{
+        v/=255;
+        return sum+[.2126,.7152,.0722][i]*(v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+      },0);
     }
-    // Inspect the real shipped, sandbox-free DOM with an explicitly TEXT-only
-    // display of untrusted existing-site HTML. No backend/auth/native QA claim.
-    for(const [width,height] of [[1280,720],[375,650]]) {
-      await page.setViewportSize({width,height});
-      await page.setContent(html, {waitUntil:'domcontentloaded'});
-      const check=await page.evaluate(() => {
-        document.querySelectorAll('[data-view]').forEach(view=>{
-          view.hidden=view.getAttribute('data-view')!=='status';
-        });
-        // This is the site-404 inspection context. A global template or
-        // unsupported scope must not show the comparison by default.
-        document.getElementById('ach-status-site-audit').hidden=false;
-        const pre=document.getElementById('ach-status-comparison-excerpt');
-        const summary=document.getElementById('ach-status-comparison-summary');
-        const hostile='<img src=x onerror=alert(1)>';
-        summary.textContent='Different - display-only source comparison; no Apply';
-        pre.textContent='--- current 404.html\\n+++ proposed 404.html\\n' +
-          Array.from({length:90},(_,i)=>'-'+i+' '+hostile+'\\n+'+i+' <p>Reviewed</p>').join('\\n');
-        const rect=pre.getBoundingClientRect();
-        const css=getComputedStyle(pre);
-        return {right:rect.right,height:rect.height,maxHeight:css.maxHeight,
-          overflowY:css.overflowY,scrollHeight:pre.scrollHeight,
-          clientHeight:pre.clientHeight,containsLiteral:pre.textContent.includes(hostile),
-          unexpectedImages:document.querySelectorAll('img[src="x"]').length,
-          documentOverflow:document.documentElement.scrollWidth>innerWidth,
-          statusVisible:summary.getBoundingClientRect().height>0};
-      });
-      if(check.documentOverflow || check.unexpectedImages || !check.containsLiteral ||
-         !check.statusVisible || check.right>width+1 || check.overflowY!=='auto' ||
-         check.scrollHeight<=check.clientHeight || check.height>260+1) {
-        throw Error('Unsafe or unscrollable Status Pages diff at 100% zoom '+
-          JSON.stringify({width,height,...check}));
-      }
+    function contrast(c){
+      const a=luminance(c.background),b=luminance(c.foreground);
+      return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
     }
-    console.log('STATUS_COMPARE_VIEWPORT_PASS 2 responsive scroll/plain-text checks');
-    // Verify actual table skeleton layout and reduced-motion support.
-    await page.setViewportSize({width:375,height:650});
-    await page.emulateMedia({reducedMotion:'reduce'});
-    await page.setContent(html, {waitUntil:'domcontentloaded'});
-    const skeletons = await page.evaluate(() => {
-      return ['sites','activity'].map(name => {
-        document.querySelectorAll('[data-view]').forEach(view => {
-          view.hidden=view.getAttribute('data-view')!==(name==='sites'?'websites':'activity');
-        });
-        const loading=document.querySelector('#ach-'+name+'-loading');
-        const rows=document.querySelector('#ach-'+name+'-rows');
-        loading.hidden=false;rows.hidden=true;
-        const r=loading.getBoundingClientRect();
-        const bar=loading.querySelector('.ach-skeleton-row span');
-        return {name,height:r.height,right:r.right,display:getComputedStyle(loading).display,
-          animation:getComputedStyle(bar).animationName,rowsHidden:getComputedStyle(rows).display==='none'};
-      });
-    });
-    for(const s of skeletons) {
-      if(s.height<150 || s.right>375 || s.display==='none' ||
-          s.animation!=='none' || !s.rowsHidden) {
-        throw Error('Skeleton layout/reduced motion failure '+JSON.stringify(s));
-      }
-    }
-    console.log('NATIVE_SKELETON_PASS '+skeletons.length+' mobile reduced-motion checks');
-    await page.emulateMedia({reducedMotion:'no-preference'});
-    // Inspect computed primary button colors in Chromium, including real hover.
-    // This complements source token calculations; white-on-green text is 13px.
-    await page.setViewportSize({width:1280,height:720});
-    await page.setContent(html, {waitUntil:'domcontentloaded'});
-    await page.evaluate(() => {
-      document.querySelectorAll('[data-view]').forEach(view => {
-        view.hidden = view.getAttribute('data-view') !== 'status';
-      });
-      // Enable the existing action in this static layout-only document so
-      // its real normal/hover contrast can be measured (no backend exists).
-      document.getElementById('ach-status-save').disabled=false;
-    });
-    const primary = page.locator('#ach-status-save');
-    const getPrimary = () => primary.evaluate(element => {
-      const css = getComputedStyle(element);
-      return {background:css.backgroundColor, foreground:css.color, disabled:element.disabled};
-    });
-    const normal = await getPrimary();
+    const normal=contrast(await colors());
     await primary.hover();
     await page.waitForTimeout(220);
-    const hover = await getPrimary();
-    function luminance(value) {
-      const channels = value.match(/[0-9]+/g)?.slice(0,3).map(Number);
-      if (!channels || channels.length !== 3) throw Error('Invalid computed color ' + value);
-      const [r,g,b] = channels.map(v => {
-        const c = v / 255;
-        return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-      });
-      return 0.2126*r + 0.7152*g + 0.0722*b;
-    }
-    function contrast(a,b) {
-      const x = luminance(a), y = luminance(b);
-      return (Math.max(x,y) + .05) / (Math.min(x,y) + .05);
-    }
-    for (const [state,colors] of [['normal',normal],['hover',hover]]) {
-      const ratio = contrast(colors.background,colors.foreground);
-      if (colors.disabled || ratio < 4.5) {
-        throw Error('Primary action contrast below AA ' + JSON.stringify({state,colors,ratio}));
-      }
-    }
-    console.log('PRIMARY_CONTRAST_PASS '+JSON.stringify({
-      normal:contrast(normal.background,normal.foreground).toFixed(3),
-      hover:contrast(hover.background,hover.foreground).toFixed(3),
-      normalFill:normal.background,hoverFill:hover.background
-    }));
-    // Exercise the shipped resize helper inside a simulated aaPanel layer.
-    // This is NOT an authenticated aaPanel guest/browser acceptance test.
-    const complete = fs.readFileSync(filename, 'utf8');
-    const helperMatch = complete.match(/  function fitNativeLayer\(\) \{[\s\S]*?\n  \}\n  if \(typeof window/);
-    if (!helperMatch) throw Error('Deployed native layer helper not found');
-    const helper = helperMatch[0].replace(/\n  if \(typeof window$/, '');
-    let layerCount = 0;
-    for (const [width,height] of [[320,480],[375,650],[720,650],[1280,720],[1920,1080]]) {
-      await page.setViewportSize({width,height});
-      await page.setContent(
-        '<div class="layui-layer" style="position:absolute;left:0;top:0;width:100px;height:100px;background:#fff">' +
-        '<div class="layui-layer-title" style="height:42px">Plugin</div>' +
-        '<div class="layui-layer-content">' + html + '</div></div>',
-        {waitUntil:'domcontentloaded'});
-      await page.addScriptTag({content:"(function(){ const root={0:document.getElementById('ach-customizer')}; " + helper + "\nfitNativeLayer(); })();"});
-      const info = await page.evaluate(()=>{
-        const layer=document.querySelector('.layui-layer');
-        const main=document.getElementById('ach-content');
-        const rect=layer.getBoundingClientRect();
-        const m=main.getBoundingClientRect();
-        const content=layer.querySelector('.layui-layer-content');
-        return {right:rect.right,left:rect.left,top:rect.top,bottom:rect.bottom,
-          layerCorner:getComputedStyle(layer).borderTopLeftRadius,
-          contentCorner:getComputedStyle(content).borderBottomLeftRadius,
-          mainHeight:m.height,rootHeight:document.getElementById('ach-customizer').getBoundingClientRect().height,
-          mainOverflow:getComputedStyle(main).overflowY,
-          direction:document.querySelector('.ach-sidebar').getAttribute('aria-orientation')};
-      });
-      if (info.left < 0 || info.top < 0 || info.right > width+1 || info.bottom > height+1 ||
-          info.layerCorner !== '10px' || info.contentCorner !== '10px' ||
-          info.mainHeight < 120 || info.mainOverflow !== 'auto' ||
-          info.direction !== (width <= 720 ? 'horizontal' : 'vertical')) {
-        throw Error('Simulated native layer invariant failed '+
-          JSON.stringify({width,height,...info}));
-      }
-      layerCount++;
-    }
-    // Reproduce aaPanel 8.0.7's actual fixed launcher: top:20% with a
-    // 1100x672 area. The plugin's inline script may execute before aaPanel
-    // attaches its wrapper; the shipped CSS must fit it without a resize.
-    let launcherCount = 0;
-    for (const [width,height] of [[1280,720],[900,700],[740,600],[390,844],[1280,500]]) {
-      await page.setViewportSize({width,height});
-      await page.setContent(
-        '<div class="layui-layer" style="position:fixed;left:90px;top:20%;width:1100px;height:672px">' +
-        '<div class="layui-layer-title" style="height:42px">ACh aaPanel Customizer</div>' +
-        '<div class="layui-layer-content" style="height:630px;overflow:hidden">' + html +
-        '</div></div>', {waitUntil:'domcontentloaded'});
-      const actual = await page.evaluate(()=>{
-        const layer=document.querySelector('.layui-layer');
-        const content=layer.querySelector('.layui-layer-content');
-        const main=document.querySelector('#ach-content');
-        const bound=layer.getBoundingClientRect();
-        const contentBound=content.getBoundingClientRect();
-        return {left:bound.left,top:bound.top,right:bound.right,bottom:bound.bottom,
-          layerCorner:getComputedStyle(layer).borderTopLeftRadius,
-          contentCorner:getComputedStyle(content).borderBottomLeftRadius,
-          contentBottom:contentBound.bottom,mainOverflow:getComputedStyle(main).overflowY,
-          rootHeight:document.querySelector('#ach-customizer').getBoundingClientRect().height,
-          cssSupported:CSS.supports('selector(.layui-layer:has(#ach-customizer))')};
-      });
-      if (!actual.cssSupported || actual.layerCorner!=='10px' ||
-          actual.contentCorner!=='10px' || actual.left<8 || actual.top<8 ||
-          actual.right>width-8 || actual.bottom>height-8 ||
-          actual.contentBottom>height-8 || actual.rootHeight<170 ||
-          actual.mainOverflow!=='auto') {
-        throw Error('Real aaPanel launcher overflow at 100% zoom '+
-          JSON.stringify({width,height,...actual}));
-      }
-      launcherCount++;
-    }
-    console.log('NATIVE_LAUNCHER_LAYOUT_PASS '+launcherCount+' viewport checks');
-    console.log('SIMULATED_LAYER_PASS '+layerCount+' viewport checks');
-    console.log('LAYOUT_PASS '+output.length+' section/viewport combinations');
-    for(const entry of output) console.log(JSON.stringify(entry));
-  } finally {
-    await browser.close();
+    const hover=contrast(await colors());
+    assert.ok(normal>=4.5&&hover>=4.5,JSON.stringify({normal,hover}));
   }
-})().catch(err=>{console.error('LAYOUT_FAIL',err.stack);process.exitCode=1});
+  await clickStage(page,'data-status-mode','defaults');
+  await page.locator('#ach-status-template').selectOption('new-site');
+  assert.equal(await page.locator('#ach-status-result').isVisible(),true);
+  await sample('error defaults');
+  await clickStage(page,'data-status-mode','fallback');
+  await page.locator('#ach-status-template').selectOption('unbound');
+  await sample('error fallback');
+  await selectStatusSite(page);
+  await clickStage(page,'data-status-mode','site');
+  await page.locator('#ach-status-template').selectOption('404');
+  assert.equal(await local.isVisible(),false,'New scope clears local editor result');
+  await sample('error site 404');
+  await clickStage(page,'data-status-mode','stopped');
+  await page.locator('#ach-status-template').selectOption('stopped');
+  await sample('error stopped');
+  // The existing source comparison is a text-only scroll surface, not HTML.
+  if(width===320||width===1280){
+    await clickStage(page,'data-status-mode','site');
+    await page.locator('#ach-status-template').selectOption('404');
+    const result=await page.locator('#ach-status-comparison-excerpt').evaluate(el=>{
+      const hostile='<img src=x onerror=alert(1)>';
+      el.textContent=Array.from({length:90},(_,i)=>'-'+i+' '+hostile).join('\n');
+      const r=el.getBoundingClientRect();
+      return {visible:r.height>0,bounded:r.height<=261,scroll:el.scrollHeight>el.clientHeight,
+        text:el.textContent.includes(hostile),images:el.querySelectorAll('img').length};
+    });
+    assert.deepEqual(result,{visible:true,bounded:true,scroll:true,text:true,images:0});
+  }
+  await openDestination(page,'activity');
+  await resolveLatest(page,'get_activity',{status:true,schema:1,read_only:true,configured_level:'INFO',entries:[]});
+  await sample('activity');
+  const requests=await page.evaluate(()=>window.__qaRequests.map(x=>
+    new URL(x.options.url,location.href).searchParams.get('s')));
+  // The deliberate mock branding save is the only write permitted in the walk.
+  assert.ok(requests.every(x=>['get_overview','get_sites','get_php_versions','inspect_hosts_aliases',
+    'status_preferences','status_sites','status_save','get_activity'].includes(x)),JSON.stringify(requests));
+  assert.equal(requests.filter(x=>x==='status_save').length,1);
+}
+
+async function run(){
+  const browser=await chromium.launch({headless:true,
+    executablePath:process.env.CHROMIUM_EXECUTABLE||chromium.executablePath(),
+    args:['--no-sandbox','--disable-dev-shm-usage']});
+  let samples=0,pairs=0;
+  const observed=new Set();
+  try{
+    for(const [width,height] of widths){
+      const {page,pageErrors}=await realPage(browser,width,height);
+      try{
+        await walk(page,width,(_name,rows)=>{
+          samples++;pairs+=rows.length;
+          for(const row of rows) observed.add([row.a,row.b].sort().join('|'));
+        });
+        assert.deepEqual(pageErrors,[]);
+        console.log('TASK_LAYOUT_VIEWPORT_PASS',width,height);
+      }finally{await page.close();}
+    }
+    assert.ok(samples>=30*widths.length && pairs>0,'Route/geometry coverage missing');
+    if(widths.some(([w])=>w===1024)){
+      for(const [a,b] of [['ach-hosts-alias-select','ach-hosts-alias-refresh'],
+        ['ach-scan-orphan-choice','ach-scan-orphan-list'],['ach-scan-maxretry','ach-scan-findtime']])
+        assert.ok(observed.has([a,b].sort().join('|')),'Missing actual form row '+a+' / '+b);
+    }
+    console.log('TASK_LAYOUT_PASS',JSON.stringify({viewports:widths.length,samples,mixedControlPairs:pairs}));
+  }finally{await browser.close();}
+}
+module.exports={run,geometry};
+if(require.main===module)run().catch(e=>{console.error(e.stack||e);process.exitCode=1;});

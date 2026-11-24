@@ -366,16 +366,19 @@
   }
   #ach-customizer .ach-fpm-operation-notice.ach-error { background:#fff5f4; border-color:#e4c8c7; }
   #ach-customizer #ach-status-result,
+  #ach-customizer #ach-status-design-result,
   #ach-customizer #ach-overview-control-result {
     padding:9px 11px; margin:8px 0 0; background:#f7f9fb;
     border:1px solid #dde6ed; border-radius:8px;
     color:#425466; overflow-wrap:anywhere;
   }
   #ach-customizer #ach-overview-control-result[data-state="saved"],
+  #ach-customizer #ach-status-design-result[data-state="saved"],
   #ach-customizer #ach-status-result[data-state="saved"] {
     background:#f1f8f2; border-color:#c8e0cc; color:#235d32;
   }
   #ach-customizer #ach-overview-control-result[data-state="error"],
+  #ach-customizer #ach-status-design-result[data-state="error"],
   #ach-customizer #ach-status-result[data-state="error"] {
     background:#fff5f3; border-color:#e8ccca; color:#a5312d;
   }
@@ -1124,7 +1127,7 @@
         <p id="ach-status-source" role="status">Branding not loaded.</p>
         <p id="ach-status-branding-guidance" role="status" aria-live="polite">Load saved branding for this scope before checking live delivery. Use Recheck saved branding below.</p>
         <div class="ach-controls"><button id="ach-status-load" type="button" aria-describedby="ach-status-branding-guidance">Recheck saved branding</button></div>
-        <p id="ach-status-result" role="status" aria-live="polite" data-state="info">Open Status Pages to load saved preferences.</p>
+        <p id="ach-status-result" role="status" aria-live="polite" data-state="info">Open Error pages to load saved preferences.</p>
       </div>
       <div class="ach-workflow" data-status-stage="design">
       <div class="ach-status-fields">
@@ -1138,15 +1141,14 @@
       </div>
       <label><input id="ach-status-footer" type="checkbox" checked /> Show footer attribution</label>
       <p class="ach-note" id="ach-status-color-notes">Accessibility recommendation: Preview your chosen colors and check readability before publishing. Low contrast is a warning, not a Save restriction.</p>
+      <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
+      <p id="ach-status-reset-why" class="ach-note" role="status" aria-live="polite">Reset changes only the selected saved branding preferences, not live error pages. Check the scope if needed, then select Reset to continue.</p>
       <div class="ach-controls">
         <button id="ach-status-preview-button" type="button" disabled>Preview unsaved settings</button>
         <button id="ach-status-save" type="button" class="btn btn-success" disabled>Save branding preferences</button>
-      </div>
-      <p class="ach-note">Site overrides affect only preview resolution. The 404 page's homepage link remains site-local (<code>/</code>), regardless of brand URL. Reset does not install or restore any live HTML.</p>
-      <div class="ach-controls">
-        <p id="ach-status-reset-why" class="ach-note" role="status" aria-live="polite">Reset changes only the selected saved branding preferences, not live error pages. Check the scope if needed, then select Reset to continue.</p>
         <button id="ach-status-reset" type="button" aria-describedby="ach-status-reset-why" class="btn btn-warning" disabled>Reset selected branding scope</button>
       </div>
+      <p id="ach-status-design-result" data-state="info" hidden></p>
       <p id="ach-status-workflow-note" class="ach-note" role="status" hidden>Preview only for this template and scope. No live Apply is supported.</p>
       <div id="ach-status-preview-surface" class="ach-note" aria-label="Offline status page preview" hidden>
         <strong>Offline preview — not installed on any website</strong>
@@ -4433,6 +4435,15 @@
   }
   function statusNotice(message, state) {
     root.find('#ach-status-result').text(message).attr('data-state', state || 'info');
+    // The shared source notice is the only live region. Do not leave an old
+    // editor result visible when another source or scope is being checked.
+    root.find('#ach-status-design-result').text('').prop('hidden',true);
+  }
+  function statusDesignNotice(message, state) {
+    statusNotice(message,state);
+    // Keep the same result beside the editor actions without announcing it twice.
+    root.find('#ach-status-design-result').text(message)
+      .attr('data-state', state || 'info').prop('hidden',false);
   }
   function statusBrandMatchesSaved() {
     if (!statusSavedBrand) return false;
@@ -4877,7 +4888,7 @@
       statusClearPreview();
       statusLock(statusBusy);
       if (statusRevision === null || statusBusy || !statusSavedBrand) return;
-      statusNotice(statusBrandMatchesSaved() ?
+      statusDesignNotice(statusBrandMatchesSaved() ?
         'Fields match saved preferences (Revision ' + statusRevision + ').' :
         'Unsaved changes — select Save branding preferences to keep them.');
     });
@@ -4891,11 +4902,12 @@
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
     if (!scope || !statusTrustedSelection(scope)) {
-      statusNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
+      statusDesignNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
       return;
     }
     statusClearPreview();
     var ticket = statusTicket, selectedBrand = statusFields();
+    statusDesignNotice('Rendering offline preview...');
     statusLock(true);
     request('status_preview', Object.assign({}, scope, selectedBrand, {
       template:root.find('#ach-status-template').val(),
@@ -4912,13 +4924,13 @@
           !/^[0-9a-f]{64}$/.test(r.source_sha256 || '') ||
           r.locale !== root.find('#ach-status-locale').val() ||
           r.template !== root.find('#ach-status-template').val()) {
-        statusNotice('Preview failed or response incompatible. Nothing applied.', 'error');
+        statusDesignNotice('Preview failed or response incompatible. Nothing applied.', 'error');
       } else {
         root.find('#ach-status-iframe').prop('srcdoc', r.html);
         root.find('#ach-status-preview-surface').prop('hidden', false);
         root.find('#ach-status-sha').text(
           'Bundled SHA-256: ' + r.source_sha256 + '\nRendered SHA-256: ' + r.rendered_sha256);
-        statusNotice('Rendered offline ' + r.locale + '/' + r.template +
+        statusDesignNotice('Rendered offline ' + r.locale + '/' + r.template +
           ' preview using ' + r.source + '. No site changes.' +
           (Array.isArray(r.advisories) && r.advisories.length ?
            ' Accessibility notes: ' + r.advisories.join(' ') + ' You can still save.' : ''));
@@ -5927,11 +5939,11 @@
     if (statusBusy || statusRevision === null) return;
     var scope = statusScope();
     if (!scope || !statusTrustedSelection(scope)) {
-      statusNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
+      statusDesignNotice('Selected website is not verified in refreshed native inventory. Keep or copy your draft, then refresh the site list.', 'error');
       return;
     }
     var priorRevision = statusRevision, submitted = statusFields();
-    statusNotice('Saving ' + scope.scope + ' branding preferences...');
+    statusDesignNotice('Saving ' + scope.scope + ' branding preferences...');
     statusLock(true);
     request('status_save', Object.assign({}, scope, submitted, {
       branding_action:'save', expected_revision:String(priorRevision)
@@ -5945,13 +5957,13 @@
         typeof r.source === 'string';
       if (!acknowledged) {
         statusRevision = null;
-        statusNotice('Save not confirmed. Recheck saved branding before retrying.', 'error');
+        statusDesignNotice('Save not confirmed. Recheck saved branding before retrying.', 'error');
       } else {
         statusRevision = r.revision;
         statusSetFields(r.effective);
         statusSavedBrand = statusFields();
         root.find('#ach-status-source').text(r.source + '; revision ' + r.revision);
-        statusNotice((r.changed ?
+        statusDesignNotice((r.changed ?
           'Saved ' + scope.scope + ' branding preferences.' :
           'No changes needed — preferences already match the saved values.') +
           ' Revision ' + r.revision + '. No page or service changed.' +
@@ -5967,7 +5979,7 @@
     var scope = statusScope();
     if (!statusTrustedSelection(scope)) return;
     var priorRevision = statusRevision;
-    statusNotice('Resetting ' + scope.scope + ' branding preferences...');
+    statusDesignNotice('Resetting ' + scope.scope + ' branding preferences...');
     statusLock(true);
     request('status_save', Object.assign({}, scope, {
       branding_action:'reset', expected_revision:String(priorRevision)
@@ -5981,14 +5993,14 @@
         typeof r.source === 'string';
       if (!acknowledged) {
         statusRevision = null;
-        statusNotice('Reset not confirmed. Recheck saved branding before retrying.', 'error');
+        statusDesignNotice('Reset not confirmed. Recheck saved branding before retrying.', 'error');
       } else {
         statusRevision = r.revision;
         statusSetFields(r.effective);
         statusSavedBrand = statusFields();
         statusClearPreview();
         root.find('#ach-status-source').text(r.source + '; revision ' + r.revision);
-        statusNotice((r.changed ? 'Branding preferences reset for this scope only.' :
+        statusDesignNotice((r.changed ? 'Branding preferences reset for this scope only.' :
           'No changes needed — this scope already uses inherited or default branding.') +
           ' Revision ' + r.revision + '. No page or service changed.', 'saved');
       }
@@ -6663,10 +6675,14 @@
   root.find('#ach-cache-clear-recheck-route,#ach-bridge-recheck-route').on('click',function () {
     activeCacheStage = 'configure';
     renderOperationalStages();
+    var target = root.find('[data-cache-task="configure"]')[0];
+    if (target && target.focus) target.focus();
   });
   root.find('#ach-php-preview-route').on('click',function () {
     activePhpStage = 'policy';
     renderOperationalStages();
+    var target = root.find('[data-php-task="policy"]')[0];
+    if (target && target.focus) target.focus();
   });
   root.find('[data-status-mode]').on('click', function () {
     var mode = $(this).attr('data-status-mode');
@@ -6695,6 +6711,14 @@
   // Arrow keys are conveniences; native Tab/Enter/Space always remain available.
   root.find('[data-destination]').on('keydown', function (event) {
     if (!root[0] || !event) return;
+    if (event.key === 'Escape' && root.find('#ach-menu-toggle').attr('aria-expanded') === 'true') {
+      event.preventDefault();
+      root.find('#ach-primary-nav').attr('data-open','false');
+      root.find('#ach-menu-toggle').attr('aria-expanded','false');
+      var toggle = root.find('#ach-menu-toggle')[0];
+      if (toggle && toggle.focus) toggle.focus();
+      return;
+    }
     var list = Array.from(root[0].querySelectorAll('[data-destination]'));
     var index = list.indexOf(this), direction = 0;
     if (event.key === 'ArrowDown') direction = 1;

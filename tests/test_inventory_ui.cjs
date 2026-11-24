@@ -177,7 +177,7 @@ function loadUi() {
     '#ach-status-unbound-apply-why', '#ach-status-unbound-restore-why',
     '#ach-status-tls-apply-why', '#ach-status-tls-restore-why',
     '#ach-status-stopped-apply-why', '#ach-status-stopped-restore-why',
-    '#ach-status-source', '#ach-status-result', '#ach-status-sha', '#ach-status-iframe',
+    '#ach-status-source', '#ach-status-result', '#ach-status-design-result', '#ach-status-sha', '#ach-status-iframe',
     '#ach-status-inspect-button', '#ach-status-inspect-result',
     '#ach-status-probe-button', '#ach-status-probe-result', '#ach-status-adoption-result',
     '#ach-status-manage-recheck', '#ach-status-manage-apply',
@@ -4018,7 +4018,8 @@ test('All tabs place routine feedback by its operation rather than below long co
   ordered('ach-fpm-check-recovery','ach-fpm-recovery-status','ach-fpm-rollback');
   // Branding read, error, and retry remain one shared source above every task stage.
   ordered('ach-status-source','ach-status-load','ach-status-result',
-    'ach-status-save','ach-status-reset','ach-status-inspect-button');
+    'ach-status-save','ach-status-reset','ach-status-design-result','ach-status-inspect-button');
+  assert.match(html,/id="ach-status-design-result" data-state="info" hidden/);
   ordered('ach-activity-result','ach-activity-rows');
   assert.equal((html.match(/id="ach-status-result"/g) || []).length,1);
   assert.match(html,/id="ach-status-result"[^>]*aria-live="polite"/);
@@ -10457,4 +10458,24 @@ test('S2S4-01: shared Recheck never discards an unsaved branding draft without a
   fresh.respond(statusPrefs(4));
   assert.equal(ui.state().statusName,brand().brand_name);
   assert.equal(ui.state().unboundRecheckDisabled,false);
+});
+
+test('S5 editor feedback mirrors the canonical status without duplicating the live announcement', () => {
+  const ui=loadUi();
+  ui.openStatus().respond(statusPrefs(4));
+  assert.equal(ui.navElementHidden('#ach-status-design-result'),true);
+  const save=ui.statusClick('#ach-status-save');
+  assert.equal(ui.elementText('#ach-status-design-result'),ui.state().statusResult);
+  assert.equal(ui.navElementHidden('#ach-status-design-result'),false);
+  save.respond({status:true,schema:1,revision:4,changed:false,scope:'global',
+    site_id:null,source:'Global default',effective:brand()});
+  assert.match(ui.elementText('#ach-status-design-result'),/No changes needed/);
+  assert.equal(ui.elementText('#ach-status-design-result'),ui.state().statusResult);
+  const reset=ui.statusClick('#ach-status-reset');
+  reset.reject(null,'timeout');
+  assert.match(ui.elementText('#ach-status-design-result'),/Reset not confirmed/);
+  assert.equal(ui.state().statusSaveDisabled,true);
+  ui.statusClick('#ach-status-load').respond(statusPrefs(5));
+  assert.equal(ui.navElementHidden('#ach-status-design-result'),true);
+  assert.match(ui.state().statusResult,/Revision 5/);
 });
