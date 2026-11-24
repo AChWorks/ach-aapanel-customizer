@@ -1312,15 +1312,18 @@ def _fragments(site_id, php_version, cache_generation, *, inherited_hsts=None,
     return reference,global_bytes,extension_bytes
 
 
-def verified_cache_extension(directory,site_id,site_key,name,text,*,state_dir=None):
+def verified_cache_extension(directory,site_id,site_key,name,text,*,state_dir=None,state_fd=None):
     """Called by native Extension scanner; trust only exact owned journal/bytes."""
     if name != _names(site_id)[1] or Path(directory).name != site_key:
         raise CacheManageError('ownership','Unknown cache extension identity')
-    statefd=_open_state_dir(state_dir or DATA_DIR)
-    try:
-        record=_record_read(statefd,site_id)
-    finally:
-        os.close(statefd)
+    if state_fd is None:
+        statefd=_open_state_dir(state_dir or DATA_DIR)
+        try:
+            record=_record_read(statefd,site_id)
+        finally:
+            os.close(statefd)
+    else:
+        record=_record_read(state_fd,site_id)
     if (not record or record['site_key'] != site_key
             or record['phase'] not in ('prepared','applied')):
         raise CacheManageError('ownership','Cache extension lacks live recovery ownership')

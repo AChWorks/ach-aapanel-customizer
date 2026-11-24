@@ -82,7 +82,8 @@ class NativeSecurityTests(unittest.TestCase):
     def operate(self, action="preview", **kwargs):
         source = guard._sha(self.vhost.read_bytes())
         variant = (guard.RULESET_XMLRPC if kwargs.get("xmlrpc", False) else guard.RULESET)
-        proposal = guard._proposal_sha(variant)
+        proposal = (guard._proposal_sha(variant, kwargs.get("scan"), self.site["id"])
+                    if action in ("preview", "apply") else None)
         return guard.manage_guard(
             action, self.site, data_fd=self.fd,
             approved=kwargs.get("approved", True),
@@ -92,7 +93,142 @@ class NativeSecurityTests(unittest.TestCase):
             vhost_root=str(self.vhost_root),
             nginx_conf=str(self.nginx_conf), nginx="/test/nginx",
             runner=self.runner, probe=self.probe,
-            block_xmlrpc=kwargs.get("xmlrpc", False))
+            block_xmlrpc=kwargs.get("xmlrpc", False), scan_policy=kwargs.get("scan"))
+
+    def test_temporary_scanner_shares_guard_transaction_and_policy(self):
+        policy = {"maxretry": 3, "findtime": 4, "bantime": 5}
+        pre = self.operate("preview", scan=policy)
+        self.assertEqual(pre["scan_policy"], policy)
+        zone = self.vhost_root / guard.SCAN_ZONE_FILE
+        self.assertFalse(zone.exists(), "Preview must not publish shared memory")
+        with self.assertRaisesRegex(guard.GuardError, "plan"):
+            self.operate("apply", scan=policy, proposal=guard._proposal_sha())
+        result = self.operate("apply", scan=policy, proposal=pre["proposal_sha256"])
+        self.assertEqual(result["state"], "Applied")
+        self.assertEqual(result["scan_policy"], policy)
+        self.assertEqual(zone.read_bytes(), guard.SCAN_ZONE_BYTES)
+        self.assertIn(b"set_by_lua_block", self.fragment.read_bytes())
+        self.assertEqual(self.operate("recheck", scan={})["scan_policy"], policy)
+        ret = self.operate("restore", recovery=result["recovery_id"], scan={})
+        self.assertEqual(ret["state"], "Restored")
+        self.assertIsNone(ret["scan_policy"])
+        self.assertFalse(self.fragment.exists())
+        self.assertEqual(zone.read_bytes(), guard.SCAN_ZONE_BYTES)
+
+    def test_dependency_inspector_only_accepts_exact_live_guard_owner(self):
+        from ach_customizer_monitor import _native_extension_fingerprint, MonitorInputError
+        def fingerprint():
+            return _native_extension_fingerprint(
+                self.ext, site_id=self.site["id"], site_key=self.site["name"],
+                cache_state_dir=str(self.state))
+        for policy in (None, guard.SCAN_DEFAULTS):
+            with self.subTest(policy=policy):
+                applied = self.operate("apply", scan=policy)
+                original = self.fragment.read_bytes()
+                self.assertEqual(len(fingerprint()), 64)
+                journal = self.state / guard._journal(self.site["id"])
+                saved = journal.read_bytes()
+                self.fragment.write_bytes(original + b"# foreign edit\n")
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                self.fragment.write_bytes(original)
+                journal.unlink()
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                journal.write_bytes(saved)
+                journal.chmod(0o600)
+                wrong = self.ext / guard._file(self.site["id"] + 1)
+                wrong.write_bytes(original)
+                wrong.chmod(0o600)
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                wrong.unlink()
+                retained = self.ext / guard._retained(self.site["id"], applied["recovery_id"])
+                retained.write_bytes(original)
+                retained.chmod(0o600)
+                with self.assertRaisesRegex(MonitorInputError, "Protection extension ownership"):
+                    fingerprint()
+                retained.unlink()
+                self.assertEqual(len(fingerprint()), 64)
+                self.assertEqual(self.operate("restore", recovery=applied["recovery_id"])["state"], "Restored")
+
+    def test_guard_exact_filename_cannot_be_imported_by_peer(self):
+        result = self.operate("apply", scan=guard.SCAN_DEFAULTS)
+        peer = self.vhost_root / "peer.invalid.conf"
+        peer.write_text("server { server_name peer.invalid; include "
+                        + str(self.fragment) + "; }\n")
+        original = self.fragment.read_bytes()
+        self.assertEqual(self.operate("recheck")["state"], "Needs Review")
+        before = len(self.commands)
+        with self.assertRaisesRegex(guard.ExtensionError, "second Nginx source"):
+            self.operate("restore", recovery=result["recovery_id"])
+        self.assertEqual(len(self.commands), before)
+        self.assertEqual(self.fragment.read_bytes(), original)
+        peer.unlink()
+        self.assertEqual(self.operate("restore", recovery=result["recovery_id"])["state"], "Restored")
+
+    def test_temporary_scanner_foreign_shared_declaration_not_adopted(self):
+        zone = self.vhost_root / guard.SCAN_ZONE_FILE
+        zone.write_text("# Foreign source")
+        zone.chmod(0o600)
+        self.assertEqual(self.operate("preview", scan=guard.SCAN_DEFAULTS)["state"], "Needs Review")
+        with self.assertRaisesRegex(guard.GuardError, "declaration differs"):
+            self.operate("apply", scan=guard.SCAN_DEFAULTS)
+        self.assertEqual(zone.read_text(), "# Foreign source")
+        self.assertFalse(self.fragment.exists())
+        self.assertEqual(self.operate("preview")["state"], "Unmanaged")
+
+    def test_temporary_scanner_syntax_failure_leaves_static_guard_available(self):
+        original = self.runner
+        def runner(argv, **kw):
+            if "-t" in argv and (self.vhost_root / guard.SCAN_ZONE_FILE).exists():
+                return SimpleNamespace(returncode=1, stderr=b"unknown directive")
+            return original(argv, **kw)
+        self.runner = runner
+        with self.assertRaisesRegex(guard.GuardError, "Lua configuration failed"):
+            self.operate("apply", scan=guard.SCAN_DEFAULTS)
+        self.assertFalse((self.vhost_root / guard.SCAN_ZONE_FILE).exists())
+        self.assertFalse(self.fragment.exists())
+        self.assertEqual(self.operate("apply")["state"], "Applied")
+
+    def test_temporary_scanner_missing_zone_reports_exact_recovery(self):
+        result = self.operate("apply", scan=guard.SCAN_DEFAULTS)
+        (self.vhost_root / guard.SCAN_ZONE_FILE).unlink()
+        observed = self.operate("recheck")
+        self.assertEqual(observed["state"], "Recovery Required")
+        self.assertEqual(observed["recovery_scope"], "scanner_runtime_unverified")
+        self.assertEqual(observed["recovery_id"], result["recovery_id"])
+        self.assertEqual(self.operate("restore", recovery=result["recovery_id"])["state"], "Restored")
+
+    def test_scanner_fallback_is_present_but_not_healthy_during_reload(self):
+        op = "a" * 32
+        first = [0]
+        def retiring(site, nonce, kind):
+            first[0] += 1
+            return (403, nonce + guard.SCAN_FALLBACK) if first[0] <= len(guard.PROOF_KINDS) else (404, None)
+        with patch.object(guard.time, "sleep"):
+            self.assertTrue(guard._verified(self.site, op, present=False, probe=retiring))
+        self.assertGreaterEqual(first[0], 4 * len(guard.PROOF_KINDS))
+        with patch.object(guard.time, "monotonic", side_effect=[0, 10]):
+            with self.assertRaisesRegex(guard.GuardError, "scanner runtime is unavailable"):
+                guard._verified(self.site, op, present=True,
+                                probe=lambda site, nonce, kind: (403, nonce + guard.SCAN_FALLBACK))
+
+    def test_temporary_scanner_validates_policy_and_site_generation(self):
+        for invalid in ({}, {"maxretry": True, "findtime": 2, "bantime": 3},
+                        {"maxretry": 0, "findtime": 2, "bantime": 3},
+                        {"maxretry": "6.0", "findtime": 2, "bantime": 3}):
+            with self.assertRaises(guard.GuardError):
+                guard._scan_policy(invalid)
+        p = guard.SCAN_DEFAULTS
+        self.assertNotEqual(guard._proposal_sha(scan_policy=p, site_id=7),
+                            guard._proposal_sha(scan_policy=p, site_id=8))
+        self.assertNotEqual(guard._include("a"*32, scan_policy=p, site_id=7),
+                            guard._include("b"*32, scan_policy=p, site_id=7))
+        generated = guard._include("a"*32, guard.RULESET_XMLRPC, p, 7).decode()
+        self.assertEqual(generated.count("^/xmlrpc[.]php$"), 1)
+        self.assertIn("safe_add", generated)
+        self.assertNotIn("http_x_", generated)
 
     def test_nested_native_served_directory_is_server_scoped_not_file_adoption(self):
         served = self.site_root / "public"

@@ -40,7 +40,7 @@ from ach_customizer_status_pages import (
 
 # Worker-loaded constant: do not read fresh disk metadata at request time.
 # In-place ZIP upgrades may leave old Python imports resident in aaPanel.
-WORKER_SOURCE_VERSION = '0.1.115'
+WORKER_SOURCE_VERSION = '0.1.116'
 
 _STATE_DIR = DATA_DIR
 
@@ -83,7 +83,6 @@ class ach_customizer_main:
             cache_recovery = (module == "websites" and
                               action in ("manage_cache_policy", "cache_manage",
                                          "manage_nginx_protection", "nginx_guard_manage",
-                                         "manage_abusive_scan", "abusive_scan_manage",
                                          "wp_settings_manage", "wp_settings_uncertain",
                                          "manage_wordpress_cache", "wordpress_cache_setup",
                                          "wordpress_cache_inspect", "wordpress_cache_restore",
@@ -133,13 +132,10 @@ class ach_customizer_main:
                 wordpress_detail = isinstance(error, (WordpressCacheError, StatusPageError))
             except ImportError:
                 pass
-        if stage == "abusive_scan_manage":
-            # This scanner is intentionally operator-controlled. Report
-            # its typed dependency/ownership/validation failures rather than
-            # hiding actionable causes behind a generic plugin error.
+        if stage == "nginx_guard_manage":
             try:
-                from ach_customizer_abusive_scan import AbuseError
-                controlled += (AbuseError,)
+                from ach_customizer_nginx_security import GuardError
+                controlled += (GuardError,)
             except ImportError:
                 pass
         typed_domain_detail = isinstance(error, str) and diagnostic_error is not None
@@ -176,12 +172,6 @@ class ach_customizer_main:
                     actual_recovery = None
             except ImportError:
                 trusted_hosts_recovery = False
-        if stage == "abusive_scan_manage":
-            try:
-                from ach_customizer_abusive_scan import AbuseError
-                trusted_hosts_recovery = isinstance(error, AbuseError)
-            except ImportError:
-                trusted_hosts_recovery = False
         if stage.startswith("wordpress_cache_"):
             trusted_hosts_recovery = wordpress_detail
         if (trusted_hosts_recovery and isinstance(actual_recovery, str) and
@@ -190,7 +180,7 @@ class ach_customizer_main:
             response["request_id"] = operation_id
         module = ("php_fpm" if stage.startswith(("fpm_", "php_fpm_", "php_versions_", "php_runtime_")) else
                   "status_pages" if stage.startswith("status_") else
-                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "abusive_scan_", "wordpress_cache_", "wp_settings_")) else
+                  "websites" if stage.startswith(("website_", "hosts_", "cache_", "nginx_guard_", "wordpress_cache_", "wp_settings_")) else
                   "lifecycle" if stage.startswith("wp_terminal_") else
                   "diagnostics" if stage.startswith("activity_") else "monitor")
         return ach_customizer_main._activity_result(
@@ -881,9 +871,8 @@ class ach_customizer_main:
             if action not in ("preview", "apply", "recheck", "restore"):
                 raise MonitorInputError("Unsupported Nginx security operation")
             import public
-            if (public.get_webserver() != "nginx" or
-                    str(public.get_panel_version()).strip() != "8.0.7"):
-                raise MonitorInputError("Nginx security adapter requires aaPanel 8.0.7 Nginx")
+            if public.get_webserver() != "nginx":
+                raise MonitorInputError("Native website protection requires Nginx")
             from ach_customizer_nginx_security import (
                 manage_guard, GuardError, ExtensionError,
             )
@@ -895,9 +884,19 @@ class ach_customizer_main:
             # Browser-provided IDs are never trusted for failed pre-selection.
             trusted_site_id = str(before["id"])
             approved = self._argument(args, "approved") == "true"
-            xmlrpc_choice = self._argument(args, "guard_block_xmlrpc", "false")
-            if xmlrpc_choice not in ("true", "false"):
-                raise MonitorInputError("Choose an explicit XML-RPC Nginx guard option")
+            # Only new proposals consume policy inputs. Recheck and Restore
+            # inspect the exact saved journal, even with unsaved/invalid edits.
+            xmlrpc_choice, scan_policy = "false", None
+            if action in ("preview", "apply"):
+                xmlrpc_choice = self._argument(args, "guard_block_xmlrpc", "false")
+                if xmlrpc_choice not in ("true", "false"):
+                    raise MonitorInputError("Choose an explicit XML-RPC Nginx guard option")
+                scan_choice = self._argument(args, "guard_scan", "false")
+                if scan_choice not in ("true", "false"):
+                    raise MonitorInputError("Choose an explicit temporary IP blocking option")
+                if scan_choice == "true":
+                    scan_policy = {name: self._argument(args, name)
+                                   for name in ("maxretry", "findtime", "bantime")}
             # A globally shared native document root cannot justify an
             # isolated per-site protection claim. Reject before any write.
             if action in ("apply", "restore"):
@@ -921,6 +920,7 @@ class ach_customizer_main:
                         expected_proposal=self._argument(args, "expected_proposal_sha256"),
                         expected_recovery=self._argument(args, "recovery_id"),
                         block_xmlrpc=xmlrpc_choice == "true",
+                        scan_policy=scan_policy,
                     )
                     if current_site() != before:
                         raise GuardError(
@@ -951,116 +951,6 @@ class ach_customizer_main:
                            re.fullmatch(r"[a-z][a-z_]{0,31}", phase) else None)
             return self._fail("nginx_guard_manage", exc, request_id,
                               target=trusted_site_id, activity_stage=typed_stage)
-
-    def manage_abusive_scan(self, args):
-        """Explicit per-site log monitoring, origin-wide firewall ban/recovery.
-
-        Fail2ban is a host dependency. Selected site ownership, persisted
-        recovery, exact log source and shared-service side effects remain
-        visible; the endpoint never installs packages or edits vendor files.
-        """
-        request_id = uuid4().hex
-        action = self._argument(args, "scan_action")
-        trusted_site_id = ""
-        try:
-            self._status_primary_admin_post()
-            if action in ("orphan_list", "orphan_restore"):
-                # Recovery must remain available after deleting the website,
-                # including when the Monitor has been disabled. Never accept
-                # a claimed orphan status supplied by the browser.
-                from ach_customizer_abusive_scan import manage_orphans, AbuseError
-                from ach_customizer_state import _open_state_dir
-                from ach_customizer_status_pages import _take_lock
-                import public
-
-                def native_site_absent(site_id):
-                    result = public.M("sites").where("id=?", (site_id,)).count()
-                    if type(result) is not int or result < 0:
-                        raise AbuseError("identity", "Native site absence lookup failed")
-                    return result == 0
-
-                raw_site = self._argument(args, "orphan_site_id")
-                site_id = None
-                if action == "orphan_restore":
-                    if not isinstance(raw_site, str) or not re.fullmatch(
-                            r"[1-9][0-9]{0,9}", raw_site):
-                        raise AbuseError("input", "Select a recorded native scanner site ID")
-                    site_id = int(raw_site)
-                data_fd = _open_state_dir(_STATE_DIR)
-                try:
-                    lock = _take_lock(data_fd)
-                    try:
-                        result = manage_orphans(
-                            action, data_fd=data_fd,
-                            native_site_absent=native_site_absent,
-                            site_id=site_id,
-                            recovery_id=self._argument(args, "recovery_id"),
-                            approved=self._argument(args, "approved") == "true")
-                    finally:
-                        os.close(lock)
-                finally:
-                    os.close(data_fd)
-                trusted_site_id = (str(result["site_id"])
-                                   if action == "orphan_restore" else "")
-                return self._activity_result(
-                    {"status": True, "request_id": request_id, **result},
-                    "websites", "manage_abusive_scan", target=trusted_site_id,
-                    level="WARNING" if result["state"] == "Recovery Required" else "INFO")
-            self._require_enabled("site_inventory")
-            if action not in ("preview", "apply", "recheck", "restore"):
-                raise MonitorInputError("Unsupported Fail2ban scanner action")
-            from ach_customizer_abusive_scan import manage, AbuseError
-            from ach_customizer_nginx_security import manage_guard
-            from ach_customizer_state import _open_state_dir
-            from ach_customizer_status_pages import _take_lock
-
-            public, site, current_site = self._selected_native_website(args)
-            trusted_site_id = str(site["id"])
-            data_fd = _open_state_dir(_STATE_DIR)
-            try:
-                lock = _take_lock(data_fd)
-                try:
-                    if current_site() != site:
-                        raise MonitorInputError("Native site changed during Fail2ban readiness")
-                    if action == "apply":
-                        # Only the verified Nginx server-level sensitive-path
-                        # guard can claim pre-PHP blocking for this site.
-                        guard = manage_guard("recheck", site, data_fd=data_fd)
-                        if guard["state"] != "Applied" or not guard["runtime_verified"]:
-                            raise AbuseError("dependency",
-                                "Enable and verify this site's Nginx sensitive-path guard first")
-                    result = manage(
-                        action, site, data_fd=data_fd,
-                        approved=self._argument(args, "approved") == "true",
-                        params={name: self._argument(args, name)
-                                for name in ("maxretry", "findtime", "bantime")
-                                if self._argument(args, name) is not None},
-                        expected_plan=self._argument(args, "expected_plan_sha256"),
-                        recovery_id=self._argument(args, "recovery_id"),
-                    )
-                    if current_site() != site:
-                        raise AbuseError("uncertain",
-                            "Native site changed; recheck exact Fail2ban recovery",
-                            recovery_id=result.get("recovery_id"))
-                finally:
-                    os.close(lock)
-            finally:
-                os.close(data_fd)
-            return self._activity_result(
-                {"status": True, "request_id": request_id, **result},
-                "websites", "manage_abusive_scan", target=trusted_site_id,
-                level="WARNING" if result["state"] in
-                    ("Needs Review", "Recovery Required", "Dependency Missing") else "INFO")
-        except PermissionError as exc:
-            return self._fail("abusive_scan_authorization", exc, request_id,
-                              target=trusted_site_id)
-        except Exception as exc:
-            from ach_customizer_abusive_scan import AbuseError
-            kind = getattr(exc, "stage", None) if isinstance(exc, AbuseError) else None
-            typed = ("abusive_scan_" + kind if isinstance(kind, str) and
-                     re.fullmatch(r"[a-z][a-z_]{0,31}", kind) else None)
-            return self._fail("abusive_scan_manage", exc, request_id,
-                              target=trusted_site_id, activity_stage=typed)
 
     def inspect_native_vhost(self, args):
         """Primary-admin-only file-level Nginx vs native site record drift.

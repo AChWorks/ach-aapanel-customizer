@@ -28,6 +28,7 @@ PARSER = argparse.ArgumentParser(description=__doc__)
 PARSER.add_argument("--plugin-root", type=Path, default=Path(__file__).resolve().parents[2] / "plugin/ach_customizer")
 PARSER.add_argument("--well-known", type=Path, default=Path(__file__).resolve().parents[1] / "fixtures/native-well-known.conf")
 PARSER.add_argument("--cache-force-https-only", action="store_true", help="Exercise fresh guarded Force HTTPS Cache lifecycle on isolated Nginx")
+PARSER.add_argument("--protection-cache-only", action="store_true", help="Verify independently owned Protection and Cache coexistence on observed layouts")
 PARSER.add_argument("--status-only", action="store_true", help="Run the nested NL status evidence/lifecycle without repeating Guard or Cache writes")
 ARGS = PARSER.parse_args()
 sys.path.insert(0, str(ARGS.plugin_root))
@@ -129,11 +130,13 @@ def high_port():
         return port
 
 
-def request(name, port, path="/index.php", *, tls=False, protocol=None, headers=()):
+def request(name, port, path="/index.php", *, tls=False, protocol=None, headers=(), source=None):
     url = ("https" if tls else "http") + f"://{name}:{port}{path}"
     args = ["curl", "--noproxy", "*", "--silent", "--show-error", "--max-time", "8",
             "--connect-timeout", "3", "--resolve", f"{name}:{port}:127.0.0.1",
             "-k", "-D", "-", url]
+    if source:
+        args.extend(("--interface", source))
     if protocol:
         args.insert(1, protocol)
     for header in headers:
@@ -190,7 +193,7 @@ def process(conf, directory, callback):
 
 
 def force_https_lifecycle(directory, confdir, vhosts, main, rows, panel, selected, cert,
-                          http_port, tls_port):
+                          http_port, tls_port, *, coexist=False):
     """Real source validation and real Nginx reloads with only fixture-local paths.
 
     Native source files retain their actual 80/443 shape; the independent
@@ -204,7 +207,7 @@ def force_https_lifecycle(directory, confdir, vhosts, main, rows, panel, selecte
     state.mkdir(mode=0o700)
     cache_root = str(directory / "managed-cache")
     selected_names = {r["name"] for r in selected}
-    for row in selected:
+    for row in ([] if coexist else selected):
         path = vhosts / (row["name"] + ".conf")
         write(path, path.read_text().replace(
             " ssl_certificate ", ' if ($server_port !~ 443) { rewrite ^(/.*)$ https://$host$1 permanent; }\n ssl_certificate ', 1))
@@ -295,10 +298,136 @@ def force_https_lifecycle(directory, confdir, vhosts, main, rows, panel, selecte
         assert commands.count("-s")==4,commands
         assert {p:p.read_bytes() for p in original}==original
         return outputs
+    def combined_lifecycle():
+        """Real managed Cache writers/readers, not just a generated config."""
+        import ach_customizer_state as plugin_state
+        import ach_customizer_cache_bridge as bridge
+        fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+        outputs = []
+        gkw = dict(data_fd=fd, vhost_root=str(vhosts), nginx_conf=str(main), nginx=NGINX,
+                   runner=runner, probe=lambda site,op,kind: guard._probe(site,op,kind,port=http_port))
+        def guard_apply(row, scan):
+            p = guard.manage_guard("preview",row,scan_policy=scan,**gkw)
+            assert p["state"]=="Unmanaged",p
+            return guard.manage_guard("apply",row,approved=True,scan_policy=scan,
+                expected_vhost=p["vhost_sha256"],expected_proposal=p["proposal_sha256"],**gkw)
+        def guard_restore(row):
+            p=guard.manage_guard("recheck",row,**gkw)
+            assert p["state"]=="Applied",p
+            r=guard.manage_guard("restore",row,approved=True,
+                expected_vhost=p["vhost_sha256"],expected_recovery=p["recovery_id"],**gkw)
+            assert r["state"]=="Restored",r
+        def cache_apply(row):
+            p=manage.preview_cache_activation(row,panel,**kw)
+            assert p["state"]=="Ready for Review",p
+            r=manage.manage_cache("apply",row,panel,approved=True,expected_source=p["source_sha256"],
+                expected_proposal=p["proposal_sha256"],cache_generation=p["cache_generation"],runner=runner,**kw)
+            assert r["state"]=="Applied" and r["runtime_verified"],r
+            return r
+        def cache_check(row):
+            checked=manage.manage_cache("recheck",row,panel,**kw)
+            assert checked["state"]=="Applied" and checked["runtime_verified"],checked
+            return checked
+        def cache_restore(row, recovery):
+            r=manage.manage_cache("restore",row,panel,approved=True,recovery_id=recovery,runner=runner,**kw)
+            assert r["state"]=="Restored" and r["runtime_verified"],r
+        def check_dependencies(row):
+            impact=monitor.inspect_php_fpm_site_impact(panel,"85",directory/"pool.conf",
+                vhost_root=str(vhosts),nginx_conf_root=str(confdir),rewrite_root=str(vhosts.parent/"rewrite"))
+            assert impact["state"]=="File Mapping" and len(impact["matched_sites"])==len(rows),impact
+            observed=audit.inspect_site_fastcgi_cache(panel,row["id"],row["name"],
+                vhost_root=str(vhosts),nginx_root=str(confdir),rewrite_root=str(vhosts.parent/"rewrite"))
+            assert observed["state"]=="Source Observed" and observed["unresolved_other_sites"]==0,observed
+        def wp_inspection(row, applied):
+            # Keep the native Cache observation and exact generation reader
+            # real. Synthetic WP files and PHP/Bridge boundary responses
+            # isolate the connection-state consumer (not a WP activation test).
+            root=Path(row["path"])
+            config=root/"wp-config.php"; ini=root/".user.ini"
+            before=(config.read_bytes(),ini.read_bytes())
+            cache=cache_root+"/site-"+str(row["id"])
+            config.write_bytes(before[0].replace(b"/www/server/fastcgi_cache",cache.encode()))
+            ini.write_bytes(before[1].rstrip()+b":"+cache.encode()+b"/\n")
+            saved=manage._record_read(fd,row["id"])
+            journal={"phase":"connected","recovery_id":applied["recovery_id"],
+                     "native_generation":saved["cache_generation"],"wp_old":"/www/server/fastcgi_cache","php":"85"}
+            caps={k:True for k in ("Nginx Helper | Config","Nginx Helper | Purge cache")}
+            wp_status={"previous":{"constant":cache,"admin_caps_stored":caps,"admin_caps_effective":caps},
+                       "active_helper":True,"active_bridge":True,
+                       "options":{"cache_method":"enable_fastcgi","enable_purge":1,"purge_method":"unlink_files"}}
+            try:
+                with patch.object(wp,"_load",return_value=journal), \
+                     patch.object(wp,"_php",return_value=wp_status), \
+                     patch.object(wp,"CACHE_ROOT",cache_root), \
+                     patch.object(wp,"manage_cache",side_effect=lambda action,site,public:manage.manage_cache(action,site,public,**kw)), \
+                     patch.object(bridge,"inspect",return_value="Provisioned"):
+                    observed=wp.inspect(row,panel,data_dir=str(state))
+                    assert observed["state"]=="Connected",observed
+            finally:
+                config.write_bytes(before[0]); ini.write_bytes(before[1])
+        def hit(row, source=None, path="/index.php"):
+            return request(row["name"],http_port,path,source=source)
+        try:
+            with patch.object(plugin_state,"DATA_DIR",str(state)):
+                # Cache first, scanner second. The peer also owns a static
+                # Guard and is included in all Cache/FPM dependency checks.
+                first, second=selected
+                peer_guard=guard_apply(second,None)
+                assert peer_guard["state"]=="Applied",peer_guard
+                c1=cache_apply(first)
+                g1=guard_apply(first,{"maxretry":3,"findtime":30,"bantime":60})
+                assert g1["state"]=="Applied",g1
+                cache_check(first); check_dependencies(first)
+                wp_inspection(first,c1)
+                assert hit(first)["status"]==200
+                assert hit(first)["headers"]["x-ach-cache"]==["HIT"]
+                for _ in range(3): assert hit(first,"127.0.0.2","/.env")["status"]==403
+                assert hit(first,"127.0.0.2")["status"]==429
+                assert hit(second,"127.0.0.2")["status"]==200
+                clear=manage.manage_cache("clear_files",first,panel,approved=True,
+                    recovery_id=c1["recovery_id"],**kw)
+                assert clear["state"]=="Applied" and clear["runtime_verified"] and clear["cache_files_removed"]>0,clear
+                assert hit(first,"127.0.0.2")["status"]==429
+                # Restore Cache while leaving the exact active Guard.
+                cache_restore(first,c1["recovery_id"])
+                assert guard.manage_guard("recheck",first,**gkw)["state"]=="Applied"
+                assert hit(first,"127.0.0.2")["status"]==429
+                guard_restore(first)
+                assert hit(first,"127.0.0.2")["status"]==200
+                outputs.append({"order":"Cache then scanner","cache_clear":clear["cache_files_removed"],
+                                "wp_connection":"Connected (synthetic WP boundary, real native Recheck)",
+                                "fpm":"all sites mapped","restore_cache_first":"PASS"})
+                # Static Guard first, Cache second. Restore Guard while
+                # Cache remains verified, then restore Cache independently.
+                c2=cache_apply(second)
+                cache_check(second); check_dependencies(second)
+                assert guard.manage_guard("recheck",second,**gkw)["state"]=="Applied"
+                assert hit(second,path="/.env")["status"]==403
+                guard_restore(second)
+                cache_check(second)
+                cache_restore(second,c2["recovery_id"])
+                assert hit(second)["status"]==200
+                outputs.append({"order":"static Guard then Cache","fpm":"all sites mapped",
+                                "restore_guard_first":"PASS"})
+                assert probe(peer)==peer_before
+            return outputs
+        finally:
+            os.close(fd)
+    peer_before = None
+    if coexist:
+        # Use the same verified fixture-local writer and exact package
+        # generators as the established Force HTTPS lifecycle.
+        callback=combined_lifecycle
+    else:
+        callback=exercise
+    def execute():
+        nonlocal peer_before
+        peer_before=probe(peer)
+        return callback()
     with patch.object(manage,"CACHE_ROOT",cache_root), patch.object(manage,"DATA_DIR",str(state)), \
          patch.object(manage,"_path_owned",owned), patch.object(manage,"generate_reference",ref), \
          patch.object(policy,"generate_reference",ref),patch.object(runtime,"CACHE_ROOT",cache_root):
-        return process(live_main,directory,exercise)
+        return process(live_main,directory,execute)
 
 
 def profile(base, label, wp_count, php_count):
@@ -423,6 +552,11 @@ def profile(base, label, wp_count, php_count):
     result["status_extension_source_ready"] = len(rows)
     # The stock site chosen for runtime has no foreign selected-route writer.
     selected = [rows[0], rows[-1]]
+    if ARGS.protection_cache_only:
+        result["protection_cache_lifecycle"] = force_https_lifecycle(
+            directory,confdir,vhosts,main,rows,panel,selected,cert,http_port,tls_port,coexist=True)
+        print(json.dumps(result),flush=True)
+        return result
     if ARGS.cache_force_https_only:
         result["force_https_cache_lifecycle"] = force_https_lifecycle(
             directory,confdir,vhosts,main,rows,panel,selected,cert,http_port,tls_port)
@@ -459,6 +593,52 @@ def profile(base, label, wp_count, php_count):
             assert response["status"] == 200 and response["body"].startswith("fixture:/index.php:")
             out[row["name"]] = response_semantics(response)
         return out, peer_requests()
+    # #146: reuse these observed native layouts, including stock and WP
+    # handlers, the well-known include and a nested public root. No new
+    # compatibility matrix or live aaPanel mutation is required.
+    if not ARGS.status_only:
+        scan_state = directory / "scanner-state"
+        scan_state.mkdir(mode=0o700)
+        def scan_runner(argv, **kwargs):
+            assert argv[0] == NGINX and argv[-2:] == ["-c", str(main)]
+            assert argv[1] in ("-t", "-s")
+            return subprocess.run([NGINX, "-p", str(directory)+"/"] + argv[1:], **kwargs)
+        def scan_lifecycle():
+            fd = os.open(scan_state, os.O_RDONLY | os.O_DIRECTORY)
+            out = []
+            try:
+                targets = [rows[0], rows[-1] if label == "ir" else rows[wp_count+1]]
+                for target in targets:
+                    name = target["name"]
+                    other = rows[-1 if target is rows[0] else 0]["name"]
+                    def query(path="/index.php", host=name):
+                        return request(host,http_port,path,source="127.0.0.2")["status"]
+                    assert query() == 200 and query(host=other) == 200
+                    opts = dict(data_fd=fd, vhost_root=str(vhosts), nginx_conf=str(main),
+                        nginx=NGINX, runner=scan_runner,
+                        probe=lambda site,op,kind: guard._probe(site,op,kind,port=http_port))
+                    policy = {"maxretry":3,"findtime":30,"bantime":30}
+                    preview = guard.manage_guard("preview",target,scan_policy=policy,**opts)
+                    assert preview["state"] == "Unmanaged",preview
+                    applied = guard.manage_guard("apply",target,approved=True,scan_policy=policy,
+                        expected_vhost=preview["vhost_sha256"],
+                        expected_proposal=preview["proposal_sha256"],**opts)
+                    assert applied["state"]=="Applied",applied
+                    assert [query("/.env") for _ in range(3)] == [403,403,403]
+                    assert query() == 429 and query(host=other) == 200
+                    assert request(name,http_port)["status"]==200
+                    checked = guard.manage_guard("recheck",target,**opts)
+                    assert checked["state"]=="Applied" and checked["scan_policy"]==policy,checked
+                    restored = guard.manage_guard("restore",target,approved=True,
+                        expected_vhost=checked["vhost_sha256"],
+                        expected_recovery=checked["recovery_id"],**opts)
+                    assert restored["state"]=="Restored" and query()==200,restored
+                    assert query(host=other)==200
+                    out.append({"site":name,"apply_recheck_restore":"PASS","same_ip_peer":"200"})
+                return out
+            finally:
+                os.close(fd)
+        result["scanner_lifecycle"] = process(main,directory,scan_lifecycle)
     if label == "nl":
         target = rows[wp_count+1]
         parent = Path(target["path"])

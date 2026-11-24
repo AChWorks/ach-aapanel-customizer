@@ -44,6 +44,12 @@ log_lifecycle() {
 case "${1:-}" in
     install)
         echo 'ACh aaPanel Customizer source registered (Monitor default; Manual Apply requires approval)'
+        # Native ZIP import overlays files; retire only the verified removed
+        # package member. No legacy runtime adapter or system cleanup.
+        if [ -x "$panel_python" ] && trusted_helper_path; then
+            "$panel_python" "$cleanup" retire-scanner-source ||
+                echo 'ACh aaPanel Customizer: retired source cleanup unconfirmed; inspect native install output'
+        fi
         log_lifecycle install_registered
         ;;
     uninstall)

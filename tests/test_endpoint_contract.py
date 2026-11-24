@@ -214,7 +214,8 @@ class EntrypointTests(unittest.TestCase):
         guard = __import__("ach_customizer_nginx_security")
         fake_public = types.ModuleType("public")
         fake_public.get_webserver = lambda: "nginx"
-        fake_public.get_panel_version = lambda: "8.0.7"
+        # The adapter uses verified native sources, not a version label.
+        fake_public.get_panel_version = Mock(side_effect=AssertionError("version gate"))
         flask_stub = types.ModuleType("flask")
         flask_stub.session = {"uid": 1, "login": True}
         flask_stub.request = types.SimpleNamespace(method="POST")
@@ -224,7 +225,8 @@ class EntrypointTests(unittest.TestCase):
                 "bound_domains": [{"name": "alternate.invalid", "port": 80}]}
         response = {"schema": 1, "site_id": 9, "site_key": site["name"],
                     "site_root": site["path"], "mode": "native_site_sensitive_paths",
-                    "ruleset": "nested-sensitive-v2", "state": "Unmanaged",
+                    "ruleset": "site-sensitive-files-v1", "state": "Unmanaged",
+                    "block_xmlrpc": False, "scan_policy": None,
                     "reason": "Native source checked", "read_only": True,
                     "changed": False, "runtime_verified": False,
                     "vhost_sha256": "a" * 64, "proposal_sha256": "b" * 64,
@@ -263,6 +265,20 @@ class EntrypointTests(unittest.TestCase):
             execute.assert_called_once()
             self.assertEqual(execute.call_args.args[:2], ("preview", site))
             self.assertFalse(execute.call_args.kwargs["approved"])
+            fake_public.get_panel_version.assert_not_called()
+            # Read-only inspection of the saved policy is independent of edits.
+            inspected = self.plugin.manage_nginx_protection({
+                "guard_action": "recheck", "guard_scan": "invalid",
+                "guard_block_xmlrpc": "invalid", "maxretry": "0"})
+            self.assertTrue(inspected["status"], inspected)
+            self.assertIsNone(execute.call_args.kwargs["scan_policy"])
+            self.assertFalse(execute.call_args.kwargs["block_xmlrpc"])
+            fake_public.get_webserver = lambda: "apache"
+            before = execute.call_count
+            refused = self.plugin.manage_nginx_protection({"guard_action": "preview"})
+            self.assertFalse(refused["status"])
+            self.assertIn("requires Nginx", refused["msg"])
+            self.assertEqual(execute.call_count, before)
 
     def test_nginx_guard_failure_activity_uses_verified_target_and_typed_phase(self):
         from ach_customizer_activity import read_activity

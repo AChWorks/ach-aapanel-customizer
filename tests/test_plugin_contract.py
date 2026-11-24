@@ -61,7 +61,7 @@ class PackageContractTests(unittest.TestCase):
                 self.assertIn('ach_customizer/ach_customizer_cache_helper.py', names)
                 self.assertIn('ach_customizer/ach_customizer_cache_bridge.py', names)
                 self.assertIn('ach_customizer/ach_customizer_nginx_security.py', names)
-                self.assertIn('ach_customizer/ach_customizer_abusive_scan.py', names)
+                self.assertNotIn('ach_customizer/ach_customizer_abusive_scan.py', names)
                 self.assertIn('ach_customizer/ach_customizer_site_changes.py', names)
                 self.assertIn('ach_customizer/ach_customizer_site_reconcile.py', names)
                 self.assertIn('ach_customizer/ach_customizer_activity.py', names)
@@ -207,9 +207,8 @@ class PackageContractTests(unittest.TestCase):
         # Each formerly detached flex label/select pair is one wrapping
         # field, across Routing, PHP-FPM, and Activity.
         for control_id in (
-            'ach-hosts-alias-select', 'ach-scan-maxretry',
-            'ach-scan-findtime', 'ach-scan-bantime',
-            'ach-scan-orphan-choice', 'ach-wp-settings-kind',
+            'ach-hosts-alias-select', 'ach-guard-maxretry',
+            'ach-guard-findtime', 'ach-guard-bantime', 'ach-wp-settings-kind',
             'ach-wp-settings-debug', 'ach-wp-settings-interval',
             'ach-php-version', 'ach-activity-level', 'ach-activity-module',
         ):
@@ -224,7 +223,7 @@ class PackageContractTests(unittest.TestCase):
         html = (PACKAGE / 'index.html').read_text(encoding='utf-8')
         for heading in (
             'What does each WordPress operation change?',
-            'How to complete orphan-jail recovery',
+            'What changes when I enable this?',
             'Which sources are compared?',
             'Supported source and exact Nginx changes',
             'What does the Cache audit check?',
@@ -234,8 +233,14 @@ class PackageContractTests(unittest.TestCase):
         ):
             self.assertIn('<summary>' + heading + '</summary>', html)
         self.assertIn('Before changing WordPress HTTPS URLs:', html)
-        self.assertIn('Firewall impact:', html)
-        self.assertIn('Existing bans are <strong>not yet verified removed</strong>', html)
+        protection = html.split('data-routing-group="protection"', 1)[1].split('data-routing-group="wordpress"', 1)[0]
+        for guidance in ('Blocks only this website', 'No firewall changes.',
+                         'verify the effective client IP when using a proxy or CDN',
+                         'HTTP 429 and expire automatically',
+                         'A full Nginx restart clears the counters',
+                         'the sensitive-path Guard still denies that path'):
+            self.assertIn(guidance, protection)
+        self.assertNotIn('orphan-jail', protection)
         self.assertIn('This is <strong>not</strong> Nginx Helper Purge All.', html)
 
     def test_installer_guards_cleanup_and_does_not_mutate_services(self):

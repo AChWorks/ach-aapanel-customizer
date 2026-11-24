@@ -1,4 +1,5 @@
 """Regression for native aaPanel icon ownership, without privileged paths."""
+import hashlib
 import importlib.util
 import os
 import pathlib
@@ -43,6 +44,53 @@ class IconRemovalTest(unittest.TestCase):
         removed, output = self.cleanup_icon()
         self.assertFalse(removed, output)
         self.assertIn("preserved", output)
+
+    def retire_scanner(self, contents=b"previous packaged scanner"):
+        return CLEANUP.retire_scanner_source(
+            trusted_root=str(self.root), panel_components=("panel",),
+            expected_uid=os.geteuid(), expected_sha256=hashlib.sha256(contents).hexdigest())
+
+    def test_retired_scanner_only_removes_exact_source_and_bytecode(self):
+        source = self.source_parent / CLEANUP._RETIRED_SCANNER
+        source.write_bytes(b"previous packaged scanner")
+        cache = self.source_parent / "__pycache__"
+        cache.mkdir()
+        retired = cache / "ach_customizer_abusive_scan.cpython-312.pyc"
+        retired.write_bytes(b"old bytecode")
+        peer = cache / "ach_customizer_nginx_security.cpython-312.pyc"
+        peer.write_bytes(b"current bytecode")
+        historical = self.panel / "data"
+        historical.mkdir()
+        journal = historical / "ach_customizer.abusive_scan.17.json"
+        journal.write_bytes(b"historical recovery")
+        self.assertTrue(self.retire_scanner())
+        self.assertFalse(source.exists())
+        self.assertFalse(retired.exists())
+        self.assertEqual(peer.read_bytes(), b"current bytecode")
+        self.assertEqual(journal.read_bytes(), b"historical recovery")
+        self.assertTrue(self.retire_scanner())
+
+    def test_retired_scanner_unknown_or_symlink_source_is_preserved(self):
+        source = self.source_parent / CLEANUP._RETIRED_SCANNER
+        source.write_bytes(b"foreign source")
+        self.assertFalse(self.retire_scanner())
+        self.assertEqual(source.read_bytes(), b"foreign source")
+        source.unlink()
+        source.symlink_to(self.source)
+        self.assertFalse(self.retire_scanner())
+        self.assertTrue(source.is_symlink())
+        self.assertEqual(self.source.read_bytes(), self.contents)
+
+    def test_retired_scanner_symlink_bytecode_is_preserved(self):
+        source = self.source_parent / CLEANUP._RETIRED_SCANNER
+        source.write_bytes(b"previous packaged scanner")
+        cache = self.source_parent / "__pycache__"
+        cache.mkdir()
+        retired = cache / "ach_customizer_abusive_scan.cpython-312.pyc"
+        retired.symlink_to(self.source)
+        self.assertFalse(self.retire_scanner())
+        self.assertTrue(source.exists())
+        self.assertTrue(retired.is_symlink())
 
     def test_expected_owned_icon_removed_then_idempotent(self):
         removed, output = self.cleanup_icon()

@@ -19,15 +19,9 @@ const protection=(family,state,extra={})=>({
   recovery_id:['Applied','Recovery Required','Restored'].includes(state)?'a'.repeat(32):null,
   journal_phase:({Applied:'applied','Recovery Required':'prepared',Restored:'restored'})[state]||null,
   vhost_sha256:'b'.repeat(64),
-  ...(family==='guard'?{
-    mode:'native_site_sensitive_paths',site_root:site.document_root,
-    ruleset:'site-sensitive-files-v1',block_xmlrpc:false,automatic_enforcement:false,
-    proposal_sha256:'c'.repeat(64)
-  }:{
-    mode:'native_site_abusive_scan_fail2ban',ruleset:'sensitive-scan-combined-v1',
-    firewall_scope:'origin_wide_web_ports',log_scope:'selected_native_site',
-    plan_sha256:'c'.repeat(64),log_path:'/www/wwwlogs/demo.test.log'
-  }),...extra
+  mode:'native_site_sensitive_paths',site_root:site.document_root,
+  ruleset:'site-sensitive-files-v1',block_xmlrpc:false,scan_policy:null,
+  automatic_enforcement:false,proposal_sha256:'c'.repeat(64),...extra
 });
 const phpInventory={status:true,schema:1,state:'Observed',read_only:true,runtime_verified:false,
   versions:['81','85'].map(v=>({code:v,label:'PHP '+v[0]+'.'+v[1],state:'File Preview Candidate',
@@ -205,27 +199,52 @@ async function walk(browser,width,height,touch){
         assert.ok(await button('ach-guard-apply').isDisabled());
       }
     }
+    // #146: proposed settings never become recovery prerequisites.
+    assert.equal(await button('ach-guard-scan-settings').isVisible(),false);
+    await button('ach-guard-scan').check();
+    assert.equal(await button('ach-guard-scan-settings').isVisible(),true);
+    for(const [id,value] of [['maxretry','6'],['findtime','120'],['bantime','600']])
+      assert.equal(await button('ach-guard-'+id).inputValue(),value);
+    await button('ach-guard-maxretry').fill('0');
+    const invalidCount=await count();
+    await button('ach-guard-preview').click();
+    assert.equal(await count(),invalidCount);
+    assert.match(await button('ach-guard-summary').innerText(),/positive whole numbers/);
+    await button('ach-guard-maxretry').fill('6');
+    await button('ach-guard-preview').click();
+    const scanRequest=await lastRequest(page,'manage_nginx_protection');
+    assert.equal(scanRequest.data.guard_scan,'true');
+    assert.equal(scanRequest.data.maxretry,'6');
+    await resolveLatest(page,'manage_nginx_protection',protection('guard','Unmanaged',{
+      scan_policy:{maxretry:0,findtime:120,bantime:600}
+    }));
+    assert.equal(await button('ach-guard-apply').isDisabled(),true);
+    assert.match(await button('ach-guard-summary').innerText(),/could not be verified/);
+    await button('ach-guard-maxretry').fill('0');
+    await button('ach-guard-recheck').click();
+    const recheck=await lastRequest(page,'manage_nginx_protection');
+    assert.equal(recheck.data.guard_scan,'false');
+    assert.equal(recheck.data.maxretry,undefined);
+    await resolveLatest(page,'manage_nginx_protection',protection('guard','Applied',{
+      scan_policy:{maxretry:4,findtime:60,bantime:120}
+    }));
+    assert.equal(await button('ach-guard-maxretry').inputValue(),'4');
+    assert.equal(await button('ach-guard-findtime').inputValue(),'60');
+    assert.match(await button('ach-guard-summary').innerText(),/Temporary IP blocking is enabled/);
+    await button('ach-guard-maxretry').fill('0');
+    assert.equal(await button('ach-guard-restore').isEnabled(),true);
+    await button('ach-guard-restore').click();
+    const recovery=await lastRequest(page,'manage_nginx_protection');
+    assert.equal(recovery.data.guard_action,'restore');
+    assert.equal(recovery.data.recovery_id,'a'.repeat(32));
+    assert.equal(recovery.data.maxretry,undefined);
+    await resolveLatest(page,'manage_nginx_protection',protection('guard','Restored',{
+      read_only:false,changed:true
+    }));
+    assert.match(await button('ach-guard-summary').innerText(),/^Restored:/);
+    assert.equal(await button('ach-guard-restore').isDisabled(),true);
     await openDestination(page,'server');
     await resolveLatest(page,'get_php_versions',phpInventory);
-    await page.locator('[data-server-task=attack]').click();
-    await button('ach-hosts-site-id').selectOption('7');
-    for(const state of ['Applied','Recovery Required','Unmanaged','Needs Review','Dependency Missing']){
-      const reason=state==='Needs Review'?'Untrusted native access log':state==='Dependency Missing'?'Fail2ban dependency missing':'Verified source';
-      await button('ach-scan-preview').click();
-      await resolveLatest(page,'manage_abusive_scan',protection('scan',state,{reason}));
-      if(state==='Unmanaged')await explain('ach-scan-restore',/no active saved Fail2ban scanner operation/,semanticMethod);
-      else{
-        await explain('ach-scan-apply',state==='Applied'?/already Applied.*No Enable/:
-          state==='Recovery Required'?/Recovery Required.*Resolve the saved recovery/:
-          new RegExp(reason),semanticMethod);
-        await explain('ach-scan-restore',['Applied','Recovery Required'].includes(state)?/Recheck jail \/ recovery.*Recovery ID/:/No eligible matching recovery/,'focus');
-        if(['Applied','Recovery Required'].includes(state)){
-          await button('ach-scan-recheck').click();
-          await resolveLatest(page,'manage_abusive_scan',protection('scan',state,{reason}));
-          assert.ok(await button('ach-scan-restore').isEnabled());
-        }
-      }
-    }
     await page.locator('[data-server-task=http]').click();
     await resolveLatest(page,'status_preferences',prefs);
     await button('ach-status-template').selectOption('unbound');
@@ -452,10 +471,6 @@ async function progressWalk(browser,width,height,touch){
     await route('[data-server-task=hosts]');
     await resolveLatest(page,'inspect_hosts_aliases',aliases);
     await run('ach-hosts-alias-refresh','inspect_hosts_aliases',aliases);
-    await route('[data-server-task=attack]');
-    await q('ach-hosts-site-id').selectOption('7');
-    await run('ach-scan-preview','manage_abusive_scan',protection('scan','Unmanaged'));
-    await run('ach-scan-orphan-list','manage_abusive_scan');
     await route('[data-server-task=http]');
     await resolveLatest(page,'status_preferences',prefs);
     await q('ach-status-template').selectOption('unbound');

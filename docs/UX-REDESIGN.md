@@ -20,7 +20,7 @@ Home
 Websites
   Website inventory → select native website (stable, explicit ID/name)
     Summary & changes       site identity, source observations, reviewed baseline
-    Protection             Guard sensitive files, optional Nginx XML-RPC policy
+    Protection             Guard sensitive files, optional XML-RPC and site-local IP blocking
     Cache & performance    inspect, configure, WP connect, purge exact owned scope
     WordPress              Debug, Cron, app XML-RPC, HTTPS URLs, install witness
     Routing & diagnostics  VHost, local HTTP, selected-site Hosts, related Recovery
@@ -30,8 +30,6 @@ Server
                            opted-in repair, exact shared-service Recovery
   Local hostnames          list current loopback entries, protected system names,
                            manual/deleted-site aliases, exact eligible removal
-  Attack protection        Fail2ban from selected site log; firewall bans are
-                           **origin-wide**, not site-scoped, with relevant Recovery
   Default HTTP/TLS routing unknown Host HTTP/80 vs unknown SNI HTTPS/443
   Monitoring controls      inspection availability and auto-repair gating
 Error pages
@@ -41,7 +39,7 @@ Error pages
   Server fallback          cross-link to Server routing, no duplicate writer
 Activity & recovery
   Understand event, identify exact target, follow link to owning workflow,
-  Recheck before Restore; advanced IDs, raw logs and two-phase orphan scanners
+  Recheck before Restore; advanced IDs and raw logs
 ```
 
 An operation has **one canonical owner view**. A relevant shortcut may open that same view with an explicit target; it must not duplicate privileged Apply, persistence or Recovery code. A site selection never falsely changes the scope of server-wide work. Advanced source/path/hash evidence is expandable and reachable, not deleted.
@@ -52,7 +50,7 @@ An operation has **one canonical owner view**. A relevant shortcut may open that
 |---|---|---|
 | Check website record | Websites → select → Summary & changes → Compare | Observation-only vs plugin-saved baseline; choose one-site accept, bulk only explicitly |
 | Protect files | Websites → select → Protection → Sensitive files | Site config plus shared Nginx reload; verify eligible Nginx include |
-| Stop malicious IPs | Server → Attack protection → choose source site | Site log feeds **whole-origin firewall ban**; do not imply site-only impact |
+| Stop malicious IPs | Websites → Protection → optional temporary IP blocking | Selected-site HTTP 429; expires automatically; no firewall change |
 | Manage Cache | Websites → select → Cache & performance | Inspect source ≠ worker proof; connect optional WP integration vs site policy; clear exact URL/owned tree |
 | Adjust PHP | Server → PHP services → choose discovered pool | Desired Monitor Save ≠ live shared Apply; show peers and recheck |
 | Modify WordPress | Websites → select → WordPress → choose task | Independent Debug, Cron, MU XML-RPC, HTTPS URL source and owner |
@@ -60,7 +58,7 @@ An operation has **one canonical owner view**. A relevant shortcut may open that
 | Recover error | Activity & recovery → event → exact owning workflow | No universal rollback; exact current-generation evidence and ID |
 | Fix host override | Server → Local hostnames → inspect | Machine name is immutable here; stale non-system aliases remain manageable |
 
-Use existing capability inventory and **91-button/57-form/36-disclosure original-to-new crosswalk** in [Issue #128 Part 2](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7089964275), revised by the server-side Fail2ban navigation and present hierarchy. Every old capability must be discoverable through its canonical task; controls need not retain historical HTML IDs after a coherent tested refactor.
+Use existing capability inventory and **91-button/57-form/36-disclosure original-to-new crosswalk** in [Issue #128 Part 2](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7089964275), revised by #146, which retires the server-wide scanner and consolidates site protection. Every current capability must be discoverable through its canonical task; controls need not retain historical HTML IDs after a coherent tested refactor.
 
 ## Page pattern and visual system
 
@@ -125,8 +123,9 @@ existing five destinations and one canonical operation owner, not a new framewor
   Recovery ID. Preserve the diagnosis on policy option edits, and clear it
   when selecting a different site or superseding the result with a new check. Keep
   all original journal bytes and native files; this is not a legacy recovery
-  migration. First-use Protection and Attack retain exactly one Browse
-  websites control, with independently accessible orphan-jail recovery.
+  migration. First-use Protection retains exactly one Browse websites control.
+  Optional temporary blocking is part of the selected website’s Guard;
+  Recheck and Restore are independent of new policy options.
 
 For acceptance, run real Chromium route/width regression plus composition
 checks (compact site context, first action visible on desktop, checkbox
@@ -165,7 +164,7 @@ Coverage matrix (existing actual controls, not new feature requirements):
 | Routing and selected-site Hosts | verified site, source inspection, removable alias and matching recovery/approval |
 | PHP inspect/policy/Apply/Restore/auto | discovered compatible service, pending operations, current form/plan/revision, shared scope and recovery |
 | Local hostnames / failed-install witness | refreshed alias selection, matching witness/readiness, stale helper refusal |
-| Attack protection / independent orphan | current site and parameters, Fail2ban capability/log trust, journal ownership; orphan recovery does not require a site |
+| Protection / temporary IP blocking | current site, exact policy, native Lua capability and Guard journal ownership |
 | Error pages | explicit independent scope/template, loaded branding, current source/preflight, running/stopped site, saved recovery/approval; separate HTTP and TLS capabilities |
 | Activity | pending refresh; dynamic owner links navigate only and never select a target or authorize Restore |
 
@@ -189,7 +188,7 @@ Preview, across success/refusal/malformed/transport failure and unchanged
 form/changed values/changed service. It asserts actual outgoing revision
 and observation identity after a fresh Preview. The real DOM suite also
 checks the already-open help on settlement and late responses; semantic
-reason cases for Guard/Fail2ban cover Applied, Recovery Required, no
+reason cases for Guard cover Applied, Recovery Required, no
 active saved recovery and actual source/dependency refusal, while global
 HTTP unbound distinguishes Conflict/Drift from missing inspection and
 uses the existing explicit approvals. These are mocked native responses;
@@ -275,7 +274,7 @@ general privacy behavior. Every new request clears the previous result tone.
 | --- | --- |
 | Home and Monitor | Keep explicit Refresh and revision-aware switches; an unavailable observation is not success. |
 | Website baseline | Saved/verified success is visible; unchanged baseline needs no Save; Compare remains available. |
-| Protection and Fail2ban | Unmanaged is neutral; verified Applied/Restored is green, recovery/unsupported is review; existing state gates and orphan Restore remain. |
+| Protection | Unmanaged is neutral; verified Applied/Restored is green; recovery/unsupported is review. Optional temporary IP blocking shares the Guard owner and recovery. |
 | Routing and Hosts | Preserve read-only VHost checks and origin-local scope; alias removal success is confirmed by refreshed inventory; preserve witness repair and emergency Disable even when watcher health is uncertain. |
 | WordPress settings | Reflect verified per-setting outcome, actual recovery ownership and request failure; retain independent inspection. |
 | Cache and WordPress Connect | Connected disables repeated Connect; Not Connected/Restored disables redundant Disconnect. Check remains available; Needs Review permits repair/recovery. Bridge Provision/Disable observes the exact manifest state. Selection changes and related writes or conflicting recovery identities clear stale proof. Cache Clear is repeatable. |
@@ -326,9 +325,8 @@ privileged actions continue through the original native backend.
   Cache separates passive inspection, WordPress Connect, live site Cache
   configuration, exact Cache Clear and Bridge mapping.
 - **Shared server:** PHP exposes inspection, desired policy, explicit live
-  shared-service change and independently discoverable saved Recovery; scanner
-  source-site selection is separate from origin-wide bans and orphan-jail
-  Restore; local aliases remain site-selection-independent.
+  shared-service change and independently discoverable saved Recovery;
+  local aliases remain site-selection-independent.
 - **Error pages:** Template/language/scope selectors remain explicit. Design,
   website publication, future-site defaults, stopped-site 503 and default
   HTTP/TLS routes are separate pages within the same canonical state owner.
@@ -358,7 +356,7 @@ HEAD/CI/QA evidence in the PR and Issue #128, not as a mirrored status log here.
 - **S0** (design baseline): this agreed contract, Issue mapping, source/API review and operator journey benchmark; **accepted in principle**. Improve when real usability evidence changes an assumption.
 - **S1** (foundation): backend dynamic system hostname protection (including direct mutator); truthful Baseline saved/unchanged messaging; shared navigation/site context/Home task flow and reusable state/visual primitives. Use a coherent worktree/PR.
 - **S2** (website tasks): Protection, Routing/Hosts/VHost, four WordPress task views and advanced witness/recovery.
-- **S3** (Cache/Server tasks): independent Cache/WordPress Connect and exact Clear, PHP shared service vs Monitor, origin-wide Fail2ban, local hostname tasks, default HTTP/TLS routing.
+- **S3** (Cache/Server tasks): independent Cache/WordPress Connect and exact Clear, PHP shared service vs Monitor, local hostname tasks, default HTTP/TLS routing.
 - **S4** (Error Pages/Activity): all 11 template types, supported real delivery/ownership and module-derived Activity/Recovery.
 - **S5** (integrated acceptance): ensure no original capability orphaned, native import, 13 retained QA peer sites, current-source/worker checks, scoped real Apply/Restore only with reversible task-owned fixtures, keyboard/accessible feedback/viewport/zoom/RTL and representative novice task completion. Automated tests must bind to actual source/HEAD; source tests never imply live aaPanel verification. Independent review before integration.
 
