@@ -58,7 +58,7 @@ An operation has **one canonical owner view**. A relevant shortcut may open that
 | Recover error | Activity & recovery → event → exact owning workflow | No universal rollback; exact current-generation evidence and ID |
 | Fix host override | Server → Local hostnames → inspect | Machine name is immutable here; stale non-system aliases remain manageable |
 
-Use existing capability inventory and **91-button/57-form/36-disclosure original-to-new crosswalk** in [Issue #128 Part 2](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7089964275), revised by the server-side Fail2ban navigation and present hierarchy. Every old capability must be discoverable through its canonical task; controls need not retain historical HTML IDs after a coherent tested refactor.
+Use existing capability inventory and **91-button/57-form/36-disclosure original-to-new crosswalk** in [Issue #128 Part 2](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7089964275), revised by #146, which retires the server-wide scanner and consolidates site protection. Every current capability must be discoverable through its canonical task; controls need not retain historical HTML IDs after a coherent tested refactor.
 
 ## Page pattern and visual system
 

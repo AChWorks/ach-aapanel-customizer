@@ -24,7 +24,7 @@ from ach_customizer_status_inspect import (
 from ach_customizer_status_extension import (
     DOMAIN, HASH, NGINX, NGINX_CONF, TOKEN, ExtensionError,
     _bounded_file, _nginx, _owned_dir, _publish_complete,
-    _rename_noreplace, _include_graph_guard, _write_exclusive, _server_directives,
+    _rename_noreplace, _verify_exclusive_site_include, _write_exclusive, _server_directives,
 )
 
 MODE = "native_site_sensitive_paths"
@@ -501,7 +501,7 @@ def _source_safe(site, *, vhost_root, nginx_conf):
             or len(set(observed_names)) != len(observed_names)
             or any(item not in native_domains for item in observed_names)):
         raise GuardError("source", "Generated VHost names do not match native bindings")
-    _include_graph_guard(site, _file(site["id"]), vhost_root, nginx_conf)
+    _verify_exclusive_site_include(site, _file(site["id"]), vhost_root, nginx_conf)
     vhost_fd = _directory(vhost_root)
     try:
         _owned_dir(vhost_fd)

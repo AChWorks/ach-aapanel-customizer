@@ -282,7 +282,7 @@ def _record_save(fd, site_id, code, record):
 
 
 
-def _include_graph_guard(site, filename, vhost_root, nginx_conf):
+def _verify_exclusive_site_include(site, filename, vhost_root, nginx_conf):
     """Bounded native include-ownership proof, not a general Nginx parser.
 
     Follow file-scope include edges from the actual primary nginx.conf.
@@ -564,7 +564,7 @@ def _source(site, code, vhost_root, nginx_conf=NGINX_CONF):
         raise ExtensionError("source", "Status extension must be included at server scope")
     # Before preparing any owned content, prove the selected server is
     # the only reachable consumer in the bounded effective native include graph.
-    _include_graph_guard(site, _include_name(site["id"], code), vhost_root, nginx_conf)
+    _verify_exclusive_site_include(site, _include_name(site["id"], code), vhost_root, nginx_conf)
     # Also fail on parked native VHost sources which could become active later.
     directory = _directory(vhost_root)
     try:

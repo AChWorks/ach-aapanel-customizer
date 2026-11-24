@@ -948,7 +948,9 @@ HTTP/80 local source/proof is not blanket proof of all HTTPS/CDN delivery.
 Native Lua syntax/capability and current exact source are checked before
 activation; if unavailable, select ordinary static protection instead.
 There is no old scanner adapter or automatic cleanup of historical
-system data. Verify no old owned active scanner jail before upgrading;
+system data. Native ZIP import overlays files; the install hook retires
+only the exact previous published scanner source and its owned Python
+bytecode, preserving unknown or changed files and all historical journals. Verify no old owned active scanner jail before upgrading;
 retire an actual existing old jail using its owning release first if
 necessary. Existing unrelated service jails and Recovery history stay intact.
 
