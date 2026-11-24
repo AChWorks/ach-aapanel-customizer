@@ -17,9 +17,10 @@ A successful import does **not** prove that aaPanel's resident Python helpers we
 
 ## What you can do
 
-The task-first destinations below describe the redesigned source/package
-identity 0.1.101+, including the 0.1.103 visual refinement candidate. The authoritative published package and its actual availability
-are recorded in GitHub Releases, not implied by this source guide.
+The task-first destinations below describe the redesigned interface
+introduced in Native 0.1.101 and refined through 0.1.106. The authoritative
+published package and its actual availability are recorded in GitHub
+Releases, not implied by this source guide.
 
 | Start here | Tasks and boundaries |
 | --- | --- |
@@ -54,10 +55,18 @@ The optional [ACh aaPanel Bridge](wordpress/ach-aapanel-bridge/README.md) is a s
 
 The [accepted screen and task contract](docs/UX-REDESIGN.md) defines the
 five-destination native shell and task-stage navigation. S1–S5 were merged
-through PRs #129–#132. The UI groups the original module-owned controls,
-without another privileged writer, permission route or recovery store.
-Task navigation alone never authorizes a write. Direct task shortcuts open
-their named stage without silently selecting a website or changing a scope.
+through PRs #129–#133 and refined through #136. The UI groups the original
+module-owned controls without another privileged writer, permission route or
+recovery store. Task navigation alone never authorizes a write. Direct task
+shortcuts open their named stage without silently selecting a website or
+changing a scope.
+
+Disabled actions explain their actual missing prerequisites through
+inline guidance and an anchored help popover, available via pointer,
+keyboard or touch. A request-producing action shows progress while
+its operation runs; it does not automatically open disabled help on
+click or settlement. Explicit approval and native recovery guards remain
+authoritative.
 
 See [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128)
 for current acceptance and delivery status, and [Issue #21](https://github.com/AChWorks/ach-aapanel-customizer/issues/21)

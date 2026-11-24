@@ -1,6 +1,6 @@
 # Native UI redesign — accepted task-first experience contract
 
-Status: Owner-approved product direction and visual refinement (2026-11-24), **implementation in progress**. Scope: `AChWorks/ach-aapanel-customizer`. Source of approval and complete audit: [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7090292152). This document owns the intended UI/navigation and testing contract, not backend authorization, actual installed capabilities, or release status.
+Status: Owner-approved task-first interface and visual refinement, implemented and integrated through PR #136 (Native 0.1.106, 2026-11-24). Exact delivery and residual acceptance evidence belong to Issues #128 and #21. Scope: `AChWorks/ach-aapanel-customizer`. Source of approval and complete audit: [Issue #128](https://github.com/AChWorks/ach-aapanel-customizer/issues/128#issuecomment-7090292152). This document owns the intended UI/navigation and testing contract, not backend authorization, actual installed capabilities, or release status.
 
 ## Outcome and compatibility
 
@@ -249,12 +249,16 @@ The image concept previously generated is **not runtime proof** and its compulso
 
 ## Current source implementation and acceptance boundary
 
-S1–S5 are merged into `main` through PRs #129–#133. Native source
-0.1.101 established the task-first redesign; 0.1.103 is the integrated review-remediated visual refinement; 0.1.104 was the first Owner follow-up candidate; 0.1.105 is the merged R135 remediation; 0.1.106 refines the help surface and separates initiating-action progress; the earlier
-published 0.1.100 package uses the seven-tab interface. A source ZIP is not
-a published Release asset. Current release availability belongs to GitHub
-Releases; exact installed QA and human acceptance belong to Issues #21 and
-#128. The browser projection adds only one selected workflow at a time;
+S1–S5 are merged into `main` through PRs #129–#133, with Owner refinements
+through #136. Native 0.1.101 established the task-first redesign; 0.1.103
+refined layout; 0.1.105 integrated the R135 remediation; 0.1.106 refines
+the help surface and separates initiating-action progress. The historical
+0.1.100 package uses the seven-tab interface. The 0.1.106 source was
+independently approved, verified on retained QA, and accepted by the Owner.
+This does not certify every Production writer or unassisted novice task.
+A source ZIP is not a published Release asset. Current release availability
+belongs to GitHub Releases; exact installed QA and human acceptance belong
+to Issues #21 and #128. The browser projection adds only one selected workflow at a time;
 privileged actions continue through the original native backend.
 
 - **Selected website:** Protection remains site-owned; WordPress exposes four
