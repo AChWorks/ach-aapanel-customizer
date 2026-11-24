@@ -20,6 +20,55 @@ const widths=process.env.ACH_QA_WIDTHS ?
   viewports.filter(([w])=>process.env.ACH_QA_WIDTHS.split(',').includes(String(w))) : viewports;
 assert.ok(widths.length,'At least one supported QA viewport is required');
 
+// Measure actual text containment, not just adjacent element border boxes.
+// The 0.1.106 Cache Clear regression had an apparently correct 12px flex gap,
+// but its wrapped approval copy overflowed a shrunken label by 18px.
+function inspectVerticalSpacing() {
+  const main=document.getElementById('ach-content');
+  const visible=e=>e && e.getClientRects().length &&
+    e.getBoundingClientRect().width>0 && e.getBoundingClientRect().height>0 &&
+    getComputedStyle(e).visibility!=='hidden';
+  const approvals=[], stacks=[], issues=[];
+  for(const label of main.querySelectorAll('label:has(> input[type="checkbox"])')){
+    if(!visible(label))continue;
+    const input=label.querySelector('input'),copy=label.querySelector('.ach-option-copy');
+    if(!copy||!visible(copy)){issues.push({id:input.id,kind:'missing option copy'});continue;}
+    const l=label.getBoundingClientRect(),c=copy.getBoundingClientRect(),style=getComputedStyle(label);
+    const a={id:input.id,disabled:input.disabled,checked:input.checked,height:l.height,
+      copyHeight:c.height,overflow:c.bottom-(l.bottom-parseFloat(style.paddingBottom))};
+    if(a.overflow>1 || c.top<l.top+parseFloat(style.paddingTop)-1 ||
+      c.left<l.left-1||c.right>l.right+1)
+      issues.push({...a,kind:'approval copy outside padded label'});
+    let next=label.nextElementSibling;
+    while(next&&!visible(next))next=next.nextElementSibling;
+    if(next?.matches('button,.ach-disabled-anchor,.ach-controls')){
+      const buttons=(next.matches('button')?[next]:[...next.querySelectorAll('button')]).filter(visible);
+      if(buttons.length){
+        a.button=buttons[0].id;
+        a.gap=Math.min(...buttons.map(b=>b.getBoundingClientRect().top))-c.bottom;
+        if(a.gap<7.5)issues.push({...a,kind:'approval copy to action gap below 8px'});
+      }
+    }
+    approvals.push(a);
+  }
+  for(const stack of main.querySelectorAll('.ach-view,.ach-workflow')){
+    if(!visible(stack))continue;
+    const gap=parseFloat(getComputedStyle(stack).rowGap);
+    const children=[...stack.children].filter(e=>visible(e)&&
+      !['absolute','fixed'].includes(getComputedStyle(e).position));
+    for(let i=0;i<children.length;i++){
+      const e=children[i],id=e.id||e.className||e.tagName;
+      if(getComputedStyle(e).overflowY==='visible'&&e.scrollHeight>e.clientHeight+2)
+        issues.push({id,kind:'vertical item overflow',pixels:e.scrollHeight-e.clientHeight});
+      if(i===0)continue;
+      const prev=children[i-1],actual=e.getBoundingClientRect().top-prev.getBoundingClientRect().bottom;
+      stacks.push({id,actual,expected:gap});
+      if(actual<gap-1)issues.push({id,kind:'vertical stack gap',actual,expected:gap});
+    }
+  }
+  return {approvals,stacks,issues};
+}
+
 async function geometry(page, label) {
   const result=await page.evaluate(()=>{
     const root=document.getElementById('ach-customizer');
@@ -81,7 +130,9 @@ async function geometry(page, label) {
   assert.deepEqual(result.badDisabledActions,[],label+' disabled actions require associated specific guidance');
   assert.deepEqual(result.enabledWithHelp,[],label+' enabled actions have no redundant help stop');
   assert.deepEqual(result.rows.filter(x=>x.delta>1.5),[],label+' mixed control bottoms');
-  return result.rows;
+  const spacing=await page.evaluate(inspectVerticalSpacing);
+  assert.deepEqual(spacing.issues,[],label+' vertical spacing');
+  return Object.assign(result.rows,{spacing});
 }
 
 async function clickStage(page, attr, value) {
@@ -101,6 +152,9 @@ async function walk(page, width, record) {
   await resolveLatest(page,'get_overview',monitor(version));
   assert.equal(await page.locator('#ach-worker-version-status').getAttribute('data-state'),'matched');
   await sample('home matched');
+  await page.locator('.ach-home-advanced summary').click();
+  await sample('home monitoring expanded');
+  await page.locator('.ach-home-advanced summary').click();
   if(width<=720){
     await page.locator('#ach-menu-toggle').click();
     await page.locator('[data-destination="server"]').focus();
@@ -224,6 +278,11 @@ async function walk(page, width, record) {
   for(const key of ['diagnostics','hosts','reconcile']){
     await clickStage(page,'data-routing-detail',key);
     await sample('routing '+key);
+    if(key==='hosts'){
+      await page.locator('#ach-hosts-remediation summary').click();
+      await sample('routing hosts advanced');
+      await page.locator('#ach-hosts-remediation summary').click();
+    }
   }
   await openDestination(page,'server');
   for(const key of ['inspect','policy','apply','restore']){
@@ -233,10 +292,62 @@ async function walk(page, width, record) {
   await clickStage(page,'data-php-task','apply');
   await page.locator('#ach-php-preview-route').click();
   assert.equal(await page.locator('[data-php-task="policy"]').evaluate(el=>document.activeElement===el),true);
+  // Populate the two conditional PHP approval groups through the actual
+  // read-only response contract, never by revealing hidden markup directly.
+  const phpVersion='85', source='/www/server/php/85/etc/php-fpm.conf';
+  await resolveLatest(page,'get_php_versions',{status:true,schema:1,state:'Observed',read_only:true,
+    runtime_verified:false,versions:[{code:phpVersion,label:'PHP 8.5',state:'File Preview Candidate',
+      binary_present:true,config_present:true,preview_candidate:true,manual_apply_adapter:'guarded_php85',
+      apply_eligible:false,reason:'Prepare required'}],reason:'',note:'File-only inventory'});
+  await page.locator('#ach-php-version').selectOption(phpVersion);
+  const impact={schema:1,scope:'shared_service',state:'File Mapping',version:phpVersion,
+    matched_sites:[{id:7,site_key:site.name}],unresolved_sites:[],site_count:1,other_php_sites_count:0,
+    dependency_sha256:'e'.repeat(64),manual_apply_eligible:true,reason:'',note:'File-only attribution'};
+  const values={'pm.max_children':50,'pm.start_servers':5,'pm.min_spare_servers':5,
+    'pm.max_spare_servers':20,'pm.max_requests':0};
+  for(const [id,value] of [['ach-max-children','50'],['ach-start-servers','5'],
+    ['ach-min-spare','5'],['ach-max-spare','20'],['ach-max-requests','0']])
+    await page.locator('#'+id).fill(value);
+  await page.locator('#ach-php-form button[type=submit]').click();
+  await resolveLatest(page,'preview_php_fpm',{status:true,state:'File Drift',scope:'shared_service',
+    version:phpVersion,source,note:'Read-only file preview',changes:[{setting:'pm.max_children',desired:50,actual:80}],
+    shared_impact:impact,fpm_observation_sha256:'c'.repeat(64),fpm_saved_policy:{
+      schema:1,version:phpVersion,policy_revision:0,monitor_revision:0,saved:false,desired:null,
+      read_only:true,runtime_verified:false,auto_enforce:false,scope:'shared_service',pool:'www'}});
+  await clickStage(page,'data-php-task','apply');
+  await page.locator('#ach-fpm-prepare').click();
+  await resolveLatest(page,'fpm_prepare',{status:true,request_id:'fixture-plan',monitor_revision:0,
+    approval_scope:'PHP85-www-shared-service',warning:'Shared service reload affects current sites.',
+    impact_sha256:'c'.repeat(64),shared_impact:impact,plan:{version:phpVersion,pool:'www',
+      scope:'shared_service',source,before_sha256:'a'.repeat(64),after_sha256:'b'.repeat(64)}});
+  assert.equal(await page.locator('#ach-fpm-review').isVisible(),true);
+  assert.equal(await page.locator('#ach-fpm-commit').isDisabled(),true);
+  await sample('php prepared approval');
+  await page.locator('#ach-fpm-approval').check();
+  assert.equal(await page.locator('#ach-fpm-commit').isEnabled(),true);
+  await sample('php prepared approved');
+  await page.locator('#ach-fpm-approval').uncheck();
+  await clickStage(page,'data-php-task','restore');
+  await page.locator('#ach-fpm-check-recovery').click();
+  await resolveLatest(page,'fpm_recovery',{status:true,version:phpVersion,state:'Applied',phase:'applied',
+    operation_id:'d'.repeat(32),safe_rollback_file_match:true,baseline_sha256:'a'.repeat(64),
+    applied_sha256:'b'.repeat(64),observed_sha256:'b'.repeat(64),impact_sha256:'c'.repeat(64),
+    recovery_decision_sha256:'f'.repeat(64),shared_impact:impact,warning:'Shared service reload affects current sites.',
+    baseline_values:values,observed_values:{...values,'pm.max_children':80}});
+  assert.equal(await page.locator('#ach-fpm-rollback-controls').isVisible(),true);
+  assert.equal(await page.locator('#ach-fpm-rollback').isDisabled(),true);
+  await sample('php restore approval');
+  await page.locator('#ach-fpm-rollback-approval').check();
+  assert.equal(await page.locator('#ach-fpm-rollback').isEnabled(),true);
+  await sample('php restore approved');
+  await page.locator('#ach-fpm-rollback-approval').uncheck();
   await clickStage(page,'data-server-task','hosts');
   await resolveLatest(page,'inspect_hosts_aliases',{status:true,schema:1,read_only:true,state:'Aliases Found',
     hosts_sha256:'a'.repeat(64),entries:[{domain:'demo.test',address:'127.0.0.1',line:7}]});
   await sample('local hostnames');
+  const witness=page.locator('[data-routing-group="witness"] details').last();
+  if(!await witness.evaluate(el=>el.open))await witness.locator('summary').click();
+  await sample('local hostnames advanced witness');
   await clickStage(page,'data-server-task','attack');
   await checkWebsiteContext('7',false);
   await website.selectOption('');
@@ -431,7 +542,8 @@ async function walk(page, width, record) {
     new URL(x.options.url,location.href).searchParams.get('s')));
   // The deliberate mock branding save is the only write permitted in the walk.
   assert.ok(requests.every(x=>['get_overview','get_sites','get_php_versions','inspect_hosts_aliases',
-    'status_preferences','status_sites','status_save','status_preview','manage_nginx_protection','get_activity'].includes(x)),JSON.stringify(requests));
+    'status_preferences','status_sites','status_save','status_preview','manage_nginx_protection','get_activity',
+    'preview_php_fpm','fpm_prepare','fpm_recovery'].includes(x)),JSON.stringify(requests));
   const guardActions=await page.evaluate(()=>window.__qaRequests.filter(x=>
     new URL(x.options.url,location.href).searchParams.get('s')==='manage_nginx_protection').map(x=>x.options.data.guard_action));
   assert.deepEqual(guardActions,['preview'],'Only the explicit read-only protection check is sent');
@@ -442,7 +554,8 @@ async function run(){
   const browser=await chromium.launch({headless:true,
     executablePath:process.env.CHROMIUM_EXECUTABLE||chromium.executablePath(),
     args:['--no-sandbox','--disable-dev-shm-usage']});
-  let samples=0,pairs=0;
+  let samples=0,pairs=0,approvalSamples=0,stackPairs=0;
+  const approvalIds=new Set();
   const observed=new Set();
   try{
     for(const [width,height] of widths){
@@ -450,6 +563,8 @@ async function run(){
       try{
         await walk(page,width,(_name,rows)=>{
           samples++;pairs+=rows.length;
+          approvalSamples+=rows.spacing.approvals.length;stackPairs+=rows.spacing.stacks.length;
+          for(const a of rows.spacing.approvals)approvalIds.add(a.id);
           for(const row of rows) observed.add([row.a,row.b].sort().join('|'));
         });
         assert.deepEqual(pageErrors,[]);
@@ -462,8 +577,17 @@ async function run(){
         ['ach-scan-orphan-choice','ach-scan-orphan-list'],['ach-scan-maxretry','ach-scan-findtime']])
         assert.ok(observed.has([a,b].sort().join('|')),'Missing actual form row '+a+' / '+b);
     }
-    console.log('TASK_LAYOUT_PASS',JSON.stringify({viewports:widths.length,samples,mixedControlPairs:pairs}));
+    const expectedApprovals=await (async()=>{
+      const {page}=await realPage(browser,1024,768);
+      try{return await page.locator('#ach-content label > input[type="checkbox"]').evaluateAll(els=>els.map(e=>e.id));}
+      finally{await page.close();}
+    })();
+    assert.deepEqual(expectedApprovals.filter(id=>!approvalIds.has(id)),[],
+      'Missing vertical spacing coverage for a native checkbox');
+    assert.ok(approvalSamples>0&&stackPairs>0,'Missing vertical geometry samples');
+    console.log('TASK_LAYOUT_PASS',JSON.stringify({viewports:widths.length,samples,mixedControlPairs:pairs,
+      approvalSamples,uniqueApprovals:approvalIds.size,verticalStackPairs:stackPairs}));
   }finally{await browser.close();}
 }
-module.exports={run,geometry};
+module.exports={run,geometry,inspectVerticalSpacing};
 if(require.main===module)run().catch(e=>{console.error(e.stack||e);process.exitCode=1;});

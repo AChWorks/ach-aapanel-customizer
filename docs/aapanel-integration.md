@@ -230,6 +230,12 @@ The layout runner follows real destination/task/stage controls at seven
 viewport widths from 320 to 1280 px, including selected-site and no-site
 states, keyboard focus, mixed label/input/button alignment, local editor
 feedback, loading states, contrast, and the contained source-diff surface. The 0.1.103 composition checks cover compact website context, desktop first action, checkbox text-column geometry, conditional HTTPS warning and global-scope selector, exact Activity evidence disclosure, a single Browse websites action, typed unsupported Guard recovery guidance, and a named keyboard-scrollable offline preview.
+The Issue #138 regression extends the same walk with actual vertical text
+containment and inter-item gap measurements for every native checkbox,
+including expanded advanced details and valid mocked PHP Prepare/Recovery
+responses with approval toggled (no Apply or Restore dispatched). It detects
+the 0.1.106 wrapped Cache Clear overlap even when the nominal flex gap
+remains correct. Vertical content must retain its intrinsic height.
 `tests/manual/control_alignment_browser.cjs` is the same layout entrypoint
 for the documented form-row contract. The 50x runner tests the real DOM's
 preflight/approval/Apply request contract and invalidation paths. All native

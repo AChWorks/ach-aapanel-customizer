@@ -113,11 +113,12 @@
     font-family:ui-monospace,SFMono-Regular,Consolas,monospace; color:#374b57;
   }
   #ach-customizer .ach-availability {
-    display:block; flex-basis:100%; margin:8px 0 5px;
+    display:block; margin:8px 0 5px;
     padding:4px 0 4px 10px; border-left:3px solid #b8c5d0;
     color:#435a6b; font-size:12px; line-height:1.5;
     overflow-wrap:anywhere;
   }
+  #ach-customizer .ach-controls > .ach-availability { flex-basis:100%; }
   #ach-customizer .ach-availability[data-state="blocked"] {
     border-left-color:#c89d53; color:#745318;
   }
@@ -170,7 +171,12 @@
   #ach-customizer .ach-view {
     display:flex; flex-direction:column; gap:var(--ach-space-md); min-width:0;
   }
-  #ach-customizer #ach-content .ach-view > * { margin-block:0; }
+  /* Vertical stacks scroll as a whole. Keep each child's intrinsic content
+     height: shrinking wrapped approval text can put it over the next action.
+     Percentage flex bases belong to horizontal control rows, not stacks. */
+  #ach-customizer #ach-content :is(.ach-view,.ach-workflow) > * {
+    flex:0 0 auto; margin-block:0;
+  }
   #ach-customizer #ach-worker-version-status[data-state="matched"] {
     background:transparent; border:0; padding:0; color:var(--ach-muted);
     font-size:12px; font-weight:400;
@@ -568,7 +574,6 @@
   #ach-customizer .ach-workflow {
     display:flex; flex-direction:column; gap:var(--ach-space-md); min-width:0;
   }
-  #ach-customizer #ach-content .ach-workflow > * { margin-block:0; }
   #ach-customizer .ach-mobile-nav { display:none; }
   #ach-customizer .ach-workflow[hidden],
   #ach-customizer [data-home-only][hidden] { display:none !important; }
@@ -783,7 +788,7 @@
         <details class="ach-help"><summary>Resolve an irrecoverable stale witness</summary>
           <p>After Emergency disable, an unverified witness can be discarded by explicit approval only when the native task is no longer active. This never edits /etc/hosts or any WordPress files.</p>
           <label><input id="ach-wp-terminal-abandon-reviewed" type="checkbox" /><span class="ach-option-copy">I verified that setup is no longer active and accept discarding this unverified witness without editing Hosts.</span></label>
-          <button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" data-ach-disabled-help="Inspect the current failed-install witness policy and review Discard." disabled>Discard stale witness</button>
+          <div class="ach-controls"><button type="button" id="ach-wp-terminal-abandon" class="btn btn-warning" data-ach-disabled-help="Inspect the current failed-install witness policy and review Discard." disabled>Discard stale witness</button></div>
         </details>
       </div>
       <hr />
@@ -1376,7 +1381,7 @@
   'use strict';
   var root = $('#ach-customizer');
   if (!root.length) return;
-  var shippedUiVersion = '0.1.106'; // Match package info.json and Python worker constant.
+  var shippedUiVersion = '0.1.107'; // Match package info.json and Python worker constant.
   // English-only for the initial release, following the native aaPanel plugin UI.
   var t = {
     loading: 'Loading...',
