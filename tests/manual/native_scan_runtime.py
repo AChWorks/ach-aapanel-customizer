@@ -289,7 +289,10 @@ location = /fixture-release {
             check("Restore available under allocation pressure",restore()["state"],"Restored")
             check("former blocked IP restored",status(ip="198.51.100.30"),200)
             check("release second fixture",request("/fixture-release?count="+amount2,host=PEER)[1].strip(),b"released")
-            r=enable(scan_policy=capacity_policy)
+            p=operate("preview",scan_policy=capacity_policy)
+            check("restored generation eligible for fresh Apply",p["state"],"Restored")
+            r=operate("apply",approved=True,scan_policy=capacity_policy,
+                      expected_vhost=p["vhost_sha256"],expected_proposal=p["proposal_sha256"])
             check("fresh generation before missing-zone case",r["state"],"Applied")
             (vhosts/guard.SCAN_ZONE_FILE).unlink()
             subprocess.run(args+["-t"],check=True)
