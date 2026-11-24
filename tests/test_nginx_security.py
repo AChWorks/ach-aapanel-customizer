@@ -147,6 +147,20 @@ class NativeSecurityTests(unittest.TestCase):
         self.assertEqual(observed["recovery_id"], result["recovery_id"])
         self.assertEqual(self.operate("restore", recovery=result["recovery_id"])["state"], "Restored")
 
+    def test_scanner_fallback_is_present_but_not_healthy_during_reload(self):
+        op = "a" * 32
+        first = [0]
+        def retiring(site, nonce, kind):
+            first[0] += 1
+            return (403, nonce + guard.SCAN_FALLBACK) if first[0] <= len(guard.PROOF_KINDS) else (404, None)
+        with patch.object(guard.time, "sleep"):
+            self.assertTrue(guard._verified(self.site, op, present=False, probe=retiring))
+        self.assertGreaterEqual(first[0], 4 * len(guard.PROOF_KINDS))
+        with patch.object(guard.time, "monotonic", side_effect=[0, 10]):
+            with self.assertRaisesRegex(guard.GuardError, "scanner runtime is unavailable"):
+                guard._verified(self.site, op, present=True,
+                                probe=lambda site, nonce, kind: (403, nonce + guard.SCAN_FALLBACK))
+
     def test_temporary_scanner_validates_policy_and_site_generation(self):
         for invalid in ({}, {"maxretry": True, "findtime": 2, "bantime": 3},
                         {"maxretry": 0, "findtime": 2, "bantime": 3},

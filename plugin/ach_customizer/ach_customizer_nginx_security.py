@@ -410,10 +410,11 @@ def _probe(site, op, kind, *, port=80):
         # The random per-generation body ties this observation to the
         # precise managed source without adding a global response header.
         proof = _public_proof(op)
-        if body == (proof + SCAN_FALLBACK).encode("ascii"):
-            raise GuardError("probe", "Static Guard is denying requests but its temporary "
-                             "scanner runtime is unavailable; Recheck before changing protection")
-        nonce = op if body == proof.encode("ascii") else None
+        # The fallback marker proves the old Guard is still present, but
+        # not healthy scanner runtime. Restore must wait for this marker to
+        # disappear too, rather than abort while old workers are draining.
+        nonce = (op if body == proof.encode("ascii") else
+                 op + SCAN_FALLBACK if body == (proof + SCAN_FALLBACK).encode("ascii") else None)
         return code, nonce
     except (OSError, TimeoutError, http.client.HTTPException) as exc:
         raise GuardError("probe", "Local Nginx HTTP/80 verification unavailable") from exc
@@ -431,11 +432,15 @@ def _verified(site, op, *, present, probe=None, ruleset=RULESET):
     while True:
         results = [fn(site, op, kind) for kind in kinds]
         valid = (all(code == 403 and header == op for code, header in results)
-                 if present else all(header != op for _, header in results))
+                 if present else all(header not in (op, op + SCAN_FALLBACK)
+                                     for _, header in results))
         consecutive = consecutive + 1 if valid else 0
         if consecutive >= 3:
             return True
         if time.monotonic() >= deadline:
+            if present and any(header == op + SCAN_FALLBACK for _, header in results):
+                raise GuardError("postcheck", "Static Guard is denying requests but temporary "
+                                 "scanner runtime is unavailable")
             raise GuardError(
                 "postcheck", "Serving Nginx workers did not confirm the "
                 + ("new guard" if present else "removed guard") + " on all protected paths")
